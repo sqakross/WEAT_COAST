@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+*.db
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# VSCode & PyCharm
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Word / Excel backups
+*.docx~
+*.xlsx~
+
+# Compiled files
+*.so
+
+# PDF/Word/Temp reports
+*.pdf
+*.docx
+
+# Flask uploads (если у тебя есть)
+instance/
+uploads/
