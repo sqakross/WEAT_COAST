@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-filters">
+<div class="sticky-toolbar">
+  <h2>Inventory Dashboard</h2>
+
+  <div class="d-flex flex-wrap gap-3 mb-3">
+    <a href="{{ url_for('inventory.location_report') }}" class="btn btn-primary">📦 View Inventory by Location</a>
+    <a href="{{ url_for('inventory.add_part') }}" class="btn btn-success">➕ Add Part</a> <!-- Эта кнопка добавлена -->
+    <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-secondary">← Back to Dashboard</a>
+  </div>
+
+  <form method="GET" action="{{ url_for('inventory.dashboard') }}" style="margin-bottom: 15px;">
+      <input type="text" name="search" placeholder="Search by Part Number or Name" value="{{ search_query or '' }}" style="text-transform: uppercase;">
+      <button type="submit">Search</button>
+  </form>
+</div>
+
+{% if parts %}
+<div class="table-container">
+  <table class="inventory-table">
+<!--<table border="1" cellpadding="5" cellspacing="0" style="width:100%; border-collapse: collapse;">-->
+    <thead>
+        <tr style="background-color:#f2f2f2;">
+            <th>Part Number</th>
+            <th>Name</th>
+            <th>Quantity</th>
+            <th>Unit Cost</th>
+            <th>Location</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for part in parts %}
+        <tr>
+            <td>{{ part.part_number }}</td>
+            <td>{{ part.name }}</td>
+
+            {% if current_user.role == 'superadmin' %}
+            <td>
+                <form method="POST" action="{{ url_for('inventory.update_part_field', part_id=part.id) }}">
+                    <input type="number" name="quantity" value="{{ part.quantity }}" min="0" required style="width: 70px;">
+                    <button type="submit">Save</button>
+                </form>
+            </td>
+            <td>
+                <form method="POST" action="{{ url_for('inventory.update_part_field', part_id=part.id) }}">
+                    <input type="text" name="unit_cost" value="{{ '%.2f'|format(part.unit_cost) }}" required style="width: 70px;">
+                    <button type="submit">Save</button>
+                </form>
+            </td>
+            {% else %}
+            <td>{{ part.quantity }}</td>
+            <td>${{ '%.2f'|format(part.unit_cost) }}</td>
+            {% endif %}
+
+            <td>{{ part.location }}</td>
+            <td>
+                <form method="GET" action="{{ url_for('inventory.issue_part') }}" onsubmit="return confirm('Issue part {{ part.part_number }}?');" style="display:inline;">
+                    <input type="hidden" name="part" value="{{ part.part_number }}">
+                    <button type="submit">Issue Part</button>
+                </form>
+
+                {% if current_user.role in ['superadmin'] %}
+                <a href="{{ url_for('inventory.edit_part', part_id=part.id) }}" style="margin-left: 10px;">Edit</a>
+                {% endif %}
+
+                {% if current_user.role == 'superadmin' %}
+                <form method="POST" action="{{ url_for('inventory.delete_part', part_id=part.id) }}" onsubmit="return confirm('Delete part {{ part.part_number }}?');" style="display:inline; margin-left: 10px;">
+                    <button type="submit">Delete</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<p>No parts found.</p>
+{% endif %}
+{% endblock %}
+
+
+
+

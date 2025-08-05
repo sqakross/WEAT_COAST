@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Add New User</h2>
+<form method="POST">
+  <label>Username:</label>
+  <input type="text" name="username" required>
+
+  <label>Role:</label>
+  <select name="role" required>
+    {% for role in allowed_roles %}
+      <option value="{{ role }}">{{ role.capitalize() }}</option>
+    {% endfor %}
+  </select>
+
+  <label>Password:</label>
+  <input type="password" name="password" required>
+
+  <button type="submit">Add User</button>
+</form>
+{% endblock %}
+
+

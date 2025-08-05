@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Create New User</h2>
+
+<form method="POST" action="{{ url_for('auth.register') }}">
+    <label for="username">Username:</label>
+    <input type="text" name="username" required><br>
+
+    <label for="password">Password:</label>
+    <input type="password" name="password" required><br>
+
+    <label for="role">Role:</label>
+    <select name="role" required>
+        <option value="user">User</option>
+        <option value="viewer">Viewer</option>
+        <option value="admin">Admin</option>
+    </select><br>
+
+    <button type="submit">Create User</button>
+</form>
+{% endblock %}

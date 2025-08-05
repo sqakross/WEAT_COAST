@@ -1,0 +1,239 @@
+/* General body styling */
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f6f6f6;
+    padding: 20px;
+    margin: 0;
+}
+
+/* Header styling */
+header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background-color: #1a202c;
+    color: white;
+    padding: 15px;
+    z-index: 1100;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 24px;
+}
+
+/* Navigation styling */
+nav {
+    margin-top: 10px;
+}
+
+nav a {
+    color: white;
+    margin-right: 15px;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+nav a:hover {
+    text-decoration: underline;
+}
+
+/* Main content styling */
+main {
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+/* Form styling */
+form label {
+    display: block;
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+form input,
+form select,
+form button {
+    width: 100%;
+    padding: 8px;
+    margin-top: 5px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+    font-size: 14px;
+}
+
+/* Select2 styling */
+.select2-container {
+    width: 100% !important;
+    z-index: 10000;
+}
+
+.select2-container .select2-selection--single {
+    height: 38px !important;
+    padding: 6px 12px;
+    font-size: 14px;
+    border: 1px solid #ccc !important;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 38px !important;
+}
+
+.select2-selection {
+    height: 38px !important;
+    border: 1px solid #ccc !important;
+    padding: 5px !important;
+    font-size: 14px;
+}
+
+.select2-selection__rendered {
+    line-height: 28px !important;
+}
+
+.select2-selection__arrow {
+    height: 36px !important;
+}
+
+/* Button */
+form button {
+    background-color: #3182ce;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+form button:hover {
+    background-color: #2b6cb0;
+}
+
+/* Flash messages */
+#messages li {
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+}
+
+#messages li.success {
+    background-color: #c6f6d5;
+    color: #22543d;
+}
+
+#messages li.danger {
+    background-color: #fed7d7;
+    color: #742a2a;
+}
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+table th,
+table td {
+    padding: 10px;
+    border: 1px solid #ddd;
+    text-align: left;
+}
+
+main.container {
+  padding-top: 110px; /* Отступ сверху равный высоте меню + небольшой запас */
+}
+
+.content-after-filters {
+  margin-top: 100px; /* отступ, чтобы таблица не скрывалась под фиксированной панелью */
+}
+
+
+.dashboard-filters {
+  position: sticky;
+  top: 110px;  /* отступ вниз под фиксированное меню */
+  background-color: white;  /* чтобы блок не был прозрачным */
+  padding: 10px 15px;
+  z-index: 1050;  /* поверх таблиц и текста */
+  border-bottom: 1px solid #ccc;  /* линия под блоком */
+}
+
+.report-filters {
+  position: sticky;
+  top: 70px; /* чтобы фильтры не прятались за меню */
+  background-color: white;
+  padding: 10px 15px;
+  z-index: 1050; /* чтобы блок был поверх таблицы */
+  border-bottom: 1px solid #ccc; /* чтобы отделять фильтры от таблицы */
+}
+
+.report-content {
+  margin-top: 20px; /* немного больше высоты фиксированной панели */
+}
+
+/* Кнопки одного размера */
+ .report-buttons a.btn {
+    min-width: 130px;
+    text-align: center;
+  }
+
+.inventory-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .inventory-table thead th {
+    position: sticky;
+    top: 0;
+    background-color: #f2f2f2;
+    z-index: 2;
+    border: 1px solid #ddd;
+    padding: 8px;
+  }
+
+  .inventory-table tbody td {
+    border: 1px solid #ddd;
+    padding: 8px;
+  }
+
+  .table-container {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.sticky-toolbar {
+  position: sticky;
+  top: 110px; /* Под фиксированный хедер */
+  background-color: white;
+  z-index: 1000;
+  padding: 10px 15px;
+  border-bottom: 1px solid #ccc;
+}
+
+.scroll-area {
+  overflow-y: auto;
+  max-height: 600px; /* Ограничить высоту, если хочешь */
+}
+
+.report-actions {
+    display: flex;
+    gap: 10px;
+    margin-left: auto;
+  }
+
+.report-actions a {
+    min-width: 130px;
+    text-align: center;
+  }
+
+
+
+
+
+
+
+

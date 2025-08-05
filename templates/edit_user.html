@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Edit User {{ user.username }}</h2>
+<form method="POST">
+  <label>Username:</label>
+  <input type="text" name="username" value="{{ user.username }}" required>
+
+  <label>Role:</label>
+  <select name="role" required>
+    {% if current_user.role == 'superadmin' %}
+      <option value="user" {% if user.role == 'user' %}selected{% endif %}>User</option>
+      <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Admin</option>
+      <option value="superadmin" {% if user.role == 'superadmin' %}selected{% endif %}>Superadmin</option>
+    {% elif current_user.role == 'admin' %}
+      <option value="user" selected>User</option>
+    {% endif %}
+  </select>
+
+  <button type="submit">Save</button>
+</form>
+{% endblock %}

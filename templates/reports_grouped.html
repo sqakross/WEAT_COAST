@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="report-filters">
+  <h2>Issued Parts Report (Grouped by Invoice)</h2>
+<!--<div class="report-filters">-->
+  <form method="POST" class="mb-3">
+    <div class="row g-3">
+      <div class="col-auto">
+        <label for="recipient">Issued To / Company / Technician:</label>
+        <input type="text" id="recipient" name="recipient" class="form-control" value="{{ recipient or '' }}">
+      </div>
+      <div class="col-auto">
+        <label for="reference_job">Reference Job:</label>
+        <input type="text" id="reference_job" name="reference_job" class="form-control" value="{{ reference_job or '' }}">
+      </div>
+      <div class="col-auto">
+        <label for="start_date">Start Date:</label>
+        <input type="date" id="start_date" name="start_date" class="form-control" value="{{ start_date or '' }}">
+      </div>
+      <div class="col-auto">
+        <label for="end_date">End Date:</label>
+        <input type="date" id="end_date" name="end_date" class="form-control" value="{{ end_date or '' }}">
+      </div>
+      <div class="col-auto align-self-end">
+        <button type="submit" class="btn btn-primary">Generate Report</button>
+      </div>
+    </div>
+  </form>
+
+  {% if invoices %}
+    <h3>Results:</h3>
+    <div class="d-flex flex-wrap gap-2 mb-3 report-buttons">
+    <a href="{{ url_for('inventory.download_report_pdf',
+                      start_date=start_date, end_date=end_date,
+                      recipient=recipient, reference_job=reference_job) }}"
+     class="btn btn-outline-secondary">🖨️ Print Report</a>
+
+      <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-primary">🏠 Dashboard</a>
+
+      <a href="{{ url_for('inventory.issue_part') }}" class="btn btn-outline-success">🧾 Issue Part</a>
+  </div>
+</div>
+  {% for inv in invoices %}
+  <div class="card mb-4 p-3 border">
+
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+      <div class="d-flex flex-wrap align-items-center gap-4" style="min-width: 70%;">
+        <div><strong>Issued To:</strong> {{ inv.issued_to }}</div>
+        <div><strong>Reference Job:</strong> {{ inv.reference_job or 'N/A' }}</div>
+        <div><strong>Issued By:</strong> {{ inv.issued_by }}</div>
+        <div><strong>Issue Date:</strong> {{ inv.issue_date.strftime('%Y-%m-%d') }}</div>
+      </div>
+
+      {% if current_user.role in ['superadmin', 'admin'] %}
+      <form method="POST" action="{{ url_for('inventory.update_invoice', issued_to=inv.issued_to, reference_job=inv.reference_job, issued_by=inv.issued_by, issue_date=inv.issue_date) }}">
+        <input type="hidden" name="issue_date" value="{{ inv.issue_date.strftime('%Y-%m-%d %H:%M:%S') }}">
+        <button type="submit" name="action" value="save" class="btn btn-success">Save Invoice</button>
+      </form>
+
+      <form method="POST" action="{{ url_for('inventory.cancel_invoice') }}" onsubmit="return confirm('Confirm cancel invoice?');">
+        <input type="hidden" name="issued_to" value="{{ inv.issued_to }}">
+        <input type="hidden" name="reference_job" value="{{ inv.reference_job }}">
+        <input type="hidden" name="issued_by" value="{{ inv.issued_by }}">
+        <input type="hidden" name="issue_date" value="{{ inv.issue_date.strftime('%Y-%m-%d %H:%M:%S') }}">
+        <button type="submit" class="btn btn-danger ms-2">Cancel Invoice</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <table class="table table-bordered">
+      <thead>
+        <tr>
+          <th>Part Number</th>
+          <th>Part Name</th>
+          <th>Quantity</th>
+          <th>Unit Cost</th>
+          <th>Total</th>
+          <th>Issued To</th>
+          <th>Reference Job</th>
+          <th>Issue Date</th> <!-- Добавлено -->
+          {% if current_user.role in ['superadmin', 'admin'] %}
+          <th>Actions</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in inv['items'] %}
+        <tr>
+          <form method="POST" action="{{ url_for('inventory.update_report_record', record_id=item.id) }}">
+            <td>{{ item.part.part_number }}</td>
+            <td>{{ item.part.name }}</td>
+            <td>{{ item.quantity }}</td>
+
+            <td>
+              {% if current_user.role in ['superadmin', 'admin'] %}
+                <input type="text" name="unit_cost" value="{{ '%.2f'|format(item.unit_cost_at_issue) }}" style="width:70px;">
+              {% else %}
+                ${{ '%.2f'|format(item.unit_cost_at_issue) }}
+              {% endif %}
+            </td>
+
+            <td>${{ '%.2f'|format(item.quantity * item.unit_cost_at_issue) }}</td>
+
+            <td>
+              {% if current_user.role in ['superadmin', 'admin'] %}
+                <input type="text" name="issued_to" value="{{ item.issued_to }}" style="width:120px;">
+              {% else %}
+                {{ item.issued_to }}
+              {% endif %}
+            </td>
+
+            <td>
+              {% if current_user.role in ['superadmin', 'admin'] %}
+                <input type="text" name="reference_job" value="{{ item.reference_job or '' }}" style="width:120px;">
+              {% else %}
+                {{ item.reference_job or 'N/A' }}
+              {% endif %}
+            </td>
+
+            <td>
+              {% if current_user.role == 'superadmin' %}
+                <input type="date" name="issue_date" value="{{ item.issue_date.strftime('%Y-%m-%d') }}" style="width:130px;">
+              {% else %}
+                {{ item.issue_date.strftime('%Y-%m-%d') }}
+              {% endif %}
+            </td>
+
+            {% if current_user.role in ['superadmin', 'admin'] %}
+            <td>
+              <button type="submit" class="btn btn-sm btn-success">Save</button>
+            </td>
+            {% endif %}
+          </form>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if inv['items']|length > 0 %}
+      <a href="{{ url_for('inventory.view_invoice_pdf',
+                    issued_to=inv.issued_to,
+                    reference_job=inv.reference_job,
+                    issued_by=inv.issued_by,
+                    issue_date=inv.issue_date.strftime('%Y-%m-%d %H:%M:%S')) }}"
+         target="_blank" class="btn btn-outline-primary mb-3">
+        🖨️ Print Invoice
+      </a>
+    {% endif %}
+
+    <h5>Total Invoice Value: ${{ '%.2f'|format(inv.total_value) }}</h5>
+
+  </div>
+  {% endfor %}
+
+  <h4>Grand Total: ${{ '%.2f'|format(total) }}</h4>
+{% else %}
+  <p>No records found.</p>
+{% endif %}
+
+{% endblock %}
+

@@ -1,0 +1,136 @@
+<!--{% extends "base.html" %}-->
+
+<!--{% block content %}-->
+<!--  <style>-->
+<!--    /* Стили для фиксированной панели фильтров */-->
+<!--    .report-filters {-->
+<!--      position: fixed;-->
+<!--      top: 70px; /* учитываем высоту фиксированного меню */-->
+<!--      left: 0;-->
+<!--      right: 0;-->
+<!--      background-color: white;-->
+<!--      padding: 10px 15px;-->
+<!--      z-index: 2000;-->
+<!--      border-bottom: 1px solid #ccc;-->
+<!--      box-shadow: 0 2px 5px rgba(0,0,0,0.1);-->
+<!--    }-->
+
+<!--    /* Отступ под фиксированной панелью, чтобы таблица не скрывалась */-->
+<!--    .report-content {-->
+<!--      margin-top: 110px; /* чуть больше высоты панели */-->
+<!--    }-->
+<!--  </style>-->
+
+<!--  <h2>Issued Parts Report</h2>-->
+
+<!--  <div class="report-filters">-->
+<!--    <form method="POST" class="mb-3">-->
+<!--      &lt;!&ndash; Твои поля фильтров &ndash;&gt;-->
+<!--      <input type="text" name="issued_to" placeholder="Issued To / Company / Technician" />-->
+<!--      <input type="text" name="reference_job" placeholder="Reference Job" />-->
+<!--      <input type="date" name="start_date" />-->
+<!--      <input type="date" name="end_date" />-->
+<!--      <button type="submit">Generate Report</button>-->
+<!--    </form>-->
+<!--  </div>-->
+
+<!--  <div class="report-content">-->
+<!--    {% if records %}-->
+<!--      <div class="d-flex justify-content-between align-items-center mb-3">-->
+<!--        <h3 class="m-0">Results:</h3>-->
+<!--        <div class="d-flex gap-2">-->
+<!--        <a href="{{ url_for('inventory.download_report_pdf',-->
+<!--                            start_date=start_date,-->
+<!--                            end_date=end_date,-->
+<!--                            recipient=recipient,-->
+<!--                            reference_job=reference_job) }}"-->
+<!--           class="btn btn-outline-secondary">📄 Download PDF</a>-->
+
+<!--        <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-primary">🏠 Dashboard</a>-->
+<!--        <a href="{{ url_for('inventory.issue_part') }}" class="btn btn-outline-success">🧾 Issue Part</a>-->
+<!--        </div>-->
+<!--      </div>-->
+
+<!--      <table class="table table-bordered table-striped">-->
+<!--        <thead class="table-light">-->
+<!--          <tr>-->
+<!--            <th>Date</th>-->
+<!--            <th>Part Number</th>-->
+<!--            <th>Part Name</th>-->
+<!--            <th>Quantity</th>-->
+<!--            <th>Unit Cost</th>-->
+<!--            <th>Total</th>-->
+<!--            <th>Issued To</th>-->
+<!--            <th>Issued By</th>-->
+<!--            <th>Reference Job</th>-->
+<!--            <th>Invoice</th>-->
+<!--            {% if current_user.role in ['superadmin', 'admin'] %}-->
+<!--            <th>Actions</th>-->
+<!--            {% endif %}-->
+<!--          </tr>-->
+<!--        </thead>-->
+<!--        <tbody>-->
+<!--          {% for r in records %}-->
+<!--            <tr>-->
+<!--              <td>{{ r.issue_date.strftime('%m/%d/%Y') }}</td>-->
+<!--              <td>{{ r.part.part_number }}</td>-->
+<!--              <td>{{ r.part.name }}</td>-->
+<!--              <td>{{ r.quantity }}</td>-->
+
+<!--              <td>-->
+<!--                {% if current_user.role in ['superadmin', 'admin'] %}-->
+<!--                  <form method="POST" action="{{ url_for('inventory.update_report_record', record_id=r.id) }}">-->
+<!--                    <input type="text" name="unit_cost" value="{{ '%.2f'|format(r.unit_cost_at_issue) }}" style="width:70px;">-->
+<!--                {% else %}-->
+<!--                  ${{ '%.2f'|format(r.unit_cost_at_issue) }}-->
+<!--                {% endif %}-->
+<!--              </td>-->
+
+<!--              <td>${{ '%.2f'|format(r.quantity * r.unit_cost_at_issue) }}</td>-->
+
+<!--              <td>-->
+<!--                {% if current_user.role in ['superadmin', 'admin'] %}-->
+<!--                  <input type="text" name="issued_to" value="{{ r.issued_to }}" style="width:120px;">-->
+<!--                {% else %}-->
+<!--                  {{ r.issued_to }}-->
+<!--                {% endif %}-->
+<!--              </td>-->
+
+<!--              <td>{{ r.issued_by }}</td>-->
+
+<!--              <td>-->
+<!--                {% if current_user.role in ['superadmin', 'admin'] %}-->
+<!--                  <input type="text" name="reference_job" value="{{ r.reference_job or '' }}" style="width:120px;">-->
+<!--                {% else %}-->
+<!--                  {{ r.reference_job or 'N/A' }}-->
+<!--                {% endif %}-->
+<!--              </td>-->
+
+<!--              <td>-->
+<!--                <a href="{{ url_for('inventory.view_invoice_pdf', record_id=r.id) }}" target="_blank" class="btn btn-sm btn-outline-primary">📄 View</a>-->
+<!--              </td>-->
+
+<!--              {% if current_user.role in ['superadmin', 'admin'] %}-->
+<!--              <td>-->
+<!--                  <button type="submit" class="btn btn-sm btn-success">Save</button>-->
+<!--                  </form>-->
+<!--                  <form method="POST" action="{{ url_for('inventory.cancel_issued_record', record_id=r.id) }}" style="display:inline;" onsubmit="return confirm('Are you sure you want to cancel this issued record?');">-->
+<!--                    <button type="submit" class="btn btn-sm btn-danger">Cancel</button>-->
+<!--                  </form>-->
+<!--              </td>-->
+<!--              {% endif %}-->
+<!--            </tr>-->
+<!--          {% endfor %}-->
+<!--        </tbody>-->
+<!--      </table>-->
+
+<!--      <h4>Total Value: ${{ '%.2f'|format(total) }}</h4>-->
+<!--    {% else %}-->
+<!--      <p>No records found.</p>-->
+<!--    {% endif %}-->
+<!--  </div>-->
+
+<!--{% endblock %}-->
+
+
+

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WEST COAST CHIEF REPAIR - Inventory System</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+
+</head>
+<body>
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm fixed-top">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="{{ url_for('inventory.dashboard') }}">
+        WEST COAST CHIEF REPAIR
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain" aria-controls="navbarMain" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="navbarMain">
+        <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+          <li class="nav-item">
+            <a class="nav-link{% if request.endpoint == 'inventory.location_report' %} active{% endif %}" href="{{ url_for('inventory.location_report') }}">Inventory</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link{% if request.endpoint == 'inventory.dashboard' %} active{% endif %}" href="{{ url_for('inventory.dashboard') }}">Dashboard</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link{% if request.endpoint == 'inventory.add_part' %} active{% endif %}" href="{{ url_for('inventory.add_part') }}">Add Part</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link{% if request.endpoint == 'inventory.issue_part' %} active{% endif %}" href="{{ url_for('inventory.issue_part') }}">Issue Part</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link{% if request.endpoint == 'inventory.reports' %} active{% endif %}" href="{{ url_for('inventory.reports') }}">Reports</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link{% if request.endpoint == 'inventory.import_parts' %} active{% endif %}" href="{{ url_for('inventory.import_parts') }}">Import Parts</a>
+          </li>
+          {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
+          <li class="nav-item">
+            <a class="nav-link{% if request.endpoint.startswith('inventory.users') %} active{% endif %}" href="{{ url_for('inventory.users') }}">Manage Users</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('inventory.download_marcone_report') }}">📥 Marcone Report</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('inventory.download_reliable_report') }}">📥 Reliable Report</a>
+          </li>
+
+              </ul>
+            </li>
+          {% endif %}
+        </ul>
+
+        {% if current_user.is_authenticated %}
+        <div class="d-flex align-items-center">
+          <span class="text-white me-3">
+            Welcome, <strong>{{ current_user.username }}</strong> ({{ current_user.role.capitalize() }})
+          </span>
+          {% if current_user.role == 'user' %}
+             <a href="{{ url_for('inventory.change_password', user_id=current_user.id) }}" class="btn btn-outline-light btn-sm me-2">🔑 Change Password</a>
+          {% endif %}
+          <a href="{{ url_for('auth.logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <main class="container mt-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+

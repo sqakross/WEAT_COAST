@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>User Management</h2>
+<a href="{{ url_for('inventory.add_user') }}">Add New User</a>
+<table>
+  <thead>
+    <tr>
+      <th>Username</th>
+      <th>Role</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for user in users %}
+    <tr>
+      <td>{{ user.username }}</td>
+      <td>{{ user.role }}</td>
+      <td>
+        {% if current_user.role == 'superadmin' or (current_user.role == 'admin' and user.role == 'user') or user.id == current_user.id %}
+          <a href="{{ url_for('inventory.edit_user', user_id=user.id) }}">Edit</a> |
+          <a href="{{ url_for('inventory.change_password', user_id=user.id) }}">Change Password</a>
+          {% if current_user.role == 'superadmin' and user.id != current_user.id %}
+            | <form action="{{ url_for('inventory.delete_user', user_id=user.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('Delete user?');">
+                <button type="submit">Delete</button>
+              </form>
+          {% endif %}
+        {% else %}
+          -
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+

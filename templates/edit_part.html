@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Edit Part {{ part.part_number }}</h2>
+<form method="POST">
+  <label>Part Number:</label>
+  <input type="text" name="part_number" value="{{ part.part_number }}" required>
+
+  <label>Name:</label>
+  <input type="text" name="name" value="{{ part.name }}" required>
+
+  <label>Quantity:</label>
+  <input type="number" name="quantity" value="{{ part.quantity }}" required>
+
+  <label>Unit Cost:</label>
+  <input type="text" name="unit_cost" value="{{ '%.2f'|format(part.unit_cost) }}" required>
+
+  <label>Location:</label>
+  <input type="text" name="location" value="{{ part.location }}" required>
+
+  <button type="submit">Save</button>
+  <a href="{{ url_for('inventory.dashboard') }}">Cancel</a>
+</form>
+{% endblock %}

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Issue Part</h2>
+<a href="{{ url_for('inventory.reports_grouped') }}" class="btn btn-secondary mb-3">← Back to Reports</a>
+
+<form id="issue_form" onsubmit="return false;">
+    <label for="part_number">Enter Part Number:</label>
+    <input type="text" id="part_number" name="part_number" required style="text-transform: uppercase;">
+
+    <div id="part_info" style="margin-top: 10px; padding: 10px; background: #f0f0f0; border-radius: 5px;">
+        <p><strong>Name:</strong> <span id="part_name">—</span></p>
+        <p><strong>Available:</strong> <span id="part_quantity">—</span></p>
+    </div>
+
+    <input type="hidden" id="part_id">
+
+    <label for="quantity">Quantity to Issue:</label>
+    <input type="number" id="quantity" min="1" required>
+
+    <label for="recipient">Company / Technician:</label>
+    <input type="text" id="recipient" required>
+
+    <label for="reference_job">Reference Job:</label>
+    <input type="text" id="reference_job" required>
+
+    <button type="button" id="add_part_btn">Add Part</button>
+</form>
+
+<h3>Parts to Issue:</h3>
+<table id="parts_table" border="1" style="margin-top: 10px; display: none;">
+    <thead>
+        <tr>
+            <th>Part Number</th>
+            <th>Name</th>
+            <th>Quantity</th>
+            <th>Company</th>
+            <th>Reference Job</th>
+            <th>Remove</th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
+<form method="POST" action="{{ url_for('inventory.issue_part') }}" id="final_form">
+    <input type="hidden" name="all_parts_json" id="all_parts_json">
+    <button type="submit" style="margin-top: 10px;">Issue All</button>
+</form>
+
+<script>
+let currentQuantity = null;
+const addedParts = [];
+
+const partNumberInput = document.getElementById('part_number');
+const nameDisplay = document.getElementById('part_name');
+const quantityDisplay = document.getElementById('part_quantity');
+const hiddenPartId = document.getElementById('part_id');
+const quantityInput = document.getElementById('quantity');
+const recipientInput = document.getElementById('recipient');
+const referenceInput = document.getElementById('reference_job');
+const table = document.getElementById('parts_table').querySelector('tbody');
+const partsTable = document.getElementById('parts_table');
+
+function fetchPartData(partNumber) {
+    fetch(`/api/part/${partNumber}`)
+        .then(res => {
+            if (!res.ok) throw new Error("Not found");
+            return res.json();
+        })
+        .then(data => {
+            nameDisplay.textContent = data.name;
+            quantityDisplay.textContent = data.quantity;
+            hiddenPartId.value = data.id;
+            currentQuantity = Number(data.quantity);
+        })
+        .catch(() => {
+            nameDisplay.textContent = '—';
+            quantityDisplay.textContent = '—';
+            hiddenPartId.value = '';
+            currentQuantity = null;
+            alert("⚠ Part not found.");
+        });
+}
+
+document.getElementById('add_part_btn').addEventListener('click', () => {
+    const partId = hiddenPartId.value;
+    const partNumber = partNumberInput.value.trim().toUpperCase();
+    const name = nameDisplay.textContent;
+    const quantity = parseInt(quantityInput.value);
+    const recipient = recipientInput.value.trim();
+    const referenceJob = referenceInput.value.trim();
+
+    if (!partId || !quantity || !recipient || !referenceJob || quantity > currentQuantity) {
+        alert("⚠ Please fill all fields correctly.");
+        return;
+    }
+
+    addedParts.push({
+        part_id: partId,
+        part_number: partNumber,
+        name,
+        quantity,
+        recipient,
+        reference_job: referenceJob
+    });
+
+    updatePartsTable();
+
+    // Очистка, но курсор остаётся
+    partNumberInput.value = "";
+    nameDisplay.textContent = "—";
+    quantityDisplay.textContent = "—";
+    hiddenPartId.value = "";
+    quantityInput.value = "";
+    partNumberInput.focus();
+});
+
+function updatePartsTable() {
+    table.innerHTML = "";
+    if (addedParts.length === 0) {
+        partsTable.style.display = "none";
+        return;
+    }
+
+    partsTable.style.display = "table";
+
+    addedParts.forEach((item, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${item.part_number}</td>
+            <td>${item.name}</td>
+            <td>${item.quantity}</td>
+            <td>${item.recipient}</td>
+            <td>${item.reference_job}</td>
+            <td><button type="button" onclick="removePart(${index})">❌</button></td>
+        `;
+        table.appendChild(row);
+    });
+
+    document.getElementById('all_parts_json').value = JSON.stringify(addedParts);
+}
+
+function removePart(index) {
+    addedParts.splice(index, 1);
+    updatePartsTable();
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+    const urlParams = new URLSearchParams(window.location.search);
+    const prefillPart = urlParams.get("part");
+
+    if (prefillPart) {
+        partNumberInput.value = prefillPart.toUpperCase();
+        fetchPartData(prefillPart.toUpperCase());
+        setTimeout(() => quantityInput.focus(), 300);
+    }
+
+    partNumberInput.addEventListener("blur", function () {
+        const val = partNumberInput.value.trim().toUpperCase();
+        partNumberInput.value = val;
+        if (val !== "") fetchPartData(val);
+    });
+});
+</script>
+{% endblock %}
+
+
+
+

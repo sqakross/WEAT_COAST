@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="sticky-toolbar">
+  <h2 class="mb-3">Inventory Report Grouped by Location</h2>
+
+  <div class="d-flex flex-wrap gap-3">
+    <a href="{{ url_for('inventory.print_location_report') }}" class="btn btn-primary">🖨️ Print Location Report</a>
+    <a href="{{ url_for('inventory.print_inventory_summary') }}" class="btn btn-secondary">🖨️ Print Inventory Summary</a>
+    <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-secondary">← Back to Dashboard</a>
+  </div>
+</div>
+
+{% if locations %}
+  {% for loc, data in locations.items() %}
+  <div class="card mb-4 p-3 border">
+    <h4>Location: {{ loc }}</h4>
+    <p><strong>Total Quantity:</strong> {{ data.total_quantity }}</p>
+    <p><strong>Total Value:</strong> ${{ '%.2f'|format(data.total_value) }}</p>
+
+    <table class="table table-bordered">
+      <thead>
+        <tr>
+          <th>Part Number</th>
+          <th>Name</th>
+          <th>Quantity</th>
+          <th>Unit Cost</th>
+          <th>Total Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for part in data.parts %}
+        <tr>
+          <td>{{ part.part_number }}</td>
+          <td>{{ part.name }}</td>
+          <td>{{ part.quantity }}</td>
+          <td>${{ '%.2f'|format(part.unit_cost) }}</td>
+          <td>${{ '%.2f'|format(part.quantity * part.unit_cost) }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="table-primary fw-bold">
+          <td colspan="2">Location Total</td>
+          <td>{{ data.total_quantity }}</td>
+          <td></td>
+          <td>${{ '%.2f'|format(data.total_value) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+
+  <div class="card p-3 border bg-light">
+    <h4>Grand Totals for All Locations</h4>
+    <p><strong>Total Quantity:</strong> {{ grand_total_quantity }}</p>
+    <p><strong>Total Value:</strong> ${{ '%.2f'|format(grand_total_value) }}</p>
+
+    <div class="d-flex gap-3 mt-3">
+      <a href="{{ url_for('inventory.print_location_report') }}" class="btn btn-primary">Print Location Report</a>
+      <a href="{{ url_for('inventory.print_inventory_summary') }}" class="btn btn-secondary">Print Inventory Summary</a>
+      <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-secondary">Back to Dashboard</a>
+    </div>
+  </div>
+{% else %}
+  <p>No parts in inventory.</p>
+{% endif %}
+{% endblock %}
