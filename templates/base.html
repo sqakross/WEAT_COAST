@@ -37,19 +37,27 @@
           </li>
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint == 'inventory.import_parts' %} active{% endif %}" href="{{ url_for('inventory.import_parts') }}">Import Parts</a>
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" id="compareDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+              Compare Parts
+            </a>
+          <ul class="dropdown-menu" aria-labelledby="compareDropdown">
+            <li>
+              <a class="dropdown-item" href="{{ url_for('inventory.download_marcone_report') }}">📥 Marcone Report</a>
+            </li>
+            <li>
+              <a class="dropdown-item" href="{{ url_for('inventory.download_reliable_report') }}">📥 Reliable Report</a>
+            </li>
+          </ul>
           </li>
+
           {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint.startswith('inventory.users') %} active{% endif %}" href="{{ url_for('inventory.users') }}">Manage Users</a>
           </li>
-          <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('inventory.download_marcone_report') }}">📥 Marcone Report</a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('inventory.download_reliable_report') }}">📥 Reliable Report</a>
-          </li>
 
-              </ul>
+
+            </ul>
             </li>
           {% endif %}
         </ul>

@@ -17,7 +17,7 @@ def check_cart_items(items):
     results = []
     with current_app.app_context():  # используем current_app вместо from app import app
         for item in items:
-            part = Part.query.filter_by(part_number=item["part_number"]).first()
+            part = Part.query.filter_by(part_number=item["part_number"]).filter(Part.quantity > 0).first()
             if part:
                 results.append({
                     "part_number": item["part_number"],

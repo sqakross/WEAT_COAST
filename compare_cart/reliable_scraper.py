@@ -17,14 +17,14 @@ def get_cart_items():
         )
         page = context.new_page()
 
-        # 🔐 Логин
+        # Логин
         page.goto(LOGIN_URL)
         page.fill('input[name="userID"]', LOGIN)
         page.fill('input[type="password"]', PASSWORD)
         page.get_by_role("button", name="SIGN IN").click()
         page.wait_for_timeout(2000)
 
-        # 🛒 Корзина
+        # Корзина
         page.goto(CART_URL)
         print("✅ Перешли на корзину:", page.url)
         page.wait_for_load_state('networkidle')
