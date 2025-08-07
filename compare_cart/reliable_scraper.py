@@ -1,8 +1,12 @@
 from playwright.sync_api import sync_playwright
 import re
+from dotenv import load_dotenv
+import os
 
-LOGIN = "099011"
-PASSWORD = "PeYTfv5p^oQRgZv"
+load_dotenv()
+
+LOGIN = os.getenv("RELIABLE_LOGIN")
+PASSWORD = os.getenv("RELIABLE_PASSWORD")
 LOGIN_URL = "https://reliableparts.net/us/content/#/login"
 CART_URL = "https://reliableparts.net/us/content/#/cart"
 

@@ -1,7 +1,11 @@
 from playwright.sync_api import sync_playwright
+from dotenv import load_dotenv
+import os
 
-MARCONE_LOGIN = "965767"
-MARCONE_PASSWORD = "VyhA&$#JP2LNqSP"
+load_dotenv()
+
+MARCONE_LOGIN = os.getenv("MARCONE_LOGIN")
+MARCONE_PASSWORD = os.getenv("MARCONE_PASSWORD")
 LOGIN_URL = "https://my.marcone.com/"
 CART_URL = "https://my.marcone.com/Cart"
 
