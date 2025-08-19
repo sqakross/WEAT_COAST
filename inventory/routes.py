@@ -26,7 +26,7 @@ from compare_cart.reliable_scraper import get_cart_items as get_reliable_items
 from compare_cart.run_compare_reliable import get_reliable_items
 from compare_cart.run_compare import get_marcone_items, check_cart_items, export_to_docx
 from flask import after_this_request
-
+from urllib.parse import urlencode
 
 
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
@@ -301,7 +301,6 @@ def add_part():
 
 
 # ----------------- Issue Part -----------------
-
 @inventory_bp.route('/issue', methods=['GET', 'POST'])
 @login_required
 def issue_part():
@@ -313,13 +312,17 @@ def issue_part():
             all_parts = json.loads(request.form.get('all_parts_json', '[]'))
         except json.JSONDecodeError:
             flash('Invalid part data.', 'danger')
-            return redirect(url_for('inventory.issue_part'))
+            return redirect(url_for('.issue_part'))
+
+        if not all_parts:
+            flash('No parts to issue.', 'warning')
+            return redirect(url_for('.issue_part'))
 
         for item in all_parts:
             part = Part.query.get(item['part_id'])
             if not part or part.quantity < item['quantity']:
-                flash(f"Not enough stock for {item['part_number']}", 'danger')
-                return redirect(url_for('inventory.issue_part'))
+                flash(f"Not enough stock for {item.get('part_number', 'UNKNOWN')}", 'danger')
+                return redirect(url_for('.issue_part'))
 
             part.quantity -= item['quantity']
 
@@ -330,15 +333,31 @@ def issue_part():
                 reference_job=item['reference_job'],
                 issued_by=current_user.username,
                 issue_date=datetime.utcnow(),
-                unit_cost_at_issue=part.unit_cost  # фиксируем цену в момент выдачи
+                unit_cost_at_issue=part.unit_cost  # фиксируем цену на момент выдачи
             )
             db.session.add(record)
 
         db.session.commit()
         flash('All parts issued successfully.', 'success')
-        return redirect(url_for('inventory.dashboard'))
+
+        # >>> ЖЁСТКИЙ РЕДИРЕКТ СРАЗУ В ОТЧЁТ (без url_for, чтобы исключить любые конфликты)
+        today = datetime.utcnow().date().isoformat()
+        first = all_parts[0]
+        recipient = (first.get('recipient') or '').strip()
+        reference_job = (first.get('reference_job') or '').strip()
+
+        params = {'start_date': today, 'end_date': today}
+        if recipient:
+            params['recipient'] = recipient
+        if reference_job:
+            params['reference_job'] = reference_job
+
+        # Итог: /reports_grouped?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&recipient=...&reference_job=...
+        return redirect('/reports_grouped?' + urlencode(params), code=303)
 
     return render_template('issue_part.html', parts=parts)
+
+
 
 # ----------------- Reports -----------------
 
@@ -405,17 +424,27 @@ def reports():
 @login_required
 def reports_grouped():
     query = IssuedPartRecord.query.join(Part)
-    start_date = request.form.get('start_date')
-    end_date = request.form.get('end_date')
-    recipient = request.form.get('recipient')
-    reference_job = request.form.get('reference_job')
 
+    # ← читаем и из GET (?start_date=...) и из POST-форм
+    params = request.values
+    start_date = params.get('start_date')
+    end_date = params.get('end_date')
+    recipient = params.get('recipient')
+    reference_job = params.get('reference_job')
+
+    # ← ВАЖНО: приводим строки дат к datetime, чтобы сравнивать корректно
     if start_date:
-        query = query.filter(IssuedPartRecord.issue_date >= start_date)
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        query = query.filter(IssuedPartRecord.issue_date >= start_dt)
+
     if end_date:
-        end_datetime = datetime.strptime(end_date, "%Y-%m-%d")
-        end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
-        query = query.filter(IssuedPartRecord.issue_date <= end_datetime)
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
+        query = query.filter(IssuedPartRecord.issue_date <= end_dt)
+
     if recipient:
         query = query.filter(IssuedPartRecord.issued_to.ilike(f'%{recipient}%'))
     if reference_job:
@@ -423,7 +452,7 @@ def reports_grouped():
 
     records = query.order_by(IssuedPartRecord.issue_date.desc()).all()
 
-    # Группируем записи по ключу
+    # Группировка — как у тебя было
     grouped = defaultdict(list)
     for r in records:
         key = (r.issued_to, r.reference_job, r.issued_by, r.issue_date.date())
@@ -452,6 +481,7 @@ def reports_grouped():
         recipient=recipient,
         reference_job=reference_job
     )
+
 
 @inventory_bp.route('/invoice/view')
 @login_required
