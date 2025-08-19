@@ -30,6 +30,9 @@
 5. **Start the app**:
    ```bash
    python app.py
+   
+   power Shell & "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\start_server.bat"
+
    ```
 6. Open your browser and go to:  
    `http://127.0.0.1:5000`
