@@ -1,32 +1,42 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file
+import pdfplumber
+from flask import (
+    Blueprint, render_template, request, redirect, url_for,
+    flash, send_file, jsonify, after_this_request,
+    current_app,                     # NEW
+)
 from flask_login import login_required, current_user
-from models import Part, IssuedPartRecord, User
-from io import BytesIO
-from datetime import datetime
-import pandas as pd
-import os
 from werkzeug.utils import secure_filename
-from config import Config
-from utils.invoice_generator import generate_invoice_pdf
-from extensions import db
-from flask import jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import or_
-from flask import render_template, send_file
+from urllib.parse import urlencode
+
+import os
+import pandas as pd
 from io import BytesIO
+from datetime import datetime
+from collections import defaultdict
+
+from config import Config
+from extensions import db
+from models import Part, IssuedPartRecord, User
+from utils.invoice_generator import generate_invoice_pdf
+
+# PDF (ReportLab)
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
-from collections import defaultdict
-from datetime import datetime
-from compare_cart.marcone_scraper import get_cart_items as get_marcone_items
-from compare_cart.reliable_scraper import get_cart_items as get_reliable_items
-# from compare_cart.run_compare import get_marcone_items, check_cart_items, export_to_docx
-from compare_cart.run_compare_reliable import get_reliable_items
+
+# Сравнение корзин / экспорт
 from compare_cart.run_compare import get_marcone_items, check_cart_items, export_to_docx
-from flask import after_this_request
-from urllib.parse import urlencode
+from compare_cart.run_compare_reliable import get_reliable_items
+
+# Импорт на склад (наш новый функционал)
+from .import_rules import load_table, normalize_table, build_receive_movements
+from .import_ledger import has_key, add_key
+                              # NEW
+
+
 
 
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
@@ -45,6 +55,55 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 inventory_bp = Blueprint('inventory', __name__)
 EPORT_PATH = os.path.join(os.path.dirname(__file__), '..', 'marcone_inventory_report.docx')
+
+def dataframe_from_pdf(path):
+    """
+    Пытается вытащить таблицы из 'живого' PDF.
+    Возвращает pandas.DataFrame со СТРОКАМИ, объединёнными со всех страниц.
+    Если таблиц нет (вероятно, скан) — возвращает пустой DataFrame.
+    """
+    import pandas as pd
+    frames = []
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            # 1) пробуем «по линиям»
+            tables = page.extract_tables(table_settings={
+                "vertical_strategy": "lines",
+                "horizontal_strategy": "lines",
+                "intersection_tolerance": 5,
+            }) or []
+            # 2) если не получилось — «по тексту»
+            if not tables:
+                tables = page.extract_tables(table_settings={
+                    "vertical_strategy": "text",
+                    "horizontal_strategy": "text",
+                    "snap_tolerance": 3,
+                    "intersection_tolerance": 3,
+                    "join_tolerance": 3,
+                }) or []
+            for t in tables:
+                # нормализуем: первая непустая строка — заголовок
+                rows = [r for r in t if any((c or "").strip() for c in r)]
+                if len(rows) < 2:
+                    continue
+                header = rows[0]
+                body = rows[1:]
+                w = max(len(r) for r in rows)
+                norm = [list(r) + [""]*(w-len(r)) for r in rows]
+                df = pd.DataFrame(norm[1:], columns=[(h or "").strip() for h in norm[0]])
+                # выбрасываем полностью пустые строки
+                df = df[~(df.apply(lambda r: "".join(map(lambda x: str(x or "").strip(), r)), axis=1)=="")]
+                if not df.empty:
+                    frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    # лёгкая чистка странных значений "nan"
+    for c in out.columns:
+        out[c] = out[c].astype(str).str.replace("\xa0"," ").str.strip()
+        out.loc[out[c].str.lower()=="nan", c] = ""
+    return out
+
 
 # ----------------- Dashboard -----------------
 
@@ -1274,6 +1333,148 @@ def download_reliable_report():
 
     flash("❌ Reliable report generation failed!", "danger")
     return redirect(url_for("inventory.dashboard"))
+
+@inventory_bp.route("/import-parts", methods=["GET", "POST"], endpoint="import_parts_upload")
+def import_parts_upload():
+    enabled = current_app.config.get("WCCR_IMPORT_ENABLED", 0)
+    dry     = current_app.config.get("WCCR_IMPORT_DRY_RUN", 1)
+
+    # -------- 1) Нажали "Применить импорт" с предпросмотра --------
+    if request.method == "POST" and "apply" in request.form:
+        saved_path = request.form.get("saved_path", "")
+        if not saved_path or not os.path.exists(saved_path):
+            flash("Не найден сохранённый файл. Загрузите его заново.", "danger")
+            return redirect(url_for("inventory.import_parts_upload"))
+
+        ext = os.path.splitext(saved_path)[1].lower()
+
+        # Читаем и нормализуем тот же файл (PDF/Excel/CSV)
+        if ext == ".pdf":
+            df = dataframe_from_pdf(saved_path)
+            if df.empty:
+                flash("В этом PDF не удалось распознать таблицы (скорее всего скан).", "danger")
+                rows = []
+                return render_template("import_preview.html", rows=rows, saved_path=saved_path)
+        else:
+            df = load_table(saved_path)
+
+        norm, issues = normalize_table(df, supplier_hint=None, source_file=saved_path, default_location="MAIN")
+        for msg in issues:
+            flash(msg, "warning")
+
+        # Если DRY или выключено — просто показать предпросмотр снова
+        if dry or not enabled:
+            rows = norm.to_dict(orient="records")
+            return render_template("import_preview.html", rows=rows, saved_path=saved_path)
+
+        # Применяем: создаём приходы, подавляя дубли по row_key
+        def duplicate_exists(rk: str) -> bool:
+            return has_key(rk)
+
+        def make_movement(m: dict) -> None:
+            PartModel = Part
+            session = db.session
+
+            PN_FIELDS   = ["part_number", "number", "sku", "code", "partnum", "pn"]
+            NAME_FIELDS = ["name", "part_name", "descr", "description", "title"]
+            QTY_FIELDS  = ["quantity", "qty", "on_hand", "stock", "count"]
+            LOC_FIELDS  = ["location", "bin", "shelf", "place", "loc"]
+            COST_FIELDS = ["unit_cost", "cost", "price", "unitprice", "last_cost"]
+            SUP_FIELDS  = ["supplier", "vendor", "provider"]
+
+            def pick_field(model, candidates):
+                for f in candidates:
+                    if hasattr(model, f):
+                        return f
+                return None
+
+            pn_field   = pick_field(PartModel, PN_FIELDS)
+            name_field = pick_field(PartModel, NAME_FIELDS)
+            qty_field  = pick_field(PartModel, QTY_FIELDS)
+            loc_field  = pick_field(PartModel, LOC_FIELDS)
+            cost_field = pick_field(PartModel, COST_FIELDS)
+            sup_field  = pick_field(PartModel, SUP_FIELDS)
+
+            if pn_field is None or qty_field is None:
+                raise RuntimeError("Не найдено поле PART # или QTY в модели Part — уточни имена полей.")
+
+            filters = {pn_field: m["part_number"]}
+            if loc_field:
+                filters[loc_field] = m["location"]
+
+            part = PartModel.query.filter_by(**filters).first()
+
+            if not part:
+                kwargs = dict(filters)
+                kwargs[qty_field] = 0
+                if name_field and m["part_name"]:
+                    kwargs[name_field] = m["part_name"]
+                if cost_field and (m["unit_cost"] is not None):
+                    kwargs[cost_field] = float(m["unit_cost"])
+                if sup_field and m.get("supplier"):
+                    kwargs[sup_field] = m["supplier"]
+                part = PartModel(**kwargs)
+                session.add(part)
+                session.flush()
+
+            if name_field and not getattr(part, name_field) and m["part_name"]:
+                setattr(part, name_field, m["part_name"])
+            if cost_field and (m["unit_cost"] is not None):
+                setattr(part, cost_field, float(m["unit_cost"]))
+
+            current_qty = getattr(part, qty_field) or 0
+            setattr(part, qty_field, current_qty + int(m["qty"]))
+
+            session.commit()
+            add_key(m["row_key"], {"file": m["source_file"]})
+
+        built, errors = build_receive_movements(
+            norm,
+            duplicate_exists_func=duplicate_exists,
+            make_movement_func=make_movement
+        )
+        for e in errors:
+            flash(e, "danger")
+        flash(f"Создано приходов: {len(built)}", "success")
+        return redirect(url_for("inventory.import_parts_upload"))
+
+    # -------- 2) Первая загрузка файла → показать предпросмотр --------
+    if request.method == "POST":
+        f = request.files.get("file")
+        if not f or f.filename == "":
+            flash("Выберите файл (.pdf, .xlsx, .xls или .csv)", "warning")
+            return redirect(request.url)
+
+        filename = secure_filename(f.filename)
+        upload_dir = current_app.config.get("UPLOAD_FOLDER", os.path.join(current_app.instance_path, "uploads"))
+        os.makedirs(upload_dir, exist_ok=True)
+        path = os.path.join(upload_dir, filename)
+        f.save(path)
+
+        ext = os.path.splitext(path)[1].lower()
+
+        if ext == ".pdf":
+            df = dataframe_from_pdf(path)
+            if df.empty:
+                flash("В этом PDF не удалось распознать таблицы (скорее всего скан).", "danger")
+                rows = []
+                return render_template("import_preview.html", rows=rows, saved_path=path)
+        else:
+            df = load_table(path)
+
+        norm, issues = normalize_table(df, supplier_hint=None, source_file=path, default_location="MAIN")
+        for msg in issues:
+            flash(msg, "warning")
+
+        rows = norm.to_dict(orient="records")
+        return render_template("import_preview.html", rows=rows, saved_path=path)
+
+    # -------- 3) GET → показать твою форму загрузки --------
+    return render_template("import_parts.html")
+
+
+
+
 
 
 

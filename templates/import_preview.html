@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Проверка импорта (dry-run)</h3>
+<p class="text-muted">Сейчас в базу <b>ничего не пишем</b>. Ниже — какие приходы будут созданы.</p>
+
+<form method="post">
+  <!-- ВАЖНО: путь к сохранённому файлу, чтобы на "Применить" мы снова его прочитали -->
+  <input type="hidden" name="apply" value="1">
+  <input type="hidden" name="saved_path" value="{{ saved_path }}">
+  <button class="btn btn-success">Применить импорт</button>
+  <a href="{{ url_for('inventory.import_parts') }}" class="btn btn-secondary">Назад</a>
+</form>
+
+<hr/>
+<div class="table-responsive">
+<table class="table table-sm table-striped">
+  <thead>
+    <tr>
+      <th>PART #</th><th>DESCR.</th><th>QTY</th><th>PRICE</th>
+      <th>SUPPLIER</th><th>LOCATION</th><th>ORDER #</th><th>DATE</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{{ r.part_number }}</td>
+      <td>{{ r.part_name }}</td>
+      <td>{{ r.quantity }}</td>
+      <td>{{ r.unit_cost }}</td>
+      <td>{{ r.supplier }}</td>
+      <td>{{ r.location }}</td>
+      <td>{{ r.order_no }}</td>
+      <td>{{ r.date }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

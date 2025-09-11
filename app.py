@@ -45,12 +45,24 @@ if not root.handlers:
     root.addHandler(sh)
 
 # --- 4) Flask app ---
-app = Flask(__name__)
+# ВАЖНО: instance_relative_config=True даёт читать instance/config.py
+app = Flask(__name__, instance_relative_config=True)
 app.config.from_object(Config)
+app.config.from_pyfile('config.py', silent=True)  # ← добавили
+
+# На всякий случай создадим фактическую instance-папку Flask
+os.makedirs(app.instance_path, exist_ok=True)
 
 db.init_app(app)
 login_manager.init_app(app)
 login_manager.login_view = 'auth.login'
+
+# Проверим, что флаги подхватились (увидишь в логах)
+logging.info(
+    "WCCR flags: enabled=%s, dry=%s",
+    app.config.get("WCCR_IMPORT_ENABLED"),
+    app.config.get("WCCR_IMPORT_DRY_RUN"),
+)
 
 from auth.routes import auth_bp
 from inventory.routes import inventory_bp
@@ -59,6 +71,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(inventory_bp)
 
 logging.info("Flask app configured and blueprints registered.")
+
 
 # --- 5) Локальный запуск (dev, adhoc HTTPS) ---
 if __name__ == "__main__":
