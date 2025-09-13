@@ -65,5 +65,29 @@ class IssuedPartRecord(db.Model):
 
     part = db.relationship('Part', backref=db.backref('issued_records', lazy=True))
 
+# --- Order Items (для трекера заказов) ---
+class OrderItem(db.Model):
+    __tablename__ = "order_items"
+    id = db.Column(db.Integer, primary_key=True)
+
+    order_number = db.Column(db.String(64), index=True, nullable=False)   # Order #
+    technician   = db.Column(db.String(128), index=True, nullable=False)  # Tech name
+    supplier     = db.Column(db.String(128))
+    part_number  = db.Column(db.String(128), index=True, nullable=False)
+    part_name    = db.Column(db.String(256))
+    qty_ordered  = db.Column(db.Integer, nullable=False, default=1)
+    unit_cost    = db.Column(db.Float)
+    location     = db.Column(db.String(100), index=True)
+
+    status       = db.Column(db.String(32), index=True, default="ordered")  # ordered|received|partial
+    date_ordered = db.Column(db.DateTime, default=datetime.utcnow)
+    date_received= db.Column(db.DateTime)
+    notes        = db.Column(db.Text)
+
+    # Для идемпотентного синка из Excel (если подключишь позже)
+    row_key      = db.Column(db.String(512), unique=True)
+
+
+
 
 

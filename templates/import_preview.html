@@ -1,39 +1,110 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>Проверка импорта (dry-run)</h3>
-<p class="text-muted">Сейчас в базу <b>ничего не пишем</b>. Ниже — какие приходы будут созданы.</p>
 
-<form method="post">
-  <!-- ВАЖНО: путь к сохранённому файлу, чтобы на "Применить" мы снова его прочитали -->
-  <input type="hidden" name="apply" value="1">
+{# --- NEW: helper to render empty instead of nan/None --- #}
+{% macro val(v) -%}
+  {{ (v|default('', true) ~ '')|replace('nan','') }}
+{%- endmacro %}
+
+<h2>Preview & Edit Import</h2>
+
+<form method="POST" class="mb-2">
   <input type="hidden" name="saved_path" value="{{ saved_path }}">
-  <button class="btn btn-success">Применить импорт</button>
-  <a href="{{ url_for('inventory.import_parts') }}" class="btn btn-secondary">Назад</a>
+  <button class="btn btn-primary" name="save" value="1">Save edits (stay in preview)</button>
+  <a class="btn btn-secondary" href="{{ url_for('inventory.import_parts') }}">Cancel</a>
 </form>
 
-<hr/>
-<div class="table-responsive">
-<table class="table table-sm table-striped">
-  <thead>
-    <tr>
-      <th>PART #</th><th>DESCR.</th><th>QTY</th><th>PRICE</th>
-      <th>SUPPLIER</th><th>LOCATION</th><th>ORDER #</th><th>DATE</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for r in rows %}
-    <tr>
-      <td>{{ r.part_number }}</td>
-      <td>{{ r.part_name }}</td>
-      <td>{{ r.quantity }}</td>
-      <td>{{ r.unit_cost }}</td>
-      <td>{{ r.supplier }}</td>
-      <td>{{ r.location }}</td>
-      <td>{{ r.order_no }}</td>
-      <td>{{ r.date }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<div class="mb-2">
+  <button id="toggle-extra" class="btn btn-sm btn-outline-secondary" type="button">
+    Show extra columns
+  </button>
+  <button id="add-row" class="btn btn-sm btn-outline-info" type="button">
+    Add blank row
+  </button>
 </div>
+
+<form method="POST">
+  <input type="hidden" name="saved_path" value="{{ saved_path }}">
+  <input type="hidden" name="apply" value="1">
+
+  <div class="table-responsive">
+    <table id="edit-table" class="table table-striped table-sm align-middle">
+      <thead>
+        <tr>
+          <th>PART #</th>
+          <th>DESCRIPTION</th>
+          <th style="width:80px">QTY</th>
+          <th style="width:120px">UNIT COST</th>
+          <th style="width:120px">LOCATION</th>
+          <th class="extra d-none">SUPPLIER</th>
+          <th class="extra d-none">ORDER #</th>
+          <th class="extra d-none">DATE</th>
+          <th style="width:40px">Del</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><input class="form-control form-control-sm" name="rows[{{ loop.index0 }}][part_number]" value="{{ val(r.part_number) }}"></td>
+          <td><input class="form-control form-control-sm" name="rows[{{ loop.index0 }}][part_name]" value="{{ val(r.part_name) }}"></td>
+          <td><input class="form-control form-control-sm" name="rows[{{ loop.index0 }}][quantity]" value="{{ val(r.quantity) }}"></td>
+          <td><input class="form-control form-control-sm" name="rows[{{ loop.index0 }}][unit_cost]" value="{{ val(r.unit_cost) }}"></td>
+          <td><input class="form-control form-control-sm" name="rows[{{ loop.index0 }}][location]" value="{{ val(r.location) }}"></td>
+
+          <td class="extra d-none"><input class="form-control form-control-sm" name="rows[{{ loop.index0 }}][supplier]" value="{{ val(r.supplier) }}"></td>
+          <td class="extra d-none"><input class="form-control form-control-sm" name="rows[{{ loop.index0 }}][order_no]" value="{{ val(r.order_no) }}"></td>
+          <td class="extra d-none"><input class="form-control form-control-sm" name="rows[{{ loop.index0 }}][date]" value="{{ val(r.date) }}"></td>
+
+          <td><button class="btn btn-sm btn-outline-danger del-row" type="button">×</button></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mt-2">
+    <button class="btn btn-primary" name="save" value="1">Save edits (stay in preview)</button>
+    <button class="btn btn-success" type="submit">Apply import</button>
+    <a class="btn btn-secondary" href="{{ url_for('inventory.import_parts') }}">Cancel</a>
+  </div>
+</form>
+
+<script>
+  const toggleBtn = document.getElementById('toggle-extra');
+  const extras = document.querySelectorAll('.extra');
+  let shown = false;
+  toggleBtn.addEventListener('click', () => {
+    shown = !shown;
+    extras.forEach(td => td.classList.toggle('d-none', !shown));
+    toggleBtn.textContent = shown ? 'Hide extra columns' : 'Show extra columns';
+  });
+
+  document.getElementById('add-row').addEventListener('click', () => {
+    const tbody = document.querySelector('#edit-table tbody');
+    const idx = tbody.children.length;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input class="form-control form-control-sm" name="rows[${idx}][part_number]"></td>
+      <td><input class="form-control form-control-sm" name="rows[${idx}][part_name]"></td>
+      <td><input class="form-control form-control-sm" name="rows[${idx}][quantity]" value="1"></td>
+      <td><input class="form-control form-control-sm" name="rows[${idx}][unit_cost]"></td>
+      <td><input class="form-control form-control-sm" name="rows[${idx}][location]" value="MAIN"></td>
+      <td class="extra d-none"><input class="form-control form-control-sm" name="rows[${idx}][supplier]"></td>
+      <td class="extra d-none"><input class="form-control form-control-sm" name="rows[${idx}][order_no]"></td>
+      <td class="extra d-none"><input class="form-control form-control-sm" name="rows[${idx}][date]"></td>
+      <td><button class="btn btn-sm btn-outline-danger del-row" type="button">×</button></td>`;
+    tbody.appendChild(tr);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('del-row')) {
+      e.target.closest('tr').remove();
+    }
+  });
+</script>
 {% endblock %}
+
+
+
+
+
