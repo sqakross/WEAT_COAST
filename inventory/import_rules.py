@@ -18,10 +18,16 @@ _RELIABLE_SKIP = {
 # Column name hints (case-tolerant)
 # ------------------------------- #
 COLUMN_SYNONYMS = {
-    "part_number": ["PART #","PART","PART NO","SKU","ITEM","ITEM #","ITEM NO","PN","PART NUMBER","MFR PART #"],
+    "part_number": [
+        "PART #","PART","PART NO","SKU","ITEM","ITEM #","ITEM NO",
+        "PN","PART NUMBER","MFR PART #",
+        "PRODUCT"              # <- add
+    ],
     "part_name":   ["DESCR.","DESCRIPTION","ITEM DESCRIPTION","DESC","NAME","PRODUCT","ITEM NAME","PART NAME"],
-    "quantity":    ["QTY","QUANTITY","QTY ORDERED","ORDERED QTY","Q-ty","ORDER QTY"],
-    # invoices often say Unit Price / Each / EA / Unit $
+    "quantity":    [
+        "QTY","QUANTITY","QTY ORDERED","ORDERED QTY","Q-ty","ORDER QTY",
+        "SHIPPED"             # <- add (Reliable)
+    ],
     "unit_cost":   ["UNIT PRICE","UNITPRICE","PRICE","UNIT COST","COST","PRICE $","PRICE USD",
                     "UNIT $","UNIT NET","PRICE EA","PRICE EACH","EACH","EA"],
     "supplier":    ["SUPPLIER","VENDOR","SELLER"],
@@ -104,6 +110,62 @@ def _looks_like_marcone(df: pd.DataFrame) -> bool:
     many_money = moneyish >= max(6, len(df) // 2)
     return (has_ord and has_ship and (has_part or has_desc)) or (has_ship and has_msrp) or many_money
 
+def _marcone_headerless_row_to_item(line: str, *, supplier_hint: str, default_location: str):
+    """
+    Headerless fallback for Marcone: collapse a row to one string and extract
+    PN, DESCRIPTION, UNIT PRICE, SHIP.
+    - Unit price: smallest monetary value on the line
+    - Ship: last integer AFTER the last money; if not found, assume 1
+    - Skip obvious service/footer lines and Ship==0
+    """
+    if not line:
+        return None
+    U = line.upper()
+    if any(w in U for w in _MARCONE_SKIP_WORDS):
+        return None
+
+    # money tokens
+    money_pat = re.compile(r"\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})")
+    moneys = list(money_pat.finditer(line))
+    if not moneys:
+        return None
+
+    # unit price: smallest numeric among all money tokens
+    def _m2f(m): return float(m.group(0).replace("$","").replace(",",""))
+    unit_cost = min(_m2f(m) for m in moneys if 0 < _m2f(m) < 10000)
+
+    # part number: pick a plausible token
+    pn = _pick_pn_from_tokens(line.split())
+    if not pn:
+        return None
+
+    # Ship qty: last integer after the LAST money token; if nothing → default to 1
+    tail = line[moneys[-1].end():]
+    ints_tail = [int(x) for x in re.findall(r"\b\d{1,5}\b", tail)]
+    ship = ints_tail[-1] if ints_tail else 1
+    if ship <= 0:
+        return None
+
+    # description: take text up to the FIRST money token, cut PN out, cleanup
+    left = line[:moneys[0].start()].strip()
+    i = left.upper().find(pn.upper())
+    raw_desc = (left[:i] + left[i+len(pn):]).strip(" -.,;") if i >= 0 else left
+    desc = _cleanup_description(raw_desc, pn=pn)
+
+    # minimal signal
+    if len(re.sub(r"[^A-Za-z0-9]+", "", desc)) < 3:
+        return None
+
+    return {
+        "part_number": pn,
+        "part_name": desc,
+        "quantity": int(ship),
+        "unit_cost": unit_cost,
+        "supplier": supplier_hint or "Marcone",
+        "location": SUPPLIER_LOCATION_MAP.get("marcone", default_location),
+        "order_no": "",
+        "date": "",
+    }
 
 def _pick_unit_price(money_strs: list[str]) -> float | None:
     """Choose the most plausible *unit* price for a line.
@@ -229,6 +291,150 @@ def _looks_good_pn(tok: str) -> bool:
         return False
     return any(ch.isalpha() for ch in tok) and any(ch.isdigit() for ch in tok)
 
+def _parse_reliable_by_columns(df: pd.DataFrame, supplier_hint, default_location) -> pd.DataFrame:
+    """
+    Column-first parser for Reliable.
+    - If df has no real headers, lift a header row from the first few lines.
+    - QTY comes from 'Shipped' (or the 2nd small integer left of 'Product').
+    - Unit price from 'Price/Unit Price' (fallback: smallest money in the row).
+    - Description from 'Description' (fallback: stitch from the next 1–2 rows).
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    def _rebind_headers_if_needed(df_in: pd.DataFrame) -> pd.DataFrame:
+        # Try to find a header row within the first 6 rows
+        for r in range(min(6, len(df_in))):
+            row = [_normh(x) for x in df_in.iloc[r].tolist()]
+            row_set = set(row)
+            looks_like_header = (
+                ("PRODUCT" in row_set or any("PRODUCT" in x for x in row)) and
+                ("PRICE" in row_set or "UNIT PRICE" in row_set or "SHIPPED" in row_set)
+            )
+            if looks_like_header:
+                df2 = df_in.iloc[r + 1 : ].copy()
+                headers = []
+                for j, val in enumerate(df_in.iloc[r].tolist()):
+                    h = str(val).strip() if str(val).strip() else f"C{j}"
+                    headers.append(h)
+                df2.columns = headers
+                return df2
+        return df_in
+
+    # 1) Try with current headers; if key cols not found, lift headers then try again
+    part_col  = _find_col(df, ["PRODUCT","PART #","PART NO","ITEM","ITEM #","MFR PART #"])
+    desc_col  = _find_col(df, ["DESCRIPTION","ITEM DESCRIPTION","DESCR.","DESC"])
+    qty_col   = _find_col(df, ["SHIPPED","QTY","QUANTITY"])
+    price_col = _find_col(df, ["PRICE","UNIT PRICE","UNIT COST","PRICE USD","UNIT $"])
+
+    if not part_col or (not qty_col and df.columns.dtype != object):
+        df = _rebind_headers_if_needed(df)
+        part_col  = _find_col(df, ["PRODUCT","PART #","PART NO","ITEM","ITEM #","MFR PART #"])
+        desc_col  = _find_col(df, ["DESCRIPTION","ITEM DESCRIPTION","DESCR.","DESC"])
+        qty_col   = _find_col(df, ["SHIPPED","QTY","QUANTITY"])
+        price_col = _find_col(df, ["PRICE","UNIT PRICE","UNIT COST","PRICE USD","UNIT $"])
+
+    if not part_col:
+        return pd.DataFrame()  # give chance to wide-fallback
+
+    # If no explicit DESCRIPTION, pick 1–3 cols to the right of PRODUCT (skip MAKE/NARDA)
+    if not desc_col:
+        try:
+            pi = df.columns.get_loc(part_col)
+            for j in range(pi + 1, min(pi + 4, df.shape[1])):
+                h = _normh(df.columns[j])
+                if "MAKE" in h or "NARDA" in h:
+                    continue
+                desc_col = df.columns[j]
+                break
+        except Exception:
+            pass
+
+    # Columns left of PRODUCT: typically Ordered | Unit | Shipped | Backorder
+    pre_cols = list(df.columns[: df.columns.get_loc(part_col)])
+
+    rows = []
+    for i in range(len(df)):
+        pn = _norm(df.at[i, part_col]) if i in df.index else ""
+        if not pn:
+            continue
+        upn = pn.upper()
+        if upn.startswith(("SHIPMENT MARKING", "REF:", "TRACK")):
+            continue
+
+        # ---- QTY (prefer SHIPPED)
+        ship = _to_int(df.at[i, qty_col]) if qty_col else None
+        if not ship or ship <= 0:
+            ints = []
+            for c in pre_cols:
+                try:
+                    v = _to_int(df.at[i, c])
+                except Exception:
+                    v = None
+                if v is not None:
+                    ints.append(v)
+            if len(ints) >= 2:
+                ship = ints[1]  # Ord, Ship, B/O => 2nd is Ship
+            elif ints:
+                ship = ints[0]
+            else:
+                ship = 0
+        if ship is None or ship <= 0:
+            continue  # only actually shipped lines
+
+        # ---- Unit price
+        unit_cost = _to_float(df.at[i, price_col]) if price_col else None
+        if unit_cost is None or pd.isna(unit_cost):
+            money = _row_money_values_strict(df.iloc[i, :].tolist())
+            unit_cost = min(money) if money else None
+
+        # ---- Description (prefer desc_col)
+        raw = _norm(df.at[i, desc_col]) if desc_col else ""
+        # If empty/too short, try stitching from next 1–2 rows (common for Reliable PDFs)
+        def _good_text(s: str) -> bool:
+            if not s:
+                return False
+            U = s.upper()
+            if U.startswith(("SHIPMENT MARKING", "REF:", "TRACK")):
+                return False
+            # avoid rows that are just money/amounts
+            return bool(re.search(r"[A-Z]", U))
+
+        if len(re.sub(r"[^A-Za-z0-9]+", "", raw)) < 3:
+            for k in (1, 2):
+                if i + k < len(df):
+                    candidate = _norm(df.at[i + k, desc_col]) if desc_col else ""
+                    if _good_text(candidate):
+                        raw = candidate
+                        break
+            if len(re.sub(r"[^A-Za-z0-9]+", "", raw)) < 3:
+                # ultimate fallback: whole row text
+                raw = _row_to_text(df.iloc[i, :].tolist())
+
+        raw = re.sub(rf"\b{re.escape(pn)}\b", " ", raw, flags=re.I)
+        desc = _cleanup_description(raw, pn)
+        if len(re.sub(r"[^A-Za-z0-9]+", "", desc)) < 3:
+            continue
+
+        rows.append({
+            "part_number": pn,
+            "part_name": desc,
+            "quantity": int(ship),
+            "unit_cost": unit_cost if unit_cost is not None else np.nan,
+            "supplier": supplier_hint or "ReliableParts",
+            "location": SUPPLIER_LOCATION_MAP.get("reliable", default_location),
+            "order_no": "",
+            "date": "",
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows, columns=[
+        "part_number","part_name","quantity","unit_cost","supplier","location","order_no","date"
+    ])
+
+
 def _parse_reliable_wide(df: pd.DataFrame, supplier_hint, default_location) -> pd.DataFrame:
     """
     Reliable wide-table fallback:
@@ -237,6 +443,17 @@ def _parse_reliable_wide(df: pd.DataFrame, supplier_hint, default_location) -> p
     - PN ищем сначала по ячейкам (схлопывая мусор/пробелы), потом по всей строке (тоже схлопывая)
     - цену берём как минимальную реалистичную money-цифру в строке
     """
+    # >>> NEW: try clean column-based parse first
+    try:
+        by_cols = _parse_reliable_by_columns(df, supplier_hint, default_location)
+        if by_cols is not None and not by_cols.empty:
+            return by_cols
+    except Exception as e:
+        try:
+            log.warning("[IMPORT/Reliable] by_columns failed: %s", e)
+        except Exception:
+            pass
+
     rows = []
 
     for i in range(len(df)):
@@ -326,102 +543,123 @@ def _parse_reliable_wide(df: pd.DataFrame, supplier_hint, default_location) -> p
 
     return pd.DataFrame(rows)
 
-def _parse_marcone_table_like(df: pd.DataFrame, *, supplier_hint: str,
-                              source_file: str, default_location: str) -> pd.DataFrame:
+def _parse_marcone_table_like(
+    df: pd.DataFrame,
+    *,
+    supplier_hint: str,
+    source_file: str,
+    default_location: str
+) -> pd.DataFrame:
     """
-    Parse Marcone tables where PDF extraction produced multiple unnamed columns.
-    Quantity MUST come from the trailing 'Ship' column (last integer after the last $amount).
-    Rows with Ship == 0 are skipped.
+    Robust Marcone parser that does NOT rely on column headers.
+    Row shape (typical, but tolerant):
+        ORD  SHIP  [B/O]  PN  <DESCRIPTION ...>  $UNIT  [$MSRP ...]  ...  [B/O  SHIP]
+    Rules:
+      - QTY := Ship = last small integer RIGHT BEFORE PN; if not found, use last integer at line tail.
+      - Skip if Ship==0.
+      - PN may be alphanumeric or numeric-only (6–12 digits, or 2+ digit groups with dashes).
+      - unit_cost = smallest monetary value on the row (proxy for unit).
+      - Description = tokens after PN and before first money (if no money → after PN, trimming trailing ints).
     """
     if df is None or df.empty:
         return pd.DataFrame()
 
-    pn_col   = _find_col(df, ["PART #", "PART NO", "PART"])
-    desc_col = _find_col(df, ["DESCRIPTION"])
-    price_col = _guess_unit_cost_col(df)  # ok if None – we'll salvage from row text
-
     money_pat = re.compile(r"\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})")
-    int_tail  = re.compile(r"\b\d{1,5}\b")
+    is_int    = re.compile(r"^\d+$")
+    rows = []
 
-    items = []
     for i in range(len(df)):
-        row_vals = df.iloc[i, :].tolist()
-        row_text = _row_to_text(row_vals)
-        if not row_text:
+        # 1) Collapse row to one line
+        raw = _row_to_text(df.iloc[i, :].tolist())
+        if not raw:
             continue
-        U = row_text.upper()
-        if any(tag in U for tag in ("REF:", "TRACKING", "REMIT PAYMENT", "BILL TO", "SHIP TO", "INVOICE TOTAL", "SUBTOTAL")):
+        U = raw.upper()
+        if any(w in U for w in _MARCONE_SKIP_WORDS):
             continue
 
-        # Part number / description from explicit columns when present
-        pn_raw   = str(df.at[i, pn_col]).strip() if pn_col else ""
-        desc_raw = str(df.at[i, desc_col]).strip() if desc_col else ""
+        # 2) Tokenize (keep ., /, - so PN survives)
+        toks_raw = raw.split()
+        toks = [re.sub(r"[^\w./\-]+", "", t) for t in toks_raw]
+        toks = [t for t in toks if t]
 
-        # Fallback PN from the row text if the column is missing/empty
-        pn = pn_raw
-        if not pn:
-            # Prefer clean token with both letters & digits
-            for tok in re.findall(r"[A-Z0-9][A-Z0-9\-]+", U):
-                if _looks_good_pn(tok):
-                    pn = tok
+        # 3) Find start run of integers (ORD/SHIP/[B/O] etc.)
+        start_int_run_end = 0
+        for t in toks:
+            if is_int.match(t):
+                start_int_run_end += 1
+            else:
+                break
+        leading_ints = [int(t) for t in toks[:start_int_run_end] if is_int.match(t)]
+
+        # 4) Find PN: earliest token after that run that "looks like PN"
+        pn_idx = -1
+        pn = ""
+        for idx in range(start_int_run_end, len(toks)):
+            t = toks[idx].upper()
+            if (_PN_RE.fullmatch(t) and any(c.isalpha() for c in t) and any(c.isdigit() for c in t)) or _token_is_numeric_pn(t):
+                pn = t
+                pn_idx = idx
+                break
+        if pn_idx < 0:
+            # fallback: scan all tokens
+            for idx in range(len(toks)-1, -1, -1):
+                t = toks[idx].upper()
+                if (_PN_RE.fullmatch(t) and any(c.isalpha() for c in t) and any(c.isdigit() for c in t)) or _token_is_numeric_pn(t):
+                    pn = t
+                    pn_idx = idx
                     break
+        if pn_idx < 0:
+            continue  # no PN → not an item
 
-        if not pn:
-            continue  # no PN – not a line item
+        # 5) Ship = last integer RIGHT BEFORE PN (robust for "Ord Ship B/O")
+        head_tokens = toks[:pn_idx]
+        head_ints = [int(t) for t in head_tokens if is_int.match(t)]
+        ship = head_ints[-1] if head_ints else None
 
-        # Unit price from column (preferred)…
-        unit_cost = None
-        if price_col:
-            unit_cost = _to_float(df.at[i, price_col])
-        # …or from the row text (last or smallest $x.xx in the row)
-        if pd.isna(unit_cost) or unit_cost is None:
-            moneys = [float(m.group(0).replace("$", "").replace(",", "")) for m in money_pat.finditer(row_text)]
-            if moneys:
-                # Use the smallest plausible amount as a *unit* price
-                unit_cost = min(x for x in moneys if 0 < x < 10000)
+        # If still None/0, try tail “… B/O  SHIP”
+        if ship is None or ship <= 0:
+            tail_ints = [int(t) for t in toks[-3:] if is_int.match(t)]  # usually "... 0 2"
+            if tail_ints:
+                ship = tail_ints[-1]
+        if ship is None:
+            ship = 0
+        if ship <= 0:
+            continue  # strictly skip not shipped
 
-        # Ship quantity = last integer AFTER the last money token
-        ship_qty = 0
-        tail_start = 0
-        last_m = None
-        for m in money_pat.finditer(row_text):
-            last_m = m
-        if last_m:
-            tail_start = last_m.end()
-        tail_text = row_text[tail_start:]
-        ints = [int(x) for x in int_tail.findall(tail_text)]
-        if ints:
-            ship_qty = ints[-1]  # last = Ship
-        else:
-            # crude fallback: try the very first column (often Ord) – still better than zero
-            try:
-                ship_qty = _to_int(df.iloc[i, 0]) or 0
-            except Exception:
-                ship_qty = 0
+        # 6) unit_cost = smallest money on the row (unit tends to be the smallest)
+        money_vals = [float(m.group(0).replace("$", "").replace(",", "")) for m in money_pat.finditer(raw)]
+        unit_cost = min([x for x in money_vals if 0 < x < 10000], default=np.nan)
 
-        if ship_qty <= 0:
-            continue  # skip not shipped
+        # 7) Description = tokens after PN up to first money-token (if any)
+        #    Build a string from PN onward, then trim at first money position if present
+        after_pn_text = " ".join(toks[pn_idx+1:]).strip()
+        # cut before first money, if any
+        mfirst = money_pat.search(after_pn_text)
+        if mfirst:
+            after_pn_text = after_pn_text[:mfirst.start()].strip()
+        # trim trailing integers (sometimes B/O/SHIP are at end)
+        while after_pn_text and after_pn_text.split() and is_int.match(after_pn_text.split()[-1]):
+            after_pn_text = " ".join(after_pn_text.split()[:-1]).strip()
 
-        # Description: prefer desc_col, otherwise derive from row text
-        desc = desc_raw or row_text
-        # Remove PN, money, and trailing integers from description, then clean
-        if desc:
-            desc = re.sub(re.escape(pn), " ", desc, flags=re.I)
-            desc = re.sub(money_pat, " ", desc)
-        desc = _cleanup_description(desc, pn)
+        desc = _cleanup_description(after_pn_text, pn)
 
-        items.append({
+        # Minimal signal in desc
+        if len(re.sub(r"[^A-Za-z0-9]+", "", desc)) < 3:
+            continue
+
+        rows.append({
             "part_number": pn,
             "part_name": desc,
-            "quantity": ship_qty,
-            "unit_cost": unit_cost if (unit_cost is not None and not pd.isna(unit_cost)) else np.nan,
+            "quantity": int(ship),
+            "unit_cost": unit_cost,
             "supplier": supplier_hint or "Marcone",
             "location": SUPPLIER_LOCATION_MAP.get("marcone", default_location),
             "order_no": "",
             "date": "",
         })
 
-    return pd.DataFrame(items, columns=["part_number","part_name","quantity","unit_cost","supplier","location","order_no","date"])
+    cols = ["part_number","part_name","quantity","unit_cost","supplier","location","order_no","date"]
+    return pd.DataFrame(rows, columns=cols)
 
 
 def _parse_marcone_from_pdf_text(pdf_path: str, *, supplier_hint: str,
