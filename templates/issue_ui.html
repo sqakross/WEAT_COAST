@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Issue UI (demo)</h3>
+
+<div class="mb-3">
+  <label>Issued To (Technician)</label>
+  <input id="tech_name" class="form-control" value="{{ technician_name }}">
+</div>
+<div class="mb-3">
+  <label>Reference Job</label>
+  <input id="canonical_ref" class="form-control" value="{{ canonical_ref }}">
+</div>
+
+<div class="d-flex gap-2 mb-3">
+  <button id="btn-issue-all" class="btn btn-primary">Issue All Now</button>
+  <button id="btn-issue-selected" class="btn btn-outline-primary">Issue Selected</button>
+</div>
+
+<table class="table table-sm table-bordered align-middle">
+  <thead>
+    <tr>
+      <th style="width:36px;"><input type="checkbox" id="chk-all"></th>
+      <th>Part #</th>
+      <th>Name</th>
+      <th class="text-end">On hand</th>
+      <th style="width:120px;">Qty to issue</th>
+      <th style="width:140px;">Unit price (opt)</th>
+      <th style="width:160px;">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for p in parts %}
+    <tr data-part-id="{{ p.id }}">
+      <td><input type="checkbox" class="row-chk"></td>
+      <td>{{ p.part_number }}</td>
+      <td>{{ p.name }}</td>
+      <td class="text-end">{{ p.quantity }}</td>
+      <td><input type="number" class="form-control form-control-sm qty-issue" min="0" value="1"></td>
+      <td><input type="text" class="form-control form-control-sm unit-price" placeholder="auto"></td>
+      <td>
+        <!-- C) Issue this line — оставляем как отдельную кнопу -->
+        <button class="btn btn-sm btn-success btn-issue-line">Issue this line</button>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<!-- ========================== Preview Modal ========================== -->
+<div class="modal fade" id="issuePreviewModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Issue preview</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <table class="table table-sm table-bordered">
+          <thead>
+            <tr>
+              <th>Part #</th>
+              <th>Name</th>
+              <th class="text-end">On hand</th>
+              <th class="text-end">Qty (requested)</th>
+              <th class="text-end">Issue now</th>
+              <th class="text-end">Unit price</th>
+            </tr>
+          </thead>
+          <tbody id="previewTbody"></tbody>
+        </table>
+        <div id="previewNote" class="text-muted small"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnConfirmIssue" type="button" class="btn btn-primary">Confirm issue</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ Toast ============================= -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1080">
+  <div id="issueToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body" id="issueToastBody">Issued successfully.</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ JS ============================= -->
+<script>
+/* чекбокс "выбрать все" */
+document.getElementById('chk-all').addEventListener('change', (e) => {
+  document.querySelectorAll('.row-chk').forEach(ch => ch.checked = e.target.checked);
+});
+
+let previewMode = null;   // "all" | "selected"
+let previewItems = [];    // соберём сюда перед модалкой
+
+function cellText(tr, sel){
+  const el = tr.querySelector(sel);
+  return el ? el.textContent.trim() : "";
+}
+function parsePrice(v){
+  if(!v) return null;
+  const x = v.replace(/[^\d.]/g,'');
+  return x ? parseFloat(x) : null;
+}
+
+/* собрать items из ВСЕХ строк */
+function collectAllItems() {
+  const items = [];
+  document.querySelectorAll('tbody tr').forEach(tr => {
+    const partId = parseInt(tr.getAttribute('data-part-id'), 10);
+    const qty = parseInt(tr.querySelector('.qty-issue').value || '0', 10);
+    const unitPriceStr = tr.querySelector('.unit-price').value.trim();
+    const unitPrice = unitPriceStr ? parsePrice(unitPriceStr) : null;
+    if (qty > 0) items.push({ part_id: partId, qty, unit_price: unitPrice });
+  });
+  return items;
+}
+
+/* собрать items из ОТМЕЧЕННЫХ строк */
+function collectSelectedItems() {
+  const items = [];
+  document.querySelectorAll('tbody tr').forEach(tr => {
+    const chk = tr.querySelector('.row-chk');
+    if (!chk || !chk.checked) return;
+    const partId = parseInt(tr.getAttribute('data-part-id'), 10);
+    const qty = parseInt(tr.querySelector('.qty-issue').value || '0', 10);
+    const unitPriceStr = tr.querySelector('.unit-price').value.trim();
+    const unitPrice = unitPriceStr ? parsePrice(unitPriceStr) : null;
+    if (qty > 0) items.push({ part_id: partId, qty, unit_price: unitPrice });
+  });
+  return items;
+}
+
+/* построить таблицу предпросмотра в модалке */
+function buildPreview(items) {
+  const tbody = document.getElementById('previewTbody');
+  tbody.innerHTML = "";
+  let rows = 0;
+  document.querySelectorAll('tbody tr').forEach(tr => {
+    const partId = parseInt(tr.getAttribute('data-part-id'), 10);
+    const found = items.find(i => i.part_id === partId);
+    if (!found) return;
+    const onHand = parseInt(cellText(tr, 'td:nth-child(4)') || '0', 10);
+    const pn = cellText(tr, 'td:nth-child(2)');
+    const name = cellText(tr, 'td:nth-child(3)');
+    const req = found.qty;
+    const issueNow = Math.max(0, Math.min(req, onHand));
+    const price = (found.unit_price ?? "").toString();
+
+    const trPrev = document.createElement('tr');
+    trPrev.innerHTML = `
+      <td>${pn}</td>
+      <td>${name}</td>
+      <td class="text-end">${onHand}</td>
+      <td class="text-end">${req}</td>
+      <td class="text-end">${issueNow}</td>
+      <td class="text-end">${price || '<span class="text-muted">auto</span>'}</td>
+    `;
+    tbody.appendChild(trPrev);
+    rows++;
+  });
+  document.getElementById('previewNote').textContent =
+    rows ? "Issuing is limited by current on-hand stock (min(requested, on hand))." : "No items to issue.";
+}
+
+/* показать тост */
+function showToast(msg) {
+  const el = document.getElementById('issueToast');
+  document.getElementById('issueToastBody').textContent = msg;
+  const t = new bootstrap.Toast(el, { delay: 2000 });
+  t.show();
+}
+
+/* === A) Issue All → сначала модалка === */
+document.getElementById('btn-issue-all').onclick = () => {
+  previewMode = "all";
+  previewItems = collectAllItems();
+  buildPreview(previewItems);
+  const modal = new bootstrap.Modal(document.getElementById('issuePreviewModal'));
+  modal.show();
+};
+
+/* === B) Issue Selected → тоже через модалку === */
+document.getElementById('btn-issue-selected').onclick = () => {
+  previewMode = "selected";
+  previewItems = collectSelectedItems();
+  if (previewItems.length === 0) { alert('No rows selected'); return; }
+  buildPreview(previewItems);
+  const modal = new bootstrap.Modal(document.getElementById('issuePreviewModal'));
+  modal.show();
+};
+
+/* Подтверждение в модалке → отправляем /issue/batch */
+document.getElementById('btnConfirmIssue').onclick = async () => {
+  if (!previewItems || previewItems.length === 0) return;
+
+  const payload = {
+    issued_to: document.getElementById('tech_name').value,
+    reference_job: document.getElementById('canonical_ref').value,
+    items: previewItems
+  };
+  const r = await fetch('/issue/batch', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload),
+  });
+  const res = await r.json();
+  if (res.ok && res.redirect) {
+    showToast(`Issued ${res.created} line(s). Redirecting…`);
+    setTimeout(() => { window.location = res.redirect; }, 900);
+  } else {
+    alert(res.error || 'Issue failed');
+  }
+};
+
+/* === C) Issue this line — как отдельная быстрая кнопка === */
+document.querySelectorAll('.btn-issue-line').forEach(btn => {
+  btn.addEventListener('click', async (e) => {
+    const tr = e.target.closest('tr');
+    const partId = parseInt(tr.getAttribute('data-part-id'), 10);
+    const qty = parseInt(tr.querySelector('.qty-issue').value || '0', 10);
+    const unitPriceStr = tr.querySelector('.unit-price').value.trim();
+    const unitPrice = unitPriceStr ? parsePrice(unitPriceStr) : null;
+
+    const payload = {
+      issued_to: document.getElementById('tech_name').value,
+      reference_job: document.getElementById('canonical_ref').value,
+      qty, unit_price: unitPrice
+    };
+    const r = await fetch(`/issue/line/${partId}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const res = await r.json().catch(()=>null);
+    if (res && res.ok && res.redirect) {
+      showToast(`Issued ${res.created} line(s). Redirecting…`);
+      setTimeout(() => { window.location = res.redirect; }, 900);
+    } else if (res && res.error) {
+      alert(res.error);
+    } else {
+      location.reload();
+    }
+  });
+});
+</script>
+{% endblock %}
+

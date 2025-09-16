@@ -1,10 +1,12 @@
-# app.py
 from flask import Flask
 from config import Config
 import os, sys, io, logging
 from logging.handlers import RotatingFileHandler
-
 from extensions import db, login_manager
+# + Sentry
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 # --- 1) Форсируем UTF-8 для stdout/stderr, чтобы print с кириллицей не падал ---
 def _force_utf8_stdio():
@@ -16,7 +18,6 @@ def _force_utf8_stdio():
             sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
             sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
     except Exception:
-        # Ничего страшного: просто не переопределили потоки
         pass
 
 _force_utf8_stdio()
@@ -30,7 +31,11 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # --- 3) Логирование в файл + в консоль (UTF-8) ---
 formatter = logging.Formatter('[%(asctime)s] %(levelname)s %(name)s: %(message)s')
 root = logging.getLogger()
-root.setLevel(logging.INFO)
+
+# >>> LOG_LEVEL через env
+_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+_level = getattr(logging, _level_name, logging.INFO)
+root.setLevel(_level)
 
 fh = RotatingFileHandler(os.path.join(LOG_DIR, 'app.log'),
                          maxBytes=2_000_000, backupCount=3, encoding='utf-8')
@@ -44,11 +49,35 @@ if not root.handlers:
     root.addHandler(fh)
     root.addHandler(sh)
 
+# NEW: приглушим werkzeug
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
 # --- 4) Flask app ---
 # ВАЖНО: instance_relative_config=True даёт читать instance/config.py
 app = Flask(__name__, instance_relative_config=True)
 app.config.from_object(Config)
 app.config.from_pyfile('config.py', silent=True)  # ← добавили
+
+# NEW: ограничим размер аплоадов (32 МБ по умолчанию)
+app.config.setdefault("MAX_CONTENT_LENGTH", 32 * 1024 * 1024)
+
+# --- Sentry (включается если задан SENTRY_DSN в окружении) ---
+SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[
+            FlaskIntegration(),
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ],
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES", "0.0")),
+        profiles_sample_rate=float(os.getenv("SENTRY_PROFILES", "0.0")),
+        send_default_pii=False,
+        environment=os.getenv("ENVIRONMENT", "development"),
+    )
+    logging.info("Sentry initialized.")
+else:
+    logging.info("Sentry DSN not set; skipping Sentry init.")
 
 # На всякий случай создадим фактическую instance-папку Flask
 os.makedirs(app.instance_path, exist_ok=True)
@@ -72,7 +101,6 @@ app.register_blueprint(inventory_bp)
 
 logging.info("Flask app configured and blueprints registered.")
 
-
 # --- 5) Локальный запуск (dev, adhoc HTTPS) ---
 if __name__ == "__main__":
     with app.app_context():
@@ -80,6 +108,17 @@ if __name__ == "__main__":
         logging.info("DB tables ensured (create_all).")
 
     port = int(os.environ.get("PORT", 5000))
-    logging.info(f"Starting dev server on https://0.0.0.0:{port} (adhoc TLS)")
-    app.run(host='0.0.0.0', port=port, debug=True, ssl_context='adhoc')
+
+    # NEW: управляем debug/ssl через env без правки кода
+    debug = os.getenv("DEBUG", "true").lower() == "true"
+    use_ssl = os.getenv("USE_SSL", "1").lower() in ("1", "true", "yes")
+
+    if use_ssl:
+        logging.info(f"Starting dev server on https://0.0.0.0:{port} (adhoc TLS), debug={debug}")
+        app.run(host='0.0.0.0', port=port, debug=debug, ssl_context='adhoc')
+    else:
+        logging.info(f"Starting dev server on http://0.0.0.0:{port}, debug={debug}")
+        app.run(host='0.0.0.0', port=port, debug=debug)
+
+
 

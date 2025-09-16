@@ -1,4 +1,6 @@
-from models import IssuedPartRecord
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import func
+from models import IssuedPartRecord, WorkOrder, WorkOrderPart, TechReceiveLog
 import json
 # from extensions import db
 import pdfplumber
@@ -49,26 +51,146 @@ from compare_cart.run_compare_reliable import get_reliable_items
 from .import_rules import load_table, normalize_table, build_receive_movements
 from .import_ledger import has_key, add_key
                               # NEW
-
-
-
-
-UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-
-
-
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import LETTER
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
-
+UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 inventory_bp = Blueprint('inventory', __name__)
 EPORT_PATH = os.path.join(os.path.dirname(__file__), '..', 'marcone_inventory_report.docx')
+
+def get_on_hand(part_number: str) -> int:
+    """Возвращает суммарный остаток по PN (всех локаций) из твоей модели Part."""
+    try:
+        total = db.session.query(db.func.sum(Part.quantity)).filter(
+            Part.part_number == part_number.upper()
+        ).scalar()
+        return int(total or 0)
+    except Exception:
+        return 0
+
+def compute_availability(work_order: "WorkOrder"):
+    """
+    Для каждой строки заказа возвращает:
+      [{
+        part_id, part_number, part_name, requested, on_hand, issue_now, status_hint
+      }, ...]
+    status_hint: "STOCK" / "WAIT X (stock Y)" — как мы договаривались.
+    """
+    rows = []
+    for wop in work_order.parts:
+        req = int(wop.quantity or 0)
+        on = get_on_hand(wop.part_number)
+        issue = max(0, min(req, on))
+        hint = "STOCK" if on >= req else f"WAIT {req} (stock {on})"
+        rows.append({
+            "wop_id": wop.id,
+            "part_number": wop.part_number,
+            "part_name": wop.part_name or "",
+            "requested": req,
+            "on_hand": on,
+            "issue_now": issue,
+            "status_hint": hint,
+        })
+    return rows
+
+
+def _issue_records_bulk(issued_to: str, reference_job: str, items: list, billed_price_per_item: float | None = None):
+    """
+    items: list of dicts: { "part_id": int, "qty": int, ["unit_price": float] }
+      - если unit_price передан в item — используем его как billed price (с учётом fee/markup),
+        иначе возьмём текущий part.unit_cost.
+
+    Возвращает (issue_date: datetime, created_count: int).
+    """
+    if not items:
+        raise ValueError("No items to issue")
+
+    issue_date = datetime.utcnow()
+    created = 0
+
+    for it in items:
+        part_id = int(it["part_id"])
+        qty     = max(0, int(it["qty"] or 0))
+        if qty <= 0:
+            continue
+
+        part = Part.query.get(part_id)
+        if not part:
+            continue
+
+        on_hand = int(part.quantity or 0)
+        issue_now = min(qty, on_hand)
+        if issue_now <= 0:
+            continue
+
+        # цена к фиксации — либо из item["unit_price"], либо текущая в складе
+        price_to_fix = None
+        if "unit_price" in it and it["unit_price"] is not None:
+            price_to_fix = float(it["unit_price"])
+        elif billed_price_per_item is not None:
+            price_to_fix = float(billed_price_per_item)
+        else:
+            price_to_fix = float(part.unit_cost or 0.0)
+
+        # уменьшаем склад
+        part.quantity = on_hand - issue_now
+
+        # создаём запись выдачи (твоя модель уже есть)
+        rec = IssuedPartRecord(
+            part_id=part.id,
+            quantity=issue_now,
+            issued_to=issued_to.strip(),
+            reference_job=(reference_job or "").strip(),
+            issued_by=current_user.username,
+            issue_date=issue_date,
+            unit_cost_at_issue=price_to_fix,  # фиксируем "billed" цену
+        )
+        db.session.add(rec)
+        created += 1
+
+    if created == 0:
+        raise ValueError("Nothing available to issue")
+
+    db.session.commit()
+    return issue_date, created
+
+
+# ==== RETURN HELPERS (без миграций) ====
+
+def _is_return_record(record: IssuedPartRecord) -> bool:
+    """Признак 'возвратной' строки — отрицательное количество или reference_job начинается с RETURN."""
+    if record.quantity is not None and record.quantity < 0:
+        return True
+    ref = (record.reference_job or "").strip().upper()
+    return ref.startswith("RETURN")
+
+def _is_return_group(records: list[IssuedPartRecord]) -> bool:
+    """Группа — возвратная, если есть хотя бы одна позиция с qty<0 или ref начинается с RETURN."""
+    if not records:
+        return False
+    if any((r.quantity or 0) < 0 for r in records):
+        return True
+    ref = (records[0].reference_job or "").strip().upper()
+    return ref.startswith("RETURN")
+
+def _fetch_invoice_group(issued_to: str, reference_job: str|None, issued_by: str, issue_date):
+    """Достаём ВСЕ записи накладной за конкретный день по ключу (issued_to, reference_job, issued_by, дата)."""
+    from datetime import datetime
+    start = datetime.combine(issue_date.date(), datetime.min.time())
+    end   = datetime.combine(issue_date.date(), datetime.max.time())
+    return IssuedPartRecord.query.filter(
+        IssuedPartRecord.issued_to == issued_to,
+        IssuedPartRecord.reference_job == reference_job,
+        IssuedPartRecord.issued_by == issued_by,
+        IssuedPartRecord.issue_date.between(start, end)
+    ).all()
+# ==== /RETURN HELPERS ====
+
 
 # ---------- Helpers for editable preview ----------
 
@@ -461,7 +583,6 @@ def dataframe_from_pdf(path, try_ocr: bool = False):
     log("[OCR] no lines recognized")
     return pd.DataFrame()
 
-
 def _settings_path():
     return os.path.join(current_app.instance_path, "app_settings.json")
 
@@ -485,23 +606,264 @@ def set_setting(key, value):
     with open(p, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+@inventory_bp.get("/work_orders")
+@login_required
+def wo_list():
+    q = WorkOrder.query.order_by(WorkOrder.created_at.desc()).limit(200).all()
+    return render_template("wo_list.html", items=q)
+
+@inventory_bp.get("/work_orders/<int:wo_id>")
+@login_required
+def wo_detail(wo_id):
+    wo = WorkOrder.query.get_or_404(wo_id)
+    avail = compute_availability(wo)
+    return render_template("wo_detail.html", wo=wo, avail=avail)
+
+@inventory_bp.post("/work_orders/<int:wo_id>/issue_instock")
+@login_required
+def wo_issue_instock(wo_id):
+    if getattr(current_user, "role", "") not in ("admin","superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    wo = WorkOrder.query.get_or_404(wo_id)
+    avail = compute_availability(wo)
+
+    items = []
+    for row in avail:
+        if row["issue_now"] > 0:
+            part = Part.query.filter_by(part_number=row["part_number"].upper()).first()
+            if not part:
+                continue
+            items.append({"part_id": part.id, "qty": row["issue_now"], "unit_price": None})
+
+    if not items:
+        flash("Nothing available to issue (all WAIT).", "warning")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    issue_date, created = _issue_records_bulk(
+        issued_to=wo.technician_name,
+        reference_job=wo.canonical_job,
+        items=items
+    )
+
+    still_wait = any(r["on_hand"] < r["requested"] for r in avail)
+    if not still_wait:
+        wo.status = "done"
+        db.session.commit()
+
+    today = issue_date.date().isoformat()
+    params = urlencode({"start_date":today,"end_date":today,
+                        "recipient":wo.technician_name,"reference_job":wo.canonical_job})
+    return redirect(f"/reports_grouped?{params}", code=303)
+
+@inventory_bp.post("/work_orders/<int:wo_id>/status")
+@login_required
+def wo_set_status(wo_id):
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+    new_status = (request.form.get("status") or "").strip()
+    if new_status not in ("search_ordered","ordered","done"):
+        flash("Invalid status", "warning")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+    wo = WorkOrder.query.get_or_404(wo_id)
+    wo.status = new_status
+    db.session.commit()
+    flash(f"Status set to {new_status}.", "success")
+    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+
+
+@inventory_bp.post("/issue/batch")
+@login_required
+def issue_batch():
+    # 🔐 только admin/superadmin
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        return jsonify({"ok": False, "error": "Access denied"}), 403
+    try:
+        payload = request.get_json(force=True, silent=False) or {}
+        issued_to = (payload.get("issued_to") or "").strip()
+        reference_job = (payload.get("reference_job") or "").strip()
+        items = payload.get("items") or []
+
+        if not issued_to:
+            return jsonify({"ok": False, "error": "issued_to is required"}), 400
+        if not reference_job:
+            return jsonify({"ok": False, "error": "reference_job is required"}), 400
+
+        # 🧾 логируем состав выдачи (без персональных данных)
+        try:
+            safe_items = [
+                {"part_id": int(i.get("part_id", 0)), "qty": int(i.get("qty", 0)),
+                 "unit_price": None if i.get("unit_price") in (None, "") else float(i.get("unit_price"))}
+                for i in items
+            ]
+            current_app.logger.info("ISSUE_BATCH by=%s job=%s items=%s",
+                                    getattr(current_user, "username", "?"),
+                                    reference_job, safe_items)
+        except Exception:
+            pass
+
+        issue_date, created = _issue_records_bulk(issued_to, reference_job, items)
+        today = issue_date.date().isoformat()
+        params = urlencode({
+            "start_date": today, "end_date": today,
+            "recipient": issued_to, "reference_job": reference_job
+        })
+        return jsonify({
+            "ok": True,
+            "created": created,   # ← для тоста
+            "redirect": f"/reports_grouped?{params}"
+        }), 200
+
+    except ValueError as ve:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(ve)}), 400
+    except SQLAlchemyError:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": "DB error"}), 500
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@inventory_bp.post("/issue/line/<int:part_id>")
+@login_required
+def issue_line(part_id):
+    """
+    Выдать одну позицию (когда нужно выдать конкретный Part сейчас).
+    Принимает JSON или form-data с полями:
+      - qty (int) — обязательное, > 0
+      - issued_to (str) — обязательное
+      - reference_job (str) — обязательное
+      - unit_price (float) — опционально (если уже учтены доставка/наценка)
+    Возвращает:
+      - JSON {"ok": True, "created": 1, "redirect": "..."} для JSON-запросов
+      - redirect на /reports_grouped для форм
+    """
+    # 🔐 Разрешаем только admin / superadmin
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        # Для JSON-запросов — JSON, для форм — flash + редирект
+        if request.is_json:
+            return jsonify({"ok": False, "error": "Access denied"}), 403
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.dashboard"))
+
+    try:
+        # Универсально читаем данные (JSON или форма)
+        data = (request.get_json(silent=True) or {}) if request.is_json else (request.form or {})
+        qty = int(data.get("qty") or 0)
+        issued_to = (data.get("issued_to") or "").strip()
+        reference_job = (data.get("reference_job") or "").strip()
+
+        # unit_price — опционально
+        unit_price_raw = data.get("unit_price")
+        unit_price = None
+        if unit_price_raw not in (None, ""):
+            unit_price = float(unit_price_raw)
+
+        # Валидация
+        if qty <= 0:
+            raise ValueError("qty must be > 0")
+        if not issued_to or not reference_job:
+            raise ValueError("issued_to and reference_job are required")
+
+        # 🧾 Лог выдачи одной строки (без чувствительных данных)
+        try:
+            current_app.logger.info(
+                "ISSUE_LINE by=%s job=%s part_id=%s qty=%s price=%s",
+                getattr(current_user, "username", "?"),
+                reference_job, part_id, qty, unit_price
+            )
+        except Exception:
+            pass
+
+        # Выдаём ровно одну позицию
+        items = [{"part_id": int(part_id), "qty": qty, "unit_price": unit_price}]
+        issue_date, _created = _issue_records_bulk(issued_to, reference_job, items)  # min(qty, on_hand) внутри
+
+        # Готовим редирект на сгруппированный отчёт за сегодня
+        today = issue_date.date().isoformat()
+        params = urlencode({
+            "start_date": today,
+            "end_date": today,
+            "recipient": issued_to,
+            "reference_job": reference_job
+        })
+        target = f"/reports_grouped?{params}"
+
+        if request.is_json:
+            return jsonify({"ok": True, "created": 1, "redirect": target}), 200
+        else:
+            return redirect(target, code=303)
+
+    except ValueError as ve:
+        db.session.rollback()
+        if request.is_json:
+            return jsonify({"ok": False, "error": str(ve)}), 400
+        flash(f"Issue failed: {ve}", "danger")
+        return redirect(url_for("inventory.dashboard"))
+
+    except Exception as e:
+        db.session.rollback()
+        if request.is_json:
+            return jsonify({"ok": False, "error": "Internal error"}), 500
+        current_app.logger.exception("ISSUE_LINE failed: %s", e)
+        flash("Issue failed: internal error", "danger")
+        return redirect(url_for("inventory.dashboard"))
+
+
+@inventory_bp.get("/issue_ui")
+@login_required
+def issue_ui():
+    parts = Part.query.order_by(Part.part_number).limit(200).all()  # для примера
+    technician_name = getattr(current_user, "username", "TECH")     # замени как надо
+    canonical_ref = "TESTJOB123"                                    # подставишь свой JOB
+    return render_template("issue_ui.html", parts=parts,
+                           technician_name=technician_name,
+                           canonical_ref=canonical_ref)
 
 
 # ----------------- Dashboard -----------------
 
-@inventory_bp.route('/api/part/<part_number>')
+@inventory_bp.route('/api/part/<part_number>', methods=['GET'])
 @login_required
 def get_part_by_number(part_number):
-    part = Part.query.filter_by(part_number=part_number.upper()).first()
-    if part:
+    """
+    Вернёт информацию о детали по Part #.
+    Ответ (200):
+      {
+        "id": int,
+        "name": str,
+        "location": str | null,
+        "unit_cost": float,
+        "quantity": int
+      }
+    Или (404): {"error": "Not found"}
+    """
+    try:
+        pn = (part_number or "").strip().upper()
+        if not pn:
+            return jsonify({"error": "Part number is required"}), 400
+
+        part = Part.query.filter_by(part_number=pn).first()
+        if not part:
+            return jsonify({"error": "Not found"}), 404
+
+        # Нормализуем типы в ответе
         return jsonify({
-            'id': part.id,                 # Нужен для Issue Part
-            'name': part.name,
-            'location': part.location,
-            'unit_cost': part.unit_cost,
-            'quantity': part.quantity      # Нужен для проверки остатков
-        })
-    return jsonify({'error': 'Not found'}), 404
+            "id": int(part.id),
+            "name": part.name or "",
+            "location": part.location,
+            "unit_cost": float(part.unit_cost or 0.0),
+            "quantity": int(part.quantity or 0),
+        }), 200
+
+    except Exception as e:
+        current_app.logger.exception("api/part failed for %r: %s", part_number, e)
+        return jsonify({"error": "Internal error"}), 500
+
 
 
 
@@ -1113,8 +1475,9 @@ def update_invoice():
 @inventory_bp.route('/reports/cancel_invoice', methods=['POST'])
 @login_required
 def cancel_invoice():
-    if current_user.role not in ['superadmin', 'admin']:
-        flash("Access denied", "danger")
+    ALLOWED_CANCEL_ROLES = ('superadmin',)  # потом будет ('superadmin', 'admin')
+    if current_user.role not in ALLOWED_CANCEL_ROLES:
+        flash("Access denied (superadmin only).", "danger")
         return redirect(url_for('inventory.reports'))
 
     issued_to = request.form.get('issued_to')
@@ -1349,22 +1712,6 @@ def import_parts():
         flash(msg, "warning")
 
     return render_template("import_preview.html", rows=norm.to_dict(orient="records"), saved_path=path)
-
-
-
-@inventory_bp.route('/api/part/<part_number>')
-def api_get_part(part_number):
-    part = Part.query.filter_by(part_number=part_number.upper()).first()
-    if part:
-        return {
-            'id': part.id,
-            'name': part.name,
-            'quantity': part.quantity,
-            'unit_cost': part.unit_cost,
-            'location': part.location
-        }
-    return {}, 404
-
 
 @inventory_bp.route('/reports/download')
 @login_required
@@ -2093,6 +2440,119 @@ def import_settings():
 
     ocr_enabled = bool(get_setting("pdf_ocr_enabled", False))
     return render_template("import_settings.html", ocr_enabled=ocr_enabled)
+
+@inventory_bp.post('/reports/create_return_invoice')
+@login_required
+def create_return_invoice():
+    # 1) Параметры исходной накладной (как у /invoice/view и /reports_grouped)
+    issued_to     = request.form.get('issued_to', '')
+    reference_job = request.form.get('reference_job') or None
+    issued_by     = request.form.get('issued_by', '')
+    issue_date_str= request.form.get('issue_date', '')
+
+    # Парсим дату (как в твоих функциях)
+    try:
+        issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S.%f')
+    except ValueError:
+        try:
+            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d')
+
+    # 2) Берём исходные записи этой накладной
+    src_records = _fetch_invoice_group(issued_to, reference_job, issued_by, issue_date)
+    if not src_records:
+        flash("Source invoice not found.", "danger")
+        return redirect(url_for('inventory.reports'))
+
+    # Если это уже возврат — не даём делать возврат от возврата
+    if _is_return_group(src_records):
+        flash("This invoice looks like a RETURN already.", "warning")
+        return redirect(url_for('inventory.reports'))
+
+    # 3) Готовим reference_job для возврата
+    # Пример: "RETURN #<YYYYMMDD>-<issued_to>"
+    ret_ref = f"RETURN #{issue_date.strftime('%Y%m%d')}-{(issued_to or '').strip().upper()}"
+
+    # 4) Создаём возвратные записи с qty<0 и возвращаем остатки на склад
+    created = 0
+    for r in src_records:
+        part = Part.query.get(r.part_id)
+        if not part:
+            # если вдруг удалили Part — пропустим
+            continue
+
+        # новая запись с отрицательным количеством
+        ret = IssuedPartRecord(
+            part_id=part.id,
+            quantity=-(abs(r.quantity or 0)),
+            issued_to=r.issued_to,
+            reference_job=ret_ref,
+            issued_by=current_user.username,            # фиксируем кто оформил возврат
+            issue_date=datetime.utcnow(),               # сегодняшняя дата возврата
+            unit_cost_at_issue=r.unit_cost_at_issue or part.unit_cost
+        )
+        db.session.add(ret)
+
+        # склад: возврат -> прибавляем на склад abs(qty)
+        part.quantity = (part.quantity or 0) + abs(r.quantity or 0)
+        created += 1
+
+    db.session.commit()
+    flash(f"Return invoice created: {created} item(s).", "success")
+
+    # Редиректим на отчёт за сегодня, фильтруя по ret_ref
+    params = {
+        "start_date": datetime.utcnow().date().isoformat(),
+        "end_date":   datetime.utcnow().date().isoformat(),
+        "reference_job": ret_ref
+    }
+    return redirect(url_for('inventory.reports_grouped') + "?" + urlencode(params), code=303)
+
+@inventory_bp.post('/reports/delete_return_invoice')
+@login_required
+def delete_return_invoice():
+    if current_user.role != 'superadmin':
+        flash("Only superadmin can delete return invoices.", "danger")
+        return redirect(url_for('inventory.reports'))
+
+    issued_to     = request.form.get('issued_to', '')
+    reference_job = request.form.get('reference_job') or None
+    issued_by     = request.form.get('issued_by', '')
+    issue_date_str= request.form.get('issue_date', '')
+
+    try:
+        issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S.%f')
+    except ValueError:
+        try:
+            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d')
+
+    records = _fetch_invoice_group(issued_to, reference_job, issued_by, issue_date)
+    if not records:
+        flash("Return invoice not found.", "danger")
+        return redirect(url_for('inventory.reports'))
+
+    if not _is_return_group(records):
+        flash("Selected invoice is not a RETURN invoice.", "warning")
+        return redirect(url_for('inventory.reports'))
+
+    # 1) Откатываем склад: при возврате мы прибавляли abs(qty) → сейчас уменьшаем на abs(qty)
+    for r in records:
+        part = Part.query.get(r.part_id)
+        if part and (r.quantity or 0) < 0:
+            # уменьшить на abs(qty); защита от отрицательных остатков
+            new_qty = (part.quantity or 0) - abs(r.quantity)
+            part.quantity = max(new_qty, 0)
+
+    # 2) Удаляем сами записи возврата
+    for r in records:
+        db.session.delete(r)
+
+    db.session.commit()
+    flash("Return invoice deleted and stock adjusted.", "success")
+    return redirect(url_for('inventory.reports'))
 
 
 

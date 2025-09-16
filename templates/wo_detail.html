@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Work Order #{{ wo.id }}</h3>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><strong>Technician:</strong> {{ wo.technician_name }}</div>
+  <div class="col-md-3"><strong>Job(s):</strong> {{ wo.job_numbers }} &nbsp; <span class="text-muted">primary: {{ wo.canonical_job }}</span></div>
+  <div class="col-md-3"><strong>Brand/Model:</strong> {{ wo.brand }} {{ wo.model }}</div>
+  <div class="col-md-3"><strong>Serial:</strong> {{ wo.serial }}</div>
+  <div class="col-md-3"><strong>Type:</strong> {{ wo.job_type }}</div>
+  <div class="col-md-3"><strong>Status:</strong> {{ wo.status }}</div>
+  <div class="col-md-3"><strong>Delivery/Markup:</strong> ${{ '%.2f'|format(wo.delivery_fee or 0) }} / {{ wo.markup_percent or 0 }}%</div>
+</div>
+
+<table class="table table-sm table-bordered align-middle">
+  <thead>
+    <tr>
+      <th>Part #</th><th>Name</th>
+      <th class="text-end">Needed</th>
+      <th class="text-end">On hand</th>
+      <th class="text-end">Issue now</th>
+      <th>Status hint</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in avail %}
+    <tr>
+      <td>{{ r.part_number }}</td>
+      <td>{{ r.part_name }}</td>
+      <td class="text-end">{{ r.requested }}</td>
+      <td class="text-end">{{ r.on_hand }}</td>
+      <td class="text-end">{{ r.issue_now }}</td>
+      <td>
+        {% if r.status_hint.startswith('WAIT') %}
+          <span class="badge bg-warning text-dark">{{ r.status_hint }}</span>
+        {% else %}
+          <span class="badge bg-success">{{ r.status_hint }}</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if current_user.role in ['admin','superadmin'] %}
+<form method="post" action="{{ url_for('inventory.wo_issue_instock', wo_id=wo.id) }}">
+  <button class="btn btn-primary">Issue All In-Stock Now</button>
+</form>
+{% endif %}
+
+{% endblock %}

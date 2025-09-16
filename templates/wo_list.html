@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Work Orders</h3>
+<table class="table table-sm table-hover">
+  <thead><tr>
+    <th>ID</th><th>Technician</th><th>Jobs</th><th>Brand/Model</th>
+    <th>Type</th><th>Status</th><th>Created</th><th></th>
+  </tr></thead>
+  <tbody>
+    {% for w in items %}
+    <tr>
+      <td>{{ w.id }}</td>
+      <td>{{ w.technician_name }}</td>
+      <td>{{ w.job_numbers }}</td>
+      <td>{{ w.brand }} {{ w.model }}</td>
+      <td>{{ w.job_type }}</td>
+      <td>{{ w.status }}</td>
+      <td>{{ w.created_at.strftime('%Y-%m-%d') }}</td>
+      <td><a class="btn btn-sm btn-primary" href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">Open</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
