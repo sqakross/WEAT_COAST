@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>{{ 'Edit' if wo else 'New' }} Work Order</h3>
+
+<form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm">
+  {% if wo %}
+    <input type="hidden" name="wo_id" value="{{ wo.id }}">
+  {% endif %}
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-3">
+      <label class="form-label">Technician</label>
+      <input name="technician_name" class="form-control" required
+             value="{{ wo.technician_name if wo else '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Job number(s) (comma separated)</label>
+      <input name="job_numbers" class="form-control" placeholder="98356, 98256"
+             value="{{ wo.job_numbers if wo else '' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Brand</label>
+      <input name="brand" class="form-control" value="{{ wo.brand if wo else '' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Model # (≤25)</label>
+      <input name="model" class="form-control" maxlength="25"
+             value="{{ wo.model if wo else '' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Serial # (≤25)</label>
+      <input name="serial" class="form-control" maxlength="25"
+             value="{{ wo.serial if wo else '' }}">
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Job type</label>
+      <select name="job_type" class="form-select">
+        {% set jt = (wo.job_type if wo else 'BASE') %}
+        <option value="BASE" {{ 'selected' if jt=='BASE' else '' }}>BASE</option>
+        <option value="INSURANCE" {{ 'selected' if jt=='INSURANCE' else '' }}>INSURANCE</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Delivery fee ($)</label>
+      <input type="number" step="0.01" name="delivery_fee" class="form-control"
+             value="{{ '%.2f'|format(wo.delivery_fee) if wo and wo.delivery_fee is not none else '0.00' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Markup (%)</label>
+      <input type="number" step="0.01" name="markup_percent" class="form-control"
+             value="{{ '%.2f'|format(wo.markup_percent) if wo and wo.markup_percent is not none else '0.00' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Status</label>
+      <select name="status" class="form-select">
+        {% set st = (wo.status if wo else 'search_ordered') %}
+        <option value="search_ordered" {{ 'selected' if st=='search_ordered' else '' }}>search_ordered</option>
+        <option value="ordered" {{ 'selected' if st=='ordered' else '' }}>ordered</option>
+        <option value="done" {{ 'selected' if st=='done' else '' }}>done</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="table-responsive mb-3">
+    <table class="table table-sm table-bordered align-middle" id="partsTable">
+      <thead>
+        <tr>
+          <th style="width:140px;">Part #</th>
+          <th style="width:220px;">Part name</th>
+          <th style="width:90px;">Qty</th>
+          <th style="width:220px;">Alt PN(s)</th>
+          <th style="width:180px;">Supplier</th>
+          <th style="width:120px;">Backorder</th>
+          <th style="width:160px;">Stock hint</th>
+          <th style="width:60px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in parts %}
+        {% set i = loop.index0 %}
+        <tr>
+          <td><input class="form-control pn" name="rows[{{ i }}][part_number]" value="{{ p.part_number or '' }}" required></td>
+          <td><input class="form-control" name="rows[{{ i }}][part_name]" value="{{ p.part_name or '' }}" maxlength="80"></td>
+          <td><input class="form-control qty" name="rows[{{ i }}][quantity]" type="number" min="0" value="{{ p.quantity or 1 }}"></td>
+          <td><input class="form-control" name="rows[{{ i }}][alt_numbers]" value="{{ p.alt_numbers or '' }}" maxlength="200" placeholder="comma separated"></td>
+          <td><input class="form-control" name="rows[{{ i }}][supplier]" value="{{ p.supplier or '' }}" maxlength="80"></td>
+          <td class="text-center"><input class="form-check-input" type="checkbox" name="rows[{{ i }}][backorder]" {% if p.backorder %}checked{% endif %}></td>
+          <td class="hint">—</td>
+          <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mb-3">
+    <button type="button" class="btn btn-outline-secondary" id="addRow">+ Add part row</button>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">Save</button>
+    {% if wo %}
+      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">Back</a>
+    {% else %}
+      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Cancel</a>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  const tbl = document.getElementById('partsTable').querySelector('tbody');
+  const addBtn = document.getElementById('addRow');
+
+  function rowCount(){ return tbl.querySelectorAll('tr').length; }
+
+  function templateRow(i){
+    return `
+<tr>
+  <td><input class="form-control pn" name="rows[${i}][part_number]" required></td>
+  <td><input class="form-control" name="rows[${i}][part_name]" maxlength="80"></td>
+  <td><input class="form-control qty" name="rows[${i}][quantity]" type="number" min="0" value="1"></td>
+  <td><input class="form-control" name="rows[${i}][alt_numbers]" maxlength="200" placeholder="comma separated"></td>
+  <td><input class="form-control" name="rows[${i}][supplier]" maxlength="80"></td>
+  <td class="text-center"><input class="form-check-input" type="checkbox" name="rows[${i}][backorder]"></td>
+  <td class="hint">—</td>
+  <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
+</tr>`;
+  }
+
+  function fetchHint(tr){
+    const pn = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
+    const qty = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
+    const hintCell = tr.querySelector('.hint');
+    if (!pn || qty <= 0) { hintCell.textContent = '—'; return; }
+    fetch(`/api/stock_hint?pn=${encodeURIComponent(pn)}&qty=${qty}`)
+      .then(r => r.json()).then(j => {
+        hintCell.textContent = j.hint || '—';
+        hintCell.classList.remove('text-success','text-warning');
+        if (j.hint && j.hint.startsWith('STOCK')) hintCell.classList.add('text-success');
+        else hintCell.classList.add('text-warning');
+      }).catch(()=>{ hintCell.textContent = '—';});
+  }
+
+  addBtn?.addEventListener('click', () => {
+    const i = rowCount();
+    tbl.insertAdjacentHTML('beforeend', templateRow(i));
+  });
+
+  tbl.addEventListener('input', (e) => {
+    const tr = e.target.closest('tr');
+    if (!tr) return;
+    if (e.target.classList.contains('pn') || e.target.classList.contains('qty')) {
+      fetchHint(tr);
+    }
+  });
+
+  tbl.addEventListener('click', (e) => {
+    if (e.target.classList.contains('del-row')) {
+      const tr = e.target.closest('tr');
+      tr?.remove();
+    }
+  });
+
+  // первичная инициализация подсказок для уже существующих строк
+  tbl.querySelectorAll('tr').forEach(fetchHint);
+})();
+</script>
+{% endblock %}
+

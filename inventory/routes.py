@@ -10,8 +10,9 @@ from PIL import Image
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, send_file, jsonify, after_this_request,
-    current_app,                     # NEW
+    current_app,                    # NEW
 )
+from markupsafe import Markup
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import abort
@@ -31,9 +32,7 @@ from extensions import db
 # from models import Part, IssuedPartRecord, User
 from utils.invoice_generator import generate_invoice_pdf
 # from models.order_items import OrderItem
-# from models import OrderItem
-from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER
-from models import Part
+from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER,Part, WorkOrder, WorkOrderPart
 from sqlalchemy import or_
 from pathlib import Path
 
@@ -75,28 +74,59 @@ def get_on_hand(part_number: str) -> int:
 
 def compute_availability(work_order: "WorkOrder"):
     """
-    Для каждой строки заказа возвращает:
-      [{
-        part_id, part_number, part_name, requested, on_hand, issue_now, status_hint
-      }, ...]
-    status_hint: "STOCK" / "WAIT X (stock Y)" — как мы договаривались.
+    Возвращает список словарей по каждой строке WO:
+    [{
+      wop_id, part_number, part_name, requested, on_hand, issue_now, status_hint
+    }, ...]
+
+    Логика:
+      - Только при status == "ordered" обращаемся к складу:
+          on_hand = get_on_hand(PN)
+          issue_now = min(requested, on_hand)
+          hint = "STOCK" | "WAIT {need} (stock {on})"
+      - При других статусах (например, "search_ordered"):
+          on_hand = 0, issue_now = 0, hint = "WAIT {requested} (not ordered)"
     """
     rows = []
-    for wop in work_order.parts:
+    # считаем «можно ли проверять склад»
+    check_stock = (getattr(work_order, "status", "") or "").lower() == "ordered"
+
+    for wop in (work_order.parts or []):
+        # нормализуем PN
+        pn = (wop.part_number or "").strip().upper()
+        # количество, безопасно
         req = int(wop.quantity or 0)
-        on = get_on_hand(wop.part_number)
-        issue = max(0, min(req, on))
-        hint = "STOCK" if on >= req else f"WAIT {req} (stock {on})"
+        if req < 0:
+            req = 0
+
+        if check_stock and pn:
+            on = int(get_on_hand(pn) or 0)
+            issue = min(req, on)
+            if req <= 0:
+                hint = "WAIT 0"
+            elif on >= req:
+                hint = "STOCK"
+            else:
+                need = req - on
+                hint = f"WAIT {need} (stock {on})"
+        else:
+            # статус ещё не ordered → по твоей логике не сверяем склад
+            on = 0
+            issue = 0
+            hint = f"WAIT {req} (not ordered)" if req > 0 else "WAIT 0"
+
         rows.append({
             "wop_id": wop.id,
-            "part_number": wop.part_number,
-            "part_name": wop.part_name or "",
+            "part_number": pn,
+            "part_name": (wop.part_name or "").strip(),
             "requested": req,
             "on_hand": on,
             "issue_now": issue,
             "status_hint": hint,
         })
+
     return rows
+
 
 
 def _issue_records_bulk(issued_to: str, reference_job: str, items: list, billed_price_per_item: float | None = None):
@@ -606,6 +636,274 @@ def set_setting(key, value):
     with open(p, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+@inventory_bp.post("/work_orders/new", endpoint="wo_create")
+@login_required
+def wo_create():
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    f = request.form
+    technician_name = (f.get("technician_name") or "").strip()
+    job_numbers = (f.get("job_numbers") or "").strip()
+    brand = (f.get("brand") or "").strip()
+    model = (f.get("model") or "").strip()
+    serial = (f.get("serial") or "").strip()
+    job_type = (f.get("job_type") or "BASE").strip().upper()
+    delivery_fee = float(f.get("delivery_fee") or 0)
+    markup_percent = float(f.get("markup_percent") or 0)
+
+    if not technician_name or not job_numbers:
+        flash("Technician and Job(s) are required.", "danger")
+        return redirect(url_for("inventory.wo_new"))
+
+    # канонический job = максимальный из перечисленных чисел
+    jobs = [j.strip() for j in job_numbers.replace(",", " ").split() if j.strip()]
+    nums = []
+    for j in jobs:
+        try:
+            nums.append(int(j))
+        except:
+            pass
+    canonical_job = str(max(nums)) if nums else (jobs[0] if jobs else "")
+
+    wo = WorkOrder(
+        technician_name=technician_name,
+        job_numbers=", ".join(jobs),
+        canonical_job=canonical_job,
+        brand=brand, model=model, serial=serial,
+        job_type=job_type if job_type in ("BASE","INSURANCE") else "BASE",
+        delivery_fee=delivery_fee,
+        markup_percent=markup_percent,
+        status="search_ordered",
+    )
+    db.session.add(wo)
+    db.session.flush()
+
+    # парсим строки parts из формы: rows[i][field]
+    import re
+    pat = re.compile(r"^rows\[(\d+)\]\[(\w+)\]$")
+    tmp = {}
+    for k, v in f.items():
+        m = pat.match(k)
+        if not m:
+            continue
+        i = int(m.group(1)); field = m.group(2)
+        tmp.setdefault(i, {})[field] = (v or "").strip()
+
+    for i in sorted(tmp.keys()):
+        row = tmp[i]
+        pn = (row.get("part_number") or "").strip()
+        if not pn:
+            continue
+        part = WorkOrderPart(
+            work_order_id=wo.id,
+            part_number=pn,
+            alt_numbers=(row.get("alt_numbers") or "").strip(),
+            part_name=(row.get("part_name") or "").strip(),
+            quantity=int(row.get("quantity") or 0),
+            supplier=(row.get("supplier") or "").strip(),
+            backorder=(row.get("backorder") == "on"),
+        )
+        db.session.add(part)
+
+    db.session.commit()
+    flash("Work order created.", "success")
+    return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+
+@inventory_bp.get("/work_orders/new")
+@login_required
+def wo_new():
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+    # форма с пустыми значениями и одной строкой parts
+    return render_template("wo_form.html", wo=None, parts=[{}])
+
+@inventory_bp.post("/work_orders/save")
+@login_required
+def wo_save():
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    form = request.form
+    wo_id = form.get("wo_id")
+    is_new = not wo_id
+
+    if is_new:
+        wo = WorkOrder()
+        db.session.add(wo)
+    else:
+        wo = WorkOrder.query.get_or_404(int(wo_id))
+
+    # Основные поля
+    wo.technician_name = (form.get("technician_name") or "").strip()
+    wo.job_numbers     = (form.get("job_numbers") or "").strip()
+    wo.brand           = (form.get("brand") or "").strip()
+    wo.model           = (form.get("model") or "").strip()[:25]
+    wo.serial          = (form.get("serial") or "").strip()[:25]
+    wo.job_type        = (form.get("job_type") or "BASE").strip().upper()
+    try:
+        wo.delivery_fee   = float(form.get("delivery_fee") or 0)
+    except ValueError:
+        wo.delivery_fee   = 0.0
+    try:
+        wo.markup_percent = float(form.get("markup_percent") or 0)
+    except ValueError:
+        wo.markup_percent = 0.0
+    wo.status          = (form.get("status") or "search_ordered").strip()
+
+    # Очистим старые части (проще и надёжнее для формы)
+    if not is_new:
+        for p in list(wo.parts):
+            db.session.delete(p)
+
+    # Собираем части из form rows[*]
+    idx = 0
+    while True:
+        pn = form.get(f"rows[{idx}][part_number]")
+        if pn is None:
+            break
+        pn = (pn or "").strip().upper()
+        name = (form.get(f"rows[{idx}][part_name]") or "").strip()
+        qty_str = form.get(f"rows[{idx}][quantity]") or "0"
+        altpns = (form.get(f"rows[{idx}][alt_part_numbers]") or "").strip()
+        supplier = (form.get(f"rows[{idx}][supplier]") or "").strip()
+        backorder = bool(form.get(f"rows[{idx}][backorder_flag]"))
+        status_line = (form.get(f"rows[{idx}][status]") or "").strip() or "search_ordered"
+
+        try:
+            qty = int(qty_str)
+        except ValueError:
+            qty = 0
+
+        # пропускаем пустые строки
+        if pn and qty > 0:
+            wop = WorkOrderPart(
+                part_number=pn,
+                part_name=name[:80],
+                quantity=qty,
+                alt_part_numbers=altpns[:200] or None,
+                supplier=supplier[:80] or None,
+                backorder_flag=backorder,
+                status=status_line
+            )
+            wo.parts.append(wop)
+        idx += 1
+
+    db.session.commit()
+    flash("Work Order saved.", "success")
+    return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+
+@inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
+@login_required
+def wo_edit(wo_id):
+    # только admin/superadmin
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    wo = WorkOrder.query.get_or_404(wo_id)
+
+    # Приводим части к тем полям, которые ждёт форма wo_form.html
+    parts = []
+    for p in (wo.parts or []):
+        parts.append({
+            "part_number": (p.part_number or "").strip(),
+            "alt_numbers": (getattr(p, "alt_numbers", "") or "").strip(),
+            "part_name": (p.part_name or "").strip(),
+            "quantity": int(p.quantity or 0),
+            "supplier": (getattr(p, "supplier", "") or "").strip(),
+            "backorder": bool(getattr(p, "backorder", False)),
+        })
+
+    # Если частей нет — форма сама умеет добавлять строки кнопкой “+ Add row”,
+    # можно не пихать пустую строку.
+    return render_template("wo_form.html", wo=wo, parts=parts, mode="edit")
+
+
+@inventory_bp.post("/work_orders/<int:wo_id>/edit", endpoint="wo_update")
+@login_required
+def wo_update(wo_id):
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    wo = WorkOrder.query.get_or_404(wo_id)
+    f = request.form
+
+    wo.technician_name = (f.get("technician_name") or "").strip()
+    raw_jobs = (f.get("job_numbers") or "").strip()
+    jobs = [j.strip() for j in raw_jobs.replace(",", " ").split() if j.strip()]
+    wo.job_numbers = ", ".join(jobs)
+    # пересчёт canonical
+    nums = []
+    for j in jobs:
+        try: nums.append(int(j))
+        except: pass
+    wo.canonical_job = str(max(nums)) if nums else (jobs[0] if jobs else "")
+
+    wo.brand = (f.get("brand") or "").strip()
+    wo.model = (f.get("model") or "").strip()
+    wo.serial = (f.get("serial") or "").strip()
+    job_type = (f.get("job_type") or "BASE").strip().upper()
+    wo.job_type = job_type if job_type in ("BASE","INSURANCE") else "BASE"
+    wo.delivery_fee = float(f.get("delivery_fee") or 0)
+    wo.markup_percent = float(f.get("markup_percent") or 0)
+
+    # пересобираем parts
+    WorkOrderPart.query.filter_by(work_order_id=wo.id).delete()
+
+    import re
+    pat = re.compile(r"^rows\[(\d+)\]\[(\w+)\]$")
+    tmp = {}
+    for k, v in f.items():
+        m = pat.match(k)
+        if not m:
+            continue
+        i = int(m.group(1)); field = m.group(2)
+        tmp.setdefault(i, {})[field] = (v or "").strip()
+
+    for i in sorted(tmp.keys()):
+        row = tmp[i]
+        pn = (row.get("part_number") or "").strip()
+        if not pn:
+            continue
+        part = WorkOrderPart(
+            work_order_id=wo.id,
+            part_number=pn,
+            alt_numbers=(row.get("alt_numbers") or "").strip(),
+            part_name=(row.get("part_name") or "").strip(),
+            quantity=int(row.get("quantity") or 0),
+            supplier=(row.get("supplier") or "").strip(),
+            backorder=(row.get("backorder") == "on"),
+        )
+        db.session.add(part)
+
+    db.session.commit()
+    flash("Work order updated.", "success")
+    return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+
+@inventory_bp.get("/api/stock_hint")
+@login_required
+def api_stock_hint():
+    pn  = (request.args.get("pn") or "").strip().upper()
+    try:
+        qty = int((request.args.get("qty") or "0").strip() or 0)
+    except ValueError:
+        qty = 0
+
+    on = get_on_hand(pn) if pn else 0
+    if qty > 0 and on >= qty:
+        hint = "STOCK"
+    elif qty > 0:
+        hint = f"WAIT {qty} stock {on}"
+    else:
+        hint = "—"
+
+    return jsonify({"on_hand": on, "hint": hint})
+
 @inventory_bp.get("/work_orders")
 @login_required
 def wo_list():
@@ -655,7 +953,9 @@ def wo_issue_instock(wo_id):
     today = issue_date.date().isoformat()
     params = urlencode({"start_date":today,"end_date":today,
                         "recipient":wo.technician_name,"reference_job":wo.canonical_job})
-    return redirect(f"/reports_grouped?{params}", code=303)
+    link = f"/reports_grouped?{params}"
+    flash(Markup(f'Issued in-stock items. <a href="{link}">Open invoice group</a> to print.'), "success")
+    return redirect(link, code=303)
 
 @inventory_bp.post("/work_orders/<int:wo_id>/status")
 @login_required
@@ -2343,7 +2643,7 @@ def import_parts_upload():
 def list_orders():
     from flask import request, render_template
     from extensions import db
-    from models.order_item import OrderItem
+    # from models.order_item import OrderItem
 
     q = (request.args.get("q") or "").strip()
     base = OrderItem.query.order_by(OrderItem.date_ordered.desc(), OrderItem.id.desc())

@@ -230,6 +230,37 @@ main.container {
     text-align: center;
   }
 
+/* --- Navbar dropdown should float above dashboard UI --- */
+.navbar { z-index: 1200; }                   /* выше, чем фикс-элементы на странице */
+#navbarMain, .navbar-nav { overflow: visible !important; }
+
+.navbar .dropdown-menu {
+  z-index: 1300;                             /* поверх .navbar (1200) и типовых панелей */
+  margin-top: .4rem;
+}
+
+/* Если у дашборда есть липкая панель/фильтры со высоким z-index — прижмём ниже */
+.dashboard-sticky,
+.report-filters,
+.dashboard-toolbar {
+  z-index: 100 !important;
+}
+
+/* На всякий случай избегаем отсечения выпавшего меню контейнером основной области */
+main, .container, .container-fluid {
+  overflow: visible;
+}
+
+/* На узких экранах раскрытое меню ведём статично, чтобы не обрезалось */
+@media (max-width: 991.98px) {
+  .navbar .dropdown-menu {
+    position: static;
+    float: none;
+  }
+}
+
+
+
 
 
 
