@@ -53,6 +53,41 @@
   </div>
 </div>
 
+{# ======== ПАНЕЛЬ ДЕЙСТВИЙ + ПОИСК (НОВОЕ) ======== #}
+{% set _suppliers = suppliers if suppliers is defined and suppliers else [] %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex gap-2">
+    <!-- Issue All: открываем твою существующую модалку превью -->
+    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#issuePreviewModal">
+      Issue All (in-stock)
+    </button>
+    <!-- Refresh Stock: POST; если у тебя ещё нет роута, добавь inventory.wo_refresh_stock -->
+    <form method="post" action="{{ url_for('inventory.wo_refresh_stock', wo_id=wo.id) }}" class="d-inline">
+      <button class="btn btn-outline-secondary">Refresh Stock</button>
+    </form>
+  </div>
+
+  <!-- Поиск (GET на эту же страницу). Поддержка префиксов: wo:/pn:/model:/brand:/serial: -->
+  <form method="get" action="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}" class="d-flex gap-2">
+    <input name="q" value="{{ request.args.get('q','') }}" class="form-control" style="width:320px"
+           placeholder="Search: wo:/pn:/model:/brand:/serial: or text">
+    <select name="status" class="form-select">
+      <option value="">Status: Any</option>
+      {% for s in ['in-stock','ordered','backorder','done'] %}
+        <option value="{{ s }}" {% if request.args.get('status')==s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <select name="supplier" class="form-select">
+      <option value="">Supplier: Any</option>
+      {% for sup in _suppliers %}
+        <option value="{{ sup }}" {% if request.args.get('supplier')==sup %}selected{% endif %}>{{ sup }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-primary">Search</button>
+  </form>
+</div>
+{# ======== /ПАНЕЛЬ ДЕЙСТВИЙ + ПОИСК ======== #}
+
 {% if wo.parts and avail %}
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
@@ -79,10 +114,10 @@
         <td class="text-end">{{ r.on_hand }}</td>
         <td class="text-end">{{ r.issue_now }}</td>
         <td>
-          {% if r.status_hint.startswith('WAIT') %}
+          {% if r.status_hint and r.status_hint.startswith('WAIT') %}
             <span class="badge bg-warning text-dark">{{ r.status_hint }}</span>
           {% else %}
-            <span class="badge bg-success">{{ r.status_hint }}</span>
+            <span class="badge bg-success">{{ r.status_hint or '—' }}</span>
           {% endif %}
         </td>
       </tr>
@@ -102,6 +137,43 @@
 {% else %}
 <p class="text-muted">No parts listed for this work order.</p>
 {% endif %}
+
+{# ======== ISSUED BATCHES (НОВОЕ) ======== #}
+{% set _batches = batches if batches is defined and batches else [] %}
+<h5 class="mt-4">Issued Batches (Technician View)</h5>
+<div class="table-responsive">
+  <table class="table table-sm table-hover">
+    <thead class="table-light">
+      <tr>
+        <th>Issued At</th>
+        <th>Technician</th>
+        <th>Canonical Ref</th>
+        <th>Items</th>
+        <th>Report #</th>
+        <th>Print</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in _batches %}
+      <tr>
+        <td>{{ b.issued_at }}</td>
+        <td>{{ b.technician }}</td>
+        <td>{{ b.canonical_ref }}</td>
+        <td>{{ b.items }}</td>
+        <td>
+          <a class="btn btn-sm btn-outline-secondary" href="/reports/{{ b.report_id }}" target="_blank">Open Report</a>
+        </td>
+        <td>
+          <a class="btn btn-sm btn-outline-primary" href="/reports/{{ b.report_id }}?print=1" target="_blank">Print</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-muted">No batches yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{# ======== /ISSUED BATCHES ======== #}
 
 {% if current_user.role in ['admin','superadmin'] %}
 <!-- скрытая форма (будет сабмититься из модалки) -->
@@ -136,65 +208,58 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
+        {% set ns = namespace(has_issue=false, total_issue=0) %}
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Part #</th>
+                <th>Name</th>
+                <th class="text-end">Needed</th>
+                <th class="text-end">On hand</th>
+                <th class="text-end">Issue now</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in avail %}
+                {% if r.issue_now and r.issue_now > 0 %}
+                  {% set ns.has_issue = true %}
+                  {% set ns.total_issue = ns.total_issue + (r.issue_now or 0) %}
+                  <tr>
+                    <td><code>{{ r.part_number }}</code></td>
+                    <td>{{ r.part_name }}</td>
+                    <td class="text-end">{{ r.requested }}</td>
+                    <td class="text-end">{{ r.on_hand }}</td>
+                    <td class="text-end">{{ r.issue_now }}</td>
+                  </tr>
+                {% endif %}
+              {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr class="table-light">
+                <th colspan="4" class="text-end">Total lines:</th>
+                <th class="text-end">{{ ns.total_issue }}</th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
 
-        {% set issue_rows = [] %}
-        {% for r in avail %}
-          {% if r.issue_now and r.issue_now > 0 %}
-            {% set _ = issue_rows.append(r) %}
-          {% endif %}
-        {% endfor %}
-
-        {% if issue_rows %}
-          <div class="table-responsive">
-            <table class="table table-sm table-bordered align-middle">
-              <thead class="table-light">
-                <tr>
-                  <th>Part #</th>
-                  <th>Name</th>
-                  <th class="text-end">Needed</th>
-                  <th class="text-end">On hand</th>
-                  <th class="text-end">Issue now</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% set total_issue = 0 %}
-                {% for r in issue_rows %}
-                {% set total_issue = total_issue + (r.issue_now or 0) %}
-                <tr>
-                  <td><code>{{ r.part_number }}</code></td>
-                  <td>{{ r.part_name }}</td>
-                  <td class="text-end">{{ r.requested }}</td>
-                  <td class="text-end">{{ r.on_hand }}</td>
-                  <td class="text-end">{{ r.issue_now }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-              <tfoot>
-                <tr class="table-light">
-                  <th colspan="4" class="text-end">Total lines:</th>
-                  <th class="text-end">{{ total_issue }}</th>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          <div class="alert alert-info">
-            After issuing, you’ll be redirected to <strong>Reports</strong> for printing the invoice.
-          </div>
-        {% else %}
+        {% if not ns.has_issue %}
           <div class="alert alert-warning mb-0">
             Nothing available to issue right now (all lines are WAIT).
+          </div>
+        {% else %}
+          <div class="alert alert-info mb-0">
+            After issuing, you’ll be redirected to <strong>Reports</strong> for printing the invoice.
           </div>
         {% endif %}
       </div>
 
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-        {% if issue_rows %}
-          <button type="button" class="btn btn-primary" id="confirmIssueBtn">Issue Now</button>
-        {% else %}
-          <button type="button" class="btn btn-primary" id="confirmIssueBtn" disabled>Issue Now</button>
-        {% endif %}
+        <button type="button" class="btn btn-primary" id="confirmIssueBtn" {% if not ns.has_issue %}disabled{% endif %}>
+          Issue Now
+        </button>
       </div>
     </div>
   </div>
@@ -229,3 +294,5 @@
   })();
 </script>
 {% endblock %}
+
+

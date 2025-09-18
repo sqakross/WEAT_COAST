@@ -43,9 +43,15 @@
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.issue_part' %} active{% endif %}"
                href="{{ url_for('inventory.issue_part') }}">Issue Part</a>
           </li>
-          <li class="nav-item">
-            <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.wo_list' %} active{% endif %}"
-               href="{{ url_for('inventory.wo_list') }}">Work Orders</a>
+            {% set is_wo = request.endpoint and request.endpoint.startswith('inventory.wo_') %}
+            <li class="nav-item">
+                <a class="nav-link{{ ' active' if is_wo else '' }}"
+                    href="{{ url_for('inventory.wo_list') }}">
+                    Work Orders
+                </a>
+<!--          <li class="nav-item">-->
+<!--            <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.wo_list' %} active{% endif %}"-->
+<!--               href="{{ url_for('inventory.wo_list') }}">Work Orders</a>-->
           </li>
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.reports') %} active{% endif %}"

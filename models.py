@@ -37,6 +37,13 @@ class WorkOrder(db.Model):
     __tablename__ = "work_orders"
     id = db.Column(db.Integer, primary_key=True)
 
+    units = db.relationship(
+        "WorkUnit",
+        backref="order",
+        cascade="all, delete-orphan",
+        lazy="joined",
+    )
+
     technician_name = db.Column(db.String(80), nullable=False)
     # один или два номера работ, через запятую (напр. "98256, 98356")
     job_numbers = db.Column(db.String(120), nullable=False)
@@ -80,16 +87,18 @@ class WorkOrderPart(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False)
 
-    part_number = db.Column(db.String(40), nullable=False)       # основной PN
+    part_number = db.Column(db.String(50), nullable=False)       # основной PN
     alt_part_numbers = db.Column(db.String(200))                 # альтернативы через запятую (опционально)
-    part_name = db.Column(db.String(80))
+    part_name = db.Column(db.String(120))
     quantity = db.Column(db.Integer, default=1)
 
+    alt_part_numbers = db.Column(db.String(200))
     supplier = db.Column(db.String(80))                          # если не в стоке — откуда заказывать
     backorder_flag = db.Column(db.Boolean, default=False)        # отметка backorder
     status = db.Column(db.String(20), default="search_ordered")  # при желании — пер-строчный статус
 
     # опционально фиксируем цены (без/с наценкой и доставкой)
+    unit_label = db.Column(db.String(120), nullable=True)
     unit_price_base = db.Column(db.Float)
     unit_price_final = db.Column(db.Float)
 
@@ -159,6 +168,41 @@ class OrderItem(db.Model):
 
     # Для идемпотентного синка из Excel (если подключишь позже)
     row_key      = db.Column(db.String(512), unique=True)
+
+# --- NEW: multi-appliance per WorkOrder ---
+
+class WorkUnit(db.Model):
+    __tablename__ = "work_units"
+
+    id = db.Column(db.Integer, primary_key=True)
+    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False)
+
+    brand  = db.Column(db.String(80))
+    model  = db.Column(db.String(25))
+    serial = db.Column(db.String(25))
+
+    parts = db.relationship(
+        "WorkUnitPart",
+        backref="unit",
+        cascade="all, delete-orphan",
+        lazy="joined",
+    )
+
+
+class WorkUnitPart(db.Model):
+    __tablename__ = "work_unit_parts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    work_unit_id = db.Column(db.Integer, db.ForeignKey("work_units.id"), nullable=False)
+
+    part_number      = db.Column(db.String(50), nullable=False)
+    part_name        = db.Column(db.String(120))
+    quantity         = db.Column(db.Integer, default=1)
+    alt_numbers      = db.Column(db.String(200))
+    supplier         = db.Column(db.String(80))
+    backorder_flag   = db.Column(db.Boolean, default=False)
+    line_status      = db.Column(db.String(32), default="search_ordered")  # search_ordered|ordered|done
+
 
 
 

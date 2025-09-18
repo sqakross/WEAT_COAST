@@ -61,6 +61,23 @@ app.config.from_pyfile('config.py', silent=True)  # ← добавили
 # NEW: ограничим размер аплоадов (32 МБ по умолчанию)
 app.config.setdefault("MAX_CONTENT_LENGTH", 32 * 1024 * 1024)
 
+# --- 4.1) Доп. пути для шаблонов (ДОБАВЛЕНО — после создания app) ---
+from jinja2 import ChoiceLoader, FileSystemLoader
+extra_templates = [
+    os.path.join(Config.BASE_DIR, "inventory", "templates"),
+    # добавляй доп. папки при необходимости
+]
+extra_loaders = [FileSystemLoader(p) for p in extra_templates if os.path.isdir(p)]
+if extra_loaders:
+    app.jinja_loader = ChoiceLoader([app.jinja_loader, *extra_loaders])
+    try:
+        searchpath = getattr(app.jinja_loader, "searchpath", None)
+        logging.info("Jinja searchpath: %s", searchpath)
+    except Exception:
+        pass
+else:
+    logging.warning("No extra template dirs found among: %s", extra_templates)
+
 # --- Sentry (включается если задан SENTRY_DSN в окружении) ---
 SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
 if SENTRY_DSN:
@@ -107,6 +124,22 @@ if __name__ == "__main__":
         db.create_all()
         logging.info("DB tables ensured (create_all).")
 
+        # --- ensure new columns in SQLite (no Alembic needed) ---
+        def _ensure_column(table: str, column: str, ddl_type: str):
+            try:
+                rows = db.session.execute(db.text(f"PRAGMA table_info({table})")).fetchall()
+                names = {r[1] for r in rows}  # name is at index 1
+                if column not in names:
+                    logging.info(f"Adding column {column} to {table} ...")
+                    db.session.execute(db.text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+                    db.session.commit()
+                    logging.info(f"Added column {column} to {table}.")
+            except Exception as e:
+                logging.exception(f"Failed to ensure column {table}.{column}: {e}")
+
+        # наш новый столбец для группировки позиций по Appliance
+        _ensure_column("work_order_parts", "unit_label", "TEXT")
+
     port = int(os.environ.get("PORT", 5000))
 
     # NEW: управляем debug/ssl через env без правки кода
@@ -119,6 +152,7 @@ if __name__ == "__main__":
     else:
         logging.info(f"Starting dev server on http://0.0.0.0:{port}, debug={debug}")
         app.run(host='0.0.0.0', port=port, debug=debug)
+
 
 
 

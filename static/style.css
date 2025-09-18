@@ -259,6 +259,148 @@ main, .container, .container-fluid {
   }
 }
 
+/* === Fix for numeric columns alignment === */
+.num-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding: .35rem .45rem !important;   /* same padding for all */
+  vertical-align: middle;
+}
+
+.num-cell input,
+.num-cell .form-control {
+  width: 100% !important;
+  min-width: 0;
+  text-align: right;
+  padding-right: .45rem;
+  margin: 0;
+  box-sizing: border-box;
+  font-variant-numeric: tabular-nums;
+  height: 1.9rem;                      /* uniform height */
+}
+
+.num-cell span {
+  display: block;
+  width: 100%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Issued Parts Report (Grouped by Invoice) - scoped styles ===== */
+.reports-grouped .report-table-wrap .table {
+  font-size: 0.875rem;              /* unified, compact text */
+}
+
+.reports-grouped .report-table-wrap .table td,
+.reports-grouped .report-table-wrap .table th {
+  vertical-align: middle;           /* center controls vertically */
+  padding: .40rem .50rem;           /* compact but readable */
+  line-height: 1.35;                /* stable row height */
+  white-space: nowrap;              /* avoid wrapping noise */
+}
+
+/* Unify inputs/selects height & typography inside table */
+.reports-grouped .report-table-wrap .table input,
+.reports-grouped .report-table-wrap .table select {
+  font-size: 0.875rem !important;
+  line-height: 1.35 !important;
+  height: 1.8rem !important;        /* consistent height */
+  padding: .25rem .45rem !important;
+  box-sizing: border-box;
+}
+
+/* Fixed column widths so headers & rows align perfectly */
+.reports-grouped .col-check   { width: 32px;  }
+.reports-grouped .col-pn      { width: 140px; white-space: nowrap; }
+.reports-grouped .col-name    { min-width: 220px; max-width: 420px; }
+.reports-grouped .col-qty     { width: 90px;  }
+.reports-grouped .col-rqty    { width: 120px; }
+.reports-grouped .col-cost    { width: 110px; }
+.reports-grouped .col-total   { width: 120px; }
+.reports-grouped .col-issued  { width: 160px; }
+.reports-grouped .col-refjob  { width: 160px; }
+.reports-grouped .col-date    { width: 140px; }
+.reports-grouped .col-actions { width: 100px; }
+
+/* Full-width controls inside the fixed columns */
+.reports-grouped .w-issued { width: 100%; max-width: 150px; }
+.reports-grouped .w-refjob { width: 100%; max-width: 150px; }
+.reports-grouped .w-date   { width: 100%; max-width: 130px; }
+
+/* Right-align numeric inputs and keep their width tight */
+.reports-grouped .report-table-wrap .table .text-end input[type="number"],
+.reports-grouped .report-table-wrap .table .text-end input[type="text"] {
+  text-align: right;
+  max-width: 90px;                  /* e.g., Unit Cost */
+}
+
+/* Fake read-only “inputs” to match inputs’ height when not editable */
+.reports-grouped .ro-input {
+  display: inline-block;
+  width: 100%;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  height: 1.8rem;                   /* match input height */
+  padding: .25rem .45rem;
+  box-sizing: border-box;
+}
+
+/* sticky table header */
+.reports-grouped .table-sticky thead th{
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: #f8f9fa; /* plain fallback */
+}
+
+/* Truncate long part names gracefully */
+.reports-grouped .text-ellipsis {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;
+}
+/* --- Hard-normalize row internals so left text aligns with right inputs --- */
+
+/* Make all controls and their read-only twins the same block box */
+.reports-grouped .report-table-wrap .table .form-control,
+.reports-grouped .report-table-wrap .table .form-select {
+  height: 1.8rem !important;
+  line-height: 1.35 !important;
+  padding: .25rem .45rem !important;
+  box-sizing: border-box;
+  margin: 0;                  /* no weird baseline offsets */
+}
+
+/* Read-only twin that visually matches inputs */
+.reports-grouped .ro-input {
+  display: flex;              /* vertically center inner text like inputs do */
+  align-items: center;
+  height: 1.8rem;             /* equal to inputs */
+  line-height: 1.35;
+  padding: .25rem .45rem;
+  box-sizing: border-box;
+  border: 1px solid transparent;   /* keeps exact box metrics vs inputs */
+}
+
+/* Code blocks and long names shouldn’t change the row height */
+.reports-grouped code {
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+.reports-grouped .text-ellipsis {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Guarantee middle alignment in cells */
+.reports-grouped .report-table-wrap .table td,
+.reports-grouped .report-table-wrap .table th {
+  vertical-align: middle;
+  padding: .40rem .50rem;
+  line-height: 1.35;
+}
+
+
 
 
 

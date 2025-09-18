@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>{{ 'Edit' if wo else 'New' }} Work Order (multi-appliance)</h3>
+
+<form method="post" action="{{ url_for('inventory.wo_savex') }}" id="woForm">
+  {% if wo %}
+    <input type="hidden" name="wo_id" value="{{ wo.id }}">
+  {% endif %}
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-3">
+      <label class="form-label">Technician</label>
+      <input name="technician_name" class="form-control" required
+             value="{{ wo.technician_name if wo else '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Job number(s) (comma separated)</label>
+      <input name="job_numbers" class="form-control" placeholder="98356, 98256"
+             value="{{ wo.job_numbers if wo else '' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Job type</label>
+      {% set jt = (wo.job_type if wo else 'BASE') %}
+      <select name="job_type" class="form-select">
+        <option value="BASE" {{ 'selected' if jt=='BASE' else '' }}>BASE</option>
+        <option value="INSURANCE" {{ 'selected' if jt=='INSURANCE' else '' }}>INSURANCE</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Delivery fee ($)</label>
+      <input type="number" step="0.01" name="delivery_fee" class="form-control"
+             value="{{ '%.2f'|format(wo.delivery_fee) if wo and wo.delivery_fee is not none else '0.00' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Markup (%)</label>
+      <input type="number" step="0.01" name="markup_percent" class="form-control"
+             value="{{ '%.2f'|format(wo.markup_percent) if wo and wo.markup_percent is not none else '0.00' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Status</label>
+      {% set st = (wo.status if wo else 'search_ordered') %}
+      <select name="status" class="form-select">
+        <option value="search_ordered" {{ 'selected' if st=='search_ordered' else '' }}>search_ordered</option>
+        <option value="ordered" {{ 'selected' if st=='ordered' else '' }}>ordered</option>
+        <option value="done" {{ 'selected' if st=='done' else '' }}>done</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="unitsWrap" class="d-flex flex-column gap-4">
+    {% for ui, u in enumerate(units) %}
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <strong>Appliance #{{ ui+1 }}</strong>
+        <button type="button" class="btn btn-sm btn-outline-danger del-unit">&times;</button>
+      </div>
+      <div class="card-body">
+        <div class="row g-3 mb-3">
+          <div class="col-md-4">
+            <label class="form-label">Brand</label>
+            <input name="units[{{ ui }}][brand]" class="form-control" value="{{ u.brand or '' }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Model # (≤25)</label>
+            <input name="units[{{ ui }}][model]" class="form-control" maxlength="25" value="{{ u.model or '' }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Serial # (≤25)</label>
+            <input name="units[{{ ui }}][serial]" class="form-control" maxlength="25" value="{{ u.serial or '' }}">
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered align-middle unit-table">
+            <thead>
+              <tr>
+                <th style="width:140px;">Part #</th>
+                <th style="width:220px;">Part name</th>
+                <th style="width:90px;">Qty</th>
+                <th style="width:220px;">Alt PN(s)</th>
+                <th style="width:180px;">Supplier</th>
+                <th style="width:120px;">Backorder</th>
+                <th style="width:160px;">Line status</th>
+                <th style="width:140px;">Stock hint</th>
+                <th style="width:60px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for ri, r in enumerate(u.rows) %}
+              <tr>
+                <td><input class="form-control pn" name="units[{{ ui }}][rows][{{ ri }}][part_number]" value="{{ r.part_number or '' }}"></td>
+                <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][part_name]" value="{{ r.part_name or '' }}" maxlength="80"></td>
+                <td><input class="form-control qty" name="units[{{ ui }}][rows][{{ ri }}][quantity]" type="number" min="0" value="{{ r.quantity or 1 }}"></td>
+                <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][alt_numbers]" value="{{ r.alt_numbers or '' }}" maxlength="200" placeholder="comma separated"></td>
+                <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][supplier]" value="{{ r.supplier or '' }}" maxlength="80"></td>
+                <td class="text-center"><input class="form-check-input" type="checkbox" name="units[{{ ui }}][rows][{{ ri }}][backorder_flag]" {% if r.backorder_flag %}checked{% endif %}></td>
+                <td>
+                  {% set ls = r.line_status or 'search_ordered' %}
+                  <select class="form-select" name="units[{{ ui }}][rows][{{ ri }}][line_status]">
+                    <option value="search_ordered" {{ 'selected' if ls=='search_ordered' else '' }}>search_ordered</option>
+                    <option value="ordered" {{ 'selected' if ls=='ordered' else '' }}>ordered</option>
+                    <option value="done" {{ 'selected' if ls=='done' else '' }}>done</option>
+                  </select>
+                </td>
+                <td class="hint">—</td>
+                <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <button type="button" class="btn btn-outline-secondary add-row">+ Add part row</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="my-3">
+    <button type="button" class="btn btn-outline-primary" id="addUnit">+ Add appliance</button>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">Save</button>
+    {% if wo %}
+      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">Back</a>
+    {% else %}
+      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Cancel</a>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  const unitsWrap = document.getElementById('unitsWrap');
+  const addUnitBtn = document.getElementById('addUnit');
+
+  function nextUnitIndex() {
+    return unitsWrap.querySelectorAll('.card').length;
+  }
+  function nextRowIndex(unitCard) {
+    return unitCard.querySelector('tbody').children.length;
+  }
+
+  function unitTemplate(ui){
+    return `
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <strong>Appliance #${ui+1}</strong>
+    <button type="button" class="btn btn-sm btn-outline-danger del-unit">&times;</button>
+  </div>
+  <div class="card-body">
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <label class="form-label">Brand</label>
+        <input name="units[${ui}][brand]" class="form-control">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Model # (≤25)</label>
+        <input name="units[${ui}][model]" class="form-control" maxlength="25">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Serial # (≤25)</label>
+        <input name="units[${ui}][serial]" class="form-control" maxlength="25">
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered align-middle unit-table">
+        <thead>
+          <tr>
+            <th style="width:140px;">Part #</th>
+            <th style="width:220px;">Part name</th>
+            <th style="width:90px;">Qty</th>
+            <th style="width:220px;">Alt PN(s)</th>
+            <th style="width:180px;">Supplier</th>
+            <th style="width:120px;">Backorder</th>
+            <th style="width:160px;">Line status</th>
+            <th style="width:140px;">Stock hint</th>
+            <th style="width:60px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowTemplate(ui, 0)}
+        </tbody>
+      </table>
+    </div>
+
+    <button type="button" class="btn btn-outline-secondary add-row">+ Add part row</button>
+  </div>
+</div>`;
+  }
+
+  function rowTemplate(ui, ri){
+    return `
+<tr>
+  <td><input class="form-control pn" name="units[${ui}][rows][${ri}][part_number]"></td>
+  <td><input class="form-control" name="units[${ui}][rows][${ri}][part_name]" maxlength="80"></td>
+  <td><input class="form-control qty" name="units[${ui}][rows][${ri}][quantity]" type="number" min="0" value="1"></td>
+  <td><input class="form-control" name="units[${ui}][rows][${ri}][alt_numbers]" maxlength="200" placeholder="comma separated"></td>
+  <td><input class="form-control" name="units[${ui}][rows][${ri}][supplier]" maxlength="80"></td>
+  <td class="text-center"><input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]"></td>
+  <td>
+    <select class="form-select" name="units[${ui}][rows][${ri}][line_status]">
+      <option value="search_ordered" selected>search_ordered</option>
+      <option value="ordered">ordered</option>
+      <option value="done">done</option>
+    </select>
+  </td>
+  <td class="hint">—</td>
+  <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
+</tr>`;
+  }
+
+  function fetchHint(tr){
+    const pn = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
+    const qty = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
+    const hintCell = tr.querySelector('.hint');
+    if (!pn || qty <= 0) { hintCell.textContent = '—'; return; }
+    fetch(`/api/stock_hint?pn=${encodeURIComponent(pn)}&qty=${qty}`)
+      .then(r => r.json()).then(j => {
+        hintCell.textContent = j.hint || '—';
+        hintCell.classList.remove('text-success','text-warning');
+        if (j.hint && j.hint.startsWith('STOCK')) hintCell.classList.add('text-success');
+        else hintCell.classList.add('text-warning');
+      }).catch(()=>{ hintCell.textContent = '—';});
+  }
+
+  addUnitBtn?.addEventListener('click', () => {
+    const ui = nextUnitIndex();
+    unitsWrap.insertAdjacentHTML('beforeend', unitTemplate(ui));
+  });
+
+  unitsWrap.addEventListener('click', (e) => {
+    const card = e.target.closest('.card');
+    if (!card) return;
+
+    // удалить unit
+    if (e.target.classList.contains('del-unit')) {
+      card.remove();
+      return;
+    }
+
+    // добавить строку в unit
+    if (e.target.classList.contains('add-row')) {
+      const tbody = card.querySelector('tbody');
+      const ui = Array.from(unitsWrap.children).indexOf(card);
+      const ri = nextRowIndex(card);
+      tbody.insertAdjacentHTML('beforeend', rowTemplate(ui, ri));
+      return;
+    }
+
+    // удалить строку
+    if (e.target.classList.contains('del-row')) {
+      const tr = e.target.closest('tr');
+      tr?.remove();
+      return;
+    }
+  });
+
+  // авто-подсказки
+  unitsWrap.addEventListener('input', (e) => {
+    const tr = e.target.closest('tr');
+    if (!tr) return;
+    if (e.target.classList.contains('pn') || e.target.classList.contains('qty')) {
+      fetchHint(tr);
+    }
+  });
+
+  // инициализация подсказок для уже отрендеренных строк
+  unitsWrap.querySelectorAll('tbody tr').forEach(fetchHint);
+})();
+</script>
+{% endblock %}
