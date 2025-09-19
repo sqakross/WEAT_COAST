@@ -919,8 +919,14 @@ def wo_new():
     if getattr(current_user, "role", "") not in ("admin", "superadmin"):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
-    # форма с пустыми значениями и одной строкой parts
-    return render_template("wo_form.html", wo=None, parts=[{}])
+    # сразу используем форму с юнитами (как в wo_newx)
+    units = [{
+        "brand": "", "model": "", "serial": "",
+        "rows": [{"part_number": "", "part_name": "", "quantity": 1,
+                  "alt_numbers": "", "supplier": "", "backorder_flag": False, "line_status": "search_ordered"}]
+    }]
+    return render_template("wo_form_units.html", wo=None, units=units)
+
 
 @inventory_bp.post("/work_orders/save")
 @login_required
@@ -1165,11 +1171,12 @@ def wo_detail(wo_id):
         batches = batches or []
 
     # ---- Рендер с безопасными значениями ----
-    return render_template(
-        "work_orders/detail.html",   # <- если у тебя другой путь, поменяй здесь
-        wo=wo, parts=parts, avail=avail,
-        suppliers=suppliers, batches=batches
-    )
+    return render_template("wo_detail.html",
+                           wo=wo,
+                           avail=avail,
+                           batches=batches,
+                           suppliers=suppliers,
+                           )
 
 @inventory_bp.post("/work_orders/<int:wo_id>/refresh-stock")
 @login_required
@@ -1233,7 +1240,7 @@ def wo_newx():
     return render_template("wo_form_units.html", wo=None, units=units)
 
 
-@inventory_bp.get("/work_orders/<int:wo_id>/editx")
+@inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
 @login_required
 def wo_editx(wo_id):
     if getattr(current_user, "role", "") not in ("admin", "superadmin"):
@@ -1273,6 +1280,55 @@ def wo_editx(wo_id):
 
     return render_template("wo_form_units.html", wo=wo, units=units)
 
+from flask import current_app, flash, redirect, url_for
+from flask_login import login_required, current_user
+from sqlalchemy import text
+
+@inventory_bp.post("/work_orders/<int:wo_id>/delete", endpoint="wo_delete")
+@login_required
+def wo_delete(wo_id: int):
+    if getattr(current_user, "role", "") != "superadmin":
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    def table_exists(name: str) -> bool:
+        try:
+            row = db.session.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name=:n"),
+                {"n": name}
+            ).fetchone()
+            return bool(row)
+        except Exception:
+            return False
+
+    try:
+        # 1) Пробуем через модели (если у тебя они есть)
+        try:
+            from models import WorkOrder  # подстрой, если модуль другой
+            wo = WorkOrder.query.get_or_404(wo_id)
+            db.session.delete(wo)
+            db.session.commit()
+        except Exception as model_err:
+            current_app.logger.warning("Model delete failed, fallback to SQL: %s", model_err)
+
+            # 2) Фоллбэк на SQL — удаляем дочерние записи, но только если таблицы существуют
+            for t in ("issued_part_records", "work_order_parts", "issued_batches", "job_index"):
+                if table_exists(t):
+                    db.session.execute(text(f"DELETE FROM {t} WHERE work_order_id=:id"), {"id": wo_id})
+
+            if table_exists("work_orders"):
+                db.session.execute(text("DELETE FROM work_orders WHERE id=:id"), {"id": wo_id})
+
+            db.session.commit()
+
+        flash(f"Work Order #{wo_id} deleted.", "success")
+        return redirect(url_for("inventory.wo_list"))
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Failed to delete work order %s", wo_id)
+        flash("Failed to delete work order.", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
 def _parse_units_form(form):
     """

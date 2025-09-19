@@ -7,6 +7,15 @@
     {% if current_user.role in ['admin','superadmin'] %}
       <a class="btn btn-outline-primary" href="{{ url_for('inventory.wo_edit', wo_id=wo.id) }}">✏️ Edit</a>
     {% endif %}
+    {% if current_user.role == 'superadmin' %}
+      <form method="post"
+            action="{{ url_for('inventory.wo_delete', wo_id=wo.id) }}"
+            class="d-inline"
+            onsubmit="return confirm('Delete Work Order #{{ wo.id }}? This cannot be undone.');">
+        {# {{ csrf_token() }} если используешь Flask-WTF #}
+        <button class="btn btn-outline-danger">🗑️ Delete</button>
+      </form>
+    {% endif %}
   </div>
 </div>
 
@@ -20,7 +29,7 @@
     <div class="text-muted small">primary: <code>{{ wo.canonical_job }}</code></div>
   </div>
 
-  <div class="col-md-3"><strong>Brand/Model:</strong> {{ wo.brand }} {{ wo.model }}</div>
+  <div class="col-md-3"><strong>Brand/Model:</strong> {{ (wo.brand or '') ~ ' ' ~ (wo.model or '') }}</div>
   <div class="col-md-2"><strong>Serial:</strong> {{ wo.serial }}</div>
 
   <div class="col-md-3">
@@ -53,21 +62,18 @@
   </div>
 </div>
 
-{# ======== ПАНЕЛЬ ДЕЙСТВИЙ + ПОИСК (НОВОЕ) ======== #}
+{# ======== ПАНЕЛЬ ДЕЙСТВИЙ + ПОИСК ======== #}
 {% set _suppliers = suppliers if suppliers is defined and suppliers else [] %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div class="d-flex gap-2">
-    <!-- Issue All: открываем твою существующую модалку превью -->
     <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#issuePreviewModal">
       Issue All (in-stock)
     </button>
-    <!-- Refresh Stock: POST; если у тебя ещё нет роута, добавь inventory.wo_refresh_stock -->
     <form method="post" action="{{ url_for('inventory.wo_refresh_stock', wo_id=wo.id) }}" class="d-inline">
       <button class="btn btn-outline-secondary">Refresh Stock</button>
     </form>
   </div>
 
-  <!-- Поиск (GET на эту же страницу). Поддержка префиксов: wo:/pn:/model:/brand:/serial: -->
   <form method="get" action="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}" class="d-flex gap-2">
     <input name="q" value="{{ request.args.get('q','') }}" class="form-control" style="width:320px"
            placeholder="Search: wo:/pn:/model:/brand:/serial: or text">
@@ -86,7 +92,6 @@
     <button class="btn btn-primary">Search</button>
   </form>
 </div>
-{# ======== /ПАНЕЛЬ ДЕЙСТВИЙ + ПОИСК ======== #}
 
 {% if wo.parts and avail %}
 <div class="table-responsive">
@@ -138,7 +143,7 @@
 <p class="text-muted">No parts listed for this work order.</p>
 {% endif %}
 
-{# ======== ISSUED BATCHES (НОВОЕ) ======== #}
+{# ======== ISSUED BATCHES ======== #}
 {% set _batches = batches if batches is defined and batches else [] %}
 <h5 class="mt-4">Issued Batches (Technician View)</h5>
 <div class="table-responsive">
@@ -159,7 +164,14 @@
         <td>{{ b.issued_at }}</td>
         <td>{{ b.technician }}</td>
         <td>{{ b.canonical_ref }}</td>
-        <td>{{ b.items }}</td>
+        {# показываем количество элементов, если это список/словарь; иначе — значение #}
+        <td>
+          {% if b.items is iterable and b.items is not string %}
+            {{ b.items|length }}
+          {% else %}
+            {{ b.get('items', '-') if b.get is defined else (b.items or '-') }}
+          {% endif %}
+        </td>
         <td>
           <a class="btn btn-sm btn-outline-secondary" href="/reports/{{ b.report_id }}" target="_blank">Open Report</a>
         </td>
@@ -173,10 +185,8 @@
     </tbody>
   </table>
 </div>
-{# ======== /ISSUED BATCHES ======== #}
 
 {% if current_user.role in ['admin','superadmin'] %}
-<!-- скрытая форма (будет сабмититься из модалки) -->
 <form id="issueForm" method="post" action="{{ url_for('inventory.wo_issue_instock', wo_id=wo.id) }}"></form>
 
 <div class="d-flex flex-wrap gap-2 mt-3">
@@ -199,7 +209,6 @@
   </form>
 </div>
 
-<!-- Модалка-превью выдачи -->
 <div class="modal fade" id="issuePreviewModal" tabindex="-1" aria-labelledby="issuePreviewLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -294,5 +303,4 @@
   })();
 </script>
 {% endblock %}
-
 

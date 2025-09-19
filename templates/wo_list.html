@@ -9,11 +9,18 @@
 </div>
 {% endif %}
 
-<table class="table table-sm table-hover">
+<div class="table-responsive">
+<table class="table table-sm table-hover align-middle">
   <thead>
     <tr>
-      <th>ID</th><th>Technician</th><th>Jobs</th><th>Brand/Model</th>
-      <th>Type</th><th>Status</th><th>Created</th><th></th>
+      <th>ID</th>
+      <th>Technician</th>
+      <th>Jobs</th>
+      <th>Brand/Model</th>
+      <th>Type</th>
+      <th>Status</th>
+      <th>Created</th>
+      <th class="text-end">Actions</th>
     </tr>
   </thead>
   <tbody>
@@ -22,15 +29,29 @@
       <td>{{ w.id }}</td>
       <td>{{ w.technician_name }}</td>
       <td>{{ w.job_numbers }}</td>
-      <td>{{ w.brand }} {{ w.model }}</td>
+      <td>{{ (w.brand or '') ~ ' ' ~ (w.model or '') }}</td>
       <td>{{ w.job_type }}</td>
       <td>{{ w.status }}</td>
-      <td>{{ w.created_at.strftime('%Y-%m-%d') }}</td>
-      <td>
+      <td>{{ w.created_at.strftime('%Y-%m-%d') if w.created_at else '—' }}</td>
+      <td class="text-end">
         <a class="btn btn-sm btn-primary" href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">Open</a>
+        {% if current_user.role in ['admin','superadmin'] %}
+          <a class="btn btn-sm btn-outline-secondary ms-1" href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">Edit</a>
+        {% endif %}
+        {% if current_user.role == 'superadmin' %}
+          <form method="post"
+                action="{{ url_for('inventory.wo_delete', wo_id=w.id) }}"
+                class="d-inline"
+                onsubmit="return confirm('Delete Work Order #{{ w.id }}? This cannot be undone.');">
+            {# {{ csrf_token() }} если используешь Flask-WTF #}
+            <button class="btn btn-sm btn-outline-danger ms-1">Delete</button>
+          </form>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endblock %}
+

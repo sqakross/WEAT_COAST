@@ -48,10 +48,11 @@
   </div>
 
   <div id="unitsWrap" class="d-flex flex-column gap-4">
-    {% for ui, u in enumerate(units) %}
+    {% for u in (units or []) %}
+    {% set ui = loop.index0 %}
     <div class="card">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <strong>Appliance #{{ ui+1 }}</strong>
+        <strong>Appliance #{{ loop.index }}</strong>
         <button type="button" class="btn btn-sm btn-outline-danger del-unit">&times;</button>
       </div>
       <div class="card-body">
@@ -86,7 +87,8 @@
               </tr>
             </thead>
             <tbody>
-              {% for ri, r in enumerate(u.rows) %}
+              {% for r in (u.rows or []) %}
+              {% set ri = loop.index0 %}
               <tr>
                 <td><input class="form-control pn" name="units[{{ ui }}][rows][{{ ri }}][part_number]" value="{{ r.part_number or '' }}"></td>
                 <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][part_name]" value="{{ r.part_name or '' }}" maxlength="80"></td>
@@ -228,6 +230,9 @@
       }).catch(()=>{ hintCell.textContent = '—';});
   }
 
+  const unitsWrap = document.getElementById('unitsWrap');
+  const addUnitBtn = document.getElementById('addUnit');
+
   addUnitBtn?.addEventListener('click', () => {
     const ui = nextUnitIndex();
     unitsWrap.insertAdjacentHTML('beforeend', unitTemplate(ui));
@@ -274,3 +279,4 @@
 })();
 </script>
 {% endblock %}
+
