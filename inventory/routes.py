@@ -70,6 +70,23 @@ _PREFIX_RE = re.compile(r'^\s*(wo|job|pn|model|brand|serial)\s*:\s*(.+)\s*$', re
 _units_re = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
 _rows_re  = re.compile(r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|alt_numbers|supplier|backorder_flag|line_status|unit_cost)\]$")
 
+def _parse_dt_flex(s: str):
+    """Безопасный парсер даты/даты-времени: поддерживает 'YYYY-MM-DD', 'YYYY-MM-DD HH:MM:SS', '...%f'.
+       Возвращает datetime | None (если пусто/не разобрали)."""
+    if not s:
+        return None
+    s = str(s).strip()
+    for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+        try:
+            dt = datetime.strptime(s, fmt)
+            # Если пришёл только день — добавим полночь, чтобы .date() работала как раньше
+            if fmt == '%Y-%m-%d':
+                return datetime.combine(dt.date(), time.min)
+            return dt
+        except Exception:
+            continue
+    return None
+
 def _parse_units_form(form):
     """
     Превращает плоский request.form во вложенную структуру:
@@ -2177,26 +2194,36 @@ def reports():
 @inventory_bp.route('/reports_grouped', methods=['GET', 'POST'])
 @login_required
 def reports_grouped():
+    from collections import defaultdict
+    from datetime import datetime, time
+
+    def _parse_date_ymd(s: str):
+        """Парсит YYYY-MM-DD → datetime c началом/концом дня по флагу."""
+        if not s:
+            return None
+        try:
+            return datetime.strptime(s, "%Y-%m-%d")
+        except Exception:
+            return None
+
     query = IssuedPartRecord.query.join(Part)
 
-    # ← читаем и из GET (?start_date=...) и из POST-форм
+    # читаем и из GET (?start_date=...) и из POST
     params = request.values
-    start_date = params.get('start_date')
-    end_date = params.get('end_date')
-    recipient = params.get('recipient')
-    reference_job = params.get('reference_job')
+    start_date = (params.get('start_date') or '').strip() or None
+    end_date = (params.get('end_date') or '').strip() or None
+    recipient = (params.get('recipient') or '').strip() or None
+    reference_job = (params.get('reference_job') or '').strip() or None
 
-    # ← ВАЖНО: приводим строки дат к datetime, чтобы сравнивать корректно
-    if start_date:
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+    # фильтры по датам (без падений при пустых/битых значениях)
+    start_dt_raw = _parse_date_ymd(start_date)
+    if start_dt_raw:
+        start_dt = datetime.combine(start_dt_raw.date(), time.min)
         query = query.filter(IssuedPartRecord.issue_date >= start_dt)
 
-    if end_date:
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(
-            hour=23, minute=59, second=59, microsecond=999999
-        )
+    end_dt_raw = _parse_date_ymd(end_date)
+    if end_dt_raw:
+        end_dt = datetime.combine(end_dt_raw.date(), time.max)
         query = query.filter(IssuedPartRecord.issue_date <= end_dt)
 
     if recipient:
@@ -2204,27 +2231,42 @@ def reports_grouped():
     if reference_job:
         query = query.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
 
-    records = query.order_by(IssuedPartRecord.issue_date.desc()).all()
+    # порядок строк не важен: далее всё равно отсортируем группы стабильно
+    records = query.all()
 
-    # Группировка — как у тебя было
+    # группировка: (issued_to, reference_job, issued_by, issue_day)
     grouped = defaultdict(list)
     for r in records:
         key = (r.issued_to, r.reference_job, r.issued_by, r.issue_date.date())
         grouped[key].append(r)
 
+    # собираем карточки + считаем тоталы
     invoices = []
-    grand_total = 0
-    for key, items in grouped.items():
-        total_value = sum(item.quantity * item.unit_cost_at_issue for item in items)
+    grand_total = 0.0
+    for (issued_to, ref_job, issued_by, issue_day), items in grouped.items():
+        total_value = sum((item.quantity or 0) * (item.unit_cost_at_issue or 0) for item in items)
         grand_total += total_value
+
+        # === СТАБИЛЬНЫЕ КЛЮЧИ СОРТИРОВКИ ДЛЯ КАЖДОЙ КАРТОЧКИ ===
+        # max дата-время из строк группы (если что — fallback к полуночи дня)
+        max_dt = max((it.issue_date for it in items if it.issue_date), default=datetime.combine(issue_day, time.min))
+        # max id строки (на случай равных дат)
+        max_id = max((getattr(it, 'id', 0) for it in items), default=0)
+        # =======================================================
+
         invoices.append({
-            'issued_to': key[0],
-            'reference_job': key[1],
-            'issued_by': key[2],
-            'issue_date': key[3],
+            'issued_to': issued_to,
+            'reference_job': ref_job,
+            'issued_by': issued_by,
+            'issue_date': issue_day,     # date — в шаблоне .strftime('%Y-%m-%d') ок
             'items': items,
-            'total_value': total_value
+            'total_value': total_value,
+            '_sort_dt': max_dt,
+            '_sort_id': max_id,
         })
+
+    # СТАБИЛЬНАЯ СОРТИРОВКА КАРТОЧЕК: по max(issue_date) в группе, потом по max(id)
+    invoices.sort(key=lambda g: (g['_sort_dt'], g['_sort_id']), reverse=True)
 
     return render_template(
         'reports_grouped.html',
@@ -2235,7 +2277,6 @@ def reports_grouped():
         recipient=recipient,
         reference_job=reference_job
     )
-
 
 @inventory_bp.route('/invoice/view')
 @login_required
@@ -2280,52 +2321,48 @@ def view_invoice_pdf():
                      download_name=f"INVOICE_{issued_to}_{issue_date.strftime('%Y%m%d')}.pdf",
                      mimetype="application/pdf")
 
-
-
-# Обновление отдельной позиции
-@inventory_bp.route('/reports/update/<int:record_id>', methods=['POST'])
+@inventory_bp.route('/reports/update_record/<int:record_id>', methods=['POST'])
 @login_required
 def update_report_record(record_id):
     if current_user.role not in ['superadmin', 'admin']:
         flash("Access denied", "danger")
         return redirect(url_for('inventory.reports'))
 
-    record = IssuedPartRecord.query.get_or_404(record_id)
+    r = IssuedPartRecord.query.get_or_404(record_id)
 
-    issued_to = request.form.get('issued_to', '').strip()
-    reference_job = request.form.get('reference_job', '').strip()
-    unit_cost_str = request.form.get('unit_cost', '').strip()
-    issue_date_str = request.form.get('issue_date', '').strip()
+    # обновляем разрешённые поля
+    if 'issued_to' in request.form:
+        v = (request.form.get('issued_to') or '').strip()
+        if v: r.issued_to = v
 
-    if not issued_to:
-        flash("Issued To field cannot be empty.", "danger")
-        return redirect(url_for('inventory.reports'))
+    if 'reference_job' in request.form:
+        v = (request.form.get('reference_job') or '').strip() or None
+        r.reference_job = v
 
-    try:
-        unit_cost = float(unit_cost_str)
-        if unit_cost < 0:
-            raise ValueError()
-    except ValueError:
-        flash("Invalid Unit Cost value.", "danger")
-        return redirect(url_for('inventory.reports'))
-
-    # Сохраняем дату только для superadmin
-    if issue_date_str and current_user.role == 'superadmin':
+    if 'unit_cost' in request.form:
+        raw = (request.form.get('unit_cost') or '').strip()
         try:
-            new_issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d')
-            record.issue_date = new_issue_date
-        except ValueError:
-            flash("Invalid Issue Date format.", "danger")
-            return redirect(url_for('inventory.reports'))
+            r.unit_cost_at_issue = float(raw)
+        except Exception:
+            pass
 
-    record.issued_to = issued_to
-    record.reference_job = reference_job if reference_job else None
-    record.unit_cost_at_issue = unit_cost
+    if current_user.role == 'superadmin' and 'issue_date' in request.form:
+        s = (request.form.get('issue_date') or '').strip()
+        if s:
+            try:
+                # сохраняем ТУ ЖЕ дату с полночью, время не трогаем, чтобы не прыгал порядок
+                from datetime import datetime
+                d = datetime.strptime(s, '%Y-%m-%d').date()
+                r.issue_date = datetime.combine(d, r.issue_date.time())
+            except Exception:
+                pass
 
     db.session.commit()
-    flash("Issued record updated successfully.", "success")
-    return redirect(url_for('inventory.reports'))
 
+    # КЛЮЧЕВОЕ: после изменения Reference Job/Issued To
+    # нужно перерисовать страницы, чтобы кнопки карточки получили НОВЫЕ record_ids[]
+    flash("Line saved.", "success")
+    return redirect(url_for('inventory.reports'))
 
 # Отмена отдельной позиции
 @inventory_bp.route('/reports/cancel/<int:record_id>', methods=['POST'])
@@ -2346,8 +2383,6 @@ def cancel_issued_record(record_id):
     flash(f"Issued record #{record.id} canceled and stock restored.", "success")
     return redirect(url_for('inventory.reports'))
 
-
-# Обновление данных накладной (issued_to, reference_job) для всей группы позиций
 @inventory_bp.route('/reports/update_invoice', methods=['POST'])
 @login_required
 def update_invoice():
@@ -2355,116 +2390,108 @@ def update_invoice():
         flash("Access denied", "danger")
         return redirect(url_for('inventory.reports'))
 
-    action = request.form.get('action')
-    issued_to_old = request.args.get('issued_to')
-    reference_job_old = request.args.get('reference_job')
-    issued_by = request.args.get('issued_by')
-    issue_date_str = request.args.get('issue_date')
+    new_issued_to     = (request.form.get('issued_to') or '').strip()
+    new_reference_job = (request.form.get('reference_job') or '').strip() or None
+    if not new_issued_to:
+        flash("Issued To field cannot be empty.", "danger")
+        return redirect(url_for('inventory.reports'))
 
-    # Попытка распарсить дату с разными форматами
-    try:
-        issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S.%f')
-    except ValueError:
+    # 1) приоритет — по id строк
+    ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
+    records = []
+    if ids:
         try:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S')
+            ids = [int(x) for x in ids]
         except ValueError:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d')
+            ids = []
+        if ids:
+            records = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(ids)).all()
 
-    if action == "save":
-        new_issued_to = request.form.get('issued_to', '').strip()
-        new_reference_job = request.form.get('reference_job', '').strip()
+    # 2) фоллбэк — старые ключи (если где-то осталась старая форма)
+    if not records:
+        issued_to_old     = (request.form.get('issued_to_old') or request.args.get('issued_to') or '').strip()
+        reference_job_old = (request.form.get('reference_job_old') or request.args.get('reference_job') or '').strip() or None
+        issued_by         = (request.form.get('issued_by') or request.args.get('issued_by') or '').strip()
+        s                 = (request.form.get('issue_date_old') or request.form.get('issue_date') or request.args.get('issue_date') or '').strip()
+        issue_date = _parse_dt_flex(s)
 
-        if not new_issued_to:
-            flash("Issued To field cannot be empty.", "danger")
+        if not (issued_to_old and issued_by and issue_date):
+            flash("Invoice identifiers are missing (issued_to / issued_by / issue_date).", "danger")
             return redirect(url_for('inventory.reports'))
 
+        start = datetime.combine(issue_date.date(), time.min)
+        end   = datetime.combine(issue_date.date(), time.max)
         records = IssuedPartRecord.query.filter(
             IssuedPartRecord.issued_to == issued_to_old,
             IssuedPartRecord.reference_job == reference_job_old,
             IssuedPartRecord.issued_by == issued_by,
-            IssuedPartRecord.issue_date.between(
-                datetime.combine(issue_date.date(), datetime.min.time()),
-                datetime.combine(issue_date.date(), datetime.max.time())
-            )
+            IssuedPartRecord.issue_date.between(start, end)
         ).all()
 
-        for r in records:
-            r.issued_to = new_issued_to
-            r.reference_job = new_reference_job if new_reference_job else None
-
-        db.session.commit()
-        flash("Invoice updated successfully.", "success")
+    if not records:
+        flash("Invoice not found.", "warning")
         return redirect(url_for('inventory.reports'))
 
-    elif action == "cancel":
-        records = IssuedPartRecord.query.filter(
-            IssuedPartRecord.issued_to == issued_to_old,
-            IssuedPartRecord.reference_job == reference_job_old,
-            IssuedPartRecord.issued_by == issued_by,
-            IssuedPartRecord.issue_date.between(
-                datetime.combine(issue_date.date(), datetime.min.time()),
-                datetime.combine(issue_date.date(), datetime.max.time())
-            )
-        ).all()
+    for r in records:
+        r.issued_to = new_issued_to
+        r.reference_job = new_reference_job
+        # ВАЖНО: r.issue_date не трогаем!
+    db.session.commit()
 
-        for r in records:
-            part = Part.query.get(r.part_id)
-            if part:
-                part.quantity += r.quantity
-            db.session.delete(r)
-
-        db.session.commit()
-        flash("Invoice canceled and stock restored.", "success")
-        return redirect(url_for('inventory.reports'))
-
-    else:
-        flash("Invalid action.", "danger")
-        return redirect(url_for('inventory.reports'))
-
+    flash("Invoice saved.", "success")
+    return redirect(url_for('inventory.reports'))
 
 # Отмена всей накладной (группы записей)
 @inventory_bp.route('/reports/cancel_invoice', methods=['POST'])
 @login_required
 def cancel_invoice():
-    ALLOWED_CANCEL_ROLES = ('superadmin',)  # потом будет ('superadmin', 'admin')
-    if current_user.role not in ALLOWED_CANCEL_ROLES:
-        flash("Access denied (superadmin only).", "danger")
+    if current_user.role not in ['superadmin', 'admin']:
+        flash("Access denied", "danger")
         return redirect(url_for('inventory.reports'))
 
-    issued_to = request.form.get('issued_to')
-    reference_job = request.form.get('reference_job')
-    issued_by = request.form.get('issued_by')
-    issue_date_str = request.form.get('issue_date')
-
-    try:
-        issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S.%f')
-    except ValueError:
+    ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
+    records = []
+    if ids:
         try:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S')
+            ids = [int(x) for x in ids]
         except ValueError:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d')
+            ids = []
+        if ids:
+            records = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(ids)).all()
 
-    records = IssuedPartRecord.query.filter(
-        IssuedPartRecord.issued_to == issued_to,
-        IssuedPartRecord.reference_job == reference_job,
-        IssuedPartRecord.issued_by == issued_by,
-        IssuedPartRecord.issue_date.between(
-            datetime.combine(issue_date.date(), datetime.min.time()),
-            datetime.combine(issue_date.date(), datetime.max.time())
-        )
-    ).all()
+    if not records:
+        issued_to  = (request.form.get('issued_to') or request.args.get('issued_to') or '').strip()
+        reference  = (request.form.get('reference_job') or request.args.get('reference_job') or '').strip() or None
+        issued_by  = (request.form.get('issued_by') or request.args.get('issued_by') or '').strip()
+        s          = (request.form.get('issue_date') or request.args.get('issue_date') or '').strip()
+        issue_date = _parse_dt_flex(s)
+
+        if not (issued_to and issued_by and issue_date):
+            flash("Invoice identifiers are missing.", "danger")
+            return redirect(url_for('inventory.reports'))
+
+        start = datetime.combine(issue_date.date(), time.min)
+        end   = datetime.combine(issue_date.date(), time.max)
+        records = IssuedPartRecord.query.filter(
+            IssuedPartRecord.issued_to == issued_to,
+            IssuedPartRecord.reference_job == reference,
+            IssuedPartRecord.issued_by == issued_by,
+            IssuedPartRecord.issue_date.between(start, end)
+        ).all()
+
+    if not records:
+        flash("Invoice not found.", "warning")
+        return redirect(url_for('inventory.reports'))
 
     for r in records:
         part = Part.query.get(r.part_id)
         if part:
-            part.quantity += r.quantity
+            part.quantity = int(part.quantity or 0) + int(r.quantity or 0)
         db.session.delete(r)
-
     db.session.commit()
+
     flash("Invoice canceled and stock restored.", "success")
     return redirect(url_for('inventory.reports'))
-
-
 
 # ----------------- Download Invoice -----------------
 
@@ -3391,178 +3418,109 @@ def import_settings():
 
     ocr_enabled = bool(get_setting("pdf_ocr_enabled", False))
     return render_template("import_settings.html", ocr_enabled=ocr_enabled)
-
-@inventory_bp.post('/reports/create_return_invoice')
+@inventory_bp.route('/reports/create_return_invoice', methods=['POST'])
 @login_required
 def create_return_invoice():
-    issued_to      = request.form.get('issued_to', '')
-    reference_job  = request.form.get('reference_job') or None
-    issued_by      = request.form.get('issued_by', '')
-    issue_date_str = request.form.get('issue_date', '')
-
-    # 1) разбор даты
-    from datetime import datetime
-    try:
-        issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S.%f')
-    except ValueError:
-        try:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S')
-        except ValueError:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d')
-
-    # 2) исходная группа накладной
-    src_records = _fetch_invoice_group(issued_to, reference_job, issued_by, issue_date)
-    if not src_records:
-        flash("Source invoice not found.", "danger")
+    if current_user.role not in ['superadmin', 'admin']:
+        flash("Access denied", "danger")
         return redirect(url_for('inventory.reports'))
 
-    # защита от возврата-из-возврата
-    if _is_return_group(src_records):
-        flash("This invoice looks like a RETURN already.", "warning")
-        return redirect(url_for('inventory.reports'))
+    # идентификаторы исходной группы (на всякий случай)
+    issued_to_old     = (request.form.get('issued_to_old') or request.form.get('issued_to') or '').strip()
+    reference_job_old = (request.form.get('reference_job_old') or request.form.get('reference_job') or '').strip() or None
+    s                 = (request.form.get('issue_date_old') or request.form.get('issue_date') or '').strip()
+    issued_by         = (request.form.get('issued_by') or '').strip()
+    issue_date_old    = _parse_dt_flex(s)
 
-    # 3) выбранные строки (чекбоксы)
-    raw_ids = request.form.getlist('line_ids')
-    if not raw_ids:
-        flash("Select at least one line to return.", "warning")
-        return redirect(
-            url_for('inventory.reports_grouped') + "?" + urlencode({
-                "start_date": issue_date.date().isoformat(),
-                "end_date":   issue_date.date().isoformat(),
-                "reference_job": reference_job or ""
-            })
-        )
+    # выбранные строки для возврата
+    line_ids = request.form.getlist('line_ids') or request.form.getlist('line_ids[]')
+    if not line_ids:
+        flash("No lines selected.", "warning")
+        return redirect(url_for('inventory.reports'))
 
     try:
-        selected_ids = {int(x) for x in raw_ids}
+        line_ids = [int(x) for x in line_ids]
     except ValueError:
-        flash("Incorrect selection.", "danger")
+        flash("Invalid selection.", "danger")
         return redirect(url_for('inventory.reports'))
 
-    # быстрый доступ по id из исходной группы
-    by_id = {r.id: r for r in src_records if r.id is not None}
-
-    # 4) reference для возвратной накладной
-    ret_ref = f"RETURN #{issue_date.strftime('%Y%m%d')}-{(issued_to or '').strip().upper()}"
+    # под каждую строку возьмём qty_X
+    rows = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(line_ids)).all()
+    if not rows:
+        flash("Selected lines not found.", "warning")
+        return redirect(url_for('inventory.reports'))
 
     created = 0
-    from flask_login import current_user
-    from datetime import datetime as _dt
-
-    for lid in selected_ids:
-        r = by_id.get(lid)
-        if not r:
-            continue  # чужая строка — игнор
-
-        # --- доступный остаток к возврату (универсально) ---
-        issued_qty   = int(r.quantity or 0)
-        returned_qty = int(getattr(r, "qty_returned", 0) or 0)  # если поля нет — будет 0
-        max_return   = max(issued_qty - returned_qty, 0)
-        if max_return <= 0:
-            continue
-
-        # --- желаемое количество с формы ---
-        form_qty = request.form.get(f'qty_{lid}', '0')
+    for r in rows:
+        qty_raw = request.form.get(f"qty_{r.id}")
         try:
-            req_qty = int(form_qty)
-        except ValueError:
-            req_qty = 0
-        if req_qty <= 0:
+            qty = int(qty_raw or 0)
+        except Exception:
+            qty = 0
+        qty = max(0, min(qty, int(r.quantity or 0)))  # нельзя вернуть больше, чем выдали
+        if qty <= 0:
             continue
 
-        return_qty = min(req_qty, max_return)
-
-        # --- создаём возвратную запись с отрицательным количеством ---
-        part = Part.query.get(r.part_id)
-        unit_cost = r.unit_cost_at_issue or (part.unit_cost if part else 0)
-
+        # создаём возвратную запись (отрицательное количество)
         ret = IssuedPartRecord(
             part_id=r.part_id,
-            quantity=-return_qty,                      # выборочное кол-во с минусом
+            quantity=-qty,
             issued_to=r.issued_to,
-            reference_job=ret_ref,
+            reference_job=f"RETURN {r.reference_job or ''}".strip(),
             issued_by=current_user.username,
-            issue_date=_dt.utcnow(),
-            unit_cost_at_issue=unit_cost
+            issue_date=datetime.utcnow(),
+            unit_cost_at_issue=r.unit_cost_at_issue,
         )
-
-        # если у модели есть поле ссылки на исходную строку — заполним
-        if hasattr(ret, "parent_line_id"):
-            setattr(ret, "parent_line_id", r.id)
+        # при возврате на склад добавим кол-во обратно
+        part = Part.query.get(r.part_id)
+        if part:
+            part.quantity = int(part.quantity or 0) + qty
 
         db.session.add(ret)
-
-        # --- вернуть на склад ---
-        if part:
-            part.quantity = (part.quantity or 0) + return_qty
-
-        # --- аккумулируем частичный возврат, если поле существует ---
-        if hasattr(r, "qty_returned"):
-            r.qty_returned = (getattr(r, "qty_returned") or 0) + return_qty
-
         created += 1
 
     if created == 0:
-        db.session.rollback()
-        flash("Nothing to return for selected lines.", "warning")
+        flash("Nothing to return.", "warning")
         return redirect(url_for('inventory.reports'))
 
     db.session.commit()
-    flash(f"Return invoice created: {created} item(s).", "success")
+    flash(f"Return invoice created ({created} lines).", "success")
+    return redirect(url_for('inventory.reports'))
 
-    # 5) показать созданный возврат в отчёте за сегодня
-    params = {
-        "start_date": _dt.utcnow().date().isoformat(),
-        "end_date":   _dt.utcnow().date().isoformat(),
-        "reference_job": ret_ref
-    }
-    return redirect(url_for('inventory.reports_grouped') + "?" + urlencode(params), code=303)
-
-
-@inventory_bp.post('/reports/delete_return_invoice')
+@inventory_bp.route('/reports/delete_return_invoice', methods=['POST'])
 @login_required
 def delete_return_invoice():
     if current_user.role != 'superadmin':
-        flash("Only superadmin can delete return invoices.", "danger")
+        flash("Access denied", "danger")
         return redirect(url_for('inventory.reports'))
 
-    issued_to     = request.form.get('issued_to', '')
-    reference_job = request.form.get('reference_job') or None
-    issued_by     = request.form.get('issued_by', '')
-    issue_date_str= request.form.get('issue_date', '')
-
-    try:
-        issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S.%f')
-    except ValueError:
+    ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
+    records = []
+    if ids:
         try:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S')
+            ids = [int(x) for x in ids]
         except ValueError:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d')
+            ids = []
+        if ids:
+            records = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(ids)).all()
 
-    records = _fetch_invoice_group(issued_to, reference_job, issued_by, issue_date)
     if not records:
-        flash("Return invoice not found.", "danger")
+        flash("Return invoice not found.", "warning")
         return redirect(url_for('inventory.reports'))
 
-    if not _is_return_group(records):
-        flash("Selected invoice is not a RETURN invoice.", "warning")
-        return redirect(url_for('inventory.reports'))
+    # На всякий случай можно убедиться, что это возвратные строки
+    # (если смешанных групп не бывает — можно пропустить)
+    # if not _is_return_group(records):
+    #     flash("Selected records are not a return invoice.", "warning")
+    #     return redirect(url_for('inventory.reports'))
 
-    # 1) Откатываем склад: при возврате мы прибавляли abs(qty) → сейчас уменьшаем на abs(qty)
-    for r in records:
-        part = Part.query.get(r.part_id)
-        if part and (r.quantity or 0) < 0:
-            # уменьшить на abs(qty); защита от отрицательных остатков
-            new_qty = (part.quantity or 0) - abs(r.quantity)
-            part.quantity = max(new_qty, 0)
-
-    # 2) Удаляем сами записи возврата
     for r in records:
         db.session.delete(r)
-
     db.session.commit()
-    flash("Return invoice deleted and stock adjusted.", "success")
+
+    flash("Return invoice deleted.", "success")
     return redirect(url_for('inventory.reports'))
+
 
 
 
