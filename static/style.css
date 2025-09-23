@@ -399,6 +399,56 @@ main, .container, .container-fluid {
   padding: .40rem .50rem;
   line-height: 1.35;
 }
+/* ==== Work Order form (scoped) ==== */
+.wo-form .unit-table { table-layout: auto; }
+
+.wo-form .unit-table input,
+.wo-form .unit-table select {
+  height: 32px;               /* не конфликтует с твоими 1.8rem в отчётах */
+}
+
+/* ширины только для этой формы */
+.wo-form .w-pn   { min-width: 220px; }  /* Part # */
+.wo-form .w-alt  { min-width: 220px; }  /* Alt PN# */
+.wo-form .w-name { min-width: 260px; }  /* Part name */
+.wo-form .w-qty  { width: 90px;  min-width: 80px; }
+.wo-form .w-cost { width: 120px; min-width: 110px; text-align: right; }
+.wo-form .w-ltot { width: 140px; min-width: 130px; }
+
+/* правое выравнивание для чисел (используем уже существующую идею num-cell) */
+.wo-form .num-cell,
+.wo-form .num-cell input,
+.wo-form .num-cell .form-control {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* ===== Work Order form (compact table) ===== */
+.unit-table { table-layout: fixed; font-size: 0.9rem; }
+.unit-table th, .unit-table td { padding: .35rem .45rem; vertical-align: middle; }
+
+.unit-table .form-control,
+.unit-table .form-select {
+  height: 1.85rem; line-height: 1.35; padding: .2rem .4rem; font-size: 0.9rem;
+}
+
+/* Узкие и фиксированные колонки — чтобы убрать горизонтальный скролл */
+.unit-table .col-pn    { width: 120px; }
+.unit-table .col-alt   { width: 160px; }
+.unit-table .col-name  { min-width: 220px; }
+.unit-table .col-qty   { width: 72px;  }
+.unit-table .col-cost  { width: 95px;  }
+.unit-table .col-total { width: 105px; }
+.unit-table .col-supplier { width: 140px; }
+.unit-table .col-bo    { width: 72px;  }
+.unit-table .col-status{ width: 140px; }
+.unit-table .col-hint  { width: 95px;  white-space: nowrap; }
+.unit-table .col-x     { width: 46px;  }
+
+.unit-table .text-end input.form-control { text-align: right; }
+
+/* маленькие бейджи-хинты */
+.hint.text-success, .hint.text-warning { font-weight: 600; font-size: 0.85rem; }
+
 
 
 

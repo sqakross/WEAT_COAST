@@ -67,6 +67,70 @@ DB_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "instan
 
 _PREFIX_RE = re.compile(r'^\s*(wo|job|pn|model|brand|serial)\s*:\s*(.+)\s*$', re.I)
 
+_units_re = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
+_rows_re  = re.compile(r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|alt_numbers|supplier|backorder_flag|line_status|unit_cost)\]$")
+
+def _parse_units_form(form):
+    """
+    Превращает плоский request.form во вложенную структуру:
+    [
+      {
+        "brand": "...", "model": "...", "serial": "...",
+        "rows": [
+          {"part_number": "...", "part_name": "...", "quantity": 1, "unit_cost": 12.34, ...},
+          ...
+        ]
+      },
+      ...
+    ]
+    """
+    units = {}
+
+    # мета-поля юнитов (brand/model/serial)
+    for k in form.keys():
+        m = _units_re.match(k)
+        if not m:
+            continue
+        ui = int(m.group(1))
+        key = m.group(2)
+        units.setdefault(ui, {"brand": "", "model": "", "serial": "", "rows": {}})
+        units[ui][key] = (form.get(k) or "").strip()
+
+    # строки
+    for k in form.keys():
+        m = _rows_re.match(k)
+        if not m:
+            continue
+        ui = int(m.group(1))
+        ri = int(m.group(2))
+        key = m.group(3)
+
+        units.setdefault(ui, {"brand": "", "model": "", "serial": "", "rows": {}})
+        units[ui]["rows"].setdefault(ri, {
+            "part_number": "", "part_name": "", "quantity": 0,
+            "alt_numbers": "", "supplier": "", "backorder_flag": False,
+            "line_status": "search_ordered", "unit_cost": ""
+        })
+
+        val = form.get(k)
+
+        if key == "backorder_flag":
+            units[ui]["rows"][ri][key] = True  # наличие ключа = checked
+        else:
+            units[ui]["rows"][ri][key] = (val or "").strip()
+
+    # привести словарь → упорядоченный список
+    result = []
+    for ui in sorted(units.keys()):
+        u = units[ui]
+        # rows по порядку
+        rows = [u["rows"][ri] for ri in sorted(u["rows"].keys())]
+        u["rows"] = rows
+        result.append(u)
+
+    return result
+
+
 @inventory_bp.get("/debug/db_objects")
 def debug_db_objects():
     import os, sqlite3
@@ -1077,24 +1141,36 @@ def wo_update(wo_id):
     flash("Work order updated.", "success")
     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
-@inventory_bp.get("/api/stock_hint")
+@inventory_bp.get("/api/stock_hint", endpoint="api_stock_hint")
 @login_required
 def api_stock_hint():
-    pn  = (request.args.get("pn") or "").strip().upper()
+    pn = (request.args.get("pn") or "").strip().upper()
     try:
-        qty = int((request.args.get("qty") or "0").strip() or 0)
+        qty = int(request.args.get("qty") or 0)
     except ValueError:
         qty = 0
 
-    on = get_on_hand(pn) if pn else 0
-    if qty > 0 and on >= qty:
-        hint = "STOCK"
-    elif qty > 0:
-        hint = f"WAIT {qty} stock {on}"
-    else:
-        hint = "—"
+    if not pn or qty <= 0:
+        return jsonify({"hint": "—"})
 
-    return jsonify({"on_hand": on, "hint": hint})
+    # NB: подстрой названия полей под свою модель Part
+    part = Part.query.filter(func.upper(Part.part_number) == pn).first()
+
+    if not part:
+        return jsonify({"hint": "WAIT: unknown PN"})
+
+    # Если в модели другое имя — замени на Part.on_hand, Part.qty и т.п.
+    on_hand   = int(getattr(part, "on_hand", 0) or getattr(part, "quantity", 0) or 0)
+    ordered   = int(getattr(part, "ordered_qty", 0) or 0)
+    eta_value = getattr(part, "eta", None)  # datetime/date или None
+
+    if on_hand >= qty:
+        return jsonify({"hint": f"STOCK: {on_hand} avail"})
+    else:
+        need = qty - on_hand
+        extra = f", ordered {ordered}" if ordered else ""
+        eta   = f", ETA {eta_value:%Y-%m-%d}" if getattr(eta_value, "strftime", None) else ""
+        return jsonify({"hint": f"WAIT: need {need}{extra}{eta}"})
 
 @inventory_bp.get("/work_orders")
 @login_required
@@ -1239,50 +1315,60 @@ def wo_newx():
     }]
     return render_template("wo_form_units.html", wo=None, units=units)
 
-
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
 @login_required
 def wo_editx(wo_id):
+    # только admin/superadmin
     if getattr(current_user, "role", "") not in ("admin", "superadmin"):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
+
     wo = WorkOrder.query.get_or_404(wo_id)
+
     units = []
-    for u in wo.units or []:
+    for u in (wo.units or []):
         rows = []
-        for p in u.parts or []:
+        for p in (u.parts or []):
             rows.append({
-                "part_number": p.part_number,
-                "part_name": p.part_name or "",
-                "quantity": p.quantity or 0,
-                "alt_numbers": p.alt_numbers or "",
-                "supplier": p.supplier or "",
+                "part_number":    p.part_number,
+                "part_name":      p.part_name or "",
+                "quantity":       p.quantity or 0,
+                "alt_numbers":    p.alt_numbers or "",
+                "supplier":       p.supplier or "",
                 "backorder_flag": bool(p.backorder_flag),
-                "line_status": p.line_status or "search_ordered",
+                "line_status":    p.line_status or "search_ordered",
+                # ↓↓↓ ВАЖНО: пробрасываем цену в форму
+                "unit_cost":      float((getattr(p, "unit_cost", 0) or 0)),
             })
+
+        # если у юнита нет строк — положим одну пустую с unit_cost=0
         if not rows:
-            rows = [{"part_number": "", "part_name": "", "quantity": 1,
-                     "alt_numbers": "", "supplier": "", "backorder_flag": False, "line_status": "search_ordered"}]
+            rows = [{
+                "part_number": "", "part_name": "", "quantity": 1,
+                "alt_numbers": "", "supplier": "", "backorder_flag": False,
+                "line_status": "search_ordered", "unit_cost": 0.0
+            }]
+
         units.append({
-            "id": u.id,
-            "brand": u.brand or "",
-            "model": u.model or "",
+            "id":     u.id,
+            "brand":  u.brand or "",
+            "model":  u.model or "",
             "serial": u.serial or "",
-            "rows": rows
+            "rows":   rows,
         })
 
+    # если вообще нет юнитов — один пустой юнит с одной строкой (и unit_cost=0)
     if not units:
         units = [{
             "brand": "", "model": "", "serial": "",
-            "rows": [{"part_number": "", "part_name": "", "quantity": 1,
-                      "alt_numbers": "", "supplier": "", "backorder_flag": False, "line_status": "search_ordered"}]
+            "rows": [{
+                "part_number": "", "part_name": "", "quantity": 1,
+                "alt_numbers": "", "supplier": "", "backorder_flag": False,
+                "line_status": "search_ordered", "unit_cost": 0.0
+            }]
         }]
 
     return render_template("wo_form_units.html", wo=wo, units=units)
-
-from flask import current_app, flash, redirect, url_for
-from flask_login import login_required, current_user
-from sqlalchemy import text
 
 @inventory_bp.post("/work_orders/<int:wo_id>/delete", endpoint="wo_delete")
 @login_required
@@ -1372,29 +1458,35 @@ def wo_savex():
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    from models import WorkUnit, WorkUnitPart  # импортируй из своего модуля моделей
+    from models import WorkUnit, WorkUnitPart  # твои модели
 
-    wo_id = (request.form.get("wo_id") or "").strip()
-    # общие поля WO — возьмём как у твоей старой формы
-    tech = (request.form.get("technician_name") or "").strip()
+    # ----- поля шапки формы -----
+    wo_id       = (request.form.get("wo_id") or "").strip()
+    tech        = (request.form.get("technician_name") or "").strip()
     job_numbers = (request.form.get("job_numbers") or "").strip()
-    brand = (request.form.get("brand") or "").strip()
-    model = (request.form.get("model") or "").strip()
-    serial = (request.form.get("serial") or "").strip()
-    job_type = (request.form.get("job_type") or "BASE").strip()
-    status   = (request.form.get("status") or "search_ordered").strip()
-    delivery_fee   = float(request.form.get("delivery_fee") or 0)
-    markup_percent = float(request.form.get("markup_percent") or 0)
+    brand       = (request.form.get("brand") or "").strip()
+    model       = (request.form.get("model") or "").strip()
+    serial      = (request.form.get("serial") or "").strip()
+    job_type    = (request.form.get("job_type") or "BASE").strip()
+    status      = (request.form.get("status") or "search_ordered").strip()
 
-    # если поля brand/model/serial заполнены сверху — создадим для них отдельный unit №0
-    has_header_unit = any([brand, model, serial])
+    def _f(x, default=0.0):
+        try:
+            return float(x)
+        except Exception:
+            return float(default)
 
-    # units с вложенными rows
+    delivery_fee   = _f(request.form.get("delivery_fee"), 0)
+    markup_percent = _f(request.form.get("markup_percent"), 0)
+
+    # ----- вложенные units/rows -----
     units = _parse_units_form(request.form)
-    if has_header_unit:
+
+    # если шапка содержит brand/model/serial — добавляем «нулевой» unit
+    if any([brand, model, serial]):
         units = [{"brand": brand, "model": model, "serial": serial, "rows": []}] + units
 
-    # создать/обновить WO
+    # ----- создать/обновить WorkOrder -----
     if wo_id:
         wo = WorkOrder.query.get_or_404(int(wo_id))
     else:
@@ -1408,35 +1500,63 @@ def wo_savex():
     wo.delivery_fee    = delivery_fee
     wo.markup_percent  = markup_percent
 
-    # очистим старые units и создадим заново (проще и безопаснее)
+    # очищаем старые units (проще и безопаснее)
     for u in (wo.units or []):
         db.session.delete(u)
     db.session.flush()
 
-    # создаём units + parts
+    # ----- создаём units + parts -----
     for u in units:
-        if not (u.get("brand") or u.get("model") or u.get("serial") or u.get("rows")):
-            continue  # пустые секции пропускаем
-        unit = WorkUnit(order=wo,
-                        brand=u.get("brand") or "",
-                        model=u.get("model") or "",
-                        serial=u.get("serial") or "")
+        has_meta = any([(u.get("brand") or "").strip(),
+                        (u.get("model") or "").strip(),
+                        (u.get("serial") or "").strip()])
+        rows = u.get("rows") or []
+
+        if not has_meta and not rows:
+            continue  # полностью пустой блок
+
+        unit = WorkUnit(
+            order=wo,
+            brand=(u.get("brand") or "").strip(),
+            model=(u.get("model") or "").strip(),
+            serial=(u.get("serial") or "").strip(),
+        )
         db.session.add(unit)
         db.session.flush()
 
-        for r in u.get("rows") or []:
-            if not r.get("part_number"):
+        for r in rows:
+            pn = (r.get("part_number") or "").strip().upper()
+            if not pn:
                 continue
+
+            # quantity
+            try:
+                qty = int(r.get("quantity") or 0)
+            except Exception:
+                qty = 0
+
+            # unit_cost (float | None)
+            uc_raw = (r.get("unit_cost") or "").strip()
+            try:
+                unit_cost = float(uc_raw) if uc_raw != "" else None
+            except Exception:
+                unit_cost = None
+
             part = WorkUnitPart(
                 unit=unit,
-                part_number=(r.get("part_number") or "").upper(),
-                part_name=r.get("part_name") or "",
-                quantity=int(r.get("quantity") or 0),
-                alt_numbers=r.get("alt_numbers") or "",
-                supplier=r.get("supplier") or "",
+                part_number=pn,
+                part_name=(r.get("part_name") or "").strip(),
+                quantity=qty,
+                alt_numbers=(r.get("alt_numbers") or "").strip(),
+                supplier=(r.get("supplier") or "").strip(),
                 backorder_flag=bool(r.get("backorder_flag")),
-                line_status=(r.get("line_status") or "search_ordered"),
+                line_status=(r.get("line_status") or "search_ordered").strip(),
             )
+
+            # безопасно присвоим цену, если поле есть в модели/БД
+            if hasattr(part, "unit_cost"):
+                part.unit_cost = unit_cost
+
             db.session.add(part)
 
     db.session.commit()
