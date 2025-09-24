@@ -69,11 +69,10 @@
           <th style="width:140px;">Part #</th>
           <th style="width:220px;">Part name</th>
           <th style="width:90px;">Qty</th>
-          <th style="width:220px;">Alt PN(s)</th>
-          <th style="width:200px;">Appliance</th> <!-- NEW -->
-          <th style="width:180px;">Supplier</th>
-          <th style="width:120px;">Backorder</th>
-          <th style="width:160px;">Line status</th>
+          <th style="width:160px;">Alt PN#</th>
+          <th style="width:200px;">Appliance</th>
+          <th style="width:120px;">Supplier</th>
+          <th style="width:80px;" title="Backorder">B/O</th>
           <th style="width:140px;">Stock hint</th>
           <th style="width:60px;"></th>
         </tr>
@@ -83,21 +82,13 @@
         {% for p in parts %}
         {% set i = loop.index0 %}
         <tr>
-          <td><input class="form-control pn" name="rows[{{ i }}][part_number]" value="{{ p.part_number or '' }}" required></td>
+          <td><input class="form-control pn pn-20" name="rows[{{ i }}][part_number]" value="{{ p.part_number or '' }}" maxlength="20" required></td>
           <td><input class="form-control" name="rows[{{ i }}][part_name]" value="{{ p.part_name or '' }}" maxlength="80"></td>
           <td><input class="form-control qty" name="rows[{{ i }}][quantity]" type="number" min="0" value="{{ p.quantity or 1 }}"></td>
-          <td><input class="form-control" name="rows[{{ i }}][alt_part_numbers]" value="{{ p.alt_part_numbers or '' }}" maxlength="200" placeholder="comma separated"></td>
-          <td><input class="form-control" name="rows[{{ i }}][unit_label]" value="{{ p.unit_label or '' }}" maxlength="80" placeholder="e.g. FRIDGE"></td> <!-- NEW -->
-          <td><input class="form-control" name="rows[{{ i }}][supplier]" value="{{ p.supplier or '' }}" maxlength="80"></td>
+          <td><input class="form-control altpn-20" name="rows[{{ i }}][alt_part_numbers]" value="{{ p.alt_part_numbers or '' }}" maxlength="20" placeholder="comma separated"></td>
+          <td><input class="form-control" name="rows[{{ i }}][unit_label]" value="{{ p.unit_label or '' }}" maxlength="80" placeholder="e.g. FRIDGE"></td>
+          <td><input class="form-control supplier-6" name="rows[{{ i }}][supplier]" value="{{ p.supplier or '' }}" maxlength="6" placeholder="code"></td>
           <td class="text-center"><input class="form-check-input" type="checkbox" name="rows[{{ i }}][backorder_flag]" {% if p.backorder_flag %}checked{% endif %}></td>
-          <td>
-            <select class="form-select" name="rows[{{ i }}][status]">
-              {% set ls = p.status or 'search_ordered' %}
-              <option value="search_ordered" {{ 'selected' if ls=='search_ordered' else '' }}>search_ordered</option>
-              <option value="ordered" {{ 'selected' if ls=='ordered' else '' }}>ordered</option>
-              <option value="done" {{ 'selected' if ls=='done' else '' }}>done</option>
-            </select>
-          </td>
           <td class="hint">—</td>
           <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
         </tr>
@@ -132,20 +123,13 @@
   function templateRow(i){
     return `
 <tr>
-  <td><input class="form-control pn" name="rows[${i}][part_number]" required></td>
+  <td><input class="form-control pn pn-20" name="rows[${i}][part_number]" maxlength="20" required></td>
   <td><input class="form-control" name="rows[${i}][part_name]" maxlength="80"></td>
   <td><input class="form-control qty" name="rows[${i}][quantity]" type="number" min="0" value="1"></td>
-  <td><input class="form-control" name="rows[${i}][alt_part_numbers]" maxlength="200" placeholder="comma separated"></td>
-  <td><input class="form-control" name="rows[${i}][unit_label]" maxlength="80" placeholder="e.g. FRIDGE"></td> <!-- NEW -->
-  <td><input class="form-control" name="rows[${i}][supplier]" maxlength="80"></td>
+  <td><input class="form-control altpn-20" name="rows[${i}][alt_part_numbers]" maxlength="20" placeholder="comma separated"></td>
+  <td><input class="form-control" name="rows[${i}][unit_label]" maxlength="80" placeholder="e.g. FRIDGE"></td>
+  <td><input class="form-control supplier-6" name="rows[${i}][supplier]" maxlength="6" placeholder="code"></td>
   <td class="text-center"><input class="form-check-input" type="checkbox" name="rows[${i}][backorder_flag]"></td>
-  <td>
-    <select class="form-select" name="rows[${i}][status]">
-      <option value="search_ordered" selected>search_ordered</option>
-      <option value="ordered">ordered</option>
-      <option value="done">done</option>
-    </select>
-  </td>
   <td class="hint">—</td>
   <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
 </tr>`;
@@ -190,5 +174,6 @@
 })();
 </script>
 {% endblock %}
+
 
 

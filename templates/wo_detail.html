@@ -1,5 +1,15 @@
 {% extends "base.html" %}
+
 {% block content %}
+<!--
+  Work Order detail page that supports:
+   - Flat orders (parts in wo.parts)
+   - Multi-appliance orders (parts spread across wo.units[].parts)
+  Key improvements:
+   * Header Brand/Model/Serial fallback to the first unit if WorkOrder fields are empty
+   * Unified parts rendering: 'avail' table if provided, otherwise simple table from all parts
+-->
+
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3 class="mb-0">Work Order #{{ wo.id }}</h3>
   <div class="d-flex gap-2">
@@ -12,25 +22,35 @@
             action="{{ url_for('inventory.wo_delete', wo_id=wo.id) }}"
             class="d-inline"
             onsubmit="return confirm('Delete Work Order #{{ wo.id }}? This cannot be undone.');">
-        {# {{ csrf_token() }} если используешь Flask-WTF #}
-        <button class="btn btn-outline-danger">🗑️ Delete</button>
+        <!-- If you use Flask-WTF, uncomment the csrf token -->
+        {# {{ csrf_token() }} #}
+        <button class="btn btn-outline-danger" type="submit">🗑️ Delete</button>
       </form>
     {% endif %}
   </div>
 </div>
 
+{# Get first unit (if any) to backfill header fields when WO header meta is empty #}
+{% set u0 = (wo.units|first) %}
+
 <div class="row g-3 mb-3">
-  <div class="col-md-3"><strong>Technician:</strong> {{ wo.technician_name }}</div>
+  <div class="col-md-3"><strong>Technician:</strong> {{ wo.technician_name or '—' }}</div>
 
   <div class="col-md-4">
     <strong>Job(s):</strong>
-    <span id="wo-jobs">{{ wo.job_numbers }}</span>
-    <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="copyJobs">Copy</button>
-    <div class="text-muted small">primary: <code>{{ wo.canonical_job }}</code></div>
+    <span id="wo-jobs">{{ wo.job_numbers or '' }}</span>
+    <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="copyJobs" aria-label="Copy job numbers">Copy</button>
+    <div class="text-muted small">primary: <code>{{ wo.canonical_job or '—' }}</code></div>
   </div>
 
-  <div class="col-md-3"><strong>Brand/Model:</strong> {{ (wo.brand or '') ~ ' ' ~ (wo.model or '') }}</div>
-  <div class="col-md-2"><strong>Serial:</strong> {{ wo.serial }}</div>
+  <!-- Header Brand/Model/Serial now fall back to first unit's values if WO fields are empty -->
+  <div class="col-md-3">
+    <strong>Brand/Model:</strong>
+    {{ (wo.brand or (u0 and u0.brand) or '') ~ ' ' ~ (wo.model or (u0 and u0.model) or '') }}
+  </div>
+  <div class="col-md-2">
+    <strong>Serial:</strong> {{ wo.serial or (u0 and u0.serial) or '—' }}
+  </div>
 
   <div class="col-md-3">
     <strong>Type:</strong>
@@ -62,38 +82,49 @@
   </div>
 </div>
 
-{# ======== ПАНЕЛЬ ДЕЙСТВИЙ + ПОИСК ======== #}
+{# ======== ACTIONS + SEARCH ======== #}
 {% set _suppliers = suppliers if suppliers is defined and suppliers else [] %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div class="d-flex gap-2">
+    <!-- Opens modal with preview of in-stock lines; existing backend behavior preserved -->
     <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#issuePreviewModal">
       Issue All (in-stock)
     </button>
     <form method="post" action="{{ url_for('inventory.wo_refresh_stock', wo_id=wo.id) }}" class="d-inline">
-      <button class="btn btn-outline-secondary">Refresh Stock</button>
+      <button class="btn btn-outline-secondary" type="submit">Refresh Stock</button>
     </form>
   </div>
 
+  <!-- Quick search form. Back-end filters unchanged. -->
   <form method="get" action="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}" class="d-flex gap-2">
     <input name="q" value="{{ request.args.get('q','') }}" class="form-control" style="width:320px"
-           placeholder="Search: wo:/pn:/model:/brand:/serial: or text">
-    <select name="status" class="form-select">
+           placeholder="Search: wo:/pn:/model:/brand:/serial: or text" aria-label="Search">
+    <select name="status" class="form-select" aria-label="Filter by status">
       <option value="">Status: Any</option>
       {% for s in ['in-stock','ordered','backorder','done'] %}
         <option value="{{ s }}" {% if request.args.get('status')==s %}selected{% endif %}>{{ s }}</option>
       {% endfor %}
     </select>
-    <select name="supplier" class="form-select">
+    <select name="supplier" class="form-select" aria-label="Filter by supplier">
       <option value="">Supplier: Any</option>
       {% for sup in _suppliers %}
         <option value="{{ sup }}" {% if request.args.get('supplier')==sup %}selected{% endif %}>{{ sup }}</option>
       {% endfor %}
     </select>
-    <button class="btn btn-primary">Search</button>
+    <button class="btn btn-primary" type="submit">Search</button>
   </form>
 </div>
 
-{% if wo.parts and avail %}
+{# ======== PARTS TABLES ======== #}
+{# Build a unified list of parts from flat + units so page always shows real lines #}
+{% set ns = namespace(all_parts=[]) %}
+{% if wo.parts %}{% set ns.all_parts = ns.all_parts + wo.parts %}{% endif %}
+{% for u in (wo.units or []) %}
+  {% if u.parts %}{% set ns.all_parts = ns.all_parts + u.parts %}{% endif %}
+{% endfor %}
+
+{# If the controller computed 'avail' (with stock/on-hand/issue-now), render that advanced table #}
+{% if avail and (avail|length) > 0 %}
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
     <thead class="table-light">
@@ -103,29 +134,29 @@
         <th class="text-end">Needed</th>
         <th class="text-end">On hand</th>
         <th class="text-end">Issue now</th>
-        <th>Status hint</th>
+        <th>Stock hint</th>
       </tr>
     </thead>
     <tbody>
       {% set total_needed = 0 %}
       {% set total_issue = 0 %}
       {% for r in avail %}
-      {% set total_needed = total_needed + (r.requested or 0) %}
-      {% set total_issue = total_issue + (r.issue_now or 0) %}
-      <tr class="{% if r.issue_now and r.issue_now > 0 %}table-success{% elif r.on_hand and r.on_hand > 0 %}table-warning{% endif %}">
-        <td><code>{{ r.part_number }}</code></td>
-        <td>{{ r.part_name }}</td>
-        <td class="text-end">{{ r.requested }}</td>
-        <td class="text-end">{{ r.on_hand }}</td>
-        <td class="text-end">{{ r.issue_now }}</td>
-        <td>
-          {% if r.status_hint and r.status_hint.startswith('WAIT') %}
-            <span class="badge bg-warning text-dark">{{ r.status_hint }}</span>
-          {% else %}
-            <span class="badge bg-success">{{ r.status_hint or '—' }}</span>
-          {% endif %}
-        </td>
-      </tr>
+        {% set total_needed = total_needed + (r.requested or 0) %}
+        {% set total_issue = total_issue + (r.issue_now or 0) %}
+        <tr class="{% if r.issue_now and r.issue_now > 0 %}table-success{% elif r.on_hand and r.on_hand > 0 %}table-warning{% endif %}">
+          <td><code>{{ r.part_number }}</code></td>
+          <td>{{ r.part_name or '—' }}</td>
+          <td class="text-end">{{ r.requested or 0 }}</td>
+          <td class="text-end">{{ r.on_hand or 0 }}</td>
+          <td class="text-end">{{ r.issue_now or 0 }}</td>
+          <td>
+            {% if r.status_hint and r.status_hint.startswith('WAIT') %}
+              <span class="badge bg-warning text-dark">{{ r.status_hint }}</span>
+            {% else %}
+              <span class="badge bg-success">{{ r.status_hint or '—' }}</span>
+            {% endif %}
+          </td>
+        </tr>
       {% endfor %}
     </tbody>
     <tfoot>
@@ -139,6 +170,40 @@
     </tfoot>
   </table>
 </div>
+
+{# Otherwise, fall back to a simple list from 'all_parts' so details never look empty after multi-save #}
+{% elif ns.all_parts and (ns.all_parts|length) > 0 %}
+<div class="table-responsive">
+  <table class="table table-sm table-bordered align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>Part #</th>
+        <th>Name</th>
+        <th class="text-end">Qty</th>
+        <th>Supplier</th>
+        <th title="Backorder">B/O</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in ns.all_parts %}
+      <tr>
+        <td><code>{{ p.part_number }}</code></td>
+        <td>{{ p.part_name or '—' }}</td>
+        <td class="text-end">{{ p.quantity or 0 }}</td>
+        <td>{{ p.supplier or '' }}</td>
+        <td>
+          {% if p.backorder_flag %}
+            <span class="badge bg-warning text-dark">B/O</span>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
 {% else %}
 <p class="text-muted">No parts listed for this work order.</p>
 {% endif %}
@@ -164,7 +229,7 @@
         <td>{{ b.issued_at }}</td>
         <td>{{ b.technician }}</td>
         <td>{{ b.canonical_ref }}</td>
-        {# показываем количество элементов, если это список/словарь; иначе — значение #}
+        <!-- Show count when items is list/dict, otherwise show raw value -->
         <td>
           {% if b.items is iterable and b.items is not string %}
             {{ b.items|length }}
@@ -173,10 +238,10 @@
           {% endif %}
         </td>
         <td>
-          <a class="btn btn-sm btn-outline-secondary" href="/reports/{{ b.report_id }}" target="_blank">Open Report</a>
+          <a class="btn btn-sm btn-outline-secondary" href="/reports/{{ b.report_id }}" target="_blank" rel="noopener">Open Report</a>
         </td>
         <td>
-          <a class="btn btn-sm btn-outline-primary" href="/reports/{{ b.report_id }}?print=1" target="_blank">Print</a>
+          <a class="btn btn-sm btn-outline-primary" href="/reports/{{ b.report_id }}?print=1" target="_blank" rel="noopener">Print</a>
         </td>
       </tr>
       {% else %}
@@ -194,21 +259,22 @@
     Preview & Issue In-Stock
   </button>
 
-  <form method="post" action="{{ url_for('inventory.wo_set_status', wo_id=wo.id) }}">
+  <form method="post" action="{{ url_for('inventory.wo_set_status', wo_id=wo.id) }}" class="d-inline">
     <input type="hidden" name="status" value="ordered">
-    <button class="btn btn-outline-warning" {% if wo.status=='ordered' %}disabled{% endif %}>
+    <button class="btn btn-outline-warning" {% if wo.status=='ordered' %}disabled{% endif %} type="submit">
       Mark as ordered
     </button>
   </form>
 
-  <form method="post" action="{{ url_for('inventory.wo_set_status', wo_id=wo.id) }}">
+  <form method="post" action="{{ url_for('inventory.wo_set_status', wo_id=wo.id) }}" class="d-inline">
     <input type="hidden" name="status" value="done">
-    <button class="btn btn-outline-success" {% if wo.status=='done' %}disabled{% endif %}>
+    <button class="btn btn-outline-success" {% if wo.status=='done' %}disabled{% endif %} type="submit">
       Mark as done
     </button>
   </form>
 </div>
 
+<!-- Issue preview modal (unchanged behavior, just minor text polish) -->
 <div class="modal fade" id="issuePreviewModal" tabindex="-1" aria-labelledby="issuePreviewLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -217,7 +283,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        {% set ns = namespace(has_issue=false, total_issue=0) %}
+        {% set ns2 = namespace(has_issue=false, total_issue=0) %}
         <div class="table-responsive">
           <table class="table table-sm table-bordered align-middle">
             <thead class="table-light">
@@ -232,28 +298,28 @@
             <tbody>
               {% for r in avail %}
                 {% if r.issue_now and r.issue_now > 0 %}
-                  {% set ns.has_issue = true %}
-                  {% set ns.total_issue = ns.total_issue + (r.issue_now or 0) %}
+                  {% set ns2.has_issue = true %}
+                  {% set ns2.total_issue = ns2.total_issue + (r.issue_now or 0) %}
                   <tr>
                     <td><code>{{ r.part_number }}</code></td>
-                    <td>{{ r.part_name }}</td>
-                    <td class="text-end">{{ r.requested }}</td>
-                    <td class="text-end">{{ r.on_hand }}</td>
-                    <td class="text-end">{{ r.issue_now }}</td>
+                    <td>{{ r.part_name or '—' }}</td>
+                    <td class="text-end">{{ r.requested or 0 }}</td>
+                    <td class="text-end">{{ r.on_hand or 0 }}</td>
+                    <td class="text-end">{{ r.issue_now or 0 }}</td>
                   </tr>
                 {% endif %}
               {% endfor %}
             </tbody>
             <tfoot>
               <tr class="table-light">
-                <th colspan="4" class="text-end">Total lines:</th>
-                <th class="text-end">{{ ns.total_issue }}</th>
+                <th colspan="4" class="text-end">Total qty to issue:</th>
+                <th class="text-end">{{ ns2.total_issue }}</th>
               </tr>
             </tfoot>
           </table>
         </div>
 
-        {% if not ns.has_issue %}
+        {% if not ns2.has_issue %}
           <div class="alert alert-warning mb-0">
             Nothing available to issue right now (all lines are WAIT).
           </div>
@@ -266,7 +332,7 @@
 
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-        <button type="button" class="btn btn-primary" id="confirmIssueBtn" {% if not ns.has_issue %}disabled{% endif %}>
+        <button type="button" class="btn btn-primary" id="confirmIssueBtn" {% if not ns2.has_issue %}disabled{% endif %}>
           Issue Now
         </button>
       </div>
@@ -279,23 +345,27 @@
 {% block extra_js %}
 <script>
   (function () {
-    // Copy Job numbers
+    // Copy Job numbers to clipboard (with fallback for older browsers)
     const btnCopy = document.getElementById('copyJobs');
     btnCopy?.addEventListener('click', async () => {
-      const txt = document.getElementById('wo-jobs')?.textContent?.trim() || '';
+      const el = document.getElementById('wo-jobs');
+      const txt = (el?.textContent || '').trim();
       if (!txt) return;
       try {
         await navigator.clipboard.writeText(txt);
         window.showToast?.('Job numbers copied');
       } catch (e) {
         const ta = document.createElement('textarea');
-        ta.value = txt; document.body.appendChild(ta);
-        ta.select(); document.execCommand('copy'); ta.remove();
+        ta.value = txt;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
         window.showToast?.('Job numbers copied');
       }
     });
 
-    // Submit hidden form from modal
+    // Submit the hidden issue form from the modal
     const btnIssue = document.getElementById('confirmIssueBtn');
     btnIssue?.addEventListener('click', () => {
       document.getElementById('issueForm')?.submit();
@@ -303,4 +373,3 @@
   })();
 </script>
 {% endblock %}
-

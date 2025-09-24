@@ -449,6 +449,79 @@ main, .container, .container-fluid {
 /* маленькие бейджи-хинты */
 .hint.text-success, .hint.text-warning { font-weight: 600; font-size: 0.85rem; }
 
+/* Compact widths for part inputs */
+input.pn-20 { max-width: 20ch; }
+input.altpn-20 { max-width: 20ch; }
+input.supplier-6 { width: 6.5ch; max-width: 6.5ch; }
+
+/* ===== Work Orders list (scoped, no duplicates) ===== */
+
+/* Fixed column widths (keep header/body aligned) */
+.wo-list-table .col-id      { width: 80px; }
+.wo-list-table .col-tech    { width: 200px; }
+.wo-list-table .col-type    { width: 140px; }
+.wo-list-table .col-status  { width: 140px; }
+.wo-list-table .col-created { width: 120px; }
+.wo-list-table .col-actions { width: 220px; }
+
+/* Truncate long text consistently (no inline styles) */
+.wo-list-table .jobs-trunc  { max-width: 36rem; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wo-list-table .brand-trunc { max-width: 32rem; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Make action buttons (link + form button) sit perfectly on one line */
+.wo-actions {
+  display: inline-flex;
+  align-items: stretch;     /* equal height for both controls */
+  gap: .375rem;             /* small, consistent space */
+}
+.wo-actions form { margin: 0; }               /* remove default form margin */
+.wo-actions .btn {
+  padding: .25rem .6rem;    /* match .btn-sm */
+  line-height: 1;
+  border-radius: .25rem;
+}
+
+/* Keep numeric cells consistent if used here too */
+.wo-list-table .num-cell { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ===== FIX: Work Orders actions buttons (override global `form button`) ===== */
+
+/* Контейнер действий уже есть в шаблоне: <div class="wo-actions"> */
+.wo-actions {
+  display: inline-flex;
+  align-items: stretch;   /* одинаковая высота */
+  gap: .375rem;
+}
+
+/* НЕ растягивать на 100% и вернуть нормальные метрики кнопок */
+.wo-actions .btn {
+  width: auto;                  /* отмена width:100% из `form button` */
+  height: 32px;                 /* единая высота (как btn-sm) */
+  line-height: 1.2;
+  padding: .25rem .6rem;        /* как у btn-sm */
+  border-radius: 4px;           /* совпадает с твоим базовым */
+}
+
+/* Специально для кнопок внутри form — убрать синий фон/безбордер из глобального правила */
+.wo-actions form .btn {
+  background: none;             /* убираем синий фон */
+  border: 1px solid transparent;
+}
+
+/* Нормализуем конкретные варианты Bootstrap, чтобы смотрелись как «Cancel» и пр. */
+.wo-actions .btn.btn-primary {
+  background-color: #0d6efd;    /* Bootstrap primary */
+  border-color: #0d6efd;
+  color: #fff;
+}
+
+.wo-actions .btn.btn-outline-danger {
+  background-color: transparent;
+  color: #dc3545;               /* Bootstrap danger */
+  border-color: #dc3545;
+}
+
+
 
 
 

@@ -2,6 +2,7 @@ from extensions import db
 from flask_login import UserMixin
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import Numeric
 
 # User roles
 ROLE_SUPERADMIN = 'superadmin'
@@ -34,20 +35,23 @@ class WorkOrder(db.Model):
     __tablename__ = "work_orders"
     id = db.Column(db.Integer, primary_key=True)
 
-    # multi-appliance (опционально, можно не использовать)
+    # multi-appliance: список юнитов (по приборам)
     units = db.relationship(
         "WorkUnit",
-        backref="order",
+        backref="work_order",
         cascade="all, delete-orphan",
-        lazy="joined",
+        lazy="selectin",
+        overlaps="parts,work_order"
     )
 
-    # «плоские» строки (как в старом коде; храним в той же таблице, что и unit-строки)
+    # «плоские» строки (старый/простой режим) — из той же таблицы work_order_parts
     parts = db.relationship(
         "WorkOrderPart",
         backref="work_order",
         primaryjoin="WorkOrder.id==WorkOrderPart.work_order_id",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        overlaps="unit,parts,work_order"
     )
 
     technician_name = db.Column(db.String(80), nullable=False)
@@ -69,18 +73,20 @@ class WorkOrder(db.Model):
         nums = [n.strip() for n in (self.job_numbers or "").split(",") if n.strip()]
         ints = []
         for n in nums:
-            try: ints.append(int(n))
-            except ValueError: pass
+            try:
+                ints.append(int(n))
+            except ValueError:
+                pass
         return str(max(ints)) if ints else (nums[0] if nums else "")
 
 
 # -----------------------------
-# Work Units (опционально: несколько аппаратов в одном WO)
+# Work Units (несколько аппаратов в одном WO)
 # -----------------------------
 class WorkUnit(db.Model):
     __tablename__ = "work_units"
     id = db.Column(db.Integer, primary_key=True)
-    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False)
+    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False, index=True)
 
     brand  = db.Column(db.String(80))
     model  = db.Column(db.String(25))
@@ -91,28 +97,27 @@ class WorkUnit(db.Model):
         backref="unit",
         primaryjoin="WorkUnit.id==WorkOrderPart.unit_id",
         cascade="all, delete-orphan",
-        lazy="joined",
+        lazy="selectin",
+        overlaps="parts,work_order"
     )
 
 
 # -----------------------------
 # Work Order Part (ЕДИНСТВЕННЫЙ класс строк)
-# — использует одну таблицу 'work_order_parts'
-# — может ссылаться и на WorkOrder (обязательно), и на WorkUnit (опционально)
+# — одна таблица 'work_order_parts' для обоих режимов:
+#   - плоский (обязательно work_order_id, unit_id = NULL)
+#   - multi-appliance (оба: work_order_id и unit_id)
 # -----------------------------
 class WorkOrderPart(db.Model):
     __tablename__ = "work_order_parts"
-    __table_args__ = {"extend_existing": True}  # на время перехода безопасно
 
     id = db.Column(db.Integer, primary_key=True)
 
-    # ВАЖНО: старое поле — оставляем NOT NULL, чтобы не ломать БД
-    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False)
+    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False, index=True)
+    unit_id = db.Column(db.Integer, db.ForeignKey("work_units.id"), nullable=True, index=True)
 
-    # Новое поле для multi-appliance (может быть NULL, если не используем units)
-    unit_id = db.Column(db.Integer, db.ForeignKey("work_units.id"), nullable=True)
-
-    # Данные по запчасти
+    # Данные по запчасти — длины столбцов оставляем как были, чтобы не требовать миграций.
+    # Ограничения (≤20 и ≤6) обеспечены формами/валидацией при сохранении.
     part_number = db.Column(db.String(80), nullable=False)
     part_name   = db.Column(db.String(120))
     quantity    = db.Column(db.Integer, default=1)
@@ -134,7 +139,7 @@ class WorkOrderPart(db.Model):
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # ---- Совместимые АЛИАСЫ ----
+    # ---- Совместимые АЛИАСЫ для старого кода/UI ----
     # alt_numbers <-> alt_part_numbers
     @property
     def alt_numbers(self) -> str:
@@ -158,8 +163,8 @@ class WorkOrderPart(db.Model):
 class TechReceiveLog(db.Model):
     __tablename__ = "tech_receive_log"
     id = db.Column(db.Integer, primary_key=True)
-    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False)
-    work_order_part_id = db.Column(db.Integer, db.ForeignKey("work_order_parts.id"), nullable=False)
+    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False, index=True)
+    work_order_part_id = db.Column(db.Integer, db.ForeignKey("work_order_parts.id"), nullable=False, index=True)
     qty_received = db.Column(db.Integer, default=0)
     received_by  = db.Column(db.String(80))
     received_at  = db.Column(db.DateTime, default=datetime.utcnow)
@@ -171,7 +176,7 @@ class TechReceiveLog(db.Model):
 class Part(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    part_number = db.Column(db.String(100), unique=True, nullable=False)
+    part_number = db.Column(db.String(100), unique=True, nullable=False, index=True)
     quantity = db.Column(db.Integer, default=0)
     unit_cost = db.Column(db.Float, nullable=False)
     location = db.Column(db.String(100))
@@ -192,12 +197,12 @@ class Recipient(db.Model):
 class IssuedPartRecord(db.Model):
     __tablename__ = 'issued_part_record'
     id = db.Column(db.Integer, primary_key=True)
-    part_id = db.Column(db.Integer, db.ForeignKey('part.id'), nullable=False)
+    part_id = db.Column(db.Integer, db.ForeignKey('part.id'), nullable=False, index=True)
     quantity = db.Column(db.Integer, nullable=False)
     issued_to = db.Column(db.String(255), nullable=False)
     issued_by = db.Column(db.String(255), nullable=False)
     reference_job = db.Column(db.String(255))
-    issue_date = db.Column(db.DateTime, nullable=False)
+    issue_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     unit_cost_at_issue = db.Column(db.Float, nullable=False)
 
     part = db.relationship('Part', backref=db.backref('issued_records', lazy=True))
@@ -224,6 +229,7 @@ class OrderItem(db.Model):
     date_received= db.Column(db.DateTime)
     notes        = db.Column(db.Text)
     row_key      = db.Column(db.String(512), unique=True)
+
 
 
 
