@@ -17,8 +17,10 @@
   <div class="row g-3 mb-3">
     <div class="col-md-3">
       <label class="form-label">Technician</label>
-      <input name="technician_name" class="form-control" required
+      <input id="technicianInput" name="technician_name" class="form-control" required
+             list="technicianList"
              value="{{ wo.technician_name if IS_EDIT else '' }}" {{ ro }} {{ dis }}>
+      <datalist id="technicianList"></datalist>
     </div>
 
     <div class="col-md-3">
@@ -198,18 +200,13 @@
   const addUnitBtn   = document.getElementById('addUnit');
   const grandTotalEl = document.getElementById('grandTotal');
 
-  // --- URLs на уже существующие у тебя ручки ---
-  const STOCK_HINT_URL = "{{ url_for('inventory.api_stock_hint') }}";
+  // --- URLs ---
+  const TECH_SUGGEST_URL = "{{ url_for('inventory.api_technicians') }}";
+  const STOCK_HINT_URL   = "{{ url_for('inventory.api_stock_hint') }}";
+  const PART_GET_URL     = "{{ url_for('inventory.get_part_by_number', part_number='__PN__') }}";
+  const PART_LOOKUP_QS   = "{{ url_for('inventory.part_lookup') }}";
 
-  // если у тебя в routes есть: @inventory_bp.get('/api/part/<part_number>')
-  // endpoint обычно называется 'inventory.get_part_by_number'
-  const PART_GET_URL   = "{{ url_for('inventory.get_part_by_number', part_number='__PN__') }}";
-
-  // если есть: @inventory_bp.get('/api/part_lookup?part_number=..')
-  // endpoint обычно 'inventory.part_lookup'
-  const PART_LOOKUP_QS = "{{ url_for('inventory.part_lookup') }}";
-
-  const READ_ONLY      = {{ 'true' if RO else 'false' }};
+  const READ_ONLY = {{ 'true' if RO else 'false' }};
 
   function toMoney(n){ return (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2); }
   function nextUnitIndex(){ return unitsWrap.querySelectorAll('.card').length; }
@@ -229,10 +226,7 @@
       line = line + delivery;
 
       const cell = tr.querySelector('.line-total');
-      if (cell) {
-        cell.textContent = toMoney(line);
-        cell.dataset.value = toMoney(line);
-      }
+      if (cell) { cell.textContent = toMoney(line); cell.dataset.value = toMoney(line); }
       unitSum += line;
     });
 
@@ -243,13 +237,11 @@
 
   function recomputeGrandTotal(){
     let g = 0;
-    unitsWrap.querySelectorAll('.unit-subtotal').forEach(el => {
-      g += parseFloat(el.textContent || '0') || 0;
-    });
+    unitsWrap.querySelectorAll('.unit-subtotal').forEach(el => { g += parseFloat(el.textContent || '0') || 0; });
     grandTotalEl.textContent = toMoney(g);
   }
 
-  // --- твой прежний хинт по наличию ---
+  // --- Stock hint ---
   function fetchHint(tr){
     const pn   = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
     const qty  = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
@@ -269,59 +261,39 @@
       .catch(() => { if(hint){ hint.textContent='—'; hint.className='hint'; }});
   }
 
-  // ===== НОВОЕ: автоподтяжка имени/цены по PN =====
+  // ===== Part lookup (PN -> name/price/supplier) =====
   function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
 
   function fillFromLookup(tr, data){
-  if (!data) return;
+    if (!data) return;
+    const p = data.part || data;
+    const found = (data.found === undefined) ? true : !!data.found;
+    if (!found || !p) return;
 
-  // /api/part => отдаёт плоский объект; /api/part_lookup => {found, part:{...}}
-  const p = data.part || data;
-  const found = (data.found === undefined) ? true : !!data.found;
-  if (!found || !p) return;
+    const nameInput = tr.querySelector("input[name$='[part_name]']");
+    const costInput = tr.querySelector(".unit-cost");
+    const suppInput = tr.querySelector("input[name$='[supplier]']");
 
-  const nameInput = tr.querySelector("input[name$='[part_name]']");
-  const costInput = tr.querySelector(".unit-cost");
-  const suppInput = tr.querySelector("input[name$='[supplier]']");
-
-  // 1) Название детали
-  if (nameInput && !nameInput.value) {
-    nameInput.value = p.part_name || p.name || "";
-  }
-
-  // 2) Цена (не перетираем, если пользователь уже ввёл)
-  if (costInput && (!costInput.value || costInput.value === "0" || costInput.value === "0.00")) {
-    if (typeof p.unit_cost === "number") {
-      const v = (Math.round((p.unit_cost + Number.EPSILON) * 100) / 100).toFixed(2);
-      costInput.value = v;
+    if (nameInput && !nameInput.value) nameInput.value = p.part_name || p.name || "";
+    if (costInput && (!costInput.value || costInput.value === "0" || costInput.value === "0.00")) {
+      if (typeof p.unit_cost === "number") costInput.value = toMoney(p.unit_cost);
     }
+    if (suppInput && !suppInput.value) suppInput.value = p.supplier || p.location || "";
   }
-
-  // 3) Supplier: если у тебя нет кода поставщика, можно подставлять складскую локацию
-  //    (или убери эту часть, если не нужно)
-  if (suppInput && !suppInput.value) {
-    suppInput.value = p.supplier || p.location || "";
-  }
-}
-
 
   const lookupPartByPn = debounce((tr)=>{
     const pn = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
     if (!pn) return;
-
-    // 1) пробуем полную ручку: /api/part/<pn>
     const url1 = PART_GET_URL.replace('__PN__', encodeURIComponent(pn));
     fetch(url1).then(r=>{
       if (r.ok) return r.json();
-      // 2) fallback: /api/part_lookup?part_number=...
       const url2 = PART_LOOKUP_QS + '?part_number=' + encodeURIComponent(pn);
       return fetch(url2).then(r2=> r2.ok ? r2.json() : null);
     }).then(j=>{
       fillFromLookup(tr, j);
       const card = tr.closest('.card'); if (card) recomputeUnitSubtotal(card);
-    }).catch(()=>{ /* молча */ });
+    }).catch(()=>{});
   }, 250);
-  // ===== /НОВОЕ =====
 
   if (!READ_ONLY){
     addUnitBtn?.addEventListener('click', () => {
@@ -355,10 +327,7 @@
       if (!card) return;
 
       if (tr && (e.target.classList.contains('pn') || e.target.classList.contains('qty'))) fetchHint(tr);
-
-      // === НОВОЕ: при вводе PN дергаем автолукап ===
       if (tr && e.target.classList.contains('pn')) lookupPartByPn(tr);
-
       if (tr && (e.target.classList.contains('qty') || e.target.classList.contains('unit-cost'))) recomputeUnitSubtotal(card);
     }
     unitsWrap.addEventListener('input', maybeRecalc);
@@ -371,13 +340,13 @@
     });
   }
 
-  // init для обоих режимов: подтягиваем hint и (НОВОЕ) имя/цену для уже введённых PN
+  // init: подтянуть хинты и имя/цену для уже введённых PN
   unitsWrap.querySelectorAll('.card').forEach(card => {
     card.querySelectorAll('tbody tr').forEach(tr => { fetchHint(tr); lookupPartByPn(tr); });
     recomputeUnitSubtotal(card);
   });
 
-  // ----- генераторы строк/юнитов (как у тебя было) -----
+  // ----- генераторы строк/юнитов -----
   function rowTemplate(ui, ri){
     return `
 <tr>
@@ -431,9 +400,36 @@
 </div>`;
   }
 
+  // ===== Technician autosuggest + UPPER =====
+  (function setupTechnicianSuggest(){
+    const input = document.getElementById('technicianInput');
+    const list  = document.getElementById('technicianList');
+    if (!input || !list) return;
+
+    function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+    function renderOptions(items){ list.innerHTML = (items||[]).map(v=>`<option value="${v}">`).join(''); }
+
+    const fetchSuggest = debounce((term)=>{
+      term = (term||'').trim().toUpperCase();
+      if (term.length < 2){ renderOptions([]); return; }
+      fetch(`${TECH_SUGGEST_URL}?q=${encodeURIComponent(term)}`)
+        .then(r => r.ok ? r.json() : {items:[]})
+        .then(j => renderOptions(j.items||[]))
+        .catch(()=>renderOptions([]));
+    }, 180);
+
+    input.addEventListener('input', e => fetchSuggest(e.target.value));
+    input.addEventListener('focus', () => fetchSuggest(input.value));
+    input.addEventListener('blur', ()=>{ input.value = (input.value||'').trim().toUpperCase(); });
+    document.getElementById('woForm')?.addEventListener('submit', ()=>{
+      input.value = (input.value||'').trim().toUpperCase();
+    });
+  })();
+
 })();
 </script>
 {% endblock %}
+
 
 
 

@@ -4,7 +4,10 @@
 
 <div class="mb-3">
   <label>Issued To (Technician)</label>
-  <input id="tech_name" class="form-control" value="{{ technician_name }}">
+  <input id="tech_name" class="form-control" value="{{ technician_name }}"
+         list="technicianListIssue2">
+    <datalist id="technicianListIssue2"></datalist>
+
 </div>
 <div class="mb-3">
   <label>Reference Job</label>
@@ -200,7 +203,7 @@ document.getElementById('btnConfirmIssue').onclick = async () => {
   if (!previewItems || previewItems.length === 0) return;
 
   const payload = {
-    issued_to: document.getElementById('tech_name').value,
+    iissued_to: (document.getElementById('tech_name').value || '').trim().toUpperCase(),
     reference_job: document.getElementById('canonical_ref').value,
     items: previewItems
   };
@@ -228,7 +231,7 @@ document.querySelectorAll('.btn-issue-line').forEach(btn => {
     const unitPrice = unitPriceStr ? parsePrice(unitPriceStr) : null;
 
     const payload = {
-      issued_to: document.getElementById('tech_name').value,
+      issued_to: (document.getElementById('tech_name').value || '').trim().toUpperCase(),
       reference_job: document.getElementById('canonical_ref').value,
       qty, unit_price: unitPrice
     };
@@ -248,6 +251,30 @@ document.querySelectorAll('.btn-issue-line').forEach(btn => {
     }
   });
 });
+// --- Technician suggestions for Issue UI (demo) ---
+(function(){
+  const TECH_SUGGEST_URL = "{{ url_for('inventory.api_technicians') }}";
+  const input = document.getElementById('tech_name');
+  const list  = document.getElementById('technicianListIssue2');
+  if (!input || !list) return;
+
+  function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+  function renderOptions(items){ list.innerHTML = (items||[]).map(v=>`<option value="${v}">`).join(''); }
+
+  const fetchSuggest = debounce((term)=>{
+    term = (term||'').trim().toUpperCase();
+    if (term.length < 2){ renderOptions([]); return; }
+    fetch(`${TECH_SUGGEST_URL}?q=${encodeURIComponent(term)}`)
+      .then(r => r.ok ? r.json() : {items:[]})
+      .then(j => renderOptions(j.items||[]))
+      .catch(()=>renderOptions([]));
+  }, 180);
+
+  input.addEventListener('input', e => fetchSuggest(e.target.value));
+  input.addEventListener('focus', () => fetchSuggest(input.value));
+  input.addEventListener('blur', ()=>{ input.value = (input.value||'').trim().toUpperCase(); });
+})();
+
 </script>
 {% endblock %}
 

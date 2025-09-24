@@ -70,6 +70,10 @@ _PREFIX_RE = re.compile(r'^\s*(wo|job|pn|model|brand|serial)\s*:\s*(.+)\s*$', re
 _units_re = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
 _rows_re  = re.compile(r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|alt_numbers|supplier|backorder_flag|line_status|unit_cost)\]$")
 
+def _tech_norm(s: str) -> str:
+    return (s or '').strip().upper()
+
+
 def _parse_dt_flex(s: str):
     """Безопасный парсер даты/даты-времени: поддерживает 'YYYY-MM-DD', 'YYYY-MM-DD HH:MM:SS', '...%f'.
        Возвращает datetime | None (если пусто/не разобрали)."""
@@ -845,6 +849,23 @@ def set_setting(key, value):
     with open(p, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+@inventory_bp.get("/api/technicians")
+@login_required
+def api_technicians():
+    from models import WorkOrder
+    q = (request.args.get("q") or "").strip().upper()
+
+    qry = (db.session.query(WorkOrder.technician_name)
+           .filter(WorkOrder.technician_name.isnot(None),
+                   WorkOrder.technician_name != ""))
+
+    if q:
+        qry = qry.filter(db.func.upper(WorkOrder.technician_name).like(q + "%"))
+
+    names = sorted({(r[0] or "").strip().upper() for r in qry.limit(25).all() if r[0]})
+    return jsonify({"items": names}), 200
+
+
 @inventory_bp.get("/debug/db")
 @login_required
 def debug_db():
@@ -1564,7 +1585,7 @@ def wo_savex():
     # ----- поля шапки формы -----
     f = request.form
     wo_id       = (f.get("wo_id") or "").strip()
-    tech        = (f.get("technician_name") or "").strip()
+    tech = _tech_norm(f.get("technician_name"))
     job_numbers = (f.get("job_numbers") or "").strip()
     brand       = (f.get("brand") or "").strip()
     model       = (f.get("model") or "").strip()
