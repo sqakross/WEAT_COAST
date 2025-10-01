@@ -2,7 +2,7 @@ from extensions import db
 from flask_login import UserMixin
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import Numeric
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey
 
 # User roles
 ROLE_SUPERADMIN = 'superadmin'
@@ -108,17 +108,19 @@ class WorkUnit(db.Model):
 #   - плоский (обязательно work_order_id, unit_id = NULL)
 #   - multi-appliance (оба: work_order_id и unit_id)
 # -----------------------------
+from datetime import datetime
+from extensions import db
+
 class WorkOrderPart(db.Model):
     __tablename__ = "work_order_parts"
 
     id = db.Column(db.Integer, primary_key=True)
 
     work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False, index=True)
-    unit_id = db.Column(db.Integer, db.ForeignKey("work_units.id"), nullable=True, index=True)
+    unit_id       = db.Column(db.Integer, db.ForeignKey("work_units.id"),  nullable=True,  index=True)
 
-    # Данные по запчасти — длины столбцов оставляем как были, чтобы не требовать миграций.
-    # Ограничения (≤20 и ≤6) обеспечены формами/валидацией при сохранении.
-    part_number = db.Column(db.String(80), nullable=False)
+    # Данные по запчасти
+    part_number = db.Column(db.String(80),  nullable=False)
     part_name   = db.Column(db.String(120))
     quantity    = db.Column(db.Integer, default=1)
 
@@ -132,10 +134,13 @@ class WorkOrderPart(db.Model):
     status = db.Column(db.String(32), default="search_ordered")
 
     # Доп. реквизиты
-    unit_label       = db.Column(db.String(120), nullable=True)
+    unit_label       = db.Column(db.String(120), nullable=True)  # историческое поле
     unit_price_base  = db.Column(db.Float)
     unit_price_final = db.Column(db.Float)
     unit_cost        = db.Column(db.Float, nullable=True, default=None)
+
+    # Новый для нас реквизит склада (у тебя уже добавлен)
+    warehouse       = db.Column(db.String(120), nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -156,6 +161,10 @@ class WorkOrderPart(db.Model):
     def line_status(self, v: str):
         self.status = v
 
+    # (опционально) fallback-свойство, если где-то ещё читают unit_label как склад
+    @property
+    def warehouse_or_label(self) -> str:
+        return self.warehouse or self.unit_label or ""
 
 # -----------------------------
 # Tech receive log
@@ -229,6 +238,9 @@ class OrderItem(db.Model):
     date_received= db.Column(db.DateTime)
     notes        = db.Column(db.Text)
     row_key      = db.Column(db.String(512), unique=True)
+
+
+
 
 
 

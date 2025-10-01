@@ -1,60 +1,34 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>{{ 'Edit' if wo else 'New' }} Work Order</h3>
+{% set IS_EDIT = wo is not none %}
+<h3>{{ 'Edit' if IS_EDIT else 'New' }} Work Order</h3>
 
-<form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm">
-  {% if wo %}
-    <input type="hidden" name="wo_id" value="{{ wo.id }}">
-  {% endif %}
+<form method="post" action="{{ url_for('inventory.wo_savex') }}" id="woForm">
+  {% if IS_EDIT %}<input type="hidden" name="wo_id" value="{{ wo.id }}">{% endif %}
 
   <div class="row g-3 mb-3">
-    <div class="col-md-3">
-      <label class="form-label">Technician</label>
-      <input name="technician_name" class="form-control" required
-             value="{{ wo.technician_name if wo else '' }}">
+    <div class="col-md-3"><label class="form-label">Technician</label>
+      <input name="technician_name" class="form-control" required value="{{ wo.technician_name if IS_EDIT else '' }}">
     </div>
-    <div class="col-md-3">
-      <label class="form-label">Job number(s) (comma separated)</label>
-      <input name="job_numbers" class="form-control" placeholder="98356, 98256"
-             value="{{ wo.job_numbers if wo else '' }}">
+    <div class="col-md-3"><label class="form-label">Job number(s) (comma separated)</label>
+      <input name="job_numbers" class="form-control" placeholder="98356, 98256" value="{{ wo.job_numbers if IS_EDIT else '' }}">
     </div>
-    <div class="col-md-2">
-      <label class="form-label">Brand</label>
-      <input name="brand" class="form-control" value="{{ wo.brand if wo else '' }}">
+    <div class="col-md-2"><label class="form-label">Brand</label><input name="brand" class="form-control" value="{{ wo.brand if IS_EDIT else '' }}"></div>
+    <div class="col-md-2"><label class="form-label">Model # (≤25)</label><input name="model" class="form-control" maxlength="25" value="{{ wo.model if IS_EDIT else '' }}"></div>
+    <div class="col-md-2"><label class="form-label">Serial # (≤25)</label><input name="serial" class="form-control" maxlength="25" value="{{ wo.serial if IS_EDIT else '' }}"></div>
+    <div class="col-md-2"><label class="form-label">Job type</label>
+      {% set jt = (wo.job_type if IS_EDIT else 'BASE') %}
+      <select name="job_type" class="form-select"><option value="BASE" {{ 'selected' if jt=='BASE' else '' }}>BASE</option><option value="INSURANCE" {{ 'selected' if jt=='INSURANCE' else '' }}>INSURANCE</option></select>
     </div>
-    <div class="col-md-2">
-      <label class="form-label">Model # (≤25)</label>
-      <input name="model" class="form-control" maxlength="25"
-             value="{{ wo.model if wo else '' }}">
+    <div class="col-md-2"><label class="form-label">Delivery fee ($)</label>
+      <input id="deliveryFee" type="number" step="0.01" name="delivery_fee" class="form-control" value="{{ '%.2f'|format(wo.delivery_fee) if IS_EDIT and wo.delivery_fee is not none else '0.00' }}">
     </div>
-    <div class="col-md-2">
-      <label class="form-label">Serial # (≤25)</label>
-      <input name="serial" class="form-control" maxlength="25"
-             value="{{ wo.serial if wo else '' }}">
+    <div class="col-md-2"><label class="form-label">Markup (%)</label>
+      <input id="markupPercent" type="number" step="0.01" name="markup_percent" class="form-control" value="{{ '%.2f'|format(wo.markup_percent) if IS_EDIT and wo.markup_percent is not none else '0.00' }}">
     </div>
-
-    <div class="col-md-2">
-      <label class="form-label">Job type</label>
-      <select name="job_type" class="form-select">
-        {% set jt = (wo.job_type if wo else 'BASE') %}
-        <option value="BASE" {{ 'selected' if jt=='BASE' else '' }}>BASE</option>
-        <option value="INSURANCE" {{ 'selected' if jt=='INSURANCE' else '' }}>INSURANCE</option>
-      </select>
-    </div>
-    <div class="col-md-2">
-      <label class="form-label">Delivery fee ($)</label>
-      <input type="number" step="0.01" name="delivery_fee" class="form-control"
-             value="{{ '%.2f'|format(wo.delivery_fee) if wo and wo.delivery_fee is not none else '0.00' }}">
-    </div>
-    <div class="col-md-2">
-      <label class="form-label">Markup (%)</label>
-      <input type="number" step="0.01" name="markup_percent" class="form-control"
-             value="{{ '%.2f'|format(wo.markup_percent) if wo and wo.markup_percent is not none else '0.00' }}">
-    </div>
-    <div class="col-md-2">
-      <label class="form-label">Status</label>
+    <div class="col-md-2"><label class="form-label">Status</label>
+      {% set st = (wo.status if IS_EDIT else 'search_ordered') %}
       <select name="status" class="form-select">
-        {% set st = (wo.status if wo else 'search_ordered') %}
         <option value="search_ordered" {{ 'selected' if st=='search_ordered' else '' }}>search_ordered</option>
         <option value="ordered" {{ 'selected' if st=='ordered' else '' }}>ordered</option>
         <option value="done" {{ 'selected' if st=='done' else '' }}>done</option>
@@ -62,34 +36,44 @@
     </div>
   </div>
 
+  <style>.col-narrow{width:90px}.col-money{width:110px;text-align:right}.num-cell{text-align:right;font-variant-numeric:tabular-nums}</style>
+
   <div class="table-responsive mb-3">
     <table class="table table-sm table-bordered align-middle" id="partsTable">
       <thead>
         <tr>
-          <th style="width:140px;">Part #</th>
-          <th style="width:220px;">Part name</th>
-          <th style="width:90px;">Qty</th>
-          <th style="width:160px;">Alt PN#</th>
-          <th style="width:200px;">Appliance</th>
-          <th style="width:120px;">Supplier</th>
-          <th style="width:80px;" title="Backorder">B/O</th>
-          <th style="width:140px;">Stock hint</th>
-          <th style="width:60px;"></th>
+          <th>Part #</th>
+          <th>Alt PN#</th>
+          <th>Part name</th>
+          <th class="text-end">Qty</th>
+          <th class="text-end col-money">Unit ($)</th>
+          <th class="text-end col-money">Total ($)</th>
+          <th class="col-narrow">WH</th>
+          <th class="col-narrow">Sup</th>
+          <th class="text-center">B/O</th>
+          <th>Stock hint</th>
+          <th class="text-center">Issue?</th>
+          <th style="width:46px;"></th>
         </tr>
       </thead>
-
       <tbody>
         {% for p in parts %}
         {% set i = loop.index0 %}
-        <tr>
-          <td><input class="form-control pn pn-20" name="rows[{{ i }}][part_number]" value="{{ p.part_number or '' }}" maxlength="20" required></td>
-          <td><input class="form-control" name="rows[{{ i }}][part_name]" value="{{ p.part_name or '' }}" maxlength="80"></td>
+        <tr data-row>
+          <td><input class="form-control pn" name="rows[{{ i }}][part_number]" value="{{ p.part_number or '' }}" maxlength="80"></td>
+          <td><input class="form-control" name="rows[{{ i }}][alt_pn]" value="{{ p.alt_numbers or '' }}"></td>
+          <td><input class="form-control" name="rows[{{ i }}][part_name]" value="{{ p.part_name or '' }}" maxlength="120"></td>
           <td><input class="form-control qty" name="rows[{{ i }}][quantity]" type="number" min="0" value="{{ p.quantity or 1 }}"></td>
-          <td><input class="form-control altpn-20" name="rows[{{ i }}][alt_part_numbers]" value="{{ p.alt_part_numbers or '' }}" maxlength="20" placeholder="comma separated"></td>
-          <td><input class="form-control" name="rows[{{ i }}][unit_label]" value="{{ p.unit_label or '' }}" maxlength="80" placeholder="e.g. FRIDGE"></td>
-          <td><input class="form-control supplier-6" name="rows[{{ i }}][supplier]" value="{{ p.supplier or '' }}" maxlength="6" placeholder="code"></td>
+          <td><input class="form-control unit-cost" name="rows[{{ i }}][unit_cost]" type="number" step="0.01" min="0" value="{{ '%.2f'|format(p.unit_cost) if p.unit_cost is not none else '0.00' }}"></td>
+          <td><input class="form-control total" name="rows[{{ i }}][line_total]" type="number" step="0.01" readonly value="0.00"></td>
+          <td><input class="form-control" name="rows[{{ i }}][warehouse]" value="{{ p.warehouse or '' }}" maxlength="120"></td>
+          <td><input class="form-control supplier-input" list="suppliers_datalist" name="rows[{{ i }}][supplier]" value="{{ p.supplier or '' }}" maxlength="80"></td>
           <td class="text-center"><input class="form-check-input" type="checkbox" name="rows[{{ i }}][backorder_flag]" {% if p.backorder_flag %}checked{% endif %}></td>
-          <td class="hint">—</td>
+          <td>
+            <span class="hint">—</span>
+            <input type="hidden" class="hint-input" name="rows[{{ i }}][stock_hint]" value="">
+          </td>
+          <td class="text-center"><input type="checkbox" class="form-check-input issue-check" name="rows[{{ i }}][issue_flag]" {% if not IS_EDIT %}disabled{% endif %}></td>
           <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
         </tr>
         {% endfor %}
@@ -97,83 +81,102 @@
     </table>
   </div>
 
-  <div class="mb-3">
-    <button type="button" class="btn btn-outline-secondary" id="addRow">+ Add part row</button>
-  </div>
+  <datalist id="suppliers_datalist">
+    {% for s in recent_suppliers or [] %}<option value="{{ s }}"></option>{% endfor %}
+  </datalist>
+
+  <div class="mb-3"><button type="button" class="btn btn-outline-secondary" id="addRow">+ Add part row</button></div>
 
   <div class="d-flex gap-2">
     <button type="submit" class="btn btn-primary">Save</button>
-    {% if wo %}
-      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">Back</a>
-    {% else %}
-      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Cancel</a>
-    {% endif %}
+    <button type="button" id="issueSelectedBtn" class="btn btn-success" {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>Issue selected</button>
+    {% if IS_EDIT %}<a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">Back</a>
+    {% else %}<a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Cancel</a>{% endif %}
   </div>
+</form>
+
+{% set issue_action = IS_EDIT and url_for('inventory.wo_issue_instock', wo_id=wo.id) or '#' %}
+<form id="issueForm" method="post" action="{{ issue_action }}">
+  <input type="hidden" name="wo_id" value="{{ wo.id if IS_EDIT else '' }}">
+  <input type="hidden" name="part_ids" id="issue_part_ids">
 </form>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function(){
-  const tbl = document.getElementById('partsTable').querySelector('tbody');
+  const tbody = document.querySelector('#partsTable tbody');
   const addBtn = document.getElementById('addRow');
-
-  function rowCount(){ return tbl.querySelectorAll('tr').length; }
 
   function templateRow(i){
     return `
-<tr>
-  <td><input class="form-control pn pn-20" name="rows[${i}][part_number]" maxlength="20" required></td>
-  <td><input class="form-control" name="rows[${i}][part_name]" maxlength="80"></td>
+<tr data-row>
+  <td><input class="form-control pn" name="rows[${i}][part_number]" maxlength="80"></td>
+  <td><input class="form-control" name="rows[${i}][alt_pn]"></td>
+  <td><input class="form-control" name="rows[${i}][part_name]" maxlength="120"></td>
   <td><input class="form-control qty" name="rows[${i}][quantity]" type="number" min="0" value="1"></td>
-  <td><input class="form-control altpn-20" name="rows[${i}][alt_part_numbers]" maxlength="20" placeholder="comma separated"></td>
-  <td><input class="form-control" name="rows[${i}][unit_label]" maxlength="80" placeholder="e.g. FRIDGE"></td>
-  <td><input class="form-control supplier-6" name="rows[${i}][supplier]" maxlength="6" placeholder="code"></td>
+  <td><input class="form-control unit-cost" name="rows[${i}][unit_cost]" type="number" step="0.01" min="0" value="0.00"></td>
+  <td><input class="form-control total" name="rows[${i}][line_total]" type="number" step="0.01" readonly value="0.00"></td>
+  <td><input class="form-control" name="rows[${i}][warehouse]" maxlength="120"></td>
+  <td><input class="form-control supplier-input" name="rows[${i}][supplier]" list="suppliers_datalist" maxlength="80"></td>
   <td class="text-center"><input class="form-check-input" type="checkbox" name="rows[${i}][backorder_flag]"></td>
-  <td class="hint">—</td>
+  <td><span class="hint">—</span><input type="hidden" class="hint-input" name="rows[${i}][stock_hint]" value=""></td>
+  <td class="text-center"><input type="checkbox" class="form-check-input issue-check" name="rows[${i}][issue_flag]"></td>
   <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
-</tr>`;
+</tr>`;}
+
+  function recalc(tr){
+    const qty = parseFloat(tr.querySelector('.qty')?.value||'0')||0;
+    const unit= parseFloat(tr.querySelector('.unit-cost')?.value||'0')||0;
+    const total = (qty*unit).toFixed(2);
+    const totalInput = tr.querySelector('.total'); if (totalInput) totalInput.value = total;
+  }
+
+  function setIssueEnabled(tr){
+    const t = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
+    const cb = tr.querySelector('.issue-check'); if(!cb) return;
+    if (t==='STOCK'){ cb.disabled=false; } else { cb.checked=false; cb.disabled=true; }
   }
 
   function fetchHint(tr){
-    const pn = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
-    const qty = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
-    const hintCell = tr.querySelector('.hint');
-    if (!pn || qty <= 0) { hintCell.textContent = '—'; return; }
-    fetch(`/api/stock_hint?pn=${encodeURIComponent(pn)}&qty=${qty}`)
-      .then(r => r.json()).then(j => {
-        hintCell.textContent = j.hint || '—';
-        hintCell.classList.remove('text-success','text-warning');
-        if (j.hint && j.hint.startsWith('STOCK')) hintCell.classList.add('text-success');
-        else hintCell.classList.add('text-warning');
-      }).catch(()=>{ hintCell.textContent = '—';});
+    const pn=(tr.querySelector('.pn')?.value||'').trim().toUpperCase();
+    const qty=parseInt(tr.querySelector('.qty')?.value||'0',10)||0;
+    const span=tr.querySelector('.hint'), hidden=tr.querySelector('.hint-input');
+    if(!pn||qty<=0){ if(span) span.textContent='—'; if(hidden) hidden.value=''; setIssueEnabled(tr); return; }
+    fetch(`/api/stock_hint?pn=${encodeURIComponent(pn)}&qty=${qty}`).then(r=>r.json()).then(j=>{
+      const norm=(String(j.hint||'').toUpperCase().startsWith('STOCK')?'STOCK':'WAIT');
+      if(span) span.textContent=norm; if(hidden) hidden.value=norm; setIssueEnabled(tr);
+    }).catch(()=>{ if(span) span.textContent='—'; if(hidden) hidden.value=''; setIssueEnabled(tr); });
   }
 
-  addBtn?.addEventListener('click', () => {
-    const i = rowCount();
-    tbl.insertAdjacentHTML('beforeend', templateRow(i));
+  addBtn?.addEventListener('click', ()=>{
+    const i = tbody.querySelectorAll('tr[data-row]').length;
+    tbody.insertAdjacentHTML('beforeend', templateRow(i));
   });
 
-  tbl.addEventListener('input', (e) => {
-    const tr = e.target.closest('tr');
-    if (!tr) return;
-    if (e.target.classList.contains('pn') || e.target.classList.contains('qty')) {
-      fetchHint(tr);
-    }
+  tbody.addEventListener('input', (e)=>{
+    const tr=e.target.closest('tr'); if(!tr) return;
+    if(e.target.classList.contains('qty')||e.target.classList.contains('unit-cost')) recalc(tr);
+    if(e.target.classList.contains('pn')||e.target.classList.contains('qty')) fetchHint(tr);
   });
 
-  tbl.addEventListener('click', (e) => {
-    if (e.target.classList.contains('del-row')) {
-      const tr = e.target.closest('tr');
-      tr?.remove();
-    }
+  tbody.addEventListener('click', (e)=>{
+    if(e.target.classList.contains('del-row')) e.target.closest('tr')?.remove();
   });
 
-  // первичная инициализация подсказок
-  tbl.querySelectorAll('tr').forEach(fetchHint);
+  document.getElementById('issueSelectedBtn')?.addEventListener('click', ()=>{
+    const ids=[...document.querySelectorAll('.issue-check:checked')].map((cb,idx)=>idx);
+    if(ids.length===0){ alert("Select at least one in-stock part"); return; }
+    document.getElementById('issue_part_ids').value=ids.join(',');
+    document.getElementById('issueForm').submit();
+  });
+
+  // init for existing rows
+  tbody.querySelectorAll('tr[data-row]').forEach(tr=>{ recalc(tr); fetchHint(tr); });
 })();
 </script>
 {% endblock %}
+
 
 
 

@@ -1,34 +1,45 @@
 {% extends "base.html" %}
-
 {% block content %}
-{# единый флаг: RO=true => только просмотр #}
 {% set RO = readonly or False %}
 {% set dis = 'disabled' if RO else '' %}
 {% set ro  = 'readonly' if RO else '' %}
 {% set IS_EDIT = wo is not none %}
 
+<style>
+  .col-narrow{width:90px}
+  .col-money{width:90px;text-align:right}
+  .col-qty{width:64px;text-align:right}
+  .col-issue{width:70px;text-align:center}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+
+  /* шапка таблицы не перехватывает клики */
+  .wo-form .unit-table thead th{position:static!important;pointer-events:none;}
+
+  /* Issue ячейка и чекбокс */
+  .wo-form .unit-table td.issue-cell{position:relative;}
+  .wo-form .unit-table .issue-check{
+    position:relative; z-index:3; pointer-events:auto!important; opacity:1!important; cursor:pointer;
+  }
+  .wo-form .unit-table td.issue-cell, .wo-form .unit-table td.issue-cell *{ pointer-events:auto!important; }
+</style>
+
 <h3>{{ RO and 'View' or (wo and 'Edit' or 'New') }} Work Order (multi-appliance)</h3>
 
-<form method="post" action="{{ url_for('inventory.wo_savex') }}" id="woForm" class="wo-form">
-  {% if IS_EDIT %}
-    <input type="hidden" name="wo_id" value="{{ wo.id }}">
-  {% endif %}
+<form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm" class="wo-form">
+  {% if IS_EDIT %}<input type="hidden" name="wo_id" value="{{ wo.id }}">{% endif %}
 
   <div class="row g-3 mb-3">
     <div class="col-md-3">
       <label class="form-label">Technician</label>
-      <input id="technicianInput" name="technician_name" class="form-control" required
-             list="technicianList"
+      <input id="technicianInput" name="technician_name" class="form-control" required list="technicianList"
              value="{{ wo.technician_name if IS_EDIT else '' }}" {{ ro }} {{ dis }}>
       <datalist id="technicianList"></datalist>
     </div>
-
     <div class="col-md-3">
       <label class="form-label">Job number(s) (comma separated)</label>
       <input name="job_numbers" class="form-control" placeholder="98356, 98256"
              value="{{ wo.job_numbers if IS_EDIT else '' }}" {{ ro }} {{ dis }}>
     </div>
-
     <div class="col-md-2">
       <label class="form-label">Job type</label>
       {% set jt = (wo.job_type if IS_EDIT else 'BASE') %}
@@ -37,19 +48,16 @@
         <option value="INSURANCE" {{ 'selected' if jt=='INSURANCE' else '' }}>INSURANCE</option>
       </select>
     </div>
-
     <div class="col-md-2">
       <label class="form-label">Delivery fee ($)</label>
       <input id="deliveryFee" type="number" step="0.01" name="delivery_fee" class="form-control"
              value="{{ '%.2f'|format(wo.delivery_fee) if IS_EDIT and wo.delivery_fee is not none else '0.00' }}" {{ ro }} {{ dis }}>
     </div>
-
     <div class="col-md-2">
       <label class="form-label">Markup (%)</label>
       <input id="markupPercent" type="number" step="0.01" name="markup_percent" class="form-control"
              value="{{ '%.2f'|format(wo.markup_percent) if IS_EDIT and wo.markup_percent is not none else '0.00' }}" {{ ro }} {{ dis }}>
     </div>
-
     <div class="col-md-2">
       <label class="form-label">Status</label>
       {% set st = (wo.status if IS_EDIT else 'search_ordered') %}
@@ -67,9 +75,7 @@
     <div class="card">
       <div class="card-header d-flex justify-content-between align-items-center">
         <strong>Appliance #{{ loop.index }}</strong>
-        {% if not RO %}
-          <button type="button" class="btn btn-sm btn-outline-danger del-unit" aria-label="Remove appliance">&times;</button>
-        {% endif %}
+        {% if not RO %}<button type="button" class="btn btn-sm btn-outline-danger del-unit">&times;</button>{% endif %}
       </div>
 
       <div class="card-body">
@@ -80,11 +86,13 @@
           </div>
           <div class="col-md-4">
             <label class="form-label">Model # (≤25)</label>
-            <input name="units[{{ ui }}][model]" class="form-control" maxlength="25" value="{{ u.model or '' }}" {{ ro }} {{ dis }}>
+            <input name="units[{{ ui }}][model]" class="form-control" maxlength="25"
+                   value="{{ u.model or '' }}" {{ ro }} {{ dis }}>
           </div>
           <div class="col-md-4">
             <label class="form-label">Serial # (≤25)</label>
-            <input name="units[{{ ui }}][serial]" class="form-control" maxlength="25" value="{{ u.serial or '' }}" {{ ro }} {{ dis }}>
+            <input name="units[{{ ui }}][serial]" class="form-control" maxlength="25"
+                   value="{{ u.serial or '' }}" {{ ro }} {{ dis }}>
           </div>
         </div>
 
@@ -92,15 +100,17 @@
           <table class="table table-sm table-bordered align-middle unit-table">
             <thead>
               <tr>
-                <th class="w-pn">Part #</th>
-                <th class="w-alt">Alt PN#</th>
-                <th class="w-name">Part name</th>
-                <th class="w-qty text-end">Qty</th>
-                <th class="w-cost text-end">Unit cost ($)</th>
-                <th class="w-ltot text-end">Line total ($)</th>
-                <th style="width:120px;">Supplier</th>
+                <th>Part #</th>
+                <th>Alt PN#</th>
+                <th>Part name</th>
+                <th class="text-end col-qty">Qty</th>
+                <th class="text-end col-money">Unit ($)</th>
+                <th class="text-end col-money">Total ($)</th>
+                <th class="col-narrow">WH</th>
+                <th class="col-narrow">Sup</th>
                 <th style="width:80px;" title="Backorder">B/O</th>
                 <th style="width:140px;">Stock hint</th>
+                <th class="col-issue">Issue?</th>
                 <th style="width:60px;"></th>
               </tr>
             </thead>
@@ -108,43 +118,31 @@
               {% for r in (u.rows or []) %}
               {% set ri = loop.index0 %}
               <tr>
-                <td><input class="form-control pn pn-20" name="units[{{ ui }}][rows][{{ ri }}][part_number]"
-                           value="{{ r.part_number or '' }}" maxlength="20" {{ ro }} {{ dis }}></td>
-                <td><input class="form-control altpn-20" name="units[{{ ui }}][rows][{{ ri }}][alt_numbers]"
-                           value="{{ r.alt_numbers or '' }}" maxlength="20" placeholder="comma separated" {{ ro }} {{ dis }}></td>
-                <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][part_name]"
-                           value="{{ r.part_name or '' }}" maxlength="80" {{ ro }} {{ dis }}></td>
-
-                <td class="num-cell">
-                  <input class="form-control qty" name="units[{{ ui }}][rows][{{ ri }}][quantity]"
-                         type="number" min="0" value="{{ r.quantity or 1 }}" {{ ro }} {{ dis }}>
-                </td>
-
-                <td class="num-cell">
-                  <input class="form-control unit-cost" name="units[{{ ui }}][rows][{{ ri }}][unit_cost]"
-                         type="number" step="0.01" min="0"
-                         value="{{ '%.2f'|format(r.unit_cost) if r.unit_cost is defined and r.unit_cost is not none else '0.00' }}" {{ ro }} {{ dis }}>
-                </td>
-
-                <td class="num-cell">
-                  <span class="line-total ro-input" data-value="0.00">0.00</span>
-                </td>
-
-                <td><input class="form-control supplier-6" name="units[{{ ui }}][rows][{{ ri }}][supplier]"
-                           value="{{ r.supplier or '' }}" maxlength="6" placeholder="code" {{ ro }} {{ dis }}></td>
-
+                <td><input class="form-control pn" name="units[{{ ui }}][rows][{{ ri }}][part_number]" value="{{ r.part_number or '' }}" maxlength="80" {{ ro }} {{ dis }}></td>
+                <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][alt_numbers]" value="{{ r.alt_numbers or '' }}" {{ ro }} {{ dis }}></td>
+                <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][part_name]" value="{{ r.part_name or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
+                <td class="num"><input class="form-control qty" name="units[{{ ui }}][rows][{{ ri }}][quantity]" type="number" min="0" value="{{ r.quantity or 1 }}" {{ ro }} {{ dis }}></td>
+                <td class="num"><input class="form-control unit-cost" name="units[{{ ui }}][rows][{{ ri }}][unit_cost]" type="number" step="0.01" min="0" value="{{ '%.2f'|format(r.unit_cost) if r.unit_cost is defined and r.unit_cost is not none else '0.00' }}" {{ ro }} {{ dis }}></td>
+                <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
+                <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][warehouse]" value="{{ r.warehouse or r.unit_label or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
+                <td><input class="form-control supplier-input" name="units[{{ ui }}][rows][{{ ri }}][supplier]" list="suppliers_datalist" value="{{ r.supplier or '' }}" {{ ro }} {{ dis }}></td>
                 <td class="text-center">
-                  <input class="form-check-input" type="checkbox" name="units[{{ ui }}][rows][{{ ri }}][backorder_flag]"
-                         {% if r.backorder_flag %}checked{% endif %} {{ dis }}>
+                  <div class="form-check d-flex justify-content-center m-0">
+                    <input class="form-check-input" type="checkbox" name="units[{{ ui }}][rows][{{ ri }}][backorder_flag]" {% if r.backorder_flag %}checked{% endif %} {{ dis }}>
+                  </div>
                 </td>
-
                 <td class="hint">—</td>
-
-                <td class="text-center">
+                <td class="text-center issue-cell">
                   {% if not RO %}
-                    <button type="button" class="btn btn-sm btn-outline-danger del-row" aria-label="Remove row">&times;</button>
+                  <div class="form-check d-flex justify-content-center m-0">
+                    <input type="checkbox" class="form-check-input issue-check"
+                           name="issue_ids" value="{{ r.id or (ui ~ '_' ~ ri) }}">
+                  </div>
+                  {% else %}
+                    <span class="text-muted">—</span>
                   {% endif %}
                 </td>
+                <td class="text-center">{% if not RO %}<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>{% endif %}</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -152,14 +150,8 @@
         </div>
 
         <div class="d-flex justify-content-between align-items-center">
-          {% if not RO %}
-            <button type="button" class="btn btn-outline-secondary add-row">+ Add part row</button>
-          {% else %}
-            <span></span>
-          {% endif %}
-          <div class="text-end">
-            <strong>Unit subtotal:</strong> <span class="unit-subtotal">0.00</span>
-          </div>
+          {% if not RO %}<button type="button" class="btn btn-outline-secondary add-row">+ Add part row</button>{% else %}<span></span>{% endif %}
+          <div class="text-end"><strong>Unit subtotal:</strong> <span class="unit-subtotal">0.00</span></div>
         </div>
       </div>
     </div>
@@ -167,23 +159,25 @@
   </div>
 
   {% if not RO %}
-  <div class="my-3">
-    <button type="button" class="btn btn-outline-primary" id="addUnit">+ Add appliance</button>
-  </div>
+  <div class="my-3"><button type="button" class="btn btn-outline-primary" id="addUnit">+ Add appliance</button></div>
   {% endif %}
 
   <div class="d-flex justify-content-between align-items-center my-2">
     <div></div>
-    <div class="text-end">
-      <strong>Grand total:</strong> <span id="grandTotal">0.00</span>
-    </div>
+    <div class="text-end"><strong>Grand total:</strong> <span id="grandTotal">0.00</span></div>
   </div>
+
+  <datalist id="suppliers_datalist">
+    {% for s in recent_suppliers or [] %}
+      <option value="{{ s }}"></option>
+    {% endfor %}
+  </datalist>
 
   <div class="d-flex gap-2">
     {% if not RO %}
       <button type="submit" class="btn btn-primary">Save</button>
+      <button type="button" id="issueSelectedBtn" class="btn btn-success" {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>Issue selected</button>
     {% endif %}
-
     {% if IS_EDIT %}
       <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">Back</a>
     {% else %}
@@ -191,245 +185,168 @@
     {% endif %}
   </div>
 </form>
+
+{% set issue_action = IS_EDIT and url_for('inventory.wo_issue_instock', wo_id=wo.id) or '#' %}
+<form id="issueForm" method="post" action="{{ issue_action }}">
+  <input type="hidden" name="wo_id" value="{{ wo.id if IS_EDIT else '' }}">
+  <input type="hidden" name="part_ids" id="issue_part_ids">
+</form>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function(){
-  const unitsWrap    = document.getElementById('unitsWrap');
-  const addUnitBtn   = document.getElementById('addUnit');
-  const grandTotalEl = document.getElementById('grandTotal');
+  const unitsWrap   = document.getElementById('unitsWrap');
+  const grandTotalEl= document.getElementById('grandTotal');
+  const deliveryEl  = document.getElementById('deliveryFee');
+  const markupEl    = document.getElementById('markupPercent');
+  const issueBtn    = document.getElementById('issueSelectedBtn');
 
-  // --- URLs ---
-  const TECH_SUGGEST_URL = "{{ url_for('inventory.api_technicians') }}";
-  const STOCK_HINT_URL   = "{{ url_for('inventory.api_stock_hint') }}";
-  const PART_GET_URL     = "{{ url_for('inventory.get_part_by_number', part_number='__PN__') }}";
-  const PART_LOOKUP_QS   = "{{ url_for('inventory.part_lookup') }}";
+  const toMoney = (n)=> (Math.round((Number(n||0)+Number.EPSILON)*100)/100).toFixed(2);
 
-  const READ_ONLY = {{ 'true' if RO else 'false' }};
-
-  function toMoney(n){ return (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2); }
-  function nextUnitIndex(){ return unitsWrap.querySelectorAll('.card').length; }
-  function nextRowIndex(card){ return card.querySelector('tbody').children.length; }
-
+  /* ===== totals ===== */
   function recomputeUnitSubtotal(card){
-    const markup   = parseFloat(document.getElementById('markupPercent')?.value || '0') || 0;
-    const delivery = parseFloat(document.getElementById('deliveryFee')?.value    || '0') || 0;
+    const markup   = parseFloat(markupEl?.value||'0')||0;
+    const delivery = parseFloat(deliveryEl?.value||'0')||0;
     let unitSum = 0;
-
-    card.querySelectorAll('tbody tr').forEach(tr => {
-      const qty  = parseFloat(tr.querySelector('.qty')?.value        || '0') || 0;
-      const cost = parseFloat(tr.querySelector('.unit-cost')?.value  || '0') || 0;
-
-      let line = qty * cost;
-      line = line * (1 + (markup / 100));
-      line = line + delivery;
-
+    card.querySelectorAll('tbody tr').forEach(tr=>{
+      const q = parseFloat(tr.querySelector('.qty')?.value||'0')||0;
+      const c = parseFloat(tr.querySelector('.unit-cost')?.value||'0')||0;
+      const line = (q*c)*(1+markup/100) + delivery;
       const cell = tr.querySelector('.line-total');
-      if (cell) { cell.textContent = toMoney(line); cell.dataset.value = toMoney(line); }
+      if (cell){ const v = toMoney(line); cell.textContent=v; cell.dataset.value=v; }
       unitSum += line;
     });
-
-    const us = card.querySelector('.unit-subtotal');
-    if (us) us.textContent = toMoney(unitSum);
+    const us = card.querySelector('.unit-subtotal'); if (us) us.textContent = toMoney(unitSum);
     recomputeGrandTotal();
   }
-
   function recomputeGrandTotal(){
-    let g = 0;
-    unitsWrap.querySelectorAll('.unit-subtotal').forEach(el => { g += parseFloat(el.textContent || '0') || 0; });
+    let g=0;
+    document.querySelectorAll('.unit-subtotal').forEach(x=> g += parseFloat(x.textContent||'0')||0);
     grandTotalEl.textContent = toMoney(g);
   }
-
-  // --- Stock hint ---
-  function fetchHint(tr){
-    const pn   = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
-    const qty  = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
-    const hint = tr.querySelector('.hint');
-    if (!pn || qty <= 0){ if(hint){ hint.textContent='—'; hint.className='hint'; } return; }
-
-    fetch(`${STOCK_HINT_URL}?pn=${encodeURIComponent(pn)}&qty=${qty}`)
-      .then(r => r.json())
-      .then(j => {
-        const raw  = (j.hint || '').toUpperCase();
-        const norm = raw.startsWith('STOCK') ? 'STOCK' : 'WAIT';
-        if (hint){
-          hint.textContent = norm;
-          hint.className = 'hint ' + (norm === 'STOCK' ? 'text-success' : 'text-warning');
-        }
-      })
-      .catch(() => { if(hint){ hint.textContent='—'; hint.className='hint'; }});
-  }
-
-  // ===== Part lookup (PN -> name/price/supplier) =====
-  function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-
-  function fillFromLookup(tr, data){
-    if (!data) return;
-    const p = data.part || data;
-    const found = (data.found === undefined) ? true : !!data.found;
-    if (!found || !p) return;
-
-    const nameInput = tr.querySelector("input[name$='[part_name]']");
-    const costInput = tr.querySelector(".unit-cost");
-    const suppInput = tr.querySelector("input[name$='[supplier]']");
-
-    if (nameInput && !nameInput.value) nameInput.value = p.part_name || p.name || "";
-    if (costInput && (!costInput.value || costInput.value === "0" || costInput.value === "0.00")) {
-      if (typeof p.unit_cost === "number") costInput.value = toMoney(p.unit_cost);
-    }
-    if (suppInput && !suppInput.value) suppInput.value = p.supplier || p.location || "";
-  }
-
-  const lookupPartByPn = debounce((tr)=>{
-    const pn = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
-    if (!pn) return;
-    const url1 = PART_GET_URL.replace('__PN__', encodeURIComponent(pn));
-    fetch(url1).then(r=>{
-      if (r.ok) return r.json();
-      const url2 = PART_LOOKUP_QS + '?part_number=' + encodeURIComponent(pn);
-      return fetch(url2).then(r2=> r2.ok ? r2.json() : null);
-    }).then(j=>{
-      fillFromLookup(tr, j);
-      const card = tr.closest('.card'); if (card) recomputeUnitSubtotal(card);
-    }).catch(()=>{});
-  }, 250);
-
-  if (!READ_ONLY){
-    addUnitBtn?.addEventListener('click', () => {
-      const ui = nextUnitIndex();
-      unitsWrap.insertAdjacentHTML('beforeend', unitTemplate(ui));
-    });
-
-    unitsWrap.addEventListener('click', (e) => {
-      const card = e.target.closest('.card');
-      if (!card) return;
-
-      if (e.target.classList.contains('del-unit')) {
-        card.remove(); recomputeGrandTotal(); return;
-      }
-      if (e.target.classList.contains('add-row')) {
-        const tbody = card.querySelector('tbody');
-        const ui = Array.from(unitsWrap.children).indexOf(card);
-        const ri = nextRowIndex(card);
-        tbody.insertAdjacentHTML('beforeend', rowTemplate(ui, ri));
-        recomputeUnitSubtotal(card); return;
-      }
-      if (e.target.classList.contains('del-row')) {
-        e.target.closest('tr')?.remove();
-        recomputeUnitSubtotal(card); return;
-      }
-    });
-
-    function maybeRecalc(e){
-      const tr = e.target.closest('tr');
-      const card = e.target.closest('.card');
-      if (!card) return;
-
-      if (tr && (e.target.classList.contains('pn') || e.target.classList.contains('qty'))) fetchHint(tr);
-      if (tr && e.target.classList.contains('pn')) lookupPartByPn(tr);
-      if (tr && (e.target.classList.contains('qty') || e.target.classList.contains('unit-cost'))) recomputeUnitSubtotal(card);
-    }
-    unitsWrap.addEventListener('input', maybeRecalc);
-
-    document.getElementById('deliveryFee')?.addEventListener('input', () => {
-      unitsWrap.querySelectorAll('.card').forEach(recomputeUnitSubtotal);
-    });
-    document.getElementById('markupPercent')?.addEventListener('input', () => {
-      unitsWrap.querySelectorAll('.card').forEach(recomputeUnitSubtotal);
-    });
-  }
-
-  // init: подтянуть хинты и имя/цену для уже введённых PN
-  unitsWrap.querySelectorAll('.card').forEach(card => {
-    card.querySelectorAll('tbody tr').forEach(tr => { fetchHint(tr); lookupPartByPn(tr); });
-    recomputeUnitSubtotal(card);
+  ['input','change'].forEach(ev=>{
+    deliveryEl?.addEventListener(ev, ()=>document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal));
+    markupEl?.addEventListener(ev,   ()=>document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal));
   });
 
-  // ----- генераторы строк/юнитов -----
-  function rowTemplate(ui, ri){
+  /* ===== enable/disable Issue by hint (only STOCK can be checked) ===== */
+  function setIssueEnabled(tr, enabled){
+    const cb = tr.querySelector('.issue-check');
+    if (!cb) return;
+    if (enabled){
+      cb.disabled = {{ 'false' if IS_EDIT else 'true' }}; // в новом WO всё ещё заблокировано кнопкой
+      cb.removeAttribute('disabled');
+    }else{
+      cb.checked = false;
+      cb.disabled = true;
+      cb.setAttribute('disabled','disabled');
+    }
+  }
+
+  /* ===== STOCK hint ===== */
+  function fetchHint(tr){
+    const pn  = (tr.querySelector('.pn')?.value||'').trim().toUpperCase();
+    const qty = parseInt(tr.querySelector('.qty')?.value||'0',10)||0;
+    const hintEl = tr.querySelector('.hint');
+
+    if(!pn||qty<=0){
+      if(hintEl) hintEl.textContent='—';
+      setIssueEnabled(tr, false);
+      return;
+    }
+
+    fetch(`{{ url_for('inventory.api_stock_hint') }}?pn=${encodeURIComponent(pn)}&qty=${qty}`)
+      .then(r=>r.json())
+      .then(j=>{
+        const t  = String(j?.hint||j?.status||'').toUpperCase();
+        const qa = Number(j?.qty_available ?? j?.available_qty ?? j?.qty ?? 0);
+        const ok = /\b(STOCK|IN[-\s]?STOCK|ON HAND|AVAILABLE)\b/.test(t) || (qa >= qty);
+        if(hintEl) hintEl.textContent = ok ? 'STOCK' : 'WAIT';
+        setIssueEnabled(tr, ok);
+      })
+      .catch(()=>{
+        if(hintEl) hintEl.textContent='—';
+        setIssueEnabled(tr, false);
+      });
+  }
+
+  /* ===== delegated handlers ===== */
+  unitsWrap.addEventListener('input', (e)=>{
+    const tr=e.target.closest('tr'); const card=e.target.closest('.card'); if(!card) return;
+    if(tr && (e.target.classList.contains('qty')||e.target.classList.contains('unit-cost'))) recomputeUnitSubtotal(card);
+    if(tr && (e.target.classList.contains('pn')||e.target.classList.contains('qty'))) fetchHint(tr);
+  });
+
+  unitsWrap.addEventListener('click',(e)=>{
+    const card=e.target.closest('.card'); if(!card) return;
+    if(e.target.classList.contains('del-unit')){ card.remove(); recomputeGrandTotal(); }
+    if(e.target.classList.contains('add-row')){
+      const tbody=card.querySelector('tbody');
+      const ui=[...document.querySelectorAll('#unitsWrap .card')].indexOf(card);
+      const ri=tbody.children.length;
+      tbody.insertAdjacentHTML('beforeend', rowTemplate(ui,ri));
+      recomputeUnitSubtotal(card);
+    }
+    if(e.target.classList.contains('del-row')){
+      const tr=e.target.closest('tr'); e.target.closest('tr')?.remove();
+      recomputeUnitSubtotal(card);
+    }
+  });
+
+  /* ===== Issue selected ===== */
+  issueBtn?.addEventListener('click', ()=>{
+    const selected = [];
+    document.querySelectorAll('tbody tr').forEach((tr)=>{
+      const cb = tr.querySelector('.issue-check');
+      const hint = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
+      if (cb && cb.checked && hint.startsWith('STOCK')){
+        selected.push(cb.value);
+      }
+    });
+    if (selected.length===0){
+      alert('Select at least one in-stock part (hint must be STOCK).');
+      return;
+    }
+    document.getElementById('issue_part_ids').value = selected.join(',');
+    document.getElementById('issueForm').submit();
+  });
+
+  /* ===== init ===== */
+  document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
+  unitsWrap.querySelectorAll('tbody tr').forEach(fetchHint);
+
+  /* ===== templates ===== */
+  function rowTemplate(ui,ri){
+    const ro = {{ RO and 'true' or 'false' }} ? 'disabled readonly' : '';
+    const boDisabled = {{ RO and 'true' or 'false' }} ? 'disabled' : '';
+    const delBtn = {{ RO and 'true' or 'false' }} ? '' : '<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>';
     return `
 <tr>
-  <td><input class="form-control pn pn-20" name="units[${ui}][rows][${ri}][part_number]" maxlength="20" ${READ_ONLY?'disabled readonly':''}></td>
-  <td><input class="form-control altpn-20" name="units[${ui}][rows][${ri}][alt_numbers]" maxlength="20" placeholder="comma separated" ${READ_ONLY?'disabled readonly':''}></td>
-  <td><input class="form-control" name="units[${ui}][rows][${ri}][part_name]" maxlength="80" ${READ_ONLY?'disabled readonly':''}></td>
-  <td class="num-cell"><input class="form-control qty" name="units[${ui}][rows][${ri}][quantity]" type="number" min="0" value="1" ${READ_ONLY?'disabled readonly':''}></td>
-  <td class="num-cell"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${READ_ONLY?'disabled readonly':''}></td>
-  <td class="num-cell"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
-  <td><input class="form-control supplier-6" name="units[${ui}][rows][${ri}][supplier]" maxlength="6" placeholder="code" ${READ_ONLY?'disabled readonly':''}></td>
-  <td class="text-center"><input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]" ${READ_ONLY?'disabled':''}></td>
+  <td><input class="form-control pn" name="units[${ui}][rows][${ri}][part_number]" maxlength="80" ${ro}></td>
+  <td><input class="form-control" name="units[${ui}][rows][${ri}][alt_numbers]" ${ro}></td>
+  <td><input class="form-control" name="units[${ui}][rows][${ri}][part_name]" maxlength="120" ${ro}></td>
+  <td class="num"><input class="form-control qty" name="units[${ui}][rows][${ri}][quantity]" type="number" min="0" value="1" ${ro}></td>
+  <td class="num"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${ro}></td>
+  <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
+  <td><input class="form-control" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
+  <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
+  <td class="text-center">
+    <div class="form-check d-flex justify-content-center m-0">
+      <input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]" ${boDisabled}>
+    </div>
+  </td>
   <td class="hint">—</td>
-  <td class="text-center">${READ_ONLY?'':'<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>'}</td>
+  <td class="text-center issue-cell">
+    <div class="form-check d-flex justify-content-center m-0">
+      <input type="checkbox" class="form-check-input issue-check" name="issue_ids" value="${ui}_${ri}" disabled>
+    </div>
+  </td>
+  <td class="text-center">${delBtn}</td>
 </tr>`;
   }
-
-  function unitTemplate(ui){
-    return `
-<div class="card">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <strong>Appliance #${ui+1}</strong>
-    ${READ_ONLY?'':'<button type="button" class="btn btn-sm btn-outline-danger del-unit">&times;</button>'}
-  </div>
-  <div class="card-body">
-    <div class="row g-3 mb-3">
-      <div class="col-md-4"><label class="form-label">Brand</label>
-        <input name="units[${ui}][brand]" class="form-control" ${READ_ONLY?'disabled readonly':''}></div>
-      <div class="col-md-4"><label class="form-label">Model # (≤25)</label>
-        <input name="units[${ui}][model]" class="form-control" maxlength="25" ${READ_ONLY?'disabled readonly':''}></div>
-      <div class="col-md-4"><label class="form-label">Serial # (≤25)</label>
-        <input name="units[${ui}][serial]" class="form-control" maxlength="25" ${READ_ONLY?'disabled readonly':''}></div>
-    </div>
-    <div class="table-responsive">
-      <table class="table table-sm table-bordered align-middle unit-table">
-        <thead>
-          <tr>
-            <th class="w-pn">Part #</th><th class="w-alt">Alt PN#</th><th class="w-name">Part name</th>
-            <th class="w-qty text-end">Qty</th><th class="w-cost text-end">Unit cost ($)</th>
-            <th class="w-ltot text-end">Line total ($)</th><th style="width:120px;">Supplier</th>
-            <th style="width:80px;" title="Backorder">B/O</th><th style="width:140px;">Stock hint</th><th style="width:60px;"></th>
-          </tr>
-        </thead>
-        <tbody>${rowTemplate(ui, 0)}</tbody>
-      </table>
-    </div>
-    <div class="d-flex justify-content-between align-items-center">
-      ${READ_ONLY?'<span></span>':'<button type="button" class="btn btn-outline-secondary add-row">+ Add part row</button>'}
-      <div class="text-end"><strong>Unit subtotal:</strong> <span class="unit-subtotal">0.00</span></div>
-    </div>
-  </div>
-</div>`;
-  }
-
-  // ===== Technician autosuggest + UPPER =====
-  (function setupTechnicianSuggest(){
-    const input = document.getElementById('technicianInput');
-    const list  = document.getElementById('technicianList');
-    if (!input || !list) return;
-
-    function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-    function renderOptions(items){ list.innerHTML = (items||[]).map(v=>`<option value="${v}">`).join(''); }
-
-    const fetchSuggest = debounce((term)=>{
-      term = (term||'').trim().toUpperCase();
-      if (term.length < 2){ renderOptions([]); return; }
-      fetch(`${TECH_SUGGEST_URL}?q=${encodeURIComponent(term)}`)
-        .then(r => r.ok ? r.json() : {items:[]})
-        .then(j => renderOptions(j.items||[]))
-        .catch(()=>renderOptions([]));
-    }, 180);
-
-    input.addEventListener('input', e => fetchSuggest(e.target.value));
-    input.addEventListener('focus', () => fetchSuggest(input.value));
-    input.addEventListener('blur', ()=>{ input.value = (input.value||'').trim().toUpperCase(); });
-    document.getElementById('woForm')?.addEventListener('submit', ()=>{
-      input.value = (input.value||'').trim().toUpperCase();
-    });
-  })();
-
 })();
 </script>
 {% endblock %}
-
-
 
 

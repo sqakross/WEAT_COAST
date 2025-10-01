@@ -1,0 +1,524 @@
+/* General body styling */
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f6f6f6;
+    padding: 20px;
+    margin: 0;
+}
+
+/* Header styling */
+header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background-color: #1a202c;
+    color: white;
+    padding: 15px;
+    z-index: 1100;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 24px;
+}
+
+/* Navigation styling */
+nav {
+    margin-top: 10px;
+}
+
+nav a {
+    color: white;
+    margin-right: 15px;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+nav a:hover {
+    text-decoration: underline;
+}
+
+/* Main content styling */
+main {
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+/* Form styling */
+form label {
+    display: block;
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+form input,
+form select {
+    width: 100%;
+    padding: 8px;
+    margin-top: 5px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+    font-size: 14px;
+}
+
+/* Buttons (не растягиваем все на 100%) */
+form button {
+    /* без width:100% по умолчанию */
+    padding: 8px;
+    margin-top: 5px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+    font-size: 14px;
+    background-color: #3182ce;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+form button:hover {
+    background-color: #2b6cb0;
+}
+
+/* Select2 styling */
+.select2-container {
+    width: 100% !important;
+    z-index: 10000;
+}
+
+.select2-container .select2-selection--single {
+    height: 38px !important;
+    padding: 6px 12px;
+    font-size: 14px;
+    border: 1px solid #ccc !important;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 38px !important;
+}
+
+.select2-selection {
+    height: 38px !important;
+    border: 1px solid #ccc !important;
+    padding: 5px !important;
+    font-size: 14px;
+}
+
+.select2-selection__rendered {
+    line-height: 28px !important;
+}
+
+.select2-selection__arrow {
+    height: 36px !important;
+}
+
+/* Flash messages */
+#messages li {
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+}
+
+#messages li.success {
+    background-color: #c6f6d5;
+    color: #22543d;
+}
+
+#messages li.danger {
+    background-color: #fed7d7;
+    color: #742a2a;
+}
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+table th,
+table td {
+    padding: 10px;
+    border: 1px solid #ddd;
+    text-align: left;
+}
+
+/* Layout helpers for fixed header + sticky toolbars */
+main.container {
+  padding-top: 110px; /* отступ сверху равный высоте меню + небольшой запас */
+}
+
+.content-after-filters {
+  margin-top: 100px; /* отступ, чтобы таблица не скрывалась под фиксированной панелью */
+}
+
+.dashboard-filters {
+  position: sticky;
+  top: 110px;  /* отступ вниз под фиксированное меню */
+  background-color: white;  /* чтобы блок не был прозрачным */
+  padding: 10px 15px;
+  z-index: 1050;  /* поверх таблиц и текста */
+  border-bottom: 1px solid #ccc;  /* линия под блоком */
+}
+
+.report-filters {
+  position: sticky;
+  top: 70px; /* чтобы фильтры не прятались за меню */
+  background-color: white;
+  padding: 10px 15px;
+  z-index: 1050; /* чтобы блок был поверх таблицы */
+  border-bottom: 1px solid #ccc; /* чтобы отделять фильтры от таблицы */
+}
+
+.report-content {
+  margin-top: 20px; /* немного больше высоты фиксированной панели */
+}
+
+/* Кнопки одного размера */
+.report-buttons a.btn {
+  min-width: 130px;
+  text-align: center;
+}
+
+/* Inventory table w/ sticky header */
+.inventory-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.inventory-table thead th {
+  position: sticky;
+  top: 0;
+  background-color: #f2f2f2;
+  z-index: 2;
+  border: 1px solid #ddd;
+  padding: 8px;
+}
+
+.inventory-table tbody td {
+  border: 1px solid #ddd;
+  padding: 8px;
+}
+
+.table-container {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.sticky-toolbar {
+  position: sticky;
+  top: 110px; /* под фиксированный хедер */
+  background-color: white;
+  z-index: 1000;
+  padding: 10px 15px;
+  border-bottom: 1px solid #ccc;
+}
+
+.scroll-area {
+  overflow-y: auto;
+  max-height: 600px;
+}
+
+.report-actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.report-actions a {
+  min-width: 130px;
+  text-align: center;
+}
+
+/* --- Navbar dropdown should float above dashboard UI --- */
+.navbar { z-index: 1200; }                   /* выше, чем фикс-элементы на странице */
+#navbarMain, .navbar-nav { overflow: visible !important; }
+
+.navbar .dropdown-menu {
+  z-index: 1300;                             /* поверх .navbar (1200) и типовых панелей */
+  margin-top: .4rem;
+}
+
+/* Если у дашборда есть липкая панель/фильтры со высоким z-index — прижмём ниже */
+.dashboard-sticky,
+.report-filters,
+.dashboard-toolbar {
+  z-index: 100 !important;
+}
+
+/* На всякий случай избегаем отсечения выпавшего меню контейнером основной области */
+main, .container, .container-fluid {
+  overflow: visible;
+}
+
+/* На узких экранах раскрытое меню ведём статично, чтобы не обрезалось */
+@media (max-width: 991.98px) {
+  .navbar .dropdown-menu {
+    position: static;
+    float: none;
+  }
+}
+
+/* === Fix for numeric columns alignment === */
+.num-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding: .35rem .45rem !important;   /* same padding for all */
+  vertical-align: middle;
+}
+
+.num-cell input,
+.num-cell .form-control {
+  width: 100% !important;
+  min-width: 0;
+  text-align: right;
+  padding-right: .45rem;
+  margin: 0;
+  box-sizing: border-box;
+  font-variant-numeric: tabular-nums;
+  height: 1.9rem;                      /* uniform height */
+}
+
+.num-cell span {
+  display: block;
+  width: 100%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Issued Parts Report (Grouped by Invoice) - scoped styles ===== */
+.reports-grouped .report-table-wrap .table {
+  font-size: 0.875rem;              /* unified, compact text */
+}
+
+.reports-grouped .report-table-wrap .table td,
+.reports-grouped .report-table-wrap .table th {
+  vertical-align: middle;           /* center controls vertically */
+  padding: .40rem .50rem;           /* compact but readable */
+  line-height: 1.35;                /* stable row height */
+  white-space: nowrap;              /* avoid wrapping noise */
+}
+
+/* Unify inputs/selects height & typography inside table */
+.reports-grouped .report-table-wrap .table input,
+.reports-grouped .report-table-wrap .table select {
+  font-size: 0.875rem !important;
+  line-height: 1.35 !important;
+  height: 1.8rem !important;        /* consistent height */
+  padding: .25rem .45rem !important;
+  box-sizing: border-box;
+}
+
+/* Fixed column widths so headers & rows align perfectly */
+.reports-grouped .col-check   { width: 32px;  }
+.reports-grouped .col-pn      { width: 140px; white-space: nowrap; }
+.reports-grouped .col-name    { min-width: 220px; max-width: 420px; }
+.reports-grouped .col-qty     { width: 90px;  }
+.reports-grouped .col-rqty    { width: 120px; }
+.reports-grouped .col-cost    { width: 110px; }
+.reports-grouped .col-total   { width: 120px; }
+.reports-grouped .col-issued  { width: 160px; }
+.reports-grouped .col-refjob  { width: 160px; }
+.reports-grouped .col-date    { width: 140px; }
+.reports-grouped .col-actions { width: 100px; }
+
+/* Full-width controls inside the fixed columns */
+.reports-grouped .w-issued { width: 100%; max-width: 150px; }
+.reports-grouped .w-refjob { width: 100%; max-width: 150px; }
+.reports-grouped .w-date   { width: 100%; max-width: 130px; }
+
+/* Right-align numeric inputs and keep their width tight */
+.reports-grouped .report-table-wrap .table .text-end input[type="number"],
+.reports-grouped .report-table-wrap .table .text-end input[type="text"] {
+  text-align: right;
+  max-width: 90px;                  /* e.g., Unit Cost */
+}
+
+/* Fake read-only “inputs” to match inputs’ height when not editable */
+.reports-grouped .ro-input {
+  display: inline-block;
+  width: 100%;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  height: 1.8rem;                   /* match input height */
+  padding: .25rem .45rem;
+  box-sizing: border-box;
+}
+
+/* sticky table header */
+.reports-grouped .table-sticky thead th{
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: #f8f9fa; /* plain fallback */
+}
+
+/* Truncate long part names gracefully */
+.reports-grouped .text-ellipsis {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;
+}
+
+/* --- Hard-normalize row internals so left text aligns with right inputs --- */
+.reports-grouped .report-table-wrap .table .form-control,
+.reports-grouped .report-table-wrap .table .form-select {
+  height: 1.8rem !important;
+  line-height: 1.35 !important;
+  padding: .25rem .45rem !important;
+  box-sizing: border-box;
+  margin: 0;                  /* no weird baseline offsets */
+}
+
+/* Read-only twin that visually matches inputs */
+.reports-grouped .ro-input {
+  display: flex;              /* vertically center inner text like inputs do */
+  align-items: center;
+  height: 1.8rem;             /* equal to inputs */
+  line-height: 1.35;
+  padding: .25rem .45rem;
+  box-sizing: border-box;
+  border: 1px solid transparent;   /* keeps exact box metrics vs inputs */
+}
+
+/* Code blocks and long names shouldn’t change the row height */
+.reports-grouped code {
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+/* Guarantee middle alignment in cells */
+.reports-grouped .report-table-wrap .table td,
+.reports-grouped .report-table-wrap .table th {
+  vertical-align: middle;
+  padding: .40rem .50rem;
+  line-height: 1.35;
+}
+
+/* ==== Work Order form (scoped) ==== */
+.wo-form .unit-table { table-layout: fixed; }  /* единообразно fixed для формы */
+
+.wo-form .unit-table input,
+.wo-form .unit-table select {
+  height: 32px;               /* не конфликтует с отчётами */
+}
+
+/* ширины только для этой формы */
+.wo-form .w-pn   { min-width: 220px; }  /* Part # */
+.wo-form .w-alt  { min-width: 220px; }  /* Alt PN# */
+.wo-form .w-name { min-width: 260px; }  /* Part name */
+.wo-form .w-qty  { width: 90px;  min-width: 80px; }
+.wo-form .w-cost { width: 120px; min-width: 110px; text-align: right; }
+.wo-form .w-ltot { width: 140px; min-width: 130px; }
+
+/* правое выравнивание для чисел (используем уже существующую идею num-cell) */
+.wo-form .num-cell,
+.wo-form .num-cell input,
+.wo-form .num-cell .form-control {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Work Order form (compact table) ===== */
+.unit-table { table-layout: fixed; font-size: 0.9rem; }
+.unit-table th, .unit-table td { padding: .35rem .45rem; vertical-align: middle; }
+
+.unit-table .form-control,
+.unit-table .form-select {
+  height: 1.85rem; line-height: 1.35; padding: .2rem .4rem; font-size: 0.9rem;
+}
+
+/* Узкие и фиксированные колонки — чтобы убрать горизонтальный скролл */
+.unit-table .col-pn    { width: 120px; }
+.unit-table .col-alt   { width: 160px; }
+.unit-table .col-name  { min-width: 220px; }
+.unit-table .col-qty   { width: 72px;  }
+.unit-table .col-cost  { width: 95px;  }
+.unit-table .col-total { width: 105px; }
+.unit-table .col-supplier { width: 140px; }
+.unit-table .col-bo    { width: 72px;  }
+.unit-table .col-status{ width: 140px; }
+.unit-table .col-hint  { width: 95px;  white-space: nowrap; }
+.unit-table .col-x     { width: 46px;  }
+
+.unit-table .text-end input.form-control { text-align: right; }
+
+/* маленькие бейджи-хинты */
+.hint.text-success, .hint.text-warning { font-weight: 600; font-size: 0.85rem; }
+
+/* Compact widths for part inputs (legacy helpers; можно оставить) */
+input.pn-20 { max-width: 20ch; }
+input.altpn-20 { max-width: 20ch; }
+input.supplier-6 { width: 6.5ch; max-width: 6.5ch; }
+
+/* ===== Work Orders list (scoped, no duplicates) ===== */
+
+/* Fixed column widths (keep header/body aligned) */
+.wo-list-table .col-id      { width: 80px; }
+.wo-list-table .col-tech    { width: 200px; }
+.wo-list-table .col-type    { width: 140px; }
+.wo-list-table .col-status  { width: 140px; }
+.wo-list-table .col-created { width: 120px; }
+.wo-list-table .col-actions { width: 220px; }
+
+/* Truncate long text consistently (no inline styles) */
+.wo-list-table .jobs-trunc  { max-width: 36rem; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wo-list-table .brand-trunc { max-width: 32rem; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Make action buttons (link + form button) sit perfectly on one line */
+.wo-actions {
+  display: inline-flex;
+  align-items: stretch;     /* equal height for both controls */
+  gap: .375rem;             /* small, consistent space */
+}
+.wo-actions form { margin: 0; }               /* remove default form margin */
+.wo-actions .btn {
+  padding: .25rem .6rem;    /* match .btn-sm */
+  line-height: 1;
+  border-radius: .25rem;
+  width: auto;              /* отмена возможного 100% */
+  height: 32px;             /* единая высота */
+}
+
+/* Нормализуем конкретные варианты Bootstrap, чтобы смотрелись как «Cancel» и пр. */
+.wo-actions .btn.btn-primary {
+  background-color: #0d6efd;    /* Bootstrap primary */
+  border-color: #0d6efd;
+  color: #fff;
+}
+
+.wo-actions .btn.btn-outline-danger {
+  background-color: transparent;
+  color: #dc3545;               /* Bootstrap danger */
+  border-color: #dc3545;
+}
+
+/* === Narrow columns used в новой таблице (WH/Sup/денежные/Issue) === */
+.col-narrow { width: 90px; }
+.col-money  { width: 90px; text-align: right; }
+.col-qty    { width: 64px; text-align: right; }
+.col-issue  { width: 60px; text-align: center; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

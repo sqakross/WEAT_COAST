@@ -189,12 +189,12 @@ if __name__ == "__main__":
     debug = os.getenv("DEBUG", "true").lower() == "true"
     use_ssl = os.getenv("USE_SSL", "1").lower() in ("1", "true", "yes")
 
-    if use_ssl:
-        logging.info(f"Starting dev server on https://0.0.0.0:{port} (adhoc TLS), debug={debug}")
-        app.run(host='0.0.0.0', port=port, debug=debug, ssl_context='adhoc')
-    else:
-        logging.info(f"Starting dev server on http://0.0.0.0:{port}, debug={debug}")
-        app.run(host='0.0.0.0', port=port, debug=debug)
+
+    logging.info(f"Starting dev server on https://0.0.0.0:{port} (adhoc TLS), debug={debug}")
+    app.run(host='0.0.0.0', port=port, debug=debug, ssl_context='adhoc')
+    # else:
+    #     logging.info(f"Starting dev server on http://0.0.0.0:{port}, debug={debug}")
+    #     app.run(host='0.0.0.0', port=port, debug=debug)
 
 
 
