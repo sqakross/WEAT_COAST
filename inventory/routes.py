@@ -73,6 +73,11 @@ _rows_re  = re.compile(r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_nam
 def _tech_norm(s: str) -> str:
     return (s or '').strip().upper()
 
+def _next_invoice_number():
+    last = db.session.query(db.func.max(IssuedPartRecord.invoice_number)).scalar() or 0
+    return last + 1
+
+
 
 def _parse_dt_flex(s: str):
     """Безопасный парсер даты/даты-времени: поддерживает 'YYYY-MM-DD', 'YYYY-MM-DD HH:MM:SS', '...%f'.

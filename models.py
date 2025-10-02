@@ -214,6 +214,9 @@ class IssuedPartRecord(db.Model):
     issue_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     unit_cost_at_issue = db.Column(db.Float, nullable=False)
 
+    invoice_number = db.Column(db.Integer, index=True, nullable=True)
+    location = db.Column(db.String(120), nullable=True)
+
     part = db.relationship('Part', backref=db.backref('issued_records', lazy=True))
 
 
