@@ -1,8 +1,6 @@
 from sqlalchemy.exc import SQLAlchemyError
-import traceback
-
 from sqlalchemy import func, or_, and_
-from models import IssuedPartRecord, WorkOrder, WorkOrderPart, TechReceiveLog
+from models import IssuedPartRecord, WorkOrder, WorkOrderPart, TechReceiveLog, IssuedBatch, Part
 import json
 # from extensions import db
 import pdfplumber
@@ -70,26 +68,193 @@ _PREFIX_RE = re.compile(r'^\s*(wo|job|pn|model|brand|serial)\s*:\s*(.+)\s*$', re
 _units_re = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
 _rows_re  = re.compile(r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|alt_numbers|supplier|backorder_flag|line_status|unit_cost)\]$")
 
+# --- Invoice numbering baseline ---
+INVOICE_START_AT = 140  # новые инвойсы начнутся с 000140
+
+# inventory/routes.py  (добавь рядом с _create_batch_for_records)
+
+def _is_return_row(r) -> bool:
+    """Возвратная строка — это строка с отрицательным количеством."""
+    try:
+        return (r.quantity or 0) < 0
+    except Exception:
+        return False
+
+def _ensure_invoice_number_for_records(records, issued_to, issued_by, reference_job, issue_date, location):
+    """
+    Если у всех строк invoice_number == None — создаёт батч и закрепляет уникальный номер.
+    Исторические инвойсы с уже заданным номером НЕ трогаем.
+    """
+    from extensions import db
+    if not records:
+        return
+
+    if all(getattr(r, "invoice_number", None) is None for r in records):
+        # Используем уже существующую у тебя функцию
+        batch = _create_batch_for_records(
+            records=records,
+            issued_to=issued_to,
+            issued_by=issued_by,
+            reference_job=reference_job,
+            issue_date=issue_date,
+            location=location or None,
+        )
+        # номер закреплён в batch.invoice_number
+        # flush/commit снаружи, в update_invoice
+
+
+def _format_invoice_no(n: int | None) -> str:
+    """UI/PDF формат: 6 цифр с ведущими нулями; '—' если None."""
+    return f"{int(n):06d}" if n else "—"
+
+
 def _tech_norm(s: str) -> str:
     return (s or '').strip().upper()
 
-def _next_invoice_number():
-    last = db.session.query(db.func.max(IssuedPartRecord.invoice_number)).scalar() or 0
-    return last + 1
+def _next_invoice_number() -> int:
+    """
+    Следующий invoice_number:
+      max(IssuedBatch.invoice_number, IssuedPartRecord.invoice_number, INVOICE_START_AT-1) + 1
+      (учитывает legacy-строки и гарантирует старт с 140)
+    """
+    # max по батчам (новая схема)
+    max_batch = db.session.query(
+        func.coalesce(func.max(IssuedBatch.invoice_number), 0)
+    ).scalar()
+
+    # max по строкам (legacy)
+    max_line = db.session.query(
+        func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)
+    ).scalar()
+
+    try:
+        mb = int(max_batch or 0)
+    except Exception:
+        mb = 0
+    try:
+        ml = int(max_line or 0)
+    except Exception:
+        ml = 0
+
+    # базовый «семечко», чтобы первый новый = 140
+    seed = INVOICE_START_AT - 1
+    return max(mb, ml, seed) + 1
+
+
+def _create_batch_for_records(
+    records: list,
+    issued_to: str,
+    issued_by: str,
+    reference_job: str | None = None,
+    issue_date: datetime | None = None,
+    location: str | None = None,
+):
+    """
+    Создаёт IssuedBatch с уникальным invoice_number и привязывает все строки.
+    Использует SAVEPOINT (begin_nested), чтобы коллизия unique не откатывала всю сессию.
+    """
+    if not records:
+        raise ValueError("No records passed to _create_batch_for_records")
+
+    issue_date = issue_date or datetime.utcnow()
+
+    for _ in range(5):  # несколько попыток на случай гонки за номер
+        inv_no = _next_invoice_number()
+
+        try:
+            with db.session.begin_nested():  # SAVEPOINT
+                batch = IssuedBatch(
+                    invoice_number=inv_no,
+                    issued_to=issued_to,
+                    issued_by=issued_by or "system",
+                    reference_job=reference_job,
+                    issue_date=issue_date,
+                    location=(location or None),
+                )
+                db.session.add(batch)
+                db.session.flush()  # резервируем уникальный номер (может кинуть IntegrityError)
+
+                # привязываем строки к батчу и переносим «шапку» для консистентности
+                for r in records:
+                    r.batch_id = batch.id
+                    r.invoice_number = inv_no
+                    r.issued_to = issued_to
+                    r.issued_by = issued_by or "system"
+                    r.reference_job = reference_job
+                    if location:
+                        r.location = location
+
+                db.session.flush()
+
+            # успех
+            return batch
+
+        except IntegrityError:
+            db.session.rollback()
+            continue
+
+    raise RuntimeError("Не удалось сгенерировать уникальный invoice_number после нескольких попыток")
+
+def create_batch_for_records(records, issued_to, issued_by, reference_job=None, issue_date=None, location=None):
+    """Создаёт IssuedBatch и привязывает к нему все переданные строки."""
+    if not records:
+        return None
+
+    issue_date = issue_date or datetime.utcnow()
+
+    # пробуем зарезервировать invoice_number с 2–3 попытками
+    for _ in range(3):
+        inv_no = _next_invoice_number()
+        batch = IssuedBatch(
+            invoice_number=inv_no,
+            issued_to=issued_to,
+            issued_by=issued_by,
+            reference_job=reference_job,
+            issue_date=issue_date,
+            location=location
+        )
+        db.session.add(batch)
+
+        try:
+            db.session.flush()  # фиксируем уникальность invoice_number
+        except IntegrityError:
+            db.session.rollback()
+            continue  # пробуем ещё раз с новым номером
+        else:
+            # Привязываем все строки
+            for r in records:
+                r.batch_id = batch.id
+                r.invoice_number = inv_no  # оставляем дублирующий номер для отчётов
+                r.issued_to = issued_to
+                r.issued_by = issued_by
+                r.reference_job = reference_job
+                if location:
+                    r.location = location
+            return batch
+
+    raise RuntimeError("Не удалось создать IssuedBatch: invoice_number конфликтует")
+
 
 
 
 def _parse_dt_flex(s: str):
-    """Безопасный парсер даты/даты-времени: поддерживает 'YYYY-MM-DD', 'YYYY-MM-DD HH:MM:SS', '...%f'.
-       Возвращает datetime | None (если пусто/не разобрали)."""
+    """Безопасный парсер даты/времени.
+       Поддерживает:
+         - YYYY-MM-DD HH:MM:SS.%f
+         - YYYY-MM-DD HH:MM:SS
+         - YYYY-MM-DD
+       Возвращает datetime или None.
+    """
     if not s:
         return None
     s = str(s).strip()
-    for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+    for fmt in ('%Y-%m-%d %H:%M:%S.%f',
+                '%Y-%m-%d %H:%M:%S',
+                '%Y-%m-%d'):
         try:
             dt = datetime.strptime(s, fmt)
-            # Если пришёл только день — добавим полночь, чтобы .date() работала как раньше
             if fmt == '%Y-%m-%d':
+                # Если только дата → прикрепляем полночь
                 return datetime.combine(dt.date(), time.min)
             return dt
         except Exception:
@@ -155,7 +320,6 @@ def _parse_units_form(form):
         result.append(u)
 
     return result
-
 
 @inventory_bp.get("/debug/db_objects")
 def debug_db_objects():
@@ -2803,15 +2967,19 @@ def reports():
         recipient=recipient,
         reference_job=reference_job
     )
-
+# inventory/routes.py
 @inventory_bp.route('/reports_grouped', methods=['GET', 'POST'])
 @login_required
 def reports_grouped():
+
     from collections import defaultdict
     from datetime import datetime, time
+    from sqlalchemy.orm import selectinload
+    from extensions import db
+    from models import IssuedPartRecord, IssuedBatch, Part
+    from flask import render_template, request
 
     def _parse_date_ymd(s: str):
-        """Парсит YYYY-MM-DD → datetime c началом/концом дня по флагу."""
         if not s:
             return None
         try:
@@ -2819,120 +2987,266 @@ def reports_grouped():
         except Exception:
             return None
 
-    query = IssuedPartRecord.query.join(Part)
+    # ---------- Параметры (GET/POST) ----------
+    params         = request.values
+    start_date_s   = (params.get('start_date') or '').strip()
+    end_date_s     = (params.get('end_date') or '').strip()
+    recipient      = (params.get('recipient') or '').strip() or None
+    reference_job  = (params.get('reference_job') or '').strip() or None
+    # принимаем invoice_number, а также fallback: invoice / invoice_no
+    invoice_s      = (params.get('invoice_number') or params.get('invoice') or params.get('invoice_no') or '').strip()
+    location       = (params.get('location') or '').strip() or None
 
-    # читаем и из GET (?start_date=...) и из POST
-    params = request.values
-    start_date = (params.get('start_date') or '').strip() or None
-    end_date = (params.get('end_date') or '').strip() or None
-    recipient = (params.get('recipient') or '').strip() or None
-    reference_job = (params.get('reference_job') or '').strip() or None
+    # даты → границы дня
+    start_dt_raw = _parse_date_ymd(start_date_s)
+    end_dt_raw   = _parse_date_ymd(end_date_s)
+    start_dt = datetime.combine(start_dt_raw.date(), time.min) if start_dt_raw else None
+    end_dt   = datetime.combine(end_dt_raw.date(),   time.max) if end_dt_raw   else None
 
-    # фильтры по датам (без падений при пустых/битых значениях)
-    start_dt_raw = _parse_date_ymd(start_date)
-    if start_dt_raw:
-        start_dt = datetime.combine(start_dt_raw.date(), time.min)
-        query = query.filter(IssuedPartRecord.issue_date >= start_dt)
+    # invoice_number (опционально)
+    try:
+        invoice_no = int(invoice_s) if invoice_s else None
+    except ValueError:
+        invoice_no = None
 
-    end_dt_raw = _parse_date_ymd(end_date)
-    if end_dt_raw:
-        end_dt = datetime.combine(end_dt_raw.date(), time.max)
-        query = query.filter(IssuedPartRecord.issue_date <= end_dt)
+    # ---------- Запрос с подзагрузкой связей ----------
+    q = (
+        IssuedPartRecord.query
+        .join(Part, IssuedPartRecord.part_id == Part.id)
+        .options(
+            selectinload(IssuedPartRecord.part),
+            selectinload(IssuedPartRecord.batch),
+        )
+    )
 
     if recipient:
-        query = query.filter(IssuedPartRecord.issued_to.ilike(f'%{recipient}%'))
+        q = q.filter(IssuedPartRecord.issued_to.ilike(f'%{recipient}%'))
     if reference_job:
-        query = query.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
+        q = q.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
+    if start_dt:
+        q = q.filter(IssuedPartRecord.issue_date >= start_dt)
+    if end_dt:
+        q = q.filter(IssuedPartRecord.issue_date <= end_dt)
+    if invoice_no is not None:
+        # у legacy строк invoice_number может быть NULL — показываем только совпавшие
+        q = q.filter(IssuedPartRecord.invoice_number == invoice_no)
+    if location:
+        q = q.filter(IssuedPartRecord.location == location)
 
-    # порядок строк не важен: далее всё равно отсортируем группы стабильно
-    records = query.all()
+    rows = q.order_by(
+        IssuedPartRecord.issue_date.desc(),
+        IssuedPartRecord.id.desc()
+    ).all()
 
-    # группировка: (issued_to, reference_job, issued_by, issue_day)
+    # ---------- Группировка: новые по batch_id, legacy по старому ключу ----------
     grouped = defaultdict(list)
-    for r in records:
-        key = (r.issued_to, r.reference_job, r.issued_by, r.issue_date.date())
+    for r in rows:
+        if getattr(r, 'batch_id', None):
+            key = ('BATCH', r.batch_id)
+        else:
+            key = ('LEGACY', r.issued_to, r.reference_job, r.issued_by, r.issue_date.date())
         grouped[key].append(r)
 
-    # собираем карточки + считаем тоталы
     invoices = []
     grand_total = 0.0
-    for (issued_to, ref_job, issued_by, issue_day), items in grouped.items():
-        total_value = sum((item.quantity or 0) * (item.unit_cost_at_issue or 0) for item in items)
+
+    def _is_return_records(items: list[IssuedPartRecord]) -> bool:
+        if not items:
+            return False
+        if any((it.quantity or 0) < 0 for it in items):
+            return True
+        ref = (items[0].reference_job or '').strip().upper()
+        return ref.startswith('RETURN')
+
+    for gkey, items in grouped.items():
+        items_sorted = sorted(items, key=lambda it: it.id)  # стабильный порядок строк
+        total_value = sum((it.quantity or 0) * (it.unit_cost_at_issue or 0.0) for it in items_sorted)
         grand_total += total_value
 
-        # === СТАБИЛЬНЫЕ КЛЮЧИ СОРТИРОВКИ ДЛЯ КАЖДОЙ КАРТОЧКИ ===
-        # max дата-время из строк группы (если что — fallback к полуночи дня)
-        max_dt = max((it.issue_date for it in items if it.issue_date), default=datetime.combine(issue_day, time.min))
-        # max id строки (на случай равных дат)
-        max_id = max((getattr(it, 'id', 0) for it in items), default=0)
-        # =======================================================
+        if gkey[0] == 'BATCH':
+            batch = items_sorted[0].batch  # selectinload уже сделал
+            inv = {
+                'id': f'B{batch.id}',
+                'issued_to': batch.issued_to,
+                'reference_job': batch.reference_job,
+                'issued_by': batch.issued_by,
+                'issue_date': batch.issue_date,          # datetime
+                'invoice_number': batch.invoice_number,
+                'location': batch.location,
+                'items': items_sorted,
+                'total_value': total_value,
+                'is_return': _is_return_records(items_sorted),
+                '_sort_dt': max((it.issue_date for it in items_sorted if it.issue_date), default=batch.issue_date),
+                '_sort_id': max((it.id for it in items_sorted), default=0),
+            }
+        else:
+            _, issued_to, ref_job, issued_by, day = gkey
+            issue_dt = datetime.combine(day, time.min)
+            first = items_sorted[0]
+            inv = {
+                'id': f'K{issued_to}|{issued_by}|{ref_job or ""}|{day.isoformat()}',
+                'issued_to': issued_to,
+                'reference_job': ref_job,
+                'issued_by': issued_by,
+                'issue_date': issue_dt,                  # datetime
+                'invoice_number': first.invoice_number,  # может быть None (legacy)
+                'location': first.location,
+                'items': items_sorted,
+                'total_value': total_value,
+                'is_return': _is_return_records(items_sorted),
+                '_sort_dt': max((it.issue_date for it in items_sorted if it.issue_date), default=issue_dt),
+                '_sort_id': max((it.id for it in items_sorted), default=0),
+            }
 
-        invoices.append({
-            'issued_to': issued_to,
-            'reference_job': ref_job,
-            'issued_by': issued_by,
-            'issue_date': issue_day,     # date — в шаблоне .strftime('%Y-%m-%d') ок
-            'items': items,
-            'total_value': total_value,
-            '_sort_dt': max_dt,
-            '_sort_id': max_id,
-        })
+        invoices.append(inv)
 
-    # СТАБИЛЬНАЯ СОРТИРОВКА КАРТОЧЕК: по max(issue_date) в группе, потом по max(id)
-    invoices.sort(key=lambda g: (g['_sort_dt'], g['_sort_id']), reverse=True)
+    # ---------- Сортировка карточек (НОВАЯ) ----------
+    # Только по дате (последние сверху), затем по номеру инвойса, затем по макс. id строки.
+    invoices.sort(
+        key=lambda g: (
+            g.get('_sort_dt') or datetime.min,
+            g.get('invoice_number') or 0,
+            g.get('_sort_id') or 0,
+        ),
+        reverse=True
+    )
 
     return render_template(
         'reports_grouped.html',
         invoices=invoices,
         total=grand_total,
-        start_date=start_date,
-        end_date=end_date,
-        recipient=recipient,
-        reference_job=reference_job
+        # возвращаем исходные значения в форму (не очищаем)
+        start_date=start_date_s,
+        end_date=end_date_s,
+        recipient=recipient or '',
+        reference_job=reference_job or '',
+        invoice=invoice_s or '',  # важно: шаблон ждёт 'invoice', не 'invoice_number'
+        location=location or '',
     )
 
-@inventory_bp.route('/invoice/view')
+@inventory_bp.route("/invoice/pdf")
 @login_required
 def view_invoice_pdf():
-    # Получаем параметры, которые идентифицируют группу инвойса
-    issued_to = request.args.get('issued_to')
-    reference_job = request.args.get('reference_job')
-    issued_by = request.args.get('issued_by')
-    issue_date_str = request.args.get('issue_date')
+    """
+    Печать инвойса.
+    Если у группы ещё НЕТ invoice_number и пришли "legacy"-ключи,
+    перед печатью аккуратно присваиваем новый номер (через batch),
+    коммитим и печатаем уже с этим номером.
+    """
+    from extensions import db
+    from models import IssuedPartRecord, IssuedBatch
+    from datetime import datetime, time as _time
+    from sqlalchemy import func
+    from flask import request, make_response
 
-    from datetime import datetime
+    # ---- вспомогалки (локальные, чтобы ничего не поломать) ----
+    def _next_invoice_number():
+        mb = db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0)).scalar() or 0
+        ml = db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)).scalar() or 0
+        return max(int(mb), int(ml)) + 1
 
-    # Попытка распарсить дату
-    try:
-        issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S.%f')
-    except ValueError:
+    def _ensure_invoice_number_for_records(records, issued_to, issued_by, reference_job, issue_date, location):
+        # уже есть — выходим
+        if any(getattr(r, "invoice_number", None) for r in records):
+            return getattr(records[0], "invoice_number", None)
+
+        # пробуем штатный хелпер, если он у тебя есть
         try:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d %H:%M:%S')
-        except ValueError:
-            issue_date = datetime.strptime(issue_date_str, '%Y-%m-%d')
+            batch = _create_batch_for_records(
+                records=records,
+                issued_to=issued_to,
+                issued_by=issued_by,
+                reference_job=reference_job,
+                issue_date=issue_date,
+                location=location,
+            )
+            return getattr(batch, "invoice_number", None)
+        except Exception:
+            db.session.rollback()
 
-    # Получаем все записи этой накладной
-    records = IssuedPartRecord.query.filter(
-        IssuedPartRecord.issued_to == issued_to,
-        IssuedPartRecord.reference_job == reference_job,
-        IssuedPartRecord.issued_by == issued_by,
-        IssuedPartRecord.issue_date.between(
-            datetime.combine(issue_date.date(), datetime.min.time()),
-            datetime.combine(issue_date.date(), datetime.max.time())
-        )
-    ).all()
+        # fallback — резервируем номер вручную
+        for _ in range(5):
+            inv_no = _next_invoice_number()
+            try:
+                with db.session.begin_nested():
+                    batch = IssuedBatch(
+                        invoice_number=inv_no,
+                        issued_to=issued_to,
+                        issued_by=issued_by or "system",
+                        reference_job=reference_job,
+                        issue_date=issue_date,
+                        location=(location or None),
+                    )
+                    db.session.add(batch)
+                    db.session.flush()  # держим уникальность
 
-    from utils.invoice_generator import generate_view_pdf
+                    for r in records:
+                        r.batch_id = batch.id
+                        r.invoice_number = inv_no
 
-    pdf_data = generate_view_pdf(records)  # Передаём список записей
+                    db.session.flush()
+                return inv_no
+            except Exception:
+                db.session.rollback()
+                continue
+        raise RuntimeError("Failed to reserve invoice number")
 
-    from io import BytesIO
-    from flask import send_file
+    # ---- входные параметры ----
+    inv_s  = (request.args.get("invoice_number") or "").strip()
+    issued_to     = (request.args.get("issued_to") or "").strip()
+    reference_job = (request.args.get("reference_job") or "").strip() or None
+    issued_by     = (request.args.get("issued_by") or "").strip()
+    issue_date_s  = (request.args.get("issue_date") or "").strip()
 
-    return send_file(BytesIO(pdf_data),
-                     as_attachment=True,
-                     download_name=f"INVOICE_{issued_to}_{issue_date.strftime('%Y%m%d')}.pdf",
-                     mimetype="application/pdf")
+    inv_no = int(inv_s) if inv_s.isdigit() else None
+
+    # ---- загрузка строк группы ----
+    recs = []
+    if inv_no is not None:
+        recs = IssuedPartRecord.query.filter_by(invoice_number=inv_no).order_by(IssuedPartRecord.id.asc()).all()
+    else:
+        # legacy-поиск по ключам за сутки (как в update_invoice)
+        if issued_to and issued_by and issue_date_s:
+            dt = _parse_dt_flex(issue_date_s) or datetime.utcnow()
+            start = datetime.combine(dt.date(), _time.min)
+            end   = datetime.combine(dt.date(), _time.max)
+            recs = (IssuedPartRecord.query
+                    .filter(IssuedPartRecord.issued_to == issued_to,
+                            IssuedPartRecord.issued_by == issued_by,
+                            IssuedPartRecord.reference_job == reference_job,
+                            IssuedPartRecord.issue_date.between(start, end))
+                    .order_by(IssuedPartRecord.id.asc()).all())
+
+    if not recs:
+        flash("Invoice lines not found.", "warning")
+        return redirect(url_for('inventory.reports_grouped'))
+
+    # ---- если у группы ещё нет номера — присваиваем его перед печатью ----
+    if all(getattr(r, "invoice_number", None) is None for r in recs):
+        base = recs[0]
+        try:
+            new_no = _ensure_invoice_number_for_records(
+                records=recs,
+                issued_to=getattr(base, "issued_to", issued_to),
+                issued_by=getattr(base, "issued_by", issued_by),
+                reference_job=getattr(base, "reference_job", reference_job),
+                issue_date=getattr(base, "issue_date", _parse_dt_flex(issue_date_s) or datetime.utcnow()),
+                location=getattr(base, "location", None),
+            )
+            db.session.commit()
+            inv_no = new_no
+        except Exception as e:
+            db.session.rollback()
+            # если не получилось — печатаем read-only как есть (legacy), но пользователь хотя бы получит PDF
+            inv_no = None
+
+    # ---- генерим PDF (используем твой генератор) ----
+    pdf_bytes = generate_invoice_pdf(recs, invoice_number=inv_no)
+    resp = make_response(pdf_bytes)
+    fname = f"INVOICE_{(inv_no or getattr(recs[0],'id', 'NO_NUM')):06d}.pdf" if inv_no is not None else "INVOICE.pdf"
+    resp.headers["Content-Type"] = "application/pdf"
+    resp.headers["Content-Disposition"] = f'inline; filename="{fname}"'
+    return resp
 
 @inventory_bp.route('/reports/update_record/<int:record_id>', methods=['POST'])
 @login_required
@@ -2999,62 +3313,376 @@ def cancel_issued_record(record_id):
 @inventory_bp.route('/reports/update_invoice', methods=['POST'])
 @login_required
 def update_invoice():
+    """
+    Save / Return / Delete from the grouped report.
+
+    Additions in this version:
+    - `apply_scope`: 'all' (default) or 'selected'.
+    - Invoice number is assigned only for scope='all' and only if ALL rows in the group have no number yet.
+    - When scope='all' and there's no number, records are resolved by the group's legacy keys.
+    - **Hard cap for Return Selected**: you cannot return more than has been issued for that line.
+      The backend calculates already-returned quantity and trims the requested amount accordingly.
+    """
+    from extensions import db
+    from models import IssuedPartRecord, IssuedBatch, Part
+    from datetime import datetime, time as _time
+    from sqlalchemy import func
+
+    # ---------- helpers ----------
+    def _is_return_row(r):
+        """A row is a 'return' when its quantity is negative."""
+        return (getattr(r, 'quantity', 0) or 0) < 0
+
+    def _next_invoice_number():
+        """Safe next invoice number from max(IssuedBatch, IssuedPartRecord)."""
+        mb = db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0)).scalar() or 0
+        ml = db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)).scalar() or 0
+        return max(int(mb), int(ml)) + 1
+
+    def _ensure_invoice_number_for_records(records, issued_to, issued_by, reference_job, issue_date, location):
+        """
+        Ensure a single invoice_number is assigned to all given records.
+        Try a project helper `_create_batch_for_records` if it exists; otherwise use a safe fallback.
+        """
+        if any(getattr(r, "invoice_number", None) for r in records):
+            return
+
+        # Try your project helper if present
+        try:
+            batch = _create_batch_for_records(
+                records=records,
+                issued_to=issued_to,
+                issued_by=issued_by,
+                reference_job=reference_job,
+                issue_date=issue_date,
+                location=location
+            )
+            return batch
+        except Exception:
+            db.session.rollback()
+
+        # Fallback: reserve a unique number inside a nested transaction
+        for _ in range(5):
+            inv_no = _next_invoice_number()
+            try:
+                with db.session.begin_nested():
+                    batch = IssuedBatch(
+                        invoice_number=inv_no,
+                        issued_to=issued_to,
+                        issued_by=issued_by or "system",
+                        reference_job=reference_job,
+                        issue_date=issue_date,
+                        location=(location or None),
+                    )
+                    db.session.add(batch)
+                    db.session.flush()  # reserve unique number
+
+                    for r in records:
+                        r.batch_id = batch.id
+                        r.invoice_number = inv_no
+                    db.session.flush()
+                return batch
+            except Exception:
+                db.session.rollback()
+        raise RuntimeError("Failed to reserve invoice number")
+
+    def _already_returned_qty_for(r):
+        """
+        Compute how many units have already been returned against the same 'issued' line.
+        Strategy:
+        - If the original row has an invoice_number: sum all negative quantities with the same
+          invoice_number and the same part_id.
+        - If there's no invoice_number (legacy group): match by issued_to, issued_by, same calendar day,
+          same part_id, and quantity < 0. This covers legacy 'RETURN ...' rows that land in separate cards.
+        """
+        if r is None or (r.quantity or 0) <= 0:
+            return 0
+
+        part_id = getattr(r, "part_id", None)
+        if not part_id:
+            return 0
+
+        if getattr(r, "invoice_number", None) is not None:
+            returned = (db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
+                        .filter(IssuedPartRecord.invoice_number == r.invoice_number,
+                                IssuedPartRecord.part_id == part_id,
+                                IssuedPartRecord.quantity < 0)
+                        .scalar() or 0)
+            # returned is negative or zero; we want absolute returned count
+            return abs(int(returned))
+        else:
+            # Legacy: match by group keys within the same day
+            it = getattr(r, "issue_date", None) or datetime.utcnow()
+            day_start = datetime.combine(it.date(), _time.min)
+            day_end   = datetime.combine(it.date(), _time.max)
+
+            returned = (db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
+                        .filter(IssuedPartRecord.issued_to == (r.issued_to or ''),
+                                IssuedPartRecord.issued_by == (r.issued_by or ''),
+                                IssuedPartRecord.part_id == part_id,
+                                IssuedPartRecord.issue_date.between(day_start, day_end),
+                                IssuedPartRecord.quantity < 0)
+                        .scalar() or 0)
+            return abs(int(returned))
+
+    def _available_to_return_for(r):
+        """
+        Remaining quantity that can still be returned for this issued row.
+        """
+        issued_qty = int(r.quantity or 0)
+        already_ret = _already_returned_qty_for(r)
+        return max(0, issued_qty - already_ret)
+
+    # ---------- access ----------
     if current_user.role not in ['superadmin', 'admin']:
         flash("Access denied", "danger")
-        return redirect(url_for('inventory.reports'))
+        return redirect(url_for('inventory.reports_grouped'))
 
-    new_issued_to     = (request.form.get('issued_to') or '').strip()
-    new_reference_job = (request.form.get('reference_job') or '').strip() or None
-    if not new_issued_to:
-        flash("Issued To field cannot be empty.", "danger")
-        return redirect(url_for('inventory.reports'))
+    # ---------- flags / scope ----------
+    do_return        = (request.form.get('do_return') or '') == '1'
+    do_delete_ret    = (request.form.get('delete_return') or '') == '1'
+    delete_invoice_s = (request.form.get('delete_invoice') or '').strip()
+    delete_invoice_no = int(delete_invoice_s) if delete_invoice_s.isdigit() else None
+    apply_scope = (request.form.get('apply_scope') or 'all').lower()  # 'all' | 'selected'
 
-    # 1) приоритет — по id строк
-    ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
-    records = []
-    if ids:
+    # ---------- header values ----------
+    location  = (request.form.get('location') or '').strip() or None
+    issued_by = (request.form.get('issued_by') or getattr(current_user, 'username', '') or '').strip()
+
+    s_date = (request.form.get('issue_date') or request.form.get('issue_date_old') or '').strip()
+    issue_date = _parse_dt_flex(s_date) if s_date else datetime.utcnow()
+
+    invoice_s = (request.form.get('invoice_number') or '').strip()
+    form_invoice_no = int(invoice_s) if invoice_s.isdigit() else None
+
+    # Group keys for scope='all' when invoice number is missing
+    g_issued_to = (request.form.get('group_issued_to') or '').strip()
+    g_ref_job   = (request.form.get('group_reference_job') or '').strip() or None
+    g_issued_by = (request.form.get('group_issued_by') or '').strip()
+    g_issue_s   = (request.form.get('group_issue_date') or '').strip()
+
+    # ---------- collect selected ids ----------
+    raw_ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
+    sel_ids = [int(x) for x in raw_ids if str(x).strip().isdigit()]
+
+    # ---------- load records ----------
+    recs = []
+    if apply_scope == 'selected' and sel_ids:
+        recs = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(sel_ids)).all()
+
+    if not recs and form_invoice_no is not None:
+        recs = IssuedPartRecord.query.filter_by(invoice_number=form_invoice_no).all()
+
+    if not recs and apply_scope == 'all':
+        # When invoice has no number yet — resolve by legacy keys within the day
+        if g_issued_to and g_issued_by and g_issue_s:
+            dt = _parse_dt_flex(g_issue_s) or issue_date
+            start = datetime.combine(dt.date(), _time.min)
+            end   = datetime.combine(dt.date(), _time.max)
+            recs = (IssuedPartRecord.query
+                    .filter(IssuedPartRecord.issued_to == g_issued_to,
+                            IssuedPartRecord.issued_by == g_issued_by,
+                            IssuedPartRecord.reference_job == g_ref_job,
+                            IssuedPartRecord.issue_date.between(start, end))
+                    .order_by(IssuedPartRecord.id.asc()).all())
+
+    if not recs:
+        flash("Invoice lines not found.", "warning")
+        return redirect(url_for('inventory.reports_grouped'))
+
+    # ---------- DELETE INVOICE ----------
+    if delete_invoice_no is not None:
+        if current_user.role != 'superadmin':
+            flash("Only superadmin may delete invoice.", "danger")
+            return redirect(url_for('inventory.reports_grouped'))
+        touched = set()
         try:
-            ids = [int(x) for x in ids]
-        except ValueError:
-            ids = []
-        if ids:
-            records = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(ids)).all()
+            for r in list(recs):
+                if r.part:
+                    # Revert stock impact (return issued qty to stock; for negative rows this subtracts)
+                    r.part.quantity = int(r.part.quantity or 0) + int(r.quantity or 0)
+                if r.batch_id:
+                    touched.add(r.batch_id)
+                db.session.delete(r)
+            # Remove empty batches
+            for bid in touched:
+                still = db.session.query(IssuedPartRecord.id).filter_by(batch_id=bid).first()
+                if not still:
+                    b = db.session.get(IssuedBatch, bid)
+                    if b:
+                        db.session.delete(b)
+            db.session.commit()
+            flash(f"Invoice #{delete_invoice_no:06d} deleted.", "success")
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Failed to delete invoice: {e}", "danger")
+        return redirect(url_for('inventory.reports_grouped'))
 
-    # 2) фоллбэк — старые ключи (если где-то осталась старая форма)
-    if not records:
-        issued_to_old     = (request.form.get('issued_to_old') or request.args.get('issued_to') or '').strip()
-        reference_job_old = (request.form.get('reference_job_old') or request.args.get('reference_job') or '').strip() or None
-        issued_by         = (request.form.get('issued_by') or request.args.get('issued_by') or '').strip()
-        s                 = (request.form.get('issue_date_old') or request.form.get('issue_date') or request.args.get('issue_date') or '').strip()
-        issue_date = _parse_dt_flex(s)
+    # ---------- DELETE RETURN ----------
+    if do_delete_ret:
+        if current_user.role != 'superadmin':
+            flash("Only superadmin may delete return invoices.", "danger")
+            return redirect(url_for('inventory.reports_grouped'))
+        touched = set()
+        try:
+            for r in recs:
+                if not _is_return_row(r):
+                    continue
+                if r.part and (r.quantity or 0) < 0:
+                    # Deleting a return (negative) reduces stock back
+                    r.part.quantity = int(r.part.quantity or 0) - abs(int(r.quantity or 0))
+                if r.batch_id:
+                    touched.add(r.batch_id)
+                db.session.delete(r)
+            for bid in list(touched):
+                still = db.session.query(IssuedPartRecord.id).filter_by(batch_id=bid).first()
+                if not still:
+                    b = db.session.get(IssuedBatch, bid)
+                    if b:
+                        db.session.delete(b)
+            db.session.commit()
+            flash("Return lines deleted.", "success")
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Failed to delete return invoice: {e}", "danger")
+        return redirect(url_for('inventory.reports_grouped'))
 
-        if not (issued_to_old and issued_by and issue_date):
-            flash("Invoice identifiers are missing (issued_to / issued_by / issue_date).", "danger")
-            return redirect(url_for('inventory.reports'))
+    # ---------- RETURN SELECTED (with hard cap) ----------
+    if do_return:
+        try:
+            created = 0
+            trimmed_any = False
+            for r in recs:
+                # Only allow returns against positive (issued) rows
+                if (r.quantity or 0) <= 0:
+                    continue
 
-        start = datetime.combine(issue_date.date(), time.min)
-        end   = datetime.combine(issue_date.date(), time.max)
-        records = IssuedPartRecord.query.filter(
-            IssuedPartRecord.issued_to == issued_to_old,
-            IssuedPartRecord.reference_job == reference_job_old,
-            IssuedPartRecord.issued_by == issued_by,
-            IssuedPartRecord.issue_date.between(start, end)
-        ).all()
+                # How many units are still eligible to be returned for this row?
+                available = _available_to_return_for(r)
+                if available <= 0:
+                    # Nothing left to return for this line
+                    continue
 
-    if not records:
-        flash("Invoice not found.", "warning")
-        return redirect(url_for('inventory.reports'))
+                # Requested qty from the form
+                try:
+                    qty_req = int((request.form.get(f"qty_{r.id}") or "1").strip())
+                except Exception:
+                    qty_req = 1
+                if qty_req < 0:
+                    qty_req = 0
 
-    for r in records:
-        r.issued_to = new_issued_to
-        r.reference_job = new_reference_job
-        # ВАЖНО: r.issue_date не трогаем!
-    db.session.commit()
+                # Hard cap: cannot exceed what's available
+                if qty_req > available:
+                    qty_req = available
+                    trimmed_any = True
 
-    flash("Invoice saved.", "success")
-    return redirect(url_for('inventory.reports'))
+                if qty_req <= 0:
+                    continue
 
-# Отмена всей накладной (группы записей)
+                # Create a separate negative row for the return
+                ret = IssuedPartRecord(
+                    part_id=r.part_id,
+                    issued_to=r.issued_to,
+                    issued_by=issued_by or r.issued_by,
+                    quantity=-qty_req,
+                    unit_cost_at_issue=(
+                        r.unit_cost_at_issue
+                        if r.unit_cost_at_issue is not None
+                        else (r.part.unit_cost if r.part else 0.0)
+                    ),
+                    reference_job=(
+                        f"RETURN {r.reference_job}"
+                        if (r.reference_job and not str(r.reference_job).upper().startswith("RETURN"))
+                        else (r.reference_job or "RETURN")
+                    ),
+                    issue_date=issue_date,
+                    location=(location or r.location),
+                    invoice_number=None,
+                    batch_id=None
+                )
+                db.session.add(ret)
+
+                # Stock: returns increase stock by the returned qty
+                if r.part:
+                    r.part.quantity = int(r.part.quantity or 0) + qty_req
+
+                created += 1
+
+            db.session.commit()
+            if created:
+                msg = f"Created {created} return line(s)."
+                if trimmed_any:
+                    msg += " Some requested quantities were trimmed to the available amount."
+                flash(msg, "success")
+            else:
+                flash("No lines were eligible for return.", "warning")
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Failed to create return: {e}", "danger")
+
+        return redirect(url_for('inventory.reports_grouped'))
+
+    # ---------- SAVE (edit + assign invoice number for scope='all') ----------
+    try:
+        # Superadmin can edit line fields with proper stock adjustment
+        if current_user.role == 'superadmin':
+            for r in recs:
+                # Qty edit
+                new_qty_s = request.form.get(f"edit_qty_{r.id}")
+                if new_qty_s not in (None, ""):
+                    try:
+                        new_qty = int(new_qty_s)
+                        old_qty = int(r.quantity or 0)
+                        if r.part:
+                            # Put back the difference: old - new
+                            r.part.quantity = int(r.part.quantity or 0) + (old_qty - new_qty)
+                        r.quantity = new_qty
+                    except Exception:
+                        pass
+
+                # Unit cost edit
+                new_ucost_s = request.form.get(f"edit_ucost_{r.id}")
+                if new_ucost_s not in (None, ""):
+                    try:
+                        r.unit_cost_at_issue = float(new_ucost_s)
+                    except Exception:
+                        pass
+
+                # Issued To / Reference Job edit
+                new_it = request.form.get(f"edit_issued_to_{r.id}")
+                if new_it is not None:
+                    r.issued_to = new_it.strip()
+                new_rj = request.form.get(f"edit_refjob_{r.id}")
+                if new_rj is not None:
+                    r.reference_job = (new_rj.strip() or None)
+
+        # Common header fields
+        for r in recs:
+            r.issued_by = issued_by or r.issued_by
+            r.issue_date = issue_date or r.issue_date
+            if location:
+                r.location = location
+
+        # Assign invoice number only when saving the whole card and only if none of the rows has a number
+        if apply_scope == 'all' and all(getattr(r, "invoice_number", None) is None for r in recs):
+            base = recs[0]
+            _ensure_invoice_number_for_records(
+                records=recs,
+                issued_to=getattr(base, "issued_to", ""),
+                issued_by=getattr(base, "issued_by", ""),
+                reference_job=getattr(base, "reference_job", None),
+                issue_date=getattr(base, "issue_date", issue_date),
+                location=getattr(base, "location", location),
+            )
+
+        db.session.commit()
+        flash("Invoice saved.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to save invoice: {e}", "danger")
+
+    return redirect(url_for('inventory.reports_grouped'))
+
 @inventory_bp.route('/reports/cancel_invoice', methods=['POST'])
 @login_required
 def cancel_invoice():
@@ -4105,34 +4733,168 @@ def create_return_invoice():
 def delete_return_invoice():
     if current_user.role != 'superadmin':
         flash("Access denied", "danger")
-        return redirect(url_for('inventory.reports'))
+        return redirect(url_for('inventory.reports_grouped'))
 
-    ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
-    records = []
-    if ids:
+    raw_ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
+    try:
+        ids = [int(x) for x in raw_ids if str(x).strip()]
+    except ValueError:
+        ids = []
+
+    if not ids:
+        flash("Nothing selected to delete.", "warning")
+        return redirect(url_for('inventory.reports_grouped'))
+
+    rows = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(ids)).all()
+    if not rows:
+        flash("Records not found.", "warning")
+        return redirect(url_for('inventory.reports_grouped'))
+
+    touched_batch_ids = set()
+    try:
+        for r in rows:
+            # удаляем только возвратные строки
+            if (r.quantity or 0) >= 0 and not ((r.reference_job or '').upper().startswith('RETURN')):
+                continue
+
+            # откатываем склад: удаляем возврат → уменьшаем склад
+            if r.part and (r.quantity or 0) < 0:
+                r.part.quantity = (r.part.quantity or 0) - abs(int(r.quantity or 0))
+
+            if r.batch_id:
+                touched_batch_ids.add(r.batch_id)
+
+            db.session.delete(r)
+
+        # чистим пустые батчи
+        if touched_batch_ids:
+            for bid in list(touched_batch_ids):
+                still_has = db.session.query(IssuedPartRecord.id).filter_by(batch_id=bid).first()
+                if not still_has:
+                    b = db.session.get(IssuedBatch, bid)
+                    if b:
+                        db.session.delete(b)
+
+        db.session.commit()
+        flash("Return invoice deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to delete return invoice: {e}", "danger")
+
+    return redirect(url_for('inventory.reports_grouped'))
+
+@inventory_bp.route('/reports/return_selected', methods=['POST'])
+@login_required
+def return_selected():
+    if current_user.role not in ['superadmin', 'admin']:
+        flash("Access denied", "danger")
+        return redirect(url_for('inventory.reports_grouped'))
+
+    raw_ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
+    try:
+        selected_ids = [int(x) for x in raw_ids if str(x).strip()]
+    except ValueError:
+        selected_ids = []
+
+    if not selected_ids:
+        flash("No rows selected.", "warning")
+        return redirect(url_for('inventory.reports_grouped'))
+
+    rows = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(selected_ids)).all()
+    if not rows:
+        flash("Selected records not found.", "warning")
+        return redirect(url_for('inventory.reports_grouped'))
+
+    now_dt   = datetime.utcnow()
+    issued_by = getattr(current_user, 'username', '') or 'system'
+    first = rows[0]
+    batch_issued_to = first.issued_to
+    batch_reference = (first.reference_job or '').strip() or 'STOCK'
+    return_reference = f"RETURN {batch_reference.upper()}"
+    batch_location   = first.location
+
+    created = []
+    for src in rows:
+        # то, что пользователь попросил вернуть
         try:
-            ids = [int(x) for x in ids]
+            want = int(request.form.get(f"qty_{src.id}", "1") or "1")
         except ValueError:
-            ids = []
-        if ids:
-            records = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(ids)).all()
+            want = 1
+        if want <= 0:
+            continue
 
-    if not records:
-        flash("Return invoice not found.", "warning")
-        return redirect(url_for('inventory.reports'))
+        # Сколько уже возвращено по этой детали/получателю
+        already = _already_returned_qty_for_source(src)
 
-    # На всякий случай можно убедиться, что это возвратные строки
-    # (если смешанных групп не бывает — можно пропустить)
-    # if not _is_return_group(records):
-    #     flash("Selected records are not a return invoice.", "warning")
-    #     return redirect(url_for('inventory.reports'))
+        # Максимум к возврату сейчас = выдано по строке − уже возвращено (не ниже 0)
+        issued_qty = int(src.quantity or 0)
+        max_can_return = max(0, issued_qty - already)
 
-    for r in records:
-        db.session.delete(r)
-    db.session.commit()
+        qty = min(want, max_can_return)
+        if qty == 0:
+            continue
 
-    flash("Return invoice deleted.", "success")
-    return redirect(url_for('inventory.reports'))
+        ret = IssuedPartRecord(
+            part_id=src.part_id,
+            quantity=-qty,
+            issued_to=src.issued_to,
+            issued_by=issued_by,
+            reference_job=return_reference,
+            issue_date=now_dt,
+            unit_cost_at_issue=src.unit_cost_at_issue,
+            location=src.location,
+        )
+        db.session.add(ret)
+        created.append(ret)
+
+        # Возвращаем на склад
+        if src.part:
+            src.part.quantity = (src.part.quantity or 0) + qty
+
+    if not created:
+        flash("Nothing to return.", "warning")
+        db.session.rollback()
+        return redirect(url_for('inventory.reports_grouped'))
+
+    try:
+        batch = create_batch_for_records(
+            created,
+            issued_to=batch_issued_to,
+            issued_by=issued_by,
+            reference_job=return_reference,
+            issue_date=now_dt,
+            location=batch_location,
+        )
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to create return invoice: {e}", "danger")
+        return redirect(url_for('inventory.reports_grouped'))
+
+    flash(f"Return invoice #{batch.invoice_number} created ({len(created)} lines).", "success")
+    return redirect(url_for('inventory.reports_grouped', invoice_number=batch.invoice_number))
+
+def _already_returned_qty_for_source(src) -> int:
+    """
+    Сколько уже возвращено по той же детали этому же получателю.
+    Суммируем все строки с qty < 0, где part_id и issued_to совпадают,
+    а reference_job начинается с 'RETURN'.
+    """
+    total_neg = (
+        db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
+        .filter(
+            IssuedPartRecord.part_id == src.part_id,
+            IssuedPartRecord.issued_to == src.issued_to,
+            IssuedPartRecord.reference_job.ilike('RETURN%'),
+        )
+        .scalar()
+        or 0
+    )
+    # total_neg отрицательный или 0 → возвращаем модуль
+    return abs(int(total_neg))
+
+
+
 
 
 

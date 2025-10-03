@@ -1,36 +1,47 @@
-from extensions import db
+from datetime import datetime, time
 from flask_login import UserMixin
-from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+
+from extensions import db
 from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey
 
+
+# --------------------------------
 # User roles
+# --------------------------------
 ROLE_SUPERADMIN = 'superadmin'
 ROLE_ADMIN = 'admin'
 ROLE_USER = 'user'
 ROLE_VIEWER = 'viewer'
 
-# -----------------------------
+
+# --------------------------------
 # Users
-# -----------------------------
+# --------------------------------
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
     role = db.Column(db.String(20), nullable=False, default=ROLE_USER)
 
-    def set_password(self, password): self.password_hash = generate_password_hash(password)
-    def check_password(self, password): return check_password_hash(self.password_hash, password)
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
     @property
-    def password(self): raise AttributeError('password is not a readable attribute')
+    def password(self):
+        raise AttributeError('password is not a readable attribute')
+
     @password.setter
-    def password(self, password): self.set_password(password)
+    def password(self, password):
+        self.set_password(password)
 
 
-# -----------------------------
+# --------------------------------
 # Work Orders (шапка)
-# -----------------------------
+# --------------------------------
 class WorkOrder(db.Model):
     __tablename__ = "work_orders"
     id = db.Column(db.Integer, primary_key=True)
@@ -80,9 +91,9 @@ class WorkOrder(db.Model):
         return str(max(ints)) if ints else (nums[0] if nums else "")
 
 
-# -----------------------------
+# --------------------------------
 # Work Units (несколько аппаратов в одном WO)
-# -----------------------------
+# --------------------------------
 class WorkUnit(db.Model):
     __tablename__ = "work_units"
     id = db.Column(db.Integer, primary_key=True)
@@ -102,15 +113,9 @@ class WorkUnit(db.Model):
     )
 
 
-# -----------------------------
-# Work Order Part (ЕДИНСТВЕННЫЙ класс строк)
-# — одна таблица 'work_order_parts' для обоих режимов:
-#   - плоский (обязательно work_order_id, unit_id = NULL)
-#   - multi-appliance (оба: work_order_id и unit_id)
-# -----------------------------
-from datetime import datetime
-from extensions import db
-
+# --------------------------------
+# Work Order Part (единственный класс строк)
+# --------------------------------
 class WorkOrderPart(db.Model):
     __tablename__ = "work_order_parts"
 
@@ -139,36 +144,36 @@ class WorkOrderPart(db.Model):
     unit_price_final = db.Column(db.Float)
     unit_cost        = db.Column(db.Float, nullable=True, default=None)
 
-    # Новый для нас реквизит склада (у тебя уже добавлен)
+    # Новый реквизит склада
     warehouse       = db.Column(db.String(120), nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # ---- Совместимые АЛИАСЫ для старого кода/UI ----
-    # alt_numbers <-> alt_part_numbers
+    # ---- Совместимые алиасы для старого кода/UI ----
     @property
     def alt_numbers(self) -> str:
         return self.alt_part_numbers
+
     @alt_numbers.setter
     def alt_numbers(self, v: str):
         self.alt_part_numbers = v
 
-    # line_status <-> status
     @property
     def line_status(self) -> str:
         return self.status
+
     @line_status.setter
     def line_status(self, v: str):
         self.status = v
 
-    # (опционально) fallback-свойство, если где-то ещё читают unit_label как склад
     @property
     def warehouse_or_label(self) -> str:
         return self.warehouse or self.unit_label or ""
 
-# -----------------------------
+
+# --------------------------------
 # Tech receive log
-# -----------------------------
+# --------------------------------
 class TechReceiveLog(db.Model):
     __tablename__ = "tech_receive_log"
     id = db.Column(db.Integer, primary_key=True)
@@ -179,9 +184,9 @@ class TechReceiveLog(db.Model):
     received_at  = db.Column(db.DateTime, default=datetime.utcnow)
 
 
-# -----------------------------
+# --------------------------------
 # Inventory Part
-# -----------------------------
+# --------------------------------
 class Part(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
@@ -192,37 +197,81 @@ class Part(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
-# -----------------------------
+# --------------------------------
 # Recipient (tech/client)
-# -----------------------------
+# --------------------------------
 class Recipient(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
 
 
-# -----------------------------
-# Issued Part Record (журнал выдач)
-# -----------------------------
+# =========================
+# IssuedPartRecord (строка инвойса)
+# =========================
 class IssuedPartRecord(db.Model):
     __tablename__ = 'issued_part_record'
-    id = db.Column(db.Integer, primary_key=True)
-    part_id = db.Column(db.Integer, db.ForeignKey('part.id'), nullable=False, index=True)
-    quantity = db.Column(db.Integer, nullable=False)
-    issued_to = db.Column(db.String(255), nullable=False)
-    issued_by = db.Column(db.String(255), nullable=False)
-    reference_job = db.Column(db.String(255))
-    issue_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    id                 = db.Column(db.Integer, primary_key=True)
+    part_id            = db.Column(db.Integer, db.ForeignKey('part.id'), nullable=False, index=True)
+    quantity           = db.Column(db.Integer, nullable=False)
+    issued_to          = db.Column(db.String(255), nullable=False, index=True)
+    issued_by          = db.Column(db.String(255), nullable=False)
+    reference_job      = db.Column(db.String(255), index=True)
+    issue_date         = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     unit_cost_at_issue = db.Column(db.Float, nullable=False)
 
-    invoice_number = db.Column(db.Integer, index=True, nullable=True)
-    location = db.Column(db.String(120), nullable=True)
+    # новые поля для инвойсов / отчётов
+    invoice_number     = db.Column(db.Integer, index=True, nullable=True)
+    location           = db.Column(db.String(120), index=True)
+
+    # batch (NULL для legacy)
+    batch_id = db.Column(
+        db.Integer,
+        db.ForeignKey('issued_batch.id', ondelete='SET NULL'),
+        index=True,
+        nullable=True
+    )
+    batch = db.relationship(
+        "IssuedBatch",
+        back_populates="parts",
+        lazy="joined"
+    )
 
     part = db.relationship('Part', backref=db.backref('issued_records', lazy=True))
 
+    def __repr__(self):
+        return f"<IssuedPartRecord id={self.id} inv={self.invoice_number} batch={self.batch_id}>"
 
-# -----------------------------
+
+# =========================
+# IssuedBatch (шапка инвойса)
+# =========================
+class IssuedBatch(db.Model):
+    __tablename__ = "issued_batch"
+    __table_args__ = {'extend_existing': True}
+
+    id             = db.Column(db.Integer, primary_key=True)
+    invoice_number = db.Column(db.Integer, unique=True, index=True, nullable=False)
+    issued_to      = db.Column(db.String(255), nullable=False)
+    issued_by      = db.Column(db.String(255), nullable=False)
+    reference_job  = db.Column(db.String(255))
+    issue_date     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    location       = db.Column(db.String(120), nullable=True)
+
+    # связь только через back_populates (никаких backref)
+    parts = db.relationship(
+        "IssuedPartRecord",
+        back_populates="batch",
+        lazy="selectin"
+    )
+
+    def __repr__(self):
+        return f"<IssuedBatch id={self.id} invoice={self.invoice_number} to={self.issued_to}>"
+
+
+# --------------------------------
 # OrderItem (трекинг заказов снаружи)
-# -----------------------------
+# --------------------------------
 class OrderItem(db.Model):
     __tablename__ = "order_items"
     id = db.Column(db.Integer, primary_key=True)
@@ -241,6 +290,9 @@ class OrderItem(db.Model):
     date_received= db.Column(db.DateTime)
     notes        = db.Column(db.Text)
     row_key      = db.Column(db.String(512), unique=True)
+
+
+
 
 
 

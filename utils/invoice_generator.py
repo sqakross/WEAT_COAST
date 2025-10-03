@@ -1,279 +1,72 @@
-from reportlab.lib.pagesizes import landscape, A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
-from io import BytesIO
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import LETTER
-from reportlab.lib.units import inch
-import os
-from datetime import datetime
-
-
-def generate_issued_report_pdf(records):
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
-
-    styles = getSampleStyleSheet()
-    elements = []
-
-    # Заголовок
-    elements.append(Paragraph("Issued Parts Report", styles['Title']))
-    elements.append(Spacer(1, 12))
-
-    # Заголовки таблицы
-    data = [[
-        "Date", "Part Number", "Part Name", "Quantity",
-        "Unit Cost", "Total", "Issued To", "Reference Job"
-    ]]
-
-    total_quantity = 0
-    total_value = 0.0
-
-    for r in records:
-        line_total = r.quantity * r.part.unit_cost
-        total_quantity += r.quantity
-        total_value += line_total
-
-        data.append([
-            r.issue_date.strftime('%Y-%m-%d'),
-            r.part.part_number,
-            r.part.name,
-            str(r.quantity),
-            f"${r.part.unit_cost:.2f}",
-            f"${line_total:.2f}",
-            r.issued_to,
-            r.reference_job or "N/A"
-        ])
-
-    # Добавляем итоговую строку
-    data.append([
-        "", "", "Grand Total:",
-        str(total_quantity),
-        "",  # пустая ячейка для Unit Cost
-        f"${total_value:.2f}",
-        "", ""
-    ])
-
-    # Таблица
-    table = Table(data, repeatRows=1, colWidths=[70, 80, 160, 60, 80, 80, 100, 100])
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (3, 1), (-2, -2), 'CENTER'),
-        ('GRID', (0, 0), (-1, -1), 0.25, colors.black),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-
-        # Стиль для итоговой строки — жирный шрифт и светло-серый фон
-        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
-        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-    ]))
-
-    elements.append(table)
-    doc.build(elements)
-
-    pdf_data = buffer.getvalue()
-    buffer.close()
-    return pdf_data
-
-
-def generate_invoice_pdf(record):
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=LETTER)
-    width, height = LETTER
-    styles = getSampleStyleSheet()
-    normal_style = styles['Normal']
-
-    # Logo
-    logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'logo', 'logo.png'))
-    if os.path.exists(logo_path):
-        c.drawImage(logo_path, 40, height - 100, width=100, preserveAspectRatio=True, mask='auto')
-
-    # Company Info (top right)
-    c.setFont("Helvetica-Bold", 12)
-    c.drawRightString(width - 40, height - 40, "WEST COAST CHIEF REPAIR")
-    c.setFont("Helvetica", 10)
-    c.drawRightString(width - 40, height - 55, "www.westcoastchief.com")
-    c.drawRightString(width - 40, height - 70, "support@westcoastchief.com")
-
-    # Invoice Number
-    invoice_num = f"INVOICE-{str(record.id).zfill(6)}"
-    c.setFont("Helvetica-Bold", 20)
-    c.drawCentredString(width / 2, height - 120, invoice_num)
-    c.line(width / 2 - 80, height - 123, width / 2 + 80, height - 123)
-
-    # Invoice Details (with wrapped text)
-    y = height - 160
-    details = [
-        f"Issue Date: {record.issue_date.strftime('%Y-%m-%d')}",
-        f"Issued To: {record.issued_to}",
-        f"Issued By: {record.issued_by}",
-        f"Reference Job: {record.reference_job or 'N/A'}"
-    ]
-
-    for line in details:
-        p = Paragraph(line, normal_style)
-        w, h = p.wrap(width - 80, 100)
-        p.drawOn(c, 40, y - h)
-        y -= h + 5
-
-    # Table header
-    y -= 10
-    c.setFillColor(colors.grey)
-    c.rect(40, y, width - 80, 20, fill=1)
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 11)
-    headers = [(50, "Part Number"), (160, "Part Name"), (300, "Qty"), (350, "Unit Cost"), (450, "Total")]
-    for x, text in headers:
-        c.drawString(x, y + 5, text)
-
-    # Table row with wrapped Part Name
-    y -= 25
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica", 10)
-    c.drawString(50, y, record.part.part_number)
-
-    p_name = Paragraph(record.part.name, normal_style)
-    w, h = p_name.wrap(130, 100)
-    p_name.drawOn(c, 160, y - h + 10)  # adjust vertical position for alignment
-
-    c.drawString(300, y, str(record.quantity))
-    c.drawString(350, y, f"${record.part.unit_cost:.2f}")
-
-    total = record.quantity * record.part.unit_cost
-    c.drawString(450, y, f"${total:.2f}")
-
-    # Footer total
-    y -= max(h, 15) + 30
-    c.setFont("Helvetica-Bold", 12)
-    c.drawRightString(width - 40, y, f"TOTAL: ${total:.2f}")
-
-    # Thank you message
-    y -= 50
-    c.setFont("Helvetica-Oblique", 10)
-    c.drawCentredString(width / 2, y, "Thank you for your business!")
-
-    c.showPage()
-    c.save()
-    pdf = buffer.getvalue()
-    buffer.close()
-    return pdf
-
-# def generate_view_pdf(record):
-#     buffer = BytesIO()
-#     c = canvas.Canvas(buffer, pagesize=LETTER)
-#     width, height = LETTER
-#     styles = getSampleStyleSheet()
-#     normal_style = styles['Normal']
-#
-#     # Logo
-#     logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'logo', 'logo.png'))
-#     if os.path.exists(logo_path):
-#         c.drawImage(logo_path, 40, height - 330, width=140, preserveAspectRatio=True, mask='auto')
-#
-#     # Company Info (top right)
-#     c.setFont("Helvetica-Bold", 12)
-#     c.drawRightString(width - 40, height - 40, "WEST COAST CHIEF REPAIR")
-#     c.setFont("Helvetica", 10)
-#     c.drawRightString(width - 40, height - 55, "3300 N. SAN FERNANDO BLVD.")
-#     c.drawRightString(width - 40, height - 70, "SUITE 101")
-#     c.drawRightString(width - 40, height - 85, "BURBANK, CA 91504")
-#     c.drawRightString(width - 40, height - 100, "parts@chiafappliance.com")
-#     c.drawRightString(width - 40, height - 115, "Phone:(323) 782-3922")
-#
-#     # Invoice Title and number
-#     invoice_num = f"INVOICE-{str(record.id).zfill(6)}"
-#     c.setFont("Helvetica-Bold", 20)
-#     c.drawCentredString(width / 2, height - 140, invoice_num)
-#     c.line(width / 2 - 80, height - 143, width / 2 + 80, height - 143)
-#
-#     # Invoice Info Box
-#     c.setFont("Helvetica", 11)
-#     y = height - 160
-#     info_lines = [
-#         f"Issue Date: {record.issue_date.strftime('%m-%d-%Y')}",
-#         f"Issued To: {record.issued_to}",
-#         f"Issued By: {record.issued_by}",
-#         f"Reference Job: {record.reference_job or 'N/A'}"
-#     ]
-#     for line in info_lines:
-#         c.drawString(40, y, line)
-#         y -= 15
-#
-#     # Table Header
-#     y -= 40
-#     c.setFillColor(colors.grey)
-#     c.rect(40, y, width - 80, 20, fill=1)
-#     c.setFillColor(colors.white)
-#     c.setFont("Helvetica-Bold", 11)
-#     headers = [(50, "Part Number"), (160, "Part Name"), (300, "Qty"), (350, "Unit Cost"), (450, "Total")]
-#     for x, text in headers:
-#         c.drawString(x, y + 5, text)
-#
-#     # Prepare the Part Name as Paragraph to wrap text
-#     part_name_para = Paragraph(record.part.name, normal_style)
-#     w, h = part_name_para.wrap(130, 100)  # width limit for Part Name
-#
-#     # Calculate max height for row (other columns are single line ~15)
-#     row_height = max(h, 15)
-#
-#     y -= row_height
-#
-#     # Draw cells with vertical alignment
-#     c.setFillColor(colors.black)
-#     c.setFont("Helvetica", 10)
-#     c.drawString(50, y + (row_height - 15), record.part.part_number)
-#     part_name_para.drawOn(c, 160, y + (row_height - h))
-#     c.drawString(300, y + (row_height - 15), str(record.quantity))
-#     c.drawString(350, y + (row_height - 15), f"${record.part.unit_cost:.2f}")
-#     total = record.quantity * record.part.unit_cost
-#     c.drawString(450, y + (row_height - 15), f"${total:.2f}")
-#
-#     # Footer - Total
-#     y -= 40
-#     c.setFont("Helvetica-Bold", 12)
-#     c.drawRightString(width - 40, y, f"TOTAL: ${total:.2f}")
-#
-#     # Thank you message
-#     y -= 50
-#     c.setFont("Helvetica-Oblique", 10)
-#     c.drawCentredString(width / 2, y, "Thank you for your business!")
-#
-#     # Finish
-#     c.showPage()
-#     c.save()
-#     pdf = buffer.getvalue()
-#     buffer.close()
-#     return pdf
-
-def generate_view_pdf(records):
-    from reportlab.lib.pagesizes import LETTER
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.platypus import Paragraph
-    from reportlab.lib import colors
+def generate_invoice_pdf(records, invoice_number=None):
+    """
+    Групповая печать инвойса (read-only).
+    Приоритет номера: param -> records[0].invoice_number -> legacy id.
+    НИЧЕГО в БД не меняет.
+    """
     from io import BytesIO
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import Paragraph
+    from reportlab.lib.enums import TA_RIGHT
     import os
+    from datetime import datetime as _dt
 
     if not records:
-        return b''
+        return b""
 
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=LETTER)
+    first = records[0]
+
+    # ---------- resolve number ----------
+    inv_no = None
+    if invoice_number is not None:
+        try:
+            inv_no = int(invoice_number)
+        except Exception:
+            inv_no = None
+    if inv_no is None:
+        n = getattr(first, "invoice_number", None)
+        if n is not None:
+            try:
+                inv_no = int(n)
+            except Exception:
+                inv_no = None
+    if inv_no is None:
+        try:
+            inv_no = int(getattr(first, "id"))
+        except Exception:
+            inv_no = None
+
+    inv_title = f"INVOICE-{inv_no:06d}" if inv_no is not None else "INVOICE"
+
+    issued_to  = getattr(first, "issued_to", "") or ""
+    issued_by  = getattr(first, "issued_by", "") or ""
+    ref_job    = getattr(first, "reference_job", "") or ""
+    issue_date = getattr(first, "issue_date", None)
+    try:
+        issue_date_s = issue_date.strftime("%m-%d-%Y") if isinstance(issue_date, _dt) else ""
+    except Exception:
+        issue_date_s = ""
+
+    # ---------- canvas ----------
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=LETTER)
     width, height = LETTER
     styles = getSampleStyleSheet()
-    normal_style = styles['Normal']
+    normal_style = styles["Normal"]
+    right_style  = ParagraphStyle("right", parent=normal_style, alignment=TA_RIGHT)
 
-    # Логотип
-    logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'logo', 'logo.png'))
-    if os.path.exists(logo_path):
-        c.drawImage(logo_path, 40, height - 330, width=140, preserveAspectRatio=True, mask='auto')
+    # === ЛОГО (СТАРАЯ ПОЗИЦИЯ, как в самом первом варианте) ===
+    try:
+        logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logo", "logo.png"))
+        if os.path.exists(logo_path):
+            c.drawImage(logo_path, 40, height - 330, width=140, preserveAspectRatio=True, mask="auto")
+    except Exception:
+        pass
 
-    # Общие данные инвойса (берём из первой записи)
-    first_record = records[0]
-
+    # Company block (справа вверху)
     c.setFont("Helvetica-Bold", 12)
     c.drawRightString(width - 40, height - 40, "WEST COAST CHIEF REPAIR")
     c.setFont("Helvetica", 10)
@@ -283,21 +76,20 @@ def generate_view_pdf(records):
     c.drawRightString(width - 40, height - 100, "parts@chiafappliance.com")
     c.drawRightString(width - 40, height - 115, "Phone:(323) 782-3922")
 
-    invoice_num = f"INVOICE-{str(first_record.id).zfill(6)}"
+    # Заголовок
     c.setFont("Helvetica-Bold", 20)
-    c.drawCentredString(width / 2, height - 140, invoice_num)
+    c.drawCentredString(width / 2, height - 140, inv_title)
     c.line(width / 2 - 80, height - 143, width / 2 + 80, height - 143)
 
-    # Информация об инвойсе
+    # Шапка данных
     c.setFont("Helvetica", 11)
     y = height - 160
-    info_lines = [
-        f"Issue Date: {first_record.issue_date.strftime('%m-%d-%Y')}",
-        f"Issued To: {first_record.issued_to}",
-        f"Issued By: {first_record.issued_by}",
-        f"Reference Job: {first_record.reference_job or 'N/A'}"
-    ]
-    for line in info_lines:
+    for line in [
+        f"Issue Date: {issue_date_s}",
+        f"Issued To: {issued_to}",
+        f"Issued By: {issued_by}",
+        f"Reference Job: {ref_job or 'N/A'}",
+    ]:
         c.drawString(40, y, line)
         y -= 15
 
@@ -307,54 +99,98 @@ def generate_view_pdf(records):
     c.rect(40, y, width - 80, 20, fill=1)
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 11)
-    headers = [(50, "Part Number"), (160, "Part Name"), (300, "Qty"), (350, "Unit Cost"), (450, "Total")]
+    headers = [(50, "Part Number"), (160, "Part Name"), (300, "Qty"),
+               (350, "Unit Cost"), (450, "Total"), (520, "Location")]
     for x, text in headers:
         c.drawString(x, y + 5, text)
 
-    # Отрисовка позиций
+    # ---------- Строки (ровное выравнивание всех колонок) ----------
     c.setFillColor(colors.black)
     c.setFont("Helvetica", 10)
     y -= 25
+    total_sum = 0.0
 
-    total_sum = 0
+    # координаты и ширины колонок (все как в твоём исходнике)
+    COLS = {
+        "pnum":  {"x": 50,  "w": 100, "style": normal_style},
+        "pname": {"x": 160, "w": 130, "style": normal_style},
+        "qty":   {"x": 300, "w": 40,  "style": right_style},
+        "ucost": {"x": 350, "w": 70,  "style": right_style},
+        "total": {"x": 450, "w": 70,  "style": right_style},
+        "loc":   {"x": 520, "w": 80,  "style": normal_style},
+    }
 
-    for record in records:
-        # Рисуем строку с данными
-        part_name_para = Paragraph(record.part.name, normal_style)
-        w, h = part_name_para.wrap(130, 100)
-        row_height = max(h, 15)
+    def _draw_table_header_only():
+        c.setFont("Helvetica-Bold", 11)
+        yy = height - 60
+        c.setFillColor(colors.grey)
+        c.rect(40, yy, width - 80, 20, fill=1)
+        c.setFillColor(colors.white)
+        for x, text in headers:
+            c.drawString(x, yy + 5, text)
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica", 10)
+        return height - 85  # новая рабочая Y после заголовка таблицы
 
-        c.drawString(50, y + (row_height - 15), record.part.part_number)
-        part_name_para.drawOn(c, 160, y + (row_height - h))
-        c.drawString(300, y + (row_height - 15), str(record.quantity))
-        c.drawString(350, y + (row_height - 15), f"${record.part.unit_cost:.2f}")
+    for r in records:
+        pnum = getattr(getattr(r, "part", None), "part_number", "") or ""
+        pname = getattr(getattr(r, "part", None), "name", "") or ""
+        qty   = getattr(r, "quantity", 0) or 0
+        ucost = getattr(r, "unit_cost_at_issue", None)
+        if ucost is None:
+            ucost = getattr(getattr(r, "part", None), "unit_cost", 0.0) or 0.0
+        loc   = getattr(r, "location", None) or getattr(getattr(r, "part", None), "location", "") or ""
 
-        line_total = record.quantity * record.part.unit_cost
-        c.drawString(450, y + (row_height - 15), f"${line_total:.2f}")
+        line_total = (qty or 0) * float(ucost or 0.0)
 
-        y -= row_height + 5
-        total_sum += line_total
-
-        # Если мало места, начинаем новую страницу
-        if y < 100:
+        # перенос страницы при нехватке места
+        min_row_h = 15
+        if y < (100 + min_row_h):
             c.showPage()
-            y = height - 50
-            # Можно повторить заголовки таблицы (опционально)
+            y = _draw_table_header_only()
+
+        # готовим параграфы для всех колонок (чтобы высота считалась одинаково)
+        cells = {
+            "pnum":  Paragraph(str(pnum), COLS["pnum"]["style"]),
+            "pname": Paragraph(pname,      COLS["pname"]["style"]),
+            "qty":   Paragraph(str(qty),   COLS["qty"]["style"]),
+            "ucost": Paragraph(f"${float(ucost):.2f}", COLS["ucost"]["style"]),
+            "total": Paragraph(f"${float(line_total):.2f}", COLS["total"]["style"]),
+            "loc":   Paragraph(str(loc),   COLS["loc"]["style"]),
+        }
+
+        # вычисляем единую высоту строки
+        max_h = 15
+        sizes = {}
+        for key, para in cells.items():
+            _, h = para.wrap(COLS[key]["w"], 1000)
+            sizes[key] = h
+            if h > max_h:
+                max_h = h
+
+        # рисуем ячейки, прижимая к верхней кромке строки
+        for key, para in cells.items():
+            x = COLS[key]["x"]
+            h = sizes[key]
+            para.drawOn(c, x, y + (max_h - h))
+
+        y -= (max_h + 5)
+        total_sum += float(line_total)
 
     # Итог
     y -= 20
     c.setFont("Helvetica-Bold", 12)
-    c.drawRightString(width - 40, y, f"TOTAL: ${total_sum:.2f}")
+    c.drawRightString(width - 40, max(y, 60), f"TOTAL: ${total_sum:.2f}")
 
     # Спасибо
     y -= 50
     c.setFont("Helvetica-Oblique", 10)
-    c.drawCentredString(width / 2, y, "Thank you for your business!")
+    c.drawCentredString(width / 2, max(y, 40), "Thank you for your business!")
 
     c.showPage()
     c.save()
-    pdf = buffer.getvalue()
-    buffer.close()
+    pdf = buf.getvalue()
+    buf.close()
     return pdf
 
 
