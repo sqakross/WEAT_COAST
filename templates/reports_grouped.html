@@ -187,12 +187,18 @@
                         <input class="linecb" type="checkbox" name="record_ids[]" value="{{ it.id }}" {% if row_is_return %}disabled{% endif %}>
                         {# quantity to return when "Return Selected" is used #}
                         <input type="number"
-                               name="qty_{{ it.id }}"
-                               class="form-control form-control-sm"
-                               style="width:70px"
-                               min="0"
-                               value="1"
-                               {% if row_is_return %}disabled{% endif %}>
+                            name="qty_{{ it.id }}"
+                            class="form-control form-control-sm return-qty"
+                            style="width:70px"
+                            inputmode="numeric"
+                            pattern="\d*"
+                            step="1"
+                            min="0"
+                            max="{{ it.quantity or 0 }}"
+                            title="Max: {{ it.quantity or 0 }}"
+                            value="{{ 1 if (it.quantity or 0) > 0 else 0 }}"
+                            {% if row_is_return %}disabled{% endif %}>
+
                       </div>
                     </td>
 

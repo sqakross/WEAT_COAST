@@ -48,11 +48,18 @@
 </div>
 
 {# ======= Parts planned / availability ======= #}
+{# Собираем строки либо по юнитам (multi), либо плоско (legacy), но не одновременно #}
 {% set ns = namespace(all_parts=[]) %}
-{% if wo.parts %}{% set ns.all_parts = ns.all_parts + wo.parts %}{% endif %}
-{% for u in (wo.units or []) %}
-  {% if u.parts %}{% set ns.all_parts = ns.all_parts + u.parts %}{% endif %}
-{% endfor %}
+{% if wo.units and (wo.units|length) > 0 %}
+  {# режим multi — только по юнитам #}
+  {% for u in wo.units %}
+    {% if u.parts %}{% set ns.all_parts = ns.all_parts + u.parts %}{% endif %}
+  {% endfor %}
+{% elif wo.parts %}
+  {# режим legacy — только плоские строки #}
+  {% set ns.all_parts = ns.all_parts + wo.parts %}
+{% endif %}
+
 
 {% if avail and (avail|length) > 0 %}
 <div class="table-responsive">
