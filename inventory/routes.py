@@ -1707,21 +1707,21 @@ def wo_issue_instock(wo_id):
     from urllib.parse import urlencode
     from markupsafe import Markup
     from sqlalchemy import func
-    from datetime import datetime, timedelta
-    from sqlalchemy import and_
+    from datetime import datetime
 
     from extensions import db
-    from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord
+    from models import WorkOrder, WorkOrderPart, Part  # Part — складская позиция
 
     wo = WorkOrder.query.get_or_404(wo_id)
 
+    # === 1) Подготовим доступность по PN из твоей функции ===
     try:
         avail_rows = compute_availability(wo) or []
     except Exception:
         avail_rows = []
 
-    stock_map = {}
-    hint_map  = {}
+    stock_map = {}  # PN -> on_hand (агрегированный "виртуальный" остаток для greedy)
+    hint_map  = {}  # PN -> нормализованный hint
     for r in avail_rows:
         pn = (r.get("part_number") or "").strip().upper()
         if not pn:
@@ -1740,23 +1740,29 @@ def wo_issue_instock(wo_id):
             return True
         return False
 
+    # === 2) Режим "выбрано" — читаем реальные ID строк ===
     raw_ids = (request.form.get("part_ids") or "").strip()
     items_to_issue = []
     issued_row_ids = []
     skipped_rows = []
 
-    # ========== режим 1: выбранные строки ==========
     if raw_ids:
-        ids = [int(tok) for tok in raw_ids.split(",") if tok.strip().isdigit()]
+        ids = []
+        for tok in raw_ids.split(","):
+            tok = tok.strip()
+            if tok and tok.isdigit():
+                ids.append(int(tok))
         if not ids:
             flash("Nothing selected to issue.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-        wops = (WorkOrderPart.query
-                .filter(WorkOrderPart.work_order_id == wo_id,
-                        WorkOrderPart.id.in_(ids))
-                .all())
-
+        # Ограничим выбор строками именно этого WO
+        wops: list[WorkOrderPart] = (
+            WorkOrderPart.query
+            .filter(WorkOrderPart.work_order_id == wo_id,
+                    WorkOrderPart.id.in_(ids))
+            .all()
+        )
         if not wops:
             flash("Selected parts not found.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
@@ -1769,14 +1775,35 @@ def wo_issue_instock(wo_id):
             if not pn or qty_req <= 0:
                 continue
 
+            # --- Поиск Part: сначала PN+location, потом PN без location (фоллбэк)
+            q_base = Part.query.filter(func.upper(Part.part_number) == pn)
+            part = None
+            if part_has_location and getattr(line, "warehouse", None):
+                part = q_base.filter(
+                    func.coalesce(Part.location, "") == (line.warehouse or "")
+                ).first()
+            if not part:
+                part = q_base.first()
+
+            # --- Проверка "можно выдать"
             ok = can_issue(pn, qty_req)
 
-            q = Part.query.filter(func.upper(Part.part_number) == pn)
-            if part_has_location and getattr(line, "warehouse", None):
-                q = q.filter(Part.location == line.warehouse)
-            part = q.first()
+            # ФОЛЛБЭК: если greedy сказал "нет", но в реальном складе хватает — позволим
+            if not ok and part:
+                try:
+                    real_left = int(getattr(part, "quantity", 0) or 0)
+                except Exception:
+                    real_left = 0
+                if real_left >= qty_req:
+                    # уменьшаем локальный "виртуальный" остаток, чтобы удерживать консистентность
+                    stock_map[pn] = int(stock_map.get(pn, 0))
+                    stock_map[pn] = max(0, stock_map[pn] - qty_req)
+                    ok = True
 
+            # нормализованный хинт для UI (не критично)
             hint_norm = (hint_map.get(pn) or ("STOCK" if ok else "WAIT"))
+
+            # если есть поле stock_hint у строки — можно сохранить
             if hasattr(line, "stock_hint"):
                 try:
                     line.stock_hint = hint_norm
@@ -1793,6 +1820,7 @@ def wo_issue_instock(wo_id):
                 })
                 continue
 
+            # unit_price берём из строки (если есть)
             unit_price = None
             if getattr(line, "unit_cost", None) is not None:
                 try:
@@ -1815,52 +1843,72 @@ def wo_issue_instock(wo_id):
                 flash("Nothing available to issue.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-        # === создаём записи выдачи ===
-        issue_date, _ = _issue_records_bulk(
+        # --- Создаём записи выдачи ---
+        issue_result = _issue_records_bulk(
             issued_to=wo.technician_name,
             reference_job=wo.canonical_job,
             items=items_to_issue
         )
 
-        # === добавляем автоматическое создание батча / инвойса ===
+        # Поддержка двух сигнатур: (dt, records) ИЛИ (dt, created_bool)
+        issue_date = None
+        new_records = None
         try:
-            # если _issue_records_bulk не возвращает записи — ищем их по времени
-            t0 = issue_date - timedelta(minutes=2)
-            t1 = issue_date + timedelta(minutes=2)
-            new_records = IssuedPartRecord.query.filter(
-                and_(
-                    IssuedPartRecord.issued_to == wo.technician_name,
-                    IssuedPartRecord.reference_job == wo.canonical_job,
-                    IssuedPartRecord.invoice_number.is_(None),
-                    IssuedPartRecord.issue_date >= t0,
-                    IssuedPartRecord.issue_date <= t1,
-                )
-            ).all()
+            # новая сигнатура
+            issue_date, new_records = issue_result
+        except Exception:
+            # старая сигнатура
+            issue_date, _created = issue_result
 
-            if new_records:
+        # отметим строки (если есть такие поля)
+        now = datetime.utcnow()
+        for line in WorkOrderPart.query.filter(WorkOrderPart.id.in_(issued_row_ids)).all():
+            if hasattr(line, "issued_qty"):
+                line.issued_qty = (line.issued_qty or 0) + int(line.quantity or 0)
+            if hasattr(line, "last_issued_at"):
+                line.last_issued_at = now
+        db.session.commit()
+
+        # --- Если прислали записи, создадим/обеспечим инвойс и редиректнём сразу в отчёт ---
+        if new_records:
+            try:
                 batch = _ensure_invoice_number_for_records(
                     records=new_records,
                     issued_to=wo.technician_name,
-                    issued_by=current_user.username,
+                    issued_by=getattr(current_user, "username", "system"),
                     reference_job=wo.canonical_job,
-                    issue_date=datetime.utcnow(),
+                    issue_date=issue_date or datetime.utcnow(),
                     location=None
                 )
                 db.session.commit()
                 return redirect(f"/reports/{batch.invoice_number}", code=303)
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Issued, but failed to create invoice: {e}", "danger")
+            except Exception:
+                db.session.rollback()
+                # если не вышло — падать не будем, дадим ссылку на группу за день ниже
 
-        # если batch не создался — fallback старое поведение
-        flash(Markup(f'Issued {len(issued_row_ids)} line(s). '
-                     f'<a href="/reports_grouped?recipient={wo.technician_name}&reference_job={wo.canonical_job}" '
-                     f'target="_blank" rel="noopener">Open invoice group</a> to print.'), "success")
+        # --- fallback: если батч не сделали здесь, откроем сгруппированный отчёт за сегодня ---
+        d = (issue_date or datetime.utcnow()).date().isoformat()
+        params = urlencode({
+            "start_date": d,
+            "end_date": d,
+            "recipient": wo.technician_name,
+            "reference_job": wo.canonical_job
+        })
+        link = f"/reports_grouped?{params}"
+
+        if skipped_rows:
+            session["wo_skip_info"] = skipped_rows
+
+        flash(Markup(
+            f'Issued {len(issued_row_ids)} line(s). '
+            f'<a href="{link}" target="_blank" rel="noopener">Open invoice group</a> to print.'
+        ), "success")
+
         return redirect(url_for("inventory.wo_detail",
                                 wo_id=wo.id,
                                 issued_ids=",".join(map(str, issued_row_ids))))
 
-    # ========== режим 2: если ничего не выбрано ==========
+    # === 3) Режим "ничего не выбрано" — как раньше ===
     items_to_issue.clear()
     for r in avail_rows:
         if int(r.get("issue_now") or 0) > 0:
@@ -1881,45 +1929,34 @@ def wo_issue_instock(wo_id):
         flash("Nothing available to issue (all WAIT).", "warning")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    issue_date, _ = _issue_records_bulk(
+    issue_date, _created_or_records = _issue_records_bulk(
         issued_to=wo.technician_name,
         reference_job=wo.canonical_job,
         items=items_to_issue
     )
 
+    # статус WO
     try:
-        t0 = issue_date - timedelta(minutes=2)
-        t1 = issue_date + timedelta(minutes=2)
-        new_records = IssuedPartRecord.query.filter(
-            and_(
-                IssuedPartRecord.issued_to == wo.technician_name,
-                IssuedPartRecord.reference_job == wo.canonical_job,
-                IssuedPartRecord.invoice_number.is_(None),
-                IssuedPartRecord.issue_date >= t0,
-                IssuedPartRecord.issue_date <= t1,
-            )
-        ).all()
-
-        if new_records:
-            batch = _ensure_invoice_number_for_records(
-                records=new_records,
-                issued_to=wo.technician_name,
-                issued_by=current_user.username,
-                reference_job=wo.canonical_job,
-                issue_date=datetime.utcnow(),
-                location=None
-            )
+        still_wait = any((row.get("on_hand", 0) < row.get("requested", 0)) for row in (compute_availability(wo) or []))
+    except Exception:
+        still_wait = True
+    if not still_wait:
+        try:
+            wo.status = "done"
             db.session.commit()
-            return redirect(f"/reports/{batch.invoice_number}", code=303)
-    except Exception as e:
-        db.session.rollback()
-        flash(f"Issued, but failed to create invoice: {e}", "danger")
+        except Exception:
+            db.session.rollback()
 
-    flash(Markup(f'Issued in-stock items. '
-                 f'<a href="/reports_grouped?recipient={wo.technician_name}&reference_job={wo.canonical_job}" '
-                 f'target="_blank" rel="noopener">Open invoice group</a> to print.'), "success")
+    d = (issue_date or datetime.utcnow()).date().isoformat()
+    params = urlencode({
+        "start_date": d,
+        "end_date": d,
+        "recipient": wo.technician_name,
+        "reference_job": wo.canonical_job
+    })
+    link = f"/reports_grouped?{params}"
+    flash(Markup(f'Issued in-stock items. <a href="{link}" target="_blank" rel="noopener">Open invoice group</a> to print.'), "success")
     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
-
 
 @inventory_bp.get("/work_orders/newx")
 @login_required
@@ -2133,6 +2170,25 @@ def wo_savex():
     f = request.form
 
     # helpers
+    def _collect_missing_sup(payload):
+        miss = []
+        for u in payload or []:
+            for r in (u.get("rows") or []):
+                pn = (r.get("part_number") or "").strip().upper()
+                qty = int((r.get("quantity") or 0) or 0)
+                sup = (r.get("supplier") or "").strip()
+                if pn and qty > 0 and not sup:
+                    miss.append(pn)
+        return sorted(set(miss))
+
+    missing_pns = _collect_missing_sup(units_payload)
+    if missing_pns:
+        flash(f"Supplier (Sup) is required for: {', '.join(missing_pns)}", "danger")
+        # НИЧЕГО в БД ещё не меняли — просто назад в форму:
+        if (f.get('wo_id') or '').strip():
+            return redirect(url_for("inventory.wo_edit", wo_id=int(f.get('wo_id'))))
+        else:
+            return redirect(url_for("inventory.wo_new"))
     def _tech_norm(x: str) -> str:
         return (x or "").strip().upper()
 
@@ -2428,6 +2484,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
 
     # --- редирект прямо на отчёт ---
     return redirect(f"/reports/{batch.invoice_number}", code=303)
+
 
 @inventory_bp.post("/work_orders/<int:wo_id>/status")
 @login_required

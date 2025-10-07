@@ -11,15 +11,9 @@
   .col-qty{width:64px;text-align:right}
   .col-issue{width:70px;text-align:center}
   .num{text-align:right;font-variant-numeric:tabular-nums}
-
-  /* шапка таблицы не перехватывает клики */
   .wo-form .unit-table thead th{position:static!important;pointer-events:none;}
-
-  /* Issue ячейка и чекбокс */
   .wo-form .unit-table td.issue-cell{position:relative;}
-  .wo-form .unit-table .issue-check{
-    position:relative; z-index:3; pointer-events:auto!important; opacity:1!important; cursor:pointer;
-  }
+  .wo-form .unit-table .issue-check{position:relative; z-index:3; pointer-events:auto!important; opacity:1!important; cursor:pointer;}
   .wo-form .unit-table td.issue-cell, .wo-form .unit-table td.issue-cell *{ pointer-events:auto!important; }
 </style>
 
@@ -85,12 +79,12 @@
             <input name="units[{{ ui }}][brand]" class="form-control" value="{{ u.brand or '' }}" {{ ro }} {{ dis }}>
           </div>
           <div class="col-md-4">
-            <label class="form-label">Model # (≤25)</label>
+            <label class="form-label">Model #</label>
             <input name="units[{{ ui }}][model]" class="form-control" maxlength="25"
                    value="{{ u.model or '' }}" {{ ro }} {{ dis }}>
           </div>
           <div class="col-md-4">
-            <label class="form-label">Serial # (≤25)</label>
+            <label class="form-label">Serial #</label>
             <input name="units[{{ ui }}][serial]" class="form-control" maxlength="25"
                    value="{{ u.serial or '' }}" {{ ro }} {{ dis }}>
           </div>
@@ -125,7 +119,7 @@
                 <td class="num"><input class="form-control unit-cost" name="units[{{ ui }}][rows][{{ ri }}][unit_cost]" type="number" step="0.01" min="0" value="{{ '%.2f'|format(r.unit_cost) if r.unit_cost is defined and r.unit_cost is not none else '0.00' }}" {{ ro }} {{ dis }}></td>
                 <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
                 <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][warehouse]" value="{{ r.warehouse or r.unit_label or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
-                <td><input class="form-control supplier-input" name="units[{{ ui }}][rows][{{ ri }}][supplier]" list="suppliers_datalist" value="{{ r.supplier or '' }}" {{ ro }} {{ dis }}></td>
+                <td><input class="form-control supplier-input" name="units[{{ ui }}][rows][{{ ri }}][supplier]" list="suppliers_datalist" value="{{ r.supplier or '' }}" required {{ ro }} {{ dis }}></td>
                 <td class="text-center">
                   <div class="form-check d-flex justify-content-center m-0">
                     <input class="form-check-input" type="checkbox" name="units[{{ ui }}][rows][{{ ri }}][backorder_flag]" {% if r.backorder_flag %}checked{% endif %} {{ dis }}>
@@ -196,6 +190,10 @@
 {% block extra_js %}
 <script>
 (function(){
+  // безопасные Jinja → JS константы (НЕ внутри backticks)
+  const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
+  const IS_EDIT   = {{ 'true' if IS_EDIT else 'false' }};
+
   const unitsWrap   = document.getElementById('unitsWrap');
   const grandTotalEl= document.getElementById('grandTotal');
   const deliveryEl  = document.getElementById('deliveryFee');
@@ -230,12 +228,12 @@
     markupEl?.addEventListener(ev,   ()=>document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal));
   });
 
-  /* ===== enable/disable Issue by hint (only STOCK can be checked) ===== */
+  /* ===== enable/disable Issue by hint ===== */
   function setIssueEnabled(tr, enabled){
     const cb = tr.querySelector('.issue-check');
     if (!cb) return;
     if (enabled){
-      cb.disabled = {{ 'false' if IS_EDIT else 'true' }}; // в новом WO всё ещё заблокировано кнопкой
+      cb.disabled = !IS_EDIT; // Только в режиме edit можно issue
       cb.removeAttribute('disabled');
     }else{
       cb.checked = false;
@@ -244,7 +242,25 @@
     }
   }
 
-  /* ===== STOCK hint ===== */
+  /* ===== универсальный парсер остатка ===== */
+  function extractAvailableCount(j){
+    const keys=['qty_available','available_qty','available','on_hand','onhand','stock','in_stock','qty','count','quantity'];
+    for(const k of keys){
+      const v=j&&j[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
+    }
+    for(const wrap of ['data','result']){
+      const o=j&&j[wrap];
+      if(o && typeof o==='object'){
+        for(const k of keys){
+          const v=o[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
+        }
+      }
+    }
+    const sumArr=a=>Array.isArray(a)?a.reduce((s,x)=>s+(Number.isFinite(extractAvailableCount(x))?extractAvailableCount(x):0),0):0;
+    return sumArr(j) || sumArr(j?.rows) || sumArr(j?.items) || sumArr(j?.data?.rows) || 0;
+  }
+
+  /* ===== STOCK hint с qty ===== */
   function fetchHint(tr){
     const pn  = (tr.querySelector('.pn')?.value||'').trim().toUpperCase();
     const qty = parseInt(tr.querySelector('.qty')?.value||'0',10)||0;
@@ -256,14 +272,15 @@
       return;
     }
 
-    fetch(`{{ url_for('inventory.api_stock_hint') }}?pn=${encodeURIComponent(pn)}&qty=${qty}`)
-      .then(r=>r.json())
+    fetch(API_STOCK + '?pn=' + encodeURIComponent(pn) + '&qty=' + qty)
+      .then(r=>r.ok ? r.json() : Promise.reject())
       .then(j=>{
-        const t  = String(j?.hint||j?.status||'').toUpperCase();
-        const qa = Number(j?.qty_available ?? j?.available_qty ?? j?.qty ?? 0);
-        const ok = /\b(STOCK|IN[-\s]?STOCK|ON HAND|AVAILABLE)\b/.test(t) || (qa >= qty);
-        if(hintEl) hintEl.textContent = ok ? 'STOCK' : 'WAIT';
-        setIssueEnabled(tr, ok);
+        const t   = String(j?.hint || j?.status || '').toUpperCase();
+        const qa  = extractAvailableCount(j);
+        const isStock = /\b(STOCK|IN[-\s]?STOCK|ON HAND|AVAILABLE)\b/.test(t) || (qa >= qty);
+        const label   = isStock ? 'STOCK' : 'WAIT';
+        if (hintEl) hintEl.textContent = label + '/' + qa;
+        setIssueEnabled(tr, isStock);
       })
       .catch(()=>{
         if(hintEl) hintEl.textContent='—';
@@ -271,14 +288,15 @@
       });
   }
 
-  /* ===== delegated handlers ===== */
-  unitsWrap.addEventListener('input', (e)=>{
+  /* ===== handlers ===== */
+  const unitsWrapEl = document.getElementById('unitsWrap');
+  unitsWrapEl.addEventListener('input', (e)=>{
     const tr=e.target.closest('tr'); const card=e.target.closest('.card'); if(!card) return;
     if(tr && (e.target.classList.contains('qty')||e.target.classList.contains('unit-cost'))) recomputeUnitSubtotal(card);
     if(tr && (e.target.classList.contains('pn')||e.target.classList.contains('qty'))) fetchHint(tr);
   });
 
-  unitsWrap.addEventListener('click',(e)=>{
+  unitsWrapEl.addEventListener('click',(e)=>{
     const card=e.target.closest('.card'); if(!card) return;
     if(e.target.classList.contains('del-unit')){ card.remove(); recomputeGrandTotal(); }
     if(e.target.classList.contains('add-row')){
@@ -289,7 +307,7 @@
       recomputeUnitSubtotal(card);
     }
     if(e.target.classList.contains('del-row')){
-      const tr=e.target.closest('tr'); e.target.closest('tr')?.remove();
+      e.target.closest('tr')?.remove();
       recomputeUnitSubtotal(card);
     }
   });
@@ -299,10 +317,9 @@
     const selected = [];
     document.querySelectorAll('tbody tr').forEach((tr)=>{
       const cb = tr.querySelector('.issue-check');
-      const hint = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
-      if (cb && cb.checked && hint.startsWith('STOCK')){
-        selected.push(cb.value);
-      }
+      const raw = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
+      const status = raw.split('/')[0];
+      if (cb && cb.checked && status==='STOCK'){ selected.push(cb.value); }
     });
     if (selected.length===0){
       alert('Select at least one in-stock part (hint must be STOCK).');
@@ -314,9 +331,9 @@
 
   /* ===== init ===== */
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
-  unitsWrap.querySelectorAll('tbody tr').forEach(fetchHint);
+  unitsWrapEl.querySelectorAll('tbody tr').forEach(fetchHint);
 
-  /* ===== templates ===== */
+  /* ===== шаблон строки ===== */
   function rowTemplate(ui,ri){
     const ro = {{ RO and 'true' or 'false' }} ? 'disabled readonly' : '';
     const boDisabled = {{ RO and 'true' or 'false' }} ? 'disabled' : '';
@@ -330,23 +347,14 @@
   <td class="num"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${ro}></td>
   <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
   <td><input class="form-control" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
-  <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
-  <td class="text-center">
-    <div class="form-check d-flex justify-content-center m-0">
-      <input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]" ${boDisabled}>
-    </div>
-  </td>
+  <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" required ${ro}></td>
+  <td class="text-center"><div class="form-check d-flex justify-content-center m-0"><input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]" ${boDisabled}></div></td>
   <td class="hint">—</td>
-  <td class="text-center issue-cell">
-    <div class="form-check d-flex justify-content-center m-0">
-      <input type="checkbox" class="form-check-input issue-check" name="issue_ids" value="${ui}_${ri}" disabled>
-    </div>
-  </td>
+  <td class="text-center issue-cell"><div class="form-check d-flex justify-content-center m-0"><input type="checkbox" class="form-check-input issue-check" name="issue_ids" value="${ui}_${ri}" disabled></div></td>
   <td class="text-center">${delBtn}</td>
 </tr>`;
   }
 })();
 </script>
 {% endblock %}
-
 
