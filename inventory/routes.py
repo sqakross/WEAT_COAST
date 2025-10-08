@@ -1148,13 +1148,15 @@ def search_alias():
 def wo_detail(wo_id):
     """
     Work Order details page (flat + multi-appliance).
+    Не используем WorkIssueBatch (его нет в проекте) — передаём batches=[]
     """
-    from flask import current_app, render_template, request, flash, redirect, url_for
+    from flask import current_app, render_template, flash, redirect, url_for
     from sqlalchemy import func
     from sqlalchemy.orm import selectinload
     from models import WorkOrder, WorkUnit, WorkOrderPart
     from extensions import db
 
+    # 1) Work Order + связанные части
     try:
         wo = (
             db.session.query(WorkOrder)
@@ -1164,7 +1166,7 @@ def wo_detail(wo_id):
             )
             .get(wo_id)
         )
-    except Exception as e:
+    except Exception:
         current_app.logger.exception("Failed to load WorkOrder %s", wo_id)
         wo = None
 
@@ -1172,7 +1174,7 @@ def wo_detail(wo_id):
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # suppliers
+    # 2) Поставщики (для справки/фильтров в шаблоне)
     suppliers = []
     try:
         rows = (
@@ -1191,17 +1193,19 @@ def wo_detail(wo_id):
         current_app.logger.exception("Suppliers query failed")
         suppliers = []
 
-    # batches — оставляем пусто пока
+    # 3) Инвойсные батчи не подгружаем — модели нет
     batches = []
+
+    # 4) Авейлы не считаем на этой странице (оставляем, как было)
+    avail = []
 
     return render_template(
         "wo_detail.html",
         wo=wo,
-        avail=[],
+        avail=avail,
         batches=batches,
         suppliers=suppliers,
     )
-
 
 @inventory_bp.post("/work_orders/new", endpoint="wo_create")
 @login_required
@@ -1901,16 +1905,29 @@ def wo_issue_instock(wo_id):
         except Exception:
             issue_date, _created = issue_result     # старая сигнатура
 
-        # отметим строки
+        # отметим выбранные строки (issued_qty + статус при закрытии)
         now = datetime.utcnow()
         for line in WorkOrderPart.query.filter(WorkOrderPart.id.in_(issued_row_ids)).all():
-            if hasattr(line, "issued_qty"):
-                line.issued_qty = (line.issued_qty or 0) + int(line.quantity or 0)
+            # сколько было и сколько надо
+            qty_needed = int(line.quantity or 0)
+            issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
+            issue_now = max(qty_needed - issued_so_far, 0)
+
+            if issue_now > 0:
+                line.issued_qty = issued_so_far + issue_now
+                if line.issued_qty >= qty_needed:
+                    try:
+                        line.status = "done"
+                    except Exception:
+                        pass
+
             if hasattr(line, "last_issued_at"):
                 line.last_issued_at = now
+
+            db.session.add(line)
         db.session.commit()
 
-        # === ВАЖНО: меняем статус, если попросили ===
+        # === ВАЖНО: меняем статус WO, если попросили ===
         if set_status == "done":
             try:
                 wo.status = "done"
@@ -1957,21 +1974,27 @@ def wo_issue_instock(wo_id):
                                 wo_id=wo.id,
                                 issued_ids=",".join(map(str, issued_row_ids))))
 
-    # === 3) «ничего не выбрано» — прежний поток ===
+    # === 3) «ничего не выбрано» — прежний поток (по avail_rows) ===
+    # подготовим словарь PN -> сколько выдаём сейчас (issue_now)
+    pn_issue_map = {}
     items_to_issue.clear()
     for r in avail_rows:
-        if int(r.get("issue_now") or 0) > 0:
-            pn = (r.get("part_number") or "").strip().upper()
-            if not pn:
-                continue
-            part = Part.query.filter(func.upper(Part.part_number) == pn).first()
-            if not part:
-                continue
-            items_to_issue.append({
-                "part_id": part.id,
-                "qty": int(r["issue_now"]),
-                "unit_price": None
-            })
+        issue_now = int(r.get("issue_now") or 0)
+        if issue_now <= 0:
+            continue
+        pn = (r.get("part_number") or "").strip().upper()
+        if not pn:
+            continue
+        pn_issue_map[pn] = pn_issue_map.get(pn, 0) + issue_now
+
+        part = Part.query.filter(func.upper(Part.part_number) == pn).first()
+        if not part:
+            continue
+        items_to_issue.append({
+            "part_id": part.id,
+            "qty": issue_now,
+            "unit_price": None
+        })
 
     if not items_to_issue:
         flash("Nothing available to issue (all WAIT).", "warning")
@@ -1982,6 +2005,43 @@ def wo_issue_instock(wo_id):
         reference_job=wo.canonical_job,
         items=items_to_issue
     )
+
+    # === РАСПРЕДЕЛЯЕМ выдачу по строкам WO по PN ===
+    # для каждого PN — идём по строкам этой WO с тем же PN и увеличиваем issued_qty, пока не исчерпаем выдачу
+    now = datetime.utcnow()
+    for pn, need_to_apply in pn_issue_map.items():
+        if need_to_apply <= 0:
+            continue
+        rows = (
+            WorkOrderPart.query
+            .filter(WorkOrderPart.work_order_id == wo.id,
+                    func.upper(WorkOrderPart.part_number) == pn)
+            .order_by(WorkOrderPart.id.asc())
+            .all()
+        )
+        for line in rows:
+            if need_to_apply <= 0:
+                break
+            qty_needed = int(line.quantity or 0)
+            issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
+            remaining = max(qty_needed - issued_so_far, 0)
+            if remaining <= 0:
+                continue
+
+            delta = min(remaining, need_to_apply)
+            line.issued_qty = issued_so_far + delta
+            if line.issued_qty >= qty_needed:
+                try:
+                    line.status = "done"
+                except Exception:
+                    pass
+            if hasattr(line, "last_issued_at"):
+                line.last_issued_at = now
+            db.session.add(line)
+            need_to_apply -= delta
+        # если остался хвост — это значит на строках уже всё закрыто; пропускаем
+
+    db.session.commit()
 
     # если явно попросили — ставим done
     if set_status == "done":

@@ -8,10 +8,7 @@
       <a class="btn btn-outline-primary" href="{{ url_for('inventory.wo_edit', wo_id=wo.id) }}">✏️ Edit</a>
     {% endif %}
     {% if current_user.role == 'superadmin' %}
-      <form method="post"
-            action="{{ url_for('inventory.wo_delete', wo_id=wo.id) }}"
-            class="d-inline"
-            onsubmit="return confirm('Delete Work Order #{{ wo.id }}? This cannot be undone.');">
+      <form method="post" action="{{ url_for('inventory.wo_delete', wo_id=wo.id) }}" class="d-inline" onsubmit="return confirm('Delete Work Order #{{ wo.id }}? This cannot be undone.');">
         <button class="btn btn-outline-danger" type="submit">🗑️ Delete</button>
       </form>
     {% endif %}
@@ -27,10 +24,7 @@
     <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="copyJobs">Copy</button>
     <div class="text-muted small">primary: <code>{{ wo.canonical_job or '—' }}</code></div>
   </div>
-  <div class="col-md-3">
-    <strong>Brand/Model:</strong>
-    {{ (wo.brand or (u0 and u0.brand) or '') ~ ' ' ~ (wo.model or (u0 and u0.model) or '') }}
-  </div>
+  <div class="col-md-3"><strong>Brand/Model:</strong> {{ (wo.brand or (u0 and u0.brand) or '') ~ ' ' ~ (wo.model or (u0 and u0.model) or '') }}</div>
   <div class="col-md-2"><strong>Serial:</strong> {{ wo.serial or (u0 and u0.serial) or '—' }}</div>
   <div class="col-md-3">
     <strong>Type:</strong>
@@ -47,106 +41,117 @@
   <div class="col-md-3"><strong>Created:</strong> {{ wo.created_at.strftime('%Y-%m-%d') if wo.created_at else '—' }}</div>
 </div>
 
-{# ======= Parts planned / availability ======= #}
-{# Собираем строки либо по юнитам (multi), либо плоско (legacy), но не одновременно #}
+{# ===== собрать все строки (multi / legacy) ===== #}
 {% set ns = namespace(all_parts=[]) %}
 {% if wo.units and (wo.units|length) > 0 %}
-  {# режим multi — только по юнитам #}
   {% for u in wo.units %}
     {% if u.parts %}{% set ns.all_parts = ns.all_parts + u.parts %}{% endif %}
   {% endfor %}
 {% elif wo.parts %}
-  {# режим legacy — только плоские строки #}
   {% set ns.all_parts = ns.all_parts + wo.parts %}
 {% endif %}
 
+{# ===== собрать PN из батчей (инвойсы) — безопасно ===== #}
+{% set _batches = batches if batches is defined and batches else [] %}
+{% set invoiced_pn = [] %}
+{% for b in _batches if b.report_id %}
+  {% if b.items is iterable and b.items is not string %}
+    {% for it in b.items %}
+      {# PN может называться part_number или pn (на всякий случай) #}
+      {% set pn_raw =
+          (it.part_number if it.part_number is defined
+            else (it.get('part_number') if it.get is defined
+              else (it.get('pn') if it.get is defined else ''))) %}
+      {% set pn = (pn_raw|string|trim|upper) %}
+      {% if pn %}{% set invoiced_pn = invoiced_pn + [pn] %}{% endif %}
+    {% endfor %}
+  {% endif %}
+{% endfor %}
+{% set invoiced_set = (invoiced_pn|unique) %}
 
-{% if avail and (avail|length) > 0 %}
+{% if ns.all_parts and (ns.all_parts|length) > 0 %}
+<style>
+  .name-ordered  { color:#0d6efd; font-weight:600; }
+  .name-invoiced { color:#198754; font-weight:600; }
+  .num { text-align:right; font-variant-numeric: tabular-nums; }
+</style>
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
     <thead class="table-light">
       <tr>
-        <th>Part #</th><th>Name</th>
-        <th class="text-end">Needed</th><th class="text-end">On hand</th>
-        <th class="text-end">Issue now</th><th>Stock hint</th>
+        <th>Part #</th>
+        <th>Alt PN#</th>
+        <th>Name</th>
+        <th class="text-end">Qty</th>
+        <th class="text-end">Unit ($)</th>
+        <th class="text-end">Total ($)</th>
+        <th>Supplier</th>
+        <th class="text-center" title="Ordered">Ord</th>
+        <th title="Backorder">B/O</th>
       </tr>
     </thead>
     <tbody>
-      {% set total_needed = 0 %}{% set total_issue = 0 %}
-      {% for r in avail %}
-        {% set total_needed = total_needed + (r.requested or 0) %}
-        {% set total_issue = total_issue + (r.issue_now or 0) %}
-        <tr class="{% if r.issue_now and r.issue_now > 0 %}table-success{% elif r.on_hand and r.on_hand > 0 %}table-warning{% endif %}">
-          <td><code>{{ r.part_number }}</code></td>
-          <td>{{ r.part_name or '—' }}</td>
-          <td class="text-end">{{ r.requested or 0 }}</td>
-          <td class="text-end">{{ r.on_hand or 0 }}</td>
-          <td class="text-end">{{ r.issue_now or 0 }}</td>
+      {% set grand = namespace(total=0.0) %}
+      {% for p in ns.all_parts %}
+        {% set pn_str = (p.part_number or '')|string|trim|upper %}
+        {% set is_invoiced = (invoiced_set and (pn_str in invoiced_set))
+                              or (p.issued_qty and p.issued_qty > 0)
+                              or ((p.status or '')|lower == 'done') %}
+        {% set is_ordered =
+              (p.ordered_flag if p is not none and p.ordered_flag is not none else false)
+              or ((p.status or '')|lower == 'ordered')
+              or ((p.line_status or '')|lower == 'ordered') %}
+        {% set qty = p.quantity or 0 %}
+        {% set unit = (p.unit_cost if p.unit_cost is defined and p.unit_cost is not none else 0.0) %}
+        {% set total = (qty * unit) %}
+        {% set grand.total = grand.total + total %}
+        <tr>
+          <td><code>{{ p.part_number }}</code></td>
+          <td>{{ p.alt_part_numbers or '—' }}</td>
           <td>
-            {% if r.status_hint and r.status_hint.startswith('WAIT') %}
-              <span class="badge bg-warning text-dark">{{ r.status_hint }}</span>
-            {% else %}
-              <span class="badge bg-success">{{ r.status_hint or '—' }}</span>
-            {% endif %}
+            <span class="{% if is_invoiced %}name-invoiced{% elif is_ordered %}name-ordered{% endif %}">
+              {{ p.part_name or '—' }}
+            </span>
           </td>
+          <td class="num">{{ qty }}</td>
+          <td class="num">{{ '%.2f'|format(unit) }}</td>
+          <td class="num">{{ '%.2f'|format(total) }}</td>
+          <td>{{ p.supplier or '' }}</td>
+          <td class="text-center"><input type="checkbox" class="form-check-input" disabled {% if is_ordered %}checked{% endif %}></td>
+          <td>{% if p.backorder_flag %}<span class="badge bg-warning text-dark">B/O</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
       {% endfor %}
     </tbody>
     <tfoot>
       <tr class="table-light">
-        <th colspan="2" class="text-end">Totals:</th>
-        <th class="text-end">{{ total_needed }}</th><th></th>
-        <th class="text-end">{{ total_issue }}</th><th></th>
+        <th colspan="5" class="text-end">Grand total:</th>
+        <th class="num">{{ '%.2f'|format(grand.total) }}</th>
+        <th colspan="3"></th>
       </tr>
     </tfoot>
-  </table>
-</div>
-{% elif ns.all_parts and (ns.all_parts|length) > 0 %}
-<div class="table-responsive">
-  <table class="table table-sm table-bordered align-middle">
-    <thead class="table-light">
-      <tr><th>Part #</th><th>Name</th><th class="text-end">Qty</th><th>Supplier</th><th title="Backorder">B/O</th></tr>
-    </thead>
-    <tbody>
-      {% for p in ns.all_parts %}
-      <tr>
-        <td><code>{{ p.part_number }}</code></td>
-        <td>{{ p.part_name or '—' }}</td>
-        <td class="text-end">{{ p.quantity or 0 }}</td>
-        <td>{{ p.supplier or '' }}</td>
-        <td>{% if p.backorder_flag %}<span class="badge bg-warning text-dark">B/O</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
   </table>
 </div>
 {% else %}
 <p class="text-muted">No parts listed for this work order.</p>
 {% endif %}
 
-{# ======= NEW: Issued Items (flatten from batches) ======= #}
-{% set _batches = batches if batches is defined and batches else [] %}
-
+{# ===== Issued Items (this WO) — без изменений логики ===== #}
 <h5 class="mt-4">Issued Items (this WO)</h5>
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
     <thead class="table-light">
-      <tr>
-        <th>Issued At</th>
-        <th>Report</th>
-        <th>Part #</th>
-        <th>Name</th>
-        <th class="text-end">Qty</th>
-        <th class="text-end">Unit ($)</th>
-      </tr>
+      <tr><th>Issued At</th><th>Report</th><th>Part #</th><th>Name</th><th class="text-end">Qty</th><th class="text-end">Unit ($)</th></tr>
     </thead>
     <tbody>
       {% set totals = namespace(qty=0) %}
       {% for b in _batches %}
         {% if b.items is iterable and b.items is not string %}
           {% for it in b.items %}
-            {# безопасные чтения полей #}
-            {% set pn   = (it.part_number if it.part_number is defined else (it.get('part_number') if it.get is defined else '')) %}
+            {% set pn_raw =
+                (it.part_number if it.part_number is defined
+                  else (it.get('part_number') if it.get is defined
+                    else (it.get('pn') if it.get is defined else ''))) %}
+            {% set pn   = pn_raw|string %}
             {% set name = (it.part_name if it.part_name is defined else (it.get('part_name') if it.get is defined else (it.get('name') if it.get is defined else ''))) %}
             {% set qty  = (it.qty if it.qty is defined else (it.get('qty') if it.get is defined else (it.get('quantity') if it.get is defined else 0))) %}
             {% set price= (it.unit_price if it.unit_price is defined else (it.get('unit_price') if it.get is defined else (it.get('unit_cost') if it.get is defined else None))) %}
@@ -156,16 +161,12 @@
               <td>
                 {% if b.report_id %}
                   <a class="btn btn-sm btn-outline-secondary" href="/reports/{{ b.report_id }}" target="_blank" rel="noopener">#{{ b.report_id }}</a>
-                {% else %}
-                  <span class="text-muted">—</span>
-                {% endif %}
+                {% else %}<span class="text-muted">—</span>{% endif %}
               </td>
               <td><code>{{ pn or '—' }}</code></td>
               <td>{{ name or '—' }}</td>
               <td class="text-end">{{ qty or 0 }}</td>
-              <td class="text-end">
-                {% if price is not none %}{{ '%.2f'|format(price) }}{% else %}<span class="text-muted">—</span>{% endif %}
-              </td>
+              <td class="text-end">{% if price is not none %}{{ '%.2f'|format(price) }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
             </tr>
           {% endfor %}
         {% endif %}
@@ -174,18 +175,12 @@
       {% endfor %}
     </tbody>
     {% if _batches and (_batches|length) > 0 %}
-    <tfoot>
-      <tr class="table-light">
-        <th colspan="4" class="text-end">Total issued qty:</th>
-        <th class="text-end">{{ totals.qty }}</th>
-        <th></th>
-      </tr>
-    </tfoot>
+      <tfoot><tr class="table-light"><th colspan="4" class="text-end">Total issued qty:</th><th class="text-end">{{ totals.qty }}</th><th></th></tr></tfoot>
     {% endif %}
   </table>
 </div>
 
-{# ======= Existing: batches list (quick links) ======= #}
+{# ===== Issued Batches (Technician View) — без изменений ===== #}
 <h5 class="mt-4">Issued Batches (Technician View)</h5>
 <div class="table-responsive">
   <table class="table table-sm table-hover">
@@ -195,91 +190,30 @@
     <tbody>
       {% for b in _batches %}
       <tr>
-        <td>{{ b.issued_at }}</td><td>{{ b.technician }}</td><td>{{ b.canonical_ref }}</td>
+        <td>{{ b.issued_at }}</td>
+        <td>{{ b.technician }}</td>
+        <td>{{ b.canonical_ref }}</td>
         <td>{% if b.items is iterable and b.items is not string %}{{ b.items|length }}{% else %}{{ b.get('items', '-') if b.get is defined else (b.items or '-') }}{% endif %}</td>
-        <td>
-          {% if b.report_id %}
-            <a class="btn btn-sm btn-outline-secondary" href="/reports/{{ b.report_id }}" target="_blank" rel="noopener">Open Report</a>
-          {% else %}
-            <span class="text-muted">—</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if b.report_id %}
-            <a class="btn btn-sm btn-outline-primary" href="/reports/{{ b.report_id }}?print=1" target="_blank" rel="noopener">Print</a>
-          {% else %}
-            <span class="text-muted">—</span>
-          {% endif %}
-        </td>
+        <td>{% if b.report_id %}<a class="btn btn-sm btn-outline-secondary" href="/reports/{{ b.report_id }}" target="_blank" rel="noopener">Open Report</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td>{% if b.report_id %}<a class="btn btn-sm btn-outline-primary" href="/reports/{{ b.report_id }}?print=1" target="_blank" rel="noopener">Print</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
       </tr>
       {% else %}<tr><td colspan="6" class="text-muted">No batches yet.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>
-
-{% if current_user.role in ['admin','superadmin'] %}
-<form id="issueForm" method="post" action="{{ url_for('inventory.wo_issue_instock', wo_id=wo.id) }}"></form>
-<div class="d-flex flex-wrap gap-2 mt-3">
-  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#issuePreviewModal">Preview & Issue In-Stock</button>
-  <form method="post" action="{{ url_for('inventory.wo_set_status', wo_id=wo.id) }}" class="d-inline">
-    <input type="hidden" name="status" value="ordered">
-    <button class="btn btn-outline-warning" {% if wo.status=='ordered' %}disabled{% endif %} type="submit">Mark as ordered</button>
-  </form>
-  <form method="post" action="{{ url_for('inventory.wo_set_status', wo_id=wo.id) }}" class="d-inline">
-    <input type="hidden" name="status" value="done">
-    <button class="btn btn-outline-success" {% if wo.status=='done' %}disabled{% endif %} type="submit">Mark as done</button>
-  </form>
-</div>
-
-<div class="modal fade" id="issuePreviewModal" tabindex="-1" aria-labelledby="issuePreviewLabel" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">
-    <div class="modal-header"><h5 class="modal-title" id="issuePreviewLabel">Issue preview (in-stock lines)</h5>
-      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-    <div class="modal-body">
-      {% set ns2 = namespace(has_issue=false, total_issue=0) %}
-      <div class="table-responsive">
-        <table class="table table-sm table-bordered align-middle">
-          <thead class="table-light"><tr><th>Part #</th><th>Name</th><th class="text-end">Needed</th><th class="text-end">On hand</th><th class="text-end">Issue now</th></tr></thead>
-          <tbody>
-            {% for r in avail %}
-              {% if r.issue_now and r.issue_now > 0 %}
-                {% set ns2.has_issue = true %}{% set ns2.total_issue = ns2.total_issue + (r.issue_now or 0) %}
-                <tr><td><code>{{ r.part_number }}</code></td><td>{{ r.part_name or '—' }}</td>
-                  <td class="text-end">{{ r.requested or 0 }}</td><td class="text-end">{{ r.on_hand or 0 }}</td>
-                  <td class="text-end">{{ r.issue_now or 0 }}</td></tr>
-              {% endif %}
-            {% endfor %}
-          </tbody>
-          <tfoot><tr class="table-light"><th colspan="4" class="text-end">Total qty to issue:</th><th class="text-end">{{ ns2.total_issue }}</th></tr></tfoot>
-        </table>
-      </div>
-      {% if not ns2.has_issue %}<div class="alert alert-warning mb-0">Nothing available to issue right now (all lines are WAIT).</div>
-      {% else %}<div class="alert alert-info mb-0">After issuing, you’ll be redirected to <strong>Reports</strong> for printing the invoice.</div>{% endif %}
-    </div>
-    <div class="modal-footer">
-      <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-      <button type="button" class="btn btn-primary" id="confirmIssueBtn" {% if not ns2.has_issue %}disabled{% endif %}>Issue Now</button>
-    </div>
-  </div></div>
-</div>
-{% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
-  (function () {
-    const btnCopy = document.getElementById('copyJobs');
-    btnCopy?.addEventListener('click', async () => {
-      const el = document.getElementById('wo-jobs'); const txt = (el?.textContent || '').trim(); if (!txt) return;
-      try { await navigator.clipboard.writeText(txt); } catch(e) {
-        const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
-        ta.select(); document.execCommand('copy'); ta.remove();
-      }
-    });
-    document.getElementById('confirmIssueBtn')?.addEventListener('click', () => {
-      document.getElementById('issueForm')?.submit();
-    });
-  })();
+(function () {
+  const btnCopy = document.getElementById('copyJobs');
+  btnCopy?.addEventListener('click', async () => {
+    const el = document.getElementById('wo-jobs'); const txt = (el?.textContent || '').trim(); if (!txt) return;
+    try { await navigator.clipboard.writeText(txt); } catch(e) {
+      const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy'); ta.remove();
+    }
+  });
+})();
 </script>
 {% endblock %}
-
