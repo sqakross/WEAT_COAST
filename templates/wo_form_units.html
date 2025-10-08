@@ -15,10 +15,14 @@
   .wo-form .unit-table td.issue-cell{position:relative;}
   .wo-form .unit-table .issue-check{position:relative; z-index:3; pointer-events:auto!important; opacity:1!important; cursor:pointer;}
   .wo-form .unit-table td.issue-cell, .wo-form .unit-table td.issue-cell *{ pointer-events:auto!important; }
+  tr.issued-row{ background:#f1f3f5; color:#6c757d; }
+  /* колонка Ordered скрыта по умолчанию */
+  .unit-table .ordered-col{ display:none; }
 </style>
 
 <h3>{{ RO and 'View' or (wo and 'Edit' or 'New') }} Work Order (multi-appliance)</h3>
 
+<!-- ВАЖНО: отправляем на wo_save -->
 <form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm" class="wo-form">
   {% if IS_EDIT %}<input type="hidden" name="wo_id" value="{{ wo.id }}">{% endif %}
 
@@ -103,6 +107,7 @@
                 <th class="col-narrow">WH</th>
                 <th class="col-narrow">Sup</th>
                 <th style="width:80px;" title="Backorder">B/O</th>
+                <th class="ordered-col" style="width:70px;">Ord</th>
                 <th style="width:140px;">Stock hint</th>
                 <th class="col-issue">Issue?</th>
                 <th style="width:60px;"></th>
@@ -111,31 +116,52 @@
             <tbody>
               {% for r in (u.rows or []) %}
               {% set ri = loop.index0 %}
-              <tr>
+              {% set issued_full = ((r.issued_qty or 0) >= (r.quantity or 0)) %}
+
+              {# вычисляем «заказан» #}
+              {% set rf = (r.ordered_flag if r.ordered_flag is defined else (r.ordered if r.ordered is defined else 0)) %}
+              {% set is_ord = (rf in (True, 1, '1')) or
+                               (r.status is defined and (r.status or '')|lower == 'ordered') or
+                               (r.line_status is defined and (r.line_status or '')|lower == 'ordered') %}
+
+              <tr class="{{ 'issued-row' if issued_full else '' }}">
                 <td><input class="form-control pn" name="units[{{ ui }}][rows][{{ ri }}][part_number]" value="{{ r.part_number or '' }}" maxlength="80" {{ ro }} {{ dis }}></td>
                 <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][alt_numbers]" value="{{ r.alt_numbers or '' }}" {{ ro }} {{ dis }}></td>
-                <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][part_name]" value="{{ r.part_name or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
+                <td><input class="form-control part-name" name="units[{{ ui }}][rows][{{ ri }}][part_name]" value="{{ r.part_name or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
                 <td class="num"><input class="form-control qty" name="units[{{ ui }}][rows][{{ ri }}][quantity]" type="number" min="0" value="{{ r.quantity or 1 }}" {{ ro }} {{ dis }}></td>
                 <td class="num"><input class="form-control unit-cost" name="units[{{ ui }}][rows][{{ ri }}][unit_cost]" type="number" step="0.01" min="0" value="{{ '%.2f'|format(r.unit_cost) if r.unit_cost is defined and r.unit_cost is not none else '0.00' }}" {{ ro }} {{ dis }}></td>
                 <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
-                <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][warehouse]" value="{{ r.warehouse or r.unit_label or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
-                <td><input class="form-control supplier-input" name="units[{{ ui }}][rows][{{ ri }}][supplier]" list="suppliers_datalist" value="{{ r.supplier or '' }}" required {{ ro }} {{ dis }}></td>
+                <td><input class="form-control wh-input" name="units[{{ ui }}][rows][{{ ri }}][warehouse]" value="{{ r.warehouse or r.unit_label or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
+                <td><input class="form-control supplier-input" name="units[{{ ui }}][rows][{{ ri }}][supplier]" list="suppliers_datalist" value="{{ r.supplier or '' }}" {{ ro }} {{ dis }}></td>
                 <td class="text-center">
                   <div class="form-check d-flex justify-content-center m-0">
                     <input class="form-check-input" type="checkbox" name="units[{{ ui }}][rows][{{ ri }}][backorder_flag]" {% if r.backorder_flag %}checked{% endif %} {{ dis }}>
                   </div>
                 </td>
+
+                <!-- Ordered -->
+                <td class="text-center ordered-col">
+                  <input type="hidden" class="ordered-val"
+                         name="units[{{ ui }}][rows][{{ ri }}][ordered_flag]"
+                         value="{{ 1 if is_ord else 0 }}">
+                  <input type="checkbox" class="form-check-input ordered-check"
+                         {% if is_ord %}checked{% endif %} {{ dis }}>
+                </td>
+
                 <td class="hint">—</td>
+
                 <td class="text-center issue-cell">
                   {% if not RO %}
-                  <div class="form-check d-flex justify-content-center m-0">
-                    <input type="checkbox" class="form-check-input issue-check"
-                           name="issue_ids" value="{{ r.id or (ui ~ '_' ~ ri) }}">
-                  </div>
+                    <div class="form-check d-flex justify-content-center m-0">
+                      <input type="checkbox" class="form-check-input issue-check"
+                             name="issue_ids" value="{{ r.id or (ui ~ '_' ~ ri) }}"
+                             {% if issued_full %}disabled{% endif %}>
+                    </div>
                   {% else %}
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
+
                 <td class="text-center">{% if not RO %}<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>{% endif %}</td>
               </tr>
               {% endfor %}
@@ -170,6 +196,7 @@
   <div class="d-flex gap-2">
     {% if not RO %}
       <button type="submit" class="btn btn-primary">Save</button>
+      <button type="button" id="selectAllInStockBtn" class="btn btn-outline-secondary">Select all in-stock</button>
       <button type="button" id="issueSelectedBtn" class="btn btn-success" {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>Issue selected</button>
     {% endif %}
     {% if IS_EDIT %}
@@ -184,25 +211,61 @@
 <form id="issueForm" method="post" action="{{ issue_action }}">
   <input type="hidden" name="wo_id" value="{{ wo.id if IS_EDIT else '' }}">
   <input type="hidden" name="part_ids" id="issue_part_ids">
+  <input type="hidden" name="set_status" id="issue_set_status" value="">
 </form>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function(){
-  // безопасные Jinja → JS константы (НЕ внутри backticks)
   const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
   const IS_EDIT   = {{ 'true' if IS_EDIT else 'false' }};
+  const IS_RO     = {{ 'true' if RO else 'false' }};
 
-  const unitsWrap   = document.getElementById('unitsWrap');
-  const grandTotalEl= document.getElementById('grandTotal');
-  const deliveryEl  = document.getElementById('deliveryFee');
-  const markupEl    = document.getElementById('markupPercent');
-  const issueBtn    = document.getElementById('issueSelectedBtn');
+  const form         = document.getElementById('woForm');
+  const unitsWrap    = document.getElementById('unitsWrap');
+  const grandTotalEl = document.getElementById('grandTotal');
+  const deliveryEl   = document.getElementById('deliveryFee');
+  const markupEl     = document.getElementById('markupPercent');
+  const issueBtn     = document.getElementById('issueSelectedBtn');
+  const selectAllBtn = document.getElementById('selectAllInStockBtn');
+  const statusSel    = document.querySelector('select[name="status"]');
+  const addUnitBtn   = document.getElementById('addUnit');
+
+  function updateSupplierRequired(){
+    const must = statusSel && statusSel.value === 'ordered';
+    document.querySelectorAll('.supplier-input').forEach(inp=>{
+      if(must) inp.setAttribute('required','required');
+      else     inp.removeAttribute('required');
+    });
+  }
+  statusSel?.addEventListener('change', updateSupplierRequired);
+
+  /* Показ/скрытие колонки Ordered */
+  function toggleOrderedCols(){
+    const show = statusSel && statusSel.value === 'ordered';
+    document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
+      cell.style.display = show ? 'table-cell' : 'none';
+      const cb  = cell.querySelector('.ordered-check');
+      const hid = cell.querySelector('.ordered-val');
+      if (!cb || !hid) return;
+      cb.disabled = !show || IS_RO;
+      if (!show){ cb.checked=false; hid.value='0'; }
+    });
+  }
+  statusSel?.addEventListener('change', toggleOrderedCols);
+
+  /* Синхронизация скрытого ordered_flag перед сабмитом */
+  form?.addEventListener('submit', ()=>{
+    document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
+      const cb  = cell.querySelector('.ordered-check');
+      const hid = cell.querySelector('.ordered-val');
+      if (hid) hid.value = (cb && cb.checked) ? '1' : '0';
+    });
+  });
 
   const toMoney = (n)=> (Math.round((Number(n||0)+Number.EPSILON)*100)/100).toFixed(2);
 
-  /* ===== totals ===== */
   function recomputeUnitSubtotal(card){
     const markup   = parseFloat(markupEl?.value||'0')||0;
     const delivery = parseFloat(deliveryEl?.value||'0')||0;
@@ -219,8 +282,7 @@
     recomputeGrandTotal();
   }
   function recomputeGrandTotal(){
-    let g=0;
-    document.querySelectorAll('.unit-subtotal').forEach(x=> g += parseFloat(x.textContent||'0')||0);
+    let g=0; document.querySelectorAll('.unit-subtotal').forEach(x=> g += parseFloat(x.textContent||'0')||0);
     grandTotalEl.textContent = toMoney(g);
   }
   ['input','change'].forEach(ev=>{
@@ -228,51 +290,41 @@
     markupEl?.addEventListener(ev,   ()=>document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal));
   });
 
-  /* ===== enable/disable Issue by hint ===== */
   function setIssueEnabled(tr, enabled){
-    const cb = tr.querySelector('.issue-check');
-    if (!cb) return;
-    if (enabled){
-      cb.disabled = !IS_EDIT; // Только в режиме edit можно issue
-      cb.removeAttribute('disabled');
-    }else{
-      cb.checked = false;
-      cb.disabled = true;
-      cb.setAttribute('disabled','disabled');
+    const cb = tr.querySelector('.issue-check'); if (!cb) return;
+    if (tr.classList.contains('issued-row')) {
+      cb.checked = false; cb.disabled = true; cb.setAttribute('disabled','disabled'); return;
     }
+    if (enabled){ cb.disabled = !IS_EDIT; cb.removeAttribute('disabled'); }
+    else { cb.checked=false; cb.disabled=true; cb.setAttribute('disabled','disabled'); }
   }
 
-  /* ===== универсальный парсер остатка ===== */
   function extractAvailableCount(j){
     const keys=['qty_available','available_qty','available','on_hand','onhand','stock','in_stock','qty','count','quantity'];
-    for(const k of keys){
-      const v=j&&j[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
-    }
+    for(const k of keys){ const v=j&&j[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v); }
     for(const wrap of ['data','result']){
-      const o=j&&j[wrap];
-      if(o && typeof o==='object'){
-        for(const k of keys){
-          const v=o[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
-        }
+      const o=j&&j[wrap]; if(o && typeof o==='object'){
+        for(const k of keys){ const v=o[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v); }
       }
     }
     const sumArr=a=>Array.isArray(a)?a.reduce((s,x)=>s+(Number.isFinite(extractAvailableCount(x))?extractAvailableCount(x):0),0):0;
     return sumArr(j) || sumArr(j?.rows) || sumArr(j?.items) || sumArr(j?.data?.rows) || 0;
   }
 
-  /* ===== STOCK hint с qty ===== */
+  function pick(j, variants){
+    for(const k of variants){ if(j && j[k] !== undefined && j[k] !== null && String(j[k]).trim()!==""){ return j[k]; } }
+    return undefined;
+  }
+
   function fetchHint(tr){
     const pn  = (tr.querySelector('.pn')?.value||'').trim().toUpperCase();
     const qty = parseInt(tr.querySelector('.qty')?.value||'0',10)||0;
     const hintEl = tr.querySelector('.hint');
+    if(!pn||qty<=0){ if(hintEl) hintEl.textContent='—'; setIssueEnabled(tr,false); return; }
+    const whNow = (tr.querySelector('.wh-input')?.value||'').trim();
 
-    if(!pn||qty<=0){
-      if(hintEl) hintEl.textContent='—';
-      setIssueEnabled(tr, false);
-      return;
-    }
-
-    fetch(API_STOCK + '?pn=' + encodeURIComponent(pn) + '&qty=' + qty)
+    const url = API_STOCK + '?pn=' + encodeURIComponent(pn) + '&qty=' + qty + (whNow?('&wh='+encodeURIComponent(whNow)):'');
+    fetch(url)
       .then(r=>r.ok ? r.json() : Promise.reject())
       .then(j=>{
         const t   = String(j?.hint || j?.status || '').toUpperCase();
@@ -281,80 +333,200 @@
         const label   = isStock ? 'STOCK' : 'WAIT';
         if (hintEl) hintEl.textContent = label + '/' + qa;
         setIssueEnabled(tr, isStock);
+
+        const nameInp = tr.querySelector('.part-name');
+        const costInp = tr.querySelector('.unit-cost');
+        const whInp   = tr.querySelector('.wh-input');
+
+        const jflat   = Object.assign({}, j, j?.data||{}, j?.result||{});
+        const pName   = pick(jflat, ['part_name','name','title','description']);
+        const pCost   = pick(jflat, ['unit_cost','price','unit_price','cost','last_price','avg_cost']);
+        const pWh     = pick(jflat,  ['warehouse','location','wh']);
+
+        if (nameInp && (!nameInp.value || !nameInp.value.trim()) && pName){ nameInp.value = String(pName).trim().slice(0,120); }
+        if (costInp){
+          const cur = parseFloat(costInp.value||'0')||0;
+          if ((cur===0 || !costInp.value) && pCost!==undefined && !isNaN(Number(pCost))){
+            costInp.value = (Math.round((Number(pCost)+Number.EPSILON)*100)/100).toFixed(2);
+            recomputeUnitSubtotal(tr.closest('.card'));
+          }
+        }
+        if (whInp && (!whInp.value || !whInp.value.trim()) && pWh){ whInp.value = String(pWh).trim().slice(0,120); }
       })
-      .catch(()=>{
-        if(hintEl) hintEl.textContent='—';
-        setIssueEnabled(tr, false);
-      });
+      .catch(()=>{ if(hintEl) hintEl.textContent='—'; setIssueEnabled(tr,false); });
   }
 
-  /* ===== handlers ===== */
-  const unitsWrapEl = document.getElementById('unitsWrap');
-  unitsWrapEl.addEventListener('input', (e)=>{
+  /* sync Ordered checkbox -> hidden value по change */
+  unitsWrap.addEventListener('change', (e)=>{
+    if (e.target.classList.contains('ordered-check')){
+      const td  = e.target.closest('td');
+      const hid = td && td.querySelector('.ordered-val');
+      if (hid) hid.value = e.target.checked ? '1' : '0';
+    }
+  });
+
+  function rowTemplate(ui, ri){
+    const ro = IS_RO ? 'disabled readonly' : '';
+    thebo = IS_RO ? 'disabled' : '';
+    return `
+<tr>
+  <td><input class="form-control pn" name="units[${ui}][rows][${ri}][part_number]" maxlength="80" ${ro}></td>
+  <td><input class="form-control" name="units[${ui}][rows][${ri}][alt_numbers]" ${ro}></td>
+  <td><input class="form-control part-name" name="units[${ui}][rows][${ri}][part_name]" maxlength="120" ${ro}></td>
+  <td class="num"><input class="form-control qty" name="units[${ui}][rows][${ri}][quantity]" type="number" min="0" value="1" ${ro}></td>
+  <td class="num"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${ro}></td>
+  <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
+  <td><input class="form-control wh-input" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
+  <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
+  <td class="text-center"><div class="form-check d-flex justify-content-center m-0"><input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]" ${thebo}></div></td>
+
+  <td class="text-center ordered-col">
+    <input type="hidden" class="ordered-val" name="units[${ui}][rows][${ri}][ordered_flag]" value="0">
+    <input type="checkbox" class="form-check-input ordered-check" ${thebo}>
+  </td>
+
+  <td class="hint">—</td>
+  <td class="text-center issue-cell"><div class="form-check d-flex justify-content-center m-0"><input type="checkbox" class="form-check-input issue-check" name="issue_ids" value="${ui}_${ri}" ${IS_EDIT?'':'disabled'}></div></td>
+  <td class="text-center">${IS_RO?'':'<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>'}</td>
+</tr>`;
+  }
+
+  function unitTemplate(ui){
+    return `
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <strong>Appliance #${ui+1}</strong>
+    ${IS_RO ? '' : '<button type="button" class="btn btn-sm btn-outline-danger del-unit">&times;</button>'}
+  </div>
+  <div class="card-body">
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <label class="form-label">Brand</label>
+        <input name="units[${ui}][brand]" class="form-control" ${IS_RO?'disabled readonly':''}>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Model #</label>
+        <input name="units[${ui}][model]" class="form-control" maxlength="25" ${IS_RO?'disabled readonly':''}>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Serial #</label>
+        <input name="units[${ui}][serial]" class="form-control" maxlength="25" ${IS_RO?'disabled readonly':''}>
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered align-middle unit-table">
+        <thead>
+          <tr>
+            <th>Part #</th>
+            <th>Alt PN#</th>
+            <th>Part name</th>
+            <th class="text-end col-qty">Qty</th>
+            <th class="text-end col-money">Unit ($)</th>
+            <th class="text-end col-money">Total ($)</th>
+            <th class="col-narrow">WH</th>
+            <th class="col-narrow">Sup</th>
+            <th style="width:80px;" title="Backorder">B/O</th>
+            <th class="ordered-col" style="width:70px;">Ord</th>
+            <th style="width:140px;">Stock hint</th>
+            <th class="col-issue">Issue?</th>
+            <th style="width:60px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowTemplate(ui, 0)}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center">
+      ${IS_RO ? '<span></span>' : '<button type="button" class="btn btn-outline-secondary add-row">+ Add part row</button>'}
+      <div class="text-end"><strong>Unit subtotal:</strong> <span class="unit-subtotal">0.00</span></div>
+    </div>
+  </div>
+</div>`;
+  }
+
+  /* делегированные обработчики */
+  unitsWrap.addEventListener('input', (e)=>{
     const tr=e.target.closest('tr'); const card=e.target.closest('.card'); if(!card) return;
     if(tr && (e.target.classList.contains('qty')||e.target.classList.contains('unit-cost'))) recomputeUnitSubtotal(card);
-    if(tr && (e.target.classList.contains('pn')||e.target.classList.contains('qty'))) fetchHint(tr);
+    if(tr && (e.target.classList.contains('pn')||e.target.classList.contains('qty')||e.target.classList.contains('wh-input'))) fetchHint(tr);
   });
 
-  unitsWrapEl.addEventListener('click',(e)=>{
-    const card=e.target.closest('.card'); if(!card) return;
-    if(e.target.classList.contains('del-unit')){ card.remove(); recomputeGrandTotal(); }
-    if(e.target.classList.contains('add-row')){
-      const tbody=card.querySelector('tbody');
-      const ui=[...document.querySelectorAll('#unitsWrap .card')].indexOf(card);
-      const ri=tbody.children.length;
-      tbody.insertAdjacentHTML('beforeend', rowTemplate(ui,ri));
-      recomputeUnitSubtotal(card);
+  unitsWrap.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button'); if(!btn) return;
+
+    if(btn.classList.contains('del-unit')){
+      const card = btn.closest('.card'); card?.remove();
+      document.querySelectorAll('#unitsWrap .card').forEach((c, idx)=>{
+        const strong=c.querySelector('.card-header strong'); if(strong) strong.textContent = `Appliance #${idx+1}`;
+      });
+      recomputeGrandTotal();
+      return;
     }
-    if(e.target.classList.contains('del-row')){
-      e.target.closest('tr')?.remove();
+
+    if(btn.classList.contains('add-row')){
+      const card  = btn.closest('.card'); if(!card) return;
+      const tbody = card.querySelector('tbody'); if(!tbody) return;
+      const ui    = [...document.querySelectorAll('#unitsWrap .card')].indexOf(card);
+      const ri    = tbody.querySelectorAll('tr').length;
+      tbody.insertAdjacentHTML('beforeend', rowTemplate(ui, ri));
+      updateSupplierRequired();
       recomputeUnitSubtotal(card);
+      fetchHint(tbody.lastElementChild);
+      toggleOrderedCols();
+      return;
+    }
+
+    if(btn.classList.contains('del-row')){
+      const tr   = btn.closest('tr'); const card = btn.closest('.card');
+      tr?.remove(); recomputeUnitSubtotal(card); return;
     }
   });
 
-  /* ===== Issue selected ===== */
+  addUnitBtn?.addEventListener('click', ()=>{
+    const ui = document.querySelectorAll('#unitsWrap .card').length;
+    unitsWrap.insertAdjacentHTML('beforeend', unitTemplate(ui));
+    const card = unitsWrap.lastElementChild;
+    updateSupplierRequired();
+    recomputeUnitSubtotal(card);
+    toggleOrderedCols();
+  });
+
+  /* Select all in-stock — toggle */
+  selectAllBtn?.addEventListener('click', ()=>{
+    const rows = [...document.querySelectorAll('#unitsWrap tbody tr')].filter(tr=>{
+      if (tr.classList.contains('issued-row')) return false;
+      const cb = tr.querySelector('.issue-check');
+      const raw = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
+      return cb && !cb.disabled && raw.split('/')[0] === 'STOCK';
+    });
+    const needCheck = rows.some(tr=> !tr.querySelector('.issue-check').checked);
+    rows.forEach(tr=> tr.querySelector('.issue-check').checked = needCheck);
+  });
+
   issueBtn?.addEventListener('click', ()=>{
-    const selected = [];
-    document.querySelectorAll('tbody tr').forEach((tr)=>{
+    const selected=[];
+    document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
+      if (tr.classList.contains('issued-row')) return;
       const cb = tr.querySelector('.issue-check');
       const raw = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
       const status = raw.split('/')[0];
       if (cb && cb.checked && status==='STOCK'){ selected.push(cb.value); }
     });
-    if (selected.length===0){
-      alert('Select at least one in-stock part (hint must be STOCK).');
-      return;
-    }
+    if (selected.length===0){ alert('Select at least one in-stock part (hint must be STOCK).'); return; }
+    if (statusSel) statusSel.value = 'done';
+    document.getElementById('issue_set_status').value = 'done';
     document.getElementById('issue_part_ids').value = selected.join(',');
     document.getElementById('issueForm').submit();
   });
 
-  /* ===== init ===== */
+  /* init */
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
-  unitsWrapEl.querySelectorAll('tbody tr').forEach(fetchHint);
-
-  /* ===== шаблон строки ===== */
-  function rowTemplate(ui,ri){
-    const ro = {{ RO and 'true' or 'false' }} ? 'disabled readonly' : '';
-    const boDisabled = {{ RO and 'true' or 'false' }} ? 'disabled' : '';
-    const delBtn = {{ RO and 'true' or 'false' }} ? '' : '<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>';
-    return `
-<tr>
-  <td><input class="form-control pn" name="units[${ui}][rows][${ri}][part_number]" maxlength="80" ${ro}></td>
-  <td><input class="form-control" name="units[${ui}][rows][${ri}][alt_numbers]" ${ro}></td>
-  <td><input class="form-control" name="units[${ui}][rows][${ri}][part_name]" maxlength="120" ${ro}></td>
-  <td class="num"><input class="form-control qty" name="units[${ui}][rows][${ri}][quantity]" type="number" min="0" value="1" ${ro}></td>
-  <td class="num"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${ro}></td>
-  <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
-  <td><input class="form-control" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
-  <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" required ${ro}></td>
-  <td class="text-center"><div class="form-check d-flex justify-content-center m-0"><input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]" ${boDisabled}></div></td>
-  <td class="hint">—</td>
-  <td class="text-center issue-cell"><div class="form-check d-flex justify-content-center m-0"><input type="checkbox" class="form-check-input issue-check" name="issue_ids" value="${ui}_${ri}" disabled></div></td>
-  <td class="text-center">${delBtn}</td>
-</tr>`;
-  }
+  document.querySelectorAll('#unitsWrap tbody tr').forEach(fetchHint);
+  updateSupplierRequired();
+  toggleOrderedCols();
 })();
 </script>
 {% endblock %}
-
