@@ -1147,16 +1147,16 @@ def search_alias():
 @login_required
 def wo_detail(wo_id):
     """
-    Work Order details page (flat + multi-appliance).
-    Не используем WorkIssueBatch (его нет в проекте) — передаём batches=[]
+    Work Order details page (flat + multi-appliance) + инвойсные партии,
+    включая возвраты (RETURN). Подсветка зелёным = PN с NET > 0.
     """
     from flask import current_app, render_template, flash, redirect, url_for
-    from sqlalchemy import func
-    from sqlalchemy.orm import selectinload
-    from models import WorkOrder, WorkUnit, WorkOrderPart
+    from sqlalchemy import func, or_
+    from sqlalchemy.orm import selectinload, joinedload
     from extensions import db
+    from models import WorkOrder, WorkUnit, WorkOrderPart
 
-    # 1) Work Order + связанные части
+    # ---- 1) Основной WO
     try:
         wo = (
             db.session.query(WorkOrder)
@@ -1174,7 +1174,7 @@ def wo_detail(wo_id):
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # 2) Поставщики (для справки/фильтров в шаблоне)
+    # ---- 2) Поставщики (для справки)
     suppliers = []
     try:
         rows = (
@@ -1193,18 +1193,129 @@ def wo_detail(wo_id):
         current_app.logger.exception("Suppliers query failed")
         suppliers = []
 
-    # 3) Инвойсные батчи не подгружаем — модели нет
+    # ---- 3) Сбор партий (инвойсы + возвраты). Мягкий импорт.
     batches = []
+    invoiced_pns = []  # будет PN с net>0
 
-    # 4) Авейлы не считаем на этой странице (оставляем, как было)
-    avail = []
+    try:
+        from models import IssuedPartRecord  # type: ignore
+    except Exception:
+        current_app.logger.warning("Invoice models not present; batches disabled.")
+        return render_template(
+            "wo_detail.html",
+            wo=wo,
+            avail=[],
+            batches=batches,
+            suppliers=suppliers,
+            invoiced_pns=invoiced_pns,
+        )
 
+    try:
+        canon = (wo.canonical_job or "").strip()
+        issued_to = (wo.technician_name or "").strip()
+
+        rows = (
+            db.session.query(IssuedPartRecord)
+            .options(joinedload(IssuedPartRecord.part), joinedload(IssuedPartRecord.batch))
+            .filter(
+                func.trim(IssuedPartRecord.issued_to) == issued_to,
+                or_(
+                    func.trim(IssuedPartRecord.reference_job) == canon,
+                    func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
+                ),
+            )
+            .order_by(IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc())
+            .all()
+        )
+
+        # --- группировка
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for r in rows:
+            if getattr(r, "batch_id", None):
+                key = ("batch", r.batch_id)
+            elif getattr(r, "invoice_number", None):
+                key = ("inv", r.invoice_number)
+            else:
+                key = ("ungrouped", f"{r.issue_date:%Y%m%d%H%M%S}-{r.issued_to}-{r.reference_job or ''}")
+            grouped[key].append(r)
+
+        def _extract(rec: "IssuedPartRecord"):
+            pn = (getattr(rec.part, "part_number", None) or "").strip().upper()
+            nm = getattr(rec.part, "name", None) or ""
+            qty = int(rec.quantity or 0)
+            price = float(rec.unit_cost_at_issue or 0.0)
+            return pn, nm, qty, price
+
+        # net-количество по PN (учитываем возвраты)
+        net_by_pn = defaultdict(int)
+
+        for _, recs in grouped.items():
+            b = recs[0].batch if recs and getattr(recs[0], "batch", None) else None
+            issued_at = (b.issue_date if b else recs[0].issue_date)
+            issued_at_str = issued_at.strftime("%Y-%m-%d %H:%M")
+            tech = recs[0].issued_to
+            ref = (b.reference_job if b else (recs[0].reference_job or "")) or ""
+            report_id = (b.invoice_number if b else recs[0].invoice_number)
+            location = getattr(b, "location", None)
+
+            # Признаки возврата: текст RETURN в ref ИЛИ отрицательная цена/кол-во
+            ref_is_return = "RETURN" in ref.upper()
+
+            items = []
+            total_value_raw = 0.0  # суммируем как в БД: qty * unit_cost_at_issue
+
+            for rec in recs:
+                pn, name, qty, price = _extract(rec)
+                if not pn or qty == 0:
+                    continue
+
+                line_total = qty * price            # без манипуляций со знаком
+                total_value_raw += line_total
+
+                # что считаем «возвратом» для net:
+                is_item_return = ref_is_return or (price < 0) or (qty < 0)
+                eff_sign = -1 if is_item_return else 1
+                net_by_pn[pn] += eff_sign * abs(qty)
+
+                items.append({
+                    "pn": pn,
+                    "name": name or "—",
+                    "qty": abs(qty),                 # показываем модуль
+                    "unit_price": price,
+                    "negative": (line_total < 0) or is_item_return,
+                })
+
+            is_group_return = (total_value_raw < 0) or ref_is_return
+
+            batches.append({
+                "issued_at": issued_at_str,
+                "technician": tech,
+                "canonical_ref": canon,
+                "reference_job": ref,
+                "location": location,
+                "report_id": report_id,
+                "is_return": is_group_return,
+                "total_value": total_value_raw,   # видно отрицательное значение для return
+                "items": items,
+            })
+
+        # PN для зелёной подсветки — только где net>0
+        invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
+
+    except Exception:
+        current_app.logger.exception("Batches lookup failed")
+        batches = []
+        invoiced_pns = []
+
+    # ---- 4) Рендер
     return render_template(
         "wo_detail.html",
         wo=wo,
-        avail=avail,
+        avail=[],
         batches=batches,
         suppliers=suppliers,
+        invoiced_pns=invoiced_pns,  # net>0
     )
 
 @inventory_bp.post("/work_orders/new", endpoint="wo_create")
@@ -3577,15 +3688,30 @@ def update_invoice():
         ml = db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)).scalar() or 0
         return max(int(mb), int(ml)) + 1
 
-    def _ensure_invoice_number_for_records(records, issued_to, issued_by, reference_job, issue_date, location):
+    def _ensure_invoice_number_for_records(
+            records,
+            issued_to,
+            issued_by,
+            reference_job,
+            issue_date,
+            location,
+            force_new=False
+    ):
         """
-        Ensure a single invoice_number is assigned to all given records.
-        Try a project helper `_create_batch_for_records` if it exists; otherwise use a safe fallback.
+        Безопасная версия: если force_new=True — всегда создаёт новый batch с уникальным invoice_number.
+        Используется для повторных возвратов и дополнительных выдач.
         """
-        if any(getattr(r, "invoice_number", None) for r in records):
-            return
+        from extensions import db
+        from models import IssuedBatch
 
-        # Try your project helper if present
+        if not records:
+            return None
+
+        # Если не требуется новый номер, и хотя бы одна запись его уже имеет — ничего не делаем
+        if not force_new and any(getattr(r, "invoice_number", None) for r in records):
+            return None
+
+        # Основной путь — твой helper
         try:
             batch = _create_batch_for_records(
                 records=records,
@@ -3593,13 +3719,13 @@ def update_invoice():
                 issued_by=issued_by,
                 reference_job=reference_job,
                 issue_date=issue_date,
-                location=location
+                location=location,
             )
             return batch
         except Exception:
             db.session.rollback()
 
-        # Fallback: reserve a unique number inside a nested transaction
+        # fallback — резервируем вручную
         for _ in range(5):
             inv_no = _next_invoice_number()
             try:
@@ -3613,7 +3739,7 @@ def update_invoice():
                         location=(location or None),
                     )
                     db.session.add(batch)
-                    db.session.flush()  # reserve unique number
+                    db.session.flush()
 
                     for r in records:
                         r.batch_id = batch.id
@@ -3779,6 +3905,7 @@ def update_invoice():
         return redirect(url_for('inventory.reports_grouped'))
 
     # ---------- RETURN SELECTED (with hard cap) ----------
+    # ---------- RETURN SELECTED (with hard cap) ----------
     if do_return:
         try:
             created = 0
@@ -3789,13 +3916,10 @@ def update_invoice():
                 if (r.quantity or 0) <= 0:
                     continue
 
-                # How many units are still eligible to be returned for this issued row
                 available = _available_to_return_for(r)
                 if available <= 0:
-                    # Nothing left to return for this line
                     continue
 
-                # Requested quantity from the form (defensive parsing)
                 raw = (request.form.get(f"qty_{r.id}") or "1").strip()
                 try:
                     qty_req = int(raw)
@@ -3805,16 +3929,14 @@ def update_invoice():
                 if qty_req < 0:
                     qty_req = 0
 
-                # Hard cap: do not allow exceeding available remaining quantity
                 if qty_req > available:
                     qty_req = available
                     trimmed_any = True
 
-                # If after trimming there's nothing to return — skip
                 if qty_req <= 0:
                     continue
 
-                # Create a negative "return" row; reference_job mirrors how we generate returns elsewhere
+                # Create a negative "return" row
                 ret = IssuedPartRecord(
                     part_id=r.part_id,
                     issued_to=r.issued_to,
@@ -3832,16 +3954,39 @@ def update_invoice():
                     ),
                     issue_date=issue_date,
                     location=(location or r.location),
-                    invoice_number=None,  # returns don't receive a number here
-                    batch_id=None  # and are not attached to a batch
+                    invoice_number=None,
+                    batch_id=None
                 )
                 db.session.add(ret)
 
-                # Stock: returns increase stock by the returned quantity
                 if r.part:
                     r.part.quantity = int(r.part.quantity or 0) + qty_req
 
                 created += 1
+
+            # 🔥 ДОБАВЛЯЕМ ЭТО СРАЗУ ПОСЛЕ ЦИКЛА
+            if created:
+                new_returns = (
+                    db.session.query(IssuedPartRecord)
+                    .filter(IssuedPartRecord.invoice_number.is_(None))
+                    .filter(IssuedPartRecord.quantity < 0)
+                    .order_by(IssuedPartRecord.id.desc())
+                    .limit(created)
+                    .all()
+                )
+                if new_returns:
+                    # Возьмём reference_job прямо из возвратной строки
+                    return_ref = getattr(new_returns[0], "reference_job", None) or "RETURN"
+
+                    _ensure_invoice_number_for_records(
+                        records=new_returns,
+                        issued_to=getattr(new_returns[0], "issued_to", None),
+                        issued_by=issued_by,
+                        reference_job=return_ref,  # ✅ ключевой параметр
+                        issue_date=datetime.utcnow(),
+                        location=getattr(new_returns[0], "location", None) or location,
+                        force_new=True  # ✅ создаёт новый invoice number
+                    )
 
             db.session.commit()
 

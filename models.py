@@ -144,6 +144,9 @@ class WorkOrderPart(db.Model):
     unit_price_final = db.Column(db.Float)
     unit_cost        = db.Column(db.Float, nullable=True, default=None)
 
+    issued_qty = db.Column(db.Integer, nullable=False, default=0)  # сколько уже выдано по этой строке WO
+    last_issued_at = db.Column(db.DateTime, nullable=True)
+
     # Новый реквизит склада
     warehouse       = db.Column(db.String(120), nullable=True)
 
@@ -290,6 +293,7 @@ class OrderItem(db.Model):
     date_received= db.Column(db.DateTime)
     notes        = db.Column(db.Text)
     row_key      = db.Column(db.String(512), unique=True)
+
 
 
 

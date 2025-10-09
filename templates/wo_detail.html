@@ -41,7 +41,7 @@
   <div class="col-md-3"><strong>Created:</strong> {{ wo.created_at.strftime('%Y-%m-%d') if wo.created_at else '—' }}</div>
 </div>
 
-{# ===== собрать все строки (multi / legacy) ===== #}
+{# собрать строки из multi/legacy #}
 {% set ns = namespace(all_parts=[]) %}
 {% if wo.units and (wo.units|length) > 0 %}
   {% for u in wo.units %}
@@ -51,23 +51,8 @@
   {% set ns.all_parts = ns.all_parts + wo.parts %}
 {% endif %}
 
-{# ===== собрать PN из батчей (инвойсы) — безопасно ===== #}
-{% set _batches = batches if batches is defined and batches else [] %}
-{% set invoiced_pn = [] %}
-{% for b in _batches if b.report_id %}
-  {% if b.items is iterable and b.items is not string %}
-    {% for it in b.items %}
-      {# PN может называться part_number или pn (на всякий случай) #}
-      {% set pn_raw =
-          (it.part_number if it.part_number is defined
-            else (it.get('part_number') if it.get is defined
-              else (it.get('pn') if it.get is defined else ''))) %}
-      {% set pn = (pn_raw|string|trim|upper) %}
-      {% if pn %}{% set invoiced_pn = invoiced_pn + [pn] %}{% endif %}
-    {% endfor %}
-  {% endif %}
-{% endfor %}
-{% set invoiced_set = (invoiced_pn|unique) %}
+{# PN для зелёной подсветки приходит из view #}
+{% set invoiced_set = (invoiced_pns or []) %}
 
 {% if ns.all_parts and (ns.all_parts|length) > 0 %}
 <style>
@@ -94,9 +79,7 @@
       {% set grand = namespace(total=0.0) %}
       {% for p in ns.all_parts %}
         {% set pn_str = (p.part_number or '')|string|trim|upper %}
-        {% set is_invoiced = (invoiced_set and (pn_str in invoiced_set))
-                              or (p.issued_qty and p.issued_qty > 0)
-                              or ((p.status or '')|lower == 'done') %}
+        {% set is_invoiced = pn_str in invoiced_set %}
         {% set is_ordered =
               (p.ordered_flag if p is not none and p.ordered_flag is not none else false)
               or ((p.status or '')|lower == 'ordered')
@@ -135,7 +118,6 @@
 <p class="text-muted">No parts listed for this work order.</p>
 {% endif %}
 
-{# ===== Issued Items (this WO) — без изменений логики ===== #}
 <h5 class="mt-4">Issued Items (this WO)</h5>
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
@@ -143,61 +125,88 @@
       <tr><th>Issued At</th><th>Report</th><th>Part #</th><th>Name</th><th class="text-end">Qty</th><th class="text-end">Unit ($)</th></tr>
     </thead>
     <tbody>
-      {% set totals = namespace(qty=0) %}
-      {% for b in _batches %}
-        {% if b.items is iterable and b.items is not string %}
-          {% for it in b.items %}
-            {% set pn_raw =
-                (it.part_number if it.part_number is defined
-                  else (it.get('part_number') if it.get is defined
-                    else (it.get('pn') if it.get is defined else ''))) %}
-            {% set pn   = pn_raw|string %}
-            {% set name = (it.part_name if it.part_name is defined else (it.get('part_name') if it.get is defined else (it.get('name') if it.get is defined else ''))) %}
-            {% set qty  = (it.qty if it.qty is defined else (it.get('qty') if it.get is defined else (it.get('quantity') if it.get is defined else 0))) %}
-            {% set price= (it.unit_price if it.unit_price is defined else (it.get('unit_price') if it.get is defined else (it.get('unit_cost') if it.get is defined else None))) %}
-            {% set totals.qty = totals.qty + (qty or 0) %}
-            <tr>
-              <td>{{ b.issued_at }}</td>
-              <td>
-                {% if b.report_id %}
-                  <a class="btn btn-sm btn-outline-secondary" href="/reports/{{ b.report_id }}" target="_blank" rel="noopener">#{{ b.report_id }}</a>
-                {% else %}<span class="text-muted">—</span>{% endif %}
-              </td>
-              <td><code>{{ pn or '—' }}</code></td>
-              <td>{{ name or '—' }}</td>
-              <td class="text-end">{{ qty or 0 }}</td>
-              <td class="text-end">{% if price is not none %}{{ '%.2f'|format(price) }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
-            </tr>
-          {% endfor %}
-        {% endif %}
-      {% else %}
-        <tr><td colspan="6" class="text-muted">No issued items yet.</td></tr>
-      {% endfor %}
+      <tr><td colspan="6" class="text-muted">No issued items yet.</td></tr>
     </tbody>
-    {% if _batches and (_batches|length) > 0 %}
-      <tfoot><tr class="table-light"><th colspan="4" class="text-end">Total issued qty:</th><th class="text-end">{{ totals.qty }}</th><th></th></tr></tfoot>
-    {% endif %}
   </table>
 </div>
 
-{# ===== Issued Batches (Technician View) — без изменений ===== #}
+{# ===== Issued Batches (включая RETURN) ===== #}
 <h5 class="mt-4">Issued Batches (Technician View)</h5>
+<style>
+  .inv-badge       { font-size: .75rem; }
+  .inv-return-row  { background: #fff5f5; }
+  .inv-item-neg    { color: #c92a2a; }
+  .inv-item        { line-height: 1.25; }
+</style>
 <div class="table-responsive">
-  <table class="table table-sm table-hover">
+  <table class="table table-sm table-hover align-middle">
     <thead class="table-light">
-      <tr><th>Issued At</th><th>Technician</th><th>Canonical Ref</th><th>Items</th><th>Report #</th><th>Print</th></tr>
+      <tr>
+        <th>Issued At</th>
+        <th>Technician</th>
+        <th>Canonical Ref</th>
+        <th>Items</th>
+        <th class="text-end">Invoice Total</th>
+        <th>Report #</th>
+        <th>Print</th>
+      </tr>
     </thead>
     <tbody>
-      {% for b in _batches %}
-      <tr>
-        <td>{{ b.issued_at }}</td>
-        <td>{{ b.technician }}</td>
-        <td>{{ b.canonical_ref }}</td>
-        <td>{% if b.items is iterable and b.items is not string %}{{ b.items|length }}{% else %}{{ b.get('items', '-') if b.get is defined else (b.items or '-') }}{% endif %}</td>
-        <td>{% if b.report_id %}<a class="btn btn-sm btn-outline-secondary" href="/reports/{{ b.report_id }}" target="_blank" rel="noopener">Open Report</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
-        <td>{% if b.report_id %}<a class="btn btn-sm btn-outline-primary" href="/reports/{{ b.report_id }}?print=1" target="_blank" rel="noopener">Print</a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+      {% for b in batches %}
+      {% set is_return = b.get('is_return') %}
+      <tr class="{% if is_return %}inv-return-row{% endif %}">
+        <td>{{ b.get('issued_at') }}</td>
+        <td>{{ b.get('technician') }}</td>
+        <td>{{ b.get('canonical_ref') }}</td>
+        <td>
+          {% set items = b.get('items') %}
+          {% if items and (items|length) > 0 %}
+            <ul class="mb-0 ps-3">
+              {% for it in items %}
+                <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
+                  <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
+                  {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        {% set total_value = b.get('total_value', 0.0) %}
+        <td class="text-end {% if total_value < 0 %}inv-item-neg{% endif %}">
+          ${{ '%.2f'|format(total_value) }}
+          {% if is_return %}
+            <span class="badge bg-danger inv-badge">RETURN</span>
+          {% else %}
+            <span class="badge bg-success inv-badge">ISSUED</span>
+          {% endif %}
+        </td>
+        <td class="text-nowrap">
+          {% if b.get('report_id') %}
+            {# Открываем отчёт, жёстко фильтруя по технику и job — передаём несколько алиасов параметров #}
+            {% set tech = b.get('technician') or wo.technician_name or '' %}
+            {% set job  = b.get('reference_job') or wo.canonical_job or '' %}
+            <a class="btn btn-sm btn-outline-secondary"
+               href="{{ url_for('inventory.reports_grouped') }}?issued_to={{ tech|urlencode }}&technician={{ tech|urlencode }}&company={{ tech|urlencode }}&tech={{ tech|urlencode }}&reference_job={{ job|urlencode }}&ref_job={{ job|urlencode }}&ref={{ job|urlencode }}&job={{ job|urlencode }}&jobs={{ job|urlencode }}"
+               target="_blank" rel="noopener">Open Report</a>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if b.get('report_id') %}
+            <a class="btn btn-sm btn-outline-primary"
+               href="/invoice/pdf?invoice_number={{ b.get('report_id') }}&print=1"
+               target="_blank" rel="noopener">Print</a>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
       </tr>
-      {% else %}<tr><td colspan="6" class="text-muted">No batches yet.</td></tr>{% endfor %}
+      {% else %}
+        <tr><td colspan="7" class="text-muted">No batches yet.</td></tr>
+      {% endfor %}
     </tbody>
   </table>
 </div>
@@ -208,9 +217,13 @@
 (function () {
   const btnCopy = document.getElementById('copyJobs');
   btnCopy?.addEventListener('click', async () => {
-    const el = document.getElementById('wo-jobs'); const txt = (el?.textContent || '').trim(); if (!txt) return;
-    try { await navigator.clipboard.writeText(txt); } catch(e) {
-      const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
+    const el = document.getElementById('wo-jobs');
+    const txt = (el?.textContent || '').trim();
+    if (!txt) return;
+    try { await navigator.clipboard.writeText(txt); }
+    catch(e) {
+      const ta=document.createElement('textarea');
+      ta.value=txt; document.body.appendChild(ta);
       ta.select(); document.execCommand('copy'); ta.remove();
     }
   });
