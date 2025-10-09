@@ -107,7 +107,7 @@
     </tbody>
     <tfoot>
       <tr class="table-light">
-        <th colspan="5" class="text-end">Grand total:</th>
+        <th colspan="5" class="text-end">Grand total (plan):</th>
         <th class="num">{{ '%.2f'|format(grand.total) }}</th>
         <th colspan="3"></th>
       </tr>
@@ -118,16 +118,54 @@
 <p class="text-muted">No parts listed for this work order.</p>
 {% endif %}
 
+{# ===== Issued Items (this WO) ===== #}
 <h5 class="mt-4">Issued Items (this WO)</h5>
+<style>
+  .row-ret { background: #fff5f5; }
+</style>
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
     <thead class="table-light">
-      <tr><th>Issued At</th><th>Report</th><th>Part #</th><th>Name</th><th class="text-end">Qty</th><th class="text-end">Unit ($)</th></tr>
+      <tr>
+        <th>Issued At</th>
+        <th>Invoice #</th>
+        <th>Part #</th>
+        <th>Name</th>
+        <th class="text-end">Qty</th>
+        <th class="text-end">Unit ($)</th>
+      </tr>
     </thead>
     <tbody>
-      <tr><td colspan="6" class="text-muted">No issued items yet.</td></tr>
+      {% if issued_items and (issued_items|length) > 0 %}
+        {% for r in issued_items %}
+          {% set is_ret = (r.quantity or 0) < 0 %}
+          <tr class="{% if is_ret %}row-ret{% endif %}">
+            <td>{{ r.issue_date.strftime('%Y-%m-%d %H:%M') if r.issue_date else '—' }}</td>
+            <td class="text-nowrap">{{ '%06d'|format(r.invoice_number) if r.invoice_number else '—' }}</td>
+            <td><code>{{ r.part.part_number if r.part else r.part_id }}</code></td>
+            <td>{{ r.part.name if r.part else '—' }}</td>
+            <td class="text-end">{{ r.quantity }}</td>
+            <td class="text-end">{{ '%.2f'|format(r.unit_cost_at_issue or 0) }}</td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr><td colspan="6" class="text-muted">No issued items yet.</td></tr>
+      {% endif %}
     </tbody>
   </table>
+</div>
+
+{# --- GRAND TOTAL по факту (Issued − Returns) --- #}
+<div class="mt-2 d-flex flex-wrap gap-4">
+  <div><strong>Issued total:</strong> ${{ '%.2f'|format(issued_total or 0) }} <span class="text-muted">(qty {{ issued_qty or 0 }})</span></div>
+  <div><strong>Returned total:</strong> ${{ '%.2f'|format(returned_total or 0) }} <span class="text-muted">(qty {{ returned_qty or 0 }})</span></div>
+  <div>
+    <strong>Grand total (Issued − Returns):</strong>
+    <span class="{{ 'text-danger' if (net_total or 0) < 0 else 'text-success' }}">
+      ${{ '%.2f'|format(net_total or 0) }}
+    </span>
+    <span class="text-muted">(qty {{ net_qty or 0 }})</span>
+  </div>
 </div>
 
 {# ===== Issued Batches (включая RETURN) ===== #}
@@ -184,7 +222,6 @@
         </td>
         <td class="text-nowrap">
           {% if b.get('report_id') %}
-            {# Открываем отчёт, жёстко фильтруя по технику и job — передаём несколько алиасов параметров #}
             {% set tech = b.get('technician') or wo.technician_name or '' %}
             {% set job  = b.get('reference_job') or wo.canonical_job or '' %}
             <a class="btn btn-sm btn-outline-secondary"

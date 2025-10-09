@@ -1149,9 +1149,12 @@ def wo_detail(wo_id):
     """
     Work Order details page (flat + multi-appliance) + инвойсные партии,
     включая возвраты (RETURN). Подсветка зелёным = PN с NET > 0.
+    Добавлено:
+      - issued_items (построчный журнал для этого WO)
+      - агрегаты Issued/Returned/Net по сумме и количеству (SQLite-safe)
     """
     from flask import current_app, render_template, flash, redirect, url_for
-    from sqlalchemy import func, or_
+    from sqlalchemy import func, or_, case
     from sqlalchemy.orm import selectinload, joinedload
     from extensions import db
     from models import WorkOrder, WorkUnit, WorkOrderPart
@@ -1193,12 +1196,15 @@ def wo_detail(wo_id):
         current_app.logger.exception("Suppliers query failed")
         suppliers = []
 
-    # ---- 3) Сбор партий (инвойсы + возвраты). Мягкий импорт.
+    # ---- 3) Сбор партий и построчного журнала
     batches = []
-    invoiced_pns = []  # будет PN с net>0
+    invoiced_pns = []
+    issued_items = []
+    issued_total = returned_total = net_total = 0.0
+    issued_qty = returned_qty = net_qty = 0
 
     try:
-        from models import IssuedPartRecord  # type: ignore
+        from models import IssuedPartRecord, IssuedBatch  # type: ignore
     except Exception:
         current_app.logger.warning("Invoice models not present; batches disabled.")
         return render_template(
@@ -1208,27 +1214,93 @@ def wo_detail(wo_id):
             batches=batches,
             suppliers=suppliers,
             invoiced_pns=invoiced_pns,
+            issued_items=issued_items,
+            issued_total=issued_total,
+            returned_total=returned_total,
+            net_total=net_total,
+            issued_qty=issued_qty,
+            returned_qty=returned_qty,
+            net_qty=net_qty,
         )
 
     try:
         canon = (wo.canonical_job or "").strip()
         issued_to = (wo.technician_name or "").strip()
 
-        rows = (
+        # База (и для списка, и для агрегатов, и для батчей)
+        base_q = (
             db.session.query(IssuedPartRecord)
             .options(joinedload(IssuedPartRecord.part), joinedload(IssuedPartRecord.batch))
+            .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
             .filter(
                 func.trim(IssuedPartRecord.issued_to) == issued_to,
                 or_(
                     func.trim(IssuedPartRecord.reference_job) == canon,
                     func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
+                    func.trim(IssuedBatch.reference_job) == canon,
                 ),
             )
-            .order_by(IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc())
-            .all()
         )
 
-        # --- группировка
+        # 3.1 Построчный журнал
+        issued_items = (
+            base_q.order_by(IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()).all()
+        )
+
+        # 3.2 Агрегаты (SQLite-friendly SUM(CASE ...))
+        money_issued = func.coalesce(
+            func.sum(
+                case(
+                    (IssuedPartRecord.quantity > 0,
+                     IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
+                    else_=0
+                )
+            ), 0.0
+        )
+        money_returned = func.coalesce(
+            func.sum(
+                case(
+                    (IssuedPartRecord.quantity < 0,
+                     -IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
+                    else_=0
+                )
+            ), 0.0
+        )
+        qty_issued = func.coalesce(
+            func.sum(
+                case((IssuedPartRecord.quantity > 0, IssuedPartRecord.quantity), else_=0)
+            ), 0
+        )
+        qty_returned = func.coalesce(
+            func.sum(
+                case((IssuedPartRecord.quantity < 0, -IssuedPartRecord.quantity), else_=0)
+            ), 0
+        )
+
+        agg = (
+            db.session.query(money_issued, money_returned, qty_issued, qty_returned)
+            .select_from(IssuedPartRecord)
+            .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
+            .filter(
+                func.trim(IssuedPartRecord.issued_to) == issued_to,
+                or_(
+                    func.trim(IssuedPartRecord.reference_job) == canon,
+                    func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
+                    func.trim(IssuedBatch.reference_job) == canon,
+                ),
+            )
+            .one()
+        )
+
+        issued_total   = float(agg[0] or 0.0)
+        returned_total = float(agg[1] or 0.0)
+        net_total      = issued_total - returned_total
+        issued_qty     = int(agg[2] or 0)
+        returned_qty   = int(agg[3] or 0)
+        net_qty        = issued_qty - returned_qty
+
+        # 3.3 Группировка для нижней таблицы (batches)
+        rows = issued_items
         from collections import defaultdict
         grouped = defaultdict(list)
         for r in rows:
@@ -1247,7 +1319,6 @@ def wo_detail(wo_id):
             price = float(rec.unit_cost_at_issue or 0.0)
             return pn, nm, qty, price
 
-        # net-количество по PN (учитываем возвраты)
         net_by_pn = defaultdict(int)
 
         for _, recs in grouped.items():
@@ -1259,29 +1330,25 @@ def wo_detail(wo_id):
             report_id = (b.invoice_number if b else recs[0].invoice_number)
             location = getattr(b, "location", None)
 
-            # Признаки возврата: текст RETURN в ref ИЛИ отрицательная цена/кол-во
             ref_is_return = "RETURN" in ref.upper()
-
             items = []
-            total_value_raw = 0.0  # суммируем как в БД: qty * unit_cost_at_issue
+            total_value_raw = 0.0
 
             for rec in recs:
                 pn, name, qty, price = _extract(rec)
                 if not pn or qty == 0:
                     continue
-
-                line_total = qty * price            # без манипуляций со знаком
+                line_total = qty * price
                 total_value_raw += line_total
 
-                # что считаем «возвратом» для net:
-                is_item_return = ref_is_return or (price < 0) or (qty < 0)
+                is_item_return = ref_is_return or (qty < 0)
                 eff_sign = -1 if is_item_return else 1
                 net_by_pn[pn] += eff_sign * abs(qty)
 
                 items.append({
                     "pn": pn,
                     "name": name or "—",
-                    "qty": abs(qty),                 # показываем модуль
+                    "qty": abs(qty),
                     "unit_price": price,
                     "negative": (line_total < 0) or is_item_return,
                 })
@@ -1296,17 +1363,19 @@ def wo_detail(wo_id):
                 "location": location,
                 "report_id": report_id,
                 "is_return": is_group_return,
-                "total_value": total_value_raw,   # видно отрицательное значение для return
+                "total_value": total_value_raw,
                 "items": items,
             })
 
-        # PN для зелёной подсветки — только где net>0
         invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
 
     except Exception:
         current_app.logger.exception("Batches lookup failed")
         batches = []
         invoiced_pns = []
+        issued_items = []
+        issued_total = returned_total = net_total = 0.0
+        issued_qty = returned_qty = net_qty = 0
 
     # ---- 4) Рендер
     return render_template(
@@ -1315,7 +1384,14 @@ def wo_detail(wo_id):
         avail=[],
         batches=batches,
         suppliers=suppliers,
-        invoiced_pns=invoiced_pns,  # net>0
+        invoiced_pns=invoiced_pns,
+        issued_items=issued_items,
+        issued_total=issued_total,
+        returned_total=returned_total,
+        net_total=net_total,
+        issued_qty=issued_qty,
+        returned_qty=returned_qty,
+        net_qty=net_qty,
     )
 
 @inventory_bp.post("/work_orders/new", endpoint="wo_create")
