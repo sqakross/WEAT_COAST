@@ -222,6 +222,10 @@ class IssuedPartRecord(db.Model):
     reference_job      = db.Column(db.String(255), index=True)
     issue_date         = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     unit_cost_at_issue = db.Column(db.Float, nullable=False)
+    # models.py (IssuedPartRecord)
+    confirmed_by_tech = db.Column(db.Boolean, default=False, nullable=False)
+    confirmed_at = db.Column(db.DateTime, nullable=True)
+    confirmed_by = db.Column(db.String(64), nullable=True)
 
     # новые поля для инвойсов / отчётов
     invoice_number     = db.Column(db.Integer, index=True, nullable=True)

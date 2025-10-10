@@ -1018,6 +1018,101 @@ def set_setting(key, value):
     with open(p, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+@inventory_bp.post("/work_orders/<int:wo_id>/confirm")
+@login_required
+def wo_confirm_lines(wo_id: int):
+    """
+    Подтверждение получения запчастей:
+    - выбранные строки (record_ids[]), или
+    - все строки конкретного invoice.
+    Доступ:
+      - technician → только свои строки;
+      - admin/superadmin → любые строки по этому WO.
+    """
+    from flask import request, flash, redirect, url_for
+    from datetime import datetime
+    from sqlalchemy import func, or_
+    from extensions import db
+    from models import WorkOrder, IssuedPartRecord, IssuedBatch
+
+    # 1. Проверка Work Order
+    wo = db.session.get(WorkOrder, wo_id)
+    if not wo:
+        flash(f"Work Order #{wo_id} not found.", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    tech = (getattr(current_user, "username", None) or "").strip()
+    if not tech:
+        flash("Your account has no username; cannot confirm.", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    canonical_job = (wo.canonical_job or "").strip()
+
+    # 2. Собираем IDs для подтверждения
+    raw_ids = request.form.getlist("record_ids[]") or request.form.getlist("record_ids")
+    sel_ids = [int(x) for x in raw_ids if str(x).isdigit()]
+    inv_s = (request.form.get("invoice_number") or "").strip()
+    inv_no = int(inv_s) if inv_s.isdigit() else None
+
+    # 3. Базовый запрос (включаем join для batch)
+    q = db.session.query(IssuedPartRecord).outerjoin(
+        IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id
+    )
+
+    # ⚙️ Фильтр по технику — только если НЕ admin/superadmin
+    if current_user.role not in ["admin", "superadmin"]:
+        q = q.filter(func.trim(IssuedPartRecord.issued_to) == tech)
+
+    # 4. Ограничение по текущему WO
+    if canonical_job:
+        q = q.filter(
+            or_(
+                func.trim(IssuedPartRecord.reference_job) == canonical_job,
+                func.trim(IssuedPartRecord.reference_job).like(f"%{canonical_job}%"),
+                func.trim(IssuedBatch.reference_job) == canonical_job,
+            )
+        )
+
+    # 5. Фильтрация по выбранным ID или invoice
+    if sel_ids:
+        q = q.filter(IssuedPartRecord.id.in_(sel_ids))
+    elif inv_no is not None:
+        q = q.filter(IssuedPartRecord.invoice_number == inv_no)
+    else:
+        flash("Nothing to confirm (no IDs or invoice number).", "warning")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    rows = q.all()
+    if not rows:
+        flash("No matching lines found to confirm.", "warning")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    # 6. Подтверждение
+    now = datetime.utcnow()
+    updated = 0
+    for r in rows:
+        if not getattr(r, "confirmed_by_tech", False):
+            r.confirmed_by_tech = True
+            r.confirmed_at = now
+            r.confirmed_by = tech
+            updated += 1
+
+    # 7. Коммит и флеш
+    try:
+        db.session.commit()
+        if updated:
+            msg = f"Confirmed {updated} line(s)"
+            if inv_no is not None:
+                msg += f" in invoice #{inv_no:06d}"
+            flash(msg + ".", "success")
+        else:
+            flash("All selected lines were already confirmed.", "info")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Database error: {e}", "danger")
+
+    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
 @inventory_bp.get("/work_orders/new", endpoint="wo_new")
 @login_required
 def wo_new():
@@ -1152,6 +1247,7 @@ def wo_detail(wo_id):
     Добавлено:
       - issued_items (построчный журнал для этого WO)
       - агрегаты Issued/Returned/Net по сумме и количеству (SQLite-safe)
+      - в items теперь есть id и confirmed, а в batch — флаги any/all_confirmed
     """
     from flask import current_app, render_template, flash, redirect, url_for
     from sqlalchemy import func, or_, case
@@ -1267,14 +1363,10 @@ def wo_detail(wo_id):
             ), 0.0
         )
         qty_issued = func.coalesce(
-            func.sum(
-                case((IssuedPartRecord.quantity > 0, IssuedPartRecord.quantity), else_=0)
-            ), 0
+            func.sum(case((IssuedPartRecord.quantity > 0, IssuedPartRecord.quantity), else_=0)), 0
         )
         qty_returned = func.coalesce(
-            func.sum(
-                case((IssuedPartRecord.quantity < 0, -IssuedPartRecord.quantity), else_=0)
-            ), 0
+            func.sum(case((IssuedPartRecord.quantity < 0, -IssuedPartRecord.quantity), else_=0)), 0
         )
 
         agg = (
@@ -1313,11 +1405,13 @@ def wo_detail(wo_id):
             grouped[key].append(r)
 
         def _extract(rec: "IssuedPartRecord"):
+            rid = rec.id
             pn = (getattr(rec.part, "part_number", None) or "").strip().upper()
             nm = getattr(rec.part, "name", None) or ""
             qty = int(rec.quantity or 0)
             price = float(rec.unit_cost_at_issue or 0.0)
-            return pn, nm, qty, price
+            confirmed = bool(getattr(rec, "confirmed_by_tech", False))
+            return rid, pn, nm, qty, price, confirmed
 
         net_by_pn = defaultdict(int)
 
@@ -1335,7 +1429,7 @@ def wo_detail(wo_id):
             total_value_raw = 0.0
 
             for rec in recs:
-                pn, name, qty, price = _extract(rec)
+                rid, pn, name, qty, price, confirmed = _extract(rec)
                 if not pn or qty == 0:
                     continue
                 line_total = qty * price
@@ -1346,14 +1440,19 @@ def wo_detail(wo_id):
                 net_by_pn[pn] += eff_sign * abs(qty)
 
                 items.append({
+                    "id": rid,
                     "pn": pn,
                     "name": name or "—",
                     "qty": abs(qty),
                     "unit_price": price,
                     "negative": (line_total < 0) or is_item_return,
+                    "confirmed": confirmed,
                 })
 
             is_group_return = (total_value_raw < 0) or ref_is_return
+
+            all_conf = all(it.get("confirmed") for it in items) if items else False
+            any_conf = any(it.get("confirmed") for it in items) if items else False
 
             batches.append({
                 "issued_at": issued_at_str,
@@ -1365,6 +1464,8 @@ def wo_detail(wo_id):
                 "is_return": is_group_return,
                 "total_value": total_value_raw,
                 "items": items,
+                "all_confirmed": all_conf,
+                "any_confirmed": any_conf,
             })
 
         invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])

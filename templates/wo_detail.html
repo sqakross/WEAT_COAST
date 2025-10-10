@@ -187,26 +187,69 @@
         <th class="text-end">Invoice Total</th>
         <th>Report #</th>
         <th>Print</th>
+        {% if current_user.username and (current_user.username|trim) == (wo.technician_name or '')|trim %}
+          <th class="text-center">Confirm</th>
+        {% endif %}
       </tr>
     </thead>
     <tbody>
       {% for b in batches %}
       {% set is_return = b.get('is_return') %}
+      {% set is_my_wo = (
+        (current_user.username and (current_user.username|trim) == (wo.technician_name or '')|trim)
+        or (current_user.role in ['admin', 'superadmin'])
+      ) %}
+
       <tr class="{% if is_return %}inv-return-row{% endif %}">
-        <td>{{ b.get('issued_at') }}</td>
+        <td>
+          {{ b.get('issued_at') }}
+          {% if b.get('all_confirmed') %}
+            <div><span class="badge bg-success inv-badge">All confirmed</span></div>
+          {% elif b.get('any_confirmed') %}
+            <div><span class="badge bg-info text-dark inv-badge">Partly confirmed</span></div>
+          {% endif %}
+        </td>
         <td>{{ b.get('technician') }}</td>
         <td>{{ b.get('canonical_ref') }}</td>
         <td>
           {% set items = b.get('items') %}
           {% if items and (items|length) > 0 %}
-            <ul class="mb-0 ps-3">
-              {% for it in items %}
-                <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
-                  <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
-                  {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
-                </li>
-              {% endfor %}
-            </ul>
+            {% if is_my_wo %}
+              <form method="post" action="{{ url_for('inventory.wo_confirm_lines', wo_id=wo.id) }}">
+                <ul class="mb-2 ps-3">
+                  {% for it in items %}
+                    <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
+                      <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
+                      {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
+                      {% if it.confirmed %}
+                        <span class="badge bg-success inv-badge ms-1">✔ confirmed</span>
+                      {% else %}
+                        <label class="ms-2 small text-muted">
+                          <input type="checkbox" name="record_ids[]" value="{{ it.id }}"> select
+                        </label>
+                      {% endif %}
+                    </li>
+                  {% endfor %}
+                </ul>
+                <div class="d-flex gap-2">
+                  <input type="hidden" name="invoice_number" value="{{ b.get('report_id') or '' }}">
+                  <button class="btn btn-sm btn-outline-primary" type="submit" name="do" value="confirm_selected" {% if not (items|selectattr('confirmed','equalto',False)|list) %}disabled{% endif %}>Confirm selected</button>
+                  <button class="btn btn-sm btn-primary" type="submit" name="do" value="confirm_invoice" {% if b.get('all_confirmed') or not b.get('report_id') %}disabled{% endif %}>Confirm ALL in invoice</button>
+                </div>
+              </form>
+            {% else %}
+              <ul class="mb-0 ps-3">
+                {% for it in items %}
+                  <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
+                    <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
+                    {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
+                    {% if it.confirmed %}
+                      <span class="badge bg-success inv-badge ms-1">✔ confirmed</span>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
           {% else %}
             <span class="text-muted">—</span>
           {% endif %}
@@ -240,9 +283,20 @@
             <span class="text-muted">—</span>
           {% endif %}
         </td>
+        {% if is_my_wo %}
+          <td class="text-center align-middle">
+            {% if b.get('all_confirmed') %}
+              ✅
+            {% elif b.get('any_confirmed') %}
+              ☑️
+            {% else %}
+              ☐
+            {% endif %}
+          </td>
+        {% endif %}
       </tr>
       {% else %}
-        <tr><td colspan="7" class="text-muted">No batches yet.</td></tr>
+        <tr><td colspan="8" class="text-muted">No batches yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
