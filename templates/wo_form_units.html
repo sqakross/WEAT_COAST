@@ -105,8 +105,8 @@
                 <th class="text-end col-money">Unit ($)</th>
                 <th class="text-end col-money">Total ($)</th>
                 <th class="col-narrow">WH</th>
-                <th class="col-narrow">Sup</th>
                 <th style="width:80px;" title="Backorder">B/O</th>
+                <th class="col-narrow">Sup</th>
                 <th class="ordered-col" style="width:70px;">Ord</th>
                 <th style="width:140px;">Stock hint</th>
                 <th class="col-issue">Issue?</th>
@@ -131,13 +131,19 @@
                 <td class="num"><input class="form-control qty" name="units[{{ ui }}][rows][{{ ri }}][quantity]" type="number" min="0" value="{{ r.quantity or 1 }}" {{ ro }} {{ dis }}></td>
                 <td class="num"><input class="form-control unit-cost" name="units[{{ ui }}][rows][{{ ri }}][unit_cost]" type="number" step="0.01" min="0" value="{{ '%.2f'|format(r.unit_cost) if r.unit_cost is defined and r.unit_cost is not none else '0.00' }}" {{ ro }} {{ dis }}></td>
                 <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
+
+                {# WH #}
                 <td><input class="form-control wh-input" name="units[{{ ui }}][rows][{{ ri }}][warehouse]" value="{{ r.warehouse or r.unit_label or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
-                <td><input class="form-control supplier-input" name="units[{{ ui }}][rows][{{ ri }}][supplier]" list="suppliers_datalist" value="{{ r.supplier or '' }}" {{ ro }} {{ dis }}></td>
+
+                {# 🔸 B/O ПЕРЕД Supplier #}
                 <td class="text-center">
                   <div class="form-check d-flex justify-content-center m-0">
                     <input class="form-check-input" type="checkbox" name="units[{{ ui }}][rows][{{ ri }}][backorder_flag]" {% if r.backorder_flag %}checked{% endif %} {{ dis }}>
                   </div>
                 </td>
+
+                {# Supplier #}
+                <td><input class="form-control supplier-input" name="units[{{ ui }}][rows][{{ ri }}][supplier]" list="suppliers_datalist" value="{{ r.supplier or '' }}" {{ ro }} {{ dis }}></td>
 
                 <!-- Ordered -->
                 <td class="text-center ordered-col">
@@ -367,7 +373,7 @@
 
   function rowTemplate(ui, ri){
     const ro = IS_RO ? 'disabled readonly' : '';
-    thebo = IS_RO ? 'disabled' : '';
+    const thebo = IS_RO ? 'disabled' : '';
     return `
 <tr>
   <td><input class="form-control pn" name="units[${ui}][rows][${ri}][part_number]" maxlength="80" ${ro}></td>
@@ -376,9 +382,12 @@
   <td class="num"><input class="form-control qty" name="units[${ui}][rows][${ri}][quantity]" type="number" min="0" value="1" ${ro}></td>
   <td class="num"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${ro}></td>
   <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
+
   <td><input class="form-control wh-input" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
-  <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
+
   <td class="text-center"><div class="form-check d-flex justify-content-center m-0"><input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]" ${thebo}></div></td>
+
+  <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
 
   <td class="text-center ordered-col">
     <input type="hidden" class="ordered-val" name="units[${ui}][rows][${ri}][ordered_flag]" value="0">
@@ -425,8 +434,8 @@
             <th class="text-end col-money">Unit ($)</th>
             <th class="text-end col-money">Total ($)</th>
             <th class="col-narrow">WH</th>
-            <th class="col-narrow">Sup</th>
             <th style="width:80px;" title="Backorder">B/O</th>
+            <th class="col-narrow">Sup</th>
             <th class="ordered-col" style="width:70px;">Ord</th>
             <th style="width:140px;">Stock hint</th>
             <th class="col-issue">Issue?</th>

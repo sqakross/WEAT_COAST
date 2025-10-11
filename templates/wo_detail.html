@@ -4,10 +4,10 @@
   <h3 class="mb-0">Work Order #{{ wo.id }}</h3>
   <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">← Back to list</a>
-    {% if current_user.role in ['admin','superadmin'] %}
+    {% if (current_user.role or '')|lower in ['admin','superadmin'] %}
       <a class="btn btn-outline-primary" href="{{ url_for('inventory.wo_edit', wo_id=wo.id) }}">✏️ Edit</a>
     {% endif %}
-    {% if current_user.role == 'superadmin' %}
+    {% if (current_user.role or '')|lower == 'superadmin' %}
       <form method="post" action="{{ url_for('inventory.wo_delete', wo_id=wo.id) }}" class="d-inline" onsubmit="return confirm('Delete Work Order #{{ wo.id }}? This cannot be undone.');">
         <button class="btn btn-outline-danger" type="submit">🗑️ Delete</button>
       </form>
@@ -38,7 +38,7 @@
     {% else %}<span class="badge bg-secondary">search_ordered</span>{% endif %}
   </div>
   <div class="col-md-3"><strong>Delivery / Markup:</strong> ${{ '%.2f'|format(wo.delivery_fee or 0) }} / {{ (wo.markup_percent or 0)|round(2) }}%</div>
-  <div class="col-md-3"><strong>Created:</strong> {{ wo.created_at.strftime('%Y-%m-%d') if wo.created_at else '—' }}</div>
+  <div class="col-md-3"><strong>Created:</strong> {{ wo.created_at|local_date if wo.created_at else '—' }}</div>
 </div>
 
 {# собрать строки из multi/legacy #}
@@ -71,7 +71,8 @@
         <th class="text-end">Unit ($)</th>
         <th class="text-end">Total ($)</th>
         <th>Supplier</th>
-        <th class="text-center" title="Ordered">Ord</th>
+        <th class="text-center" title="Ordered">Ordered</th>
+        <th class="text-center">Ordered on</th>
         <th title="Backorder">B/O</th>
       </tr>
     </thead>
@@ -80,10 +81,15 @@
       {% for p in ns.all_parts %}
         {% set pn_str = (p.part_number or '')|string|trim|upper %}
         {% set is_invoiced = pn_str in invoiced_set %}
+
+        {# НОРМАЛИЗУЕМ ordered_flag и учитываем статусы #}
+        {% set oflag = p.ordered_flag if p.ordered_flag is defined else None %}
+        {% set oflag_norm = (oflag not in (None, False, 0, '0', '', 'false', 'False')) %}
         {% set is_ordered =
-              (p.ordered_flag if p is not none and p.ordered_flag is not none else false)
-              or ((p.status or '')|lower == 'ordered')
-              or ((p.line_status or '')|lower == 'ordered') %}
+             oflag_norm
+             or ((p.status or '')|lower == 'ordered')
+             or ((p.line_status or '')|lower == 'ordered') %}
+
         {% set qty = p.quantity or 0 %}
         {% set unit = (p.unit_cost if p.unit_cost is defined and p.unit_cost is not none else 0.0) %}
         {% set total = (qty * unit) %}
@@ -100,8 +106,28 @@
           <td class="num">{{ '%.2f'|format(unit) }}</td>
           <td class="num">{{ '%.2f'|format(total) }}</td>
           <td>{{ p.supplier or '' }}</td>
-          <td class="text-center"><input type="checkbox" class="form-check-input" disabled {% if is_ordered %}checked{% endif %}></td>
-          <td>{% if p.backorder_flag %}<span class="badge bg-warning text-dark">B/O</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+
+          {# Ordered: только чтение #}
+          <td class="text-center">
+            <input type="checkbox" class="form-check-input" disabled {% if is_ordered %}checked{% endif %}>
+          </td>
+
+          {# Дата заказа #}
+          <td class="text-center">
+            {% if p.ordered_date %}
+              {{ p.ordered_date|local_date }}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+
+          <td>
+            {% if p.backorder_flag %}
+              <span class="badge bg-warning text-dark">B/O</span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
         </tr>
       {% endfor %}
     </tbody>
@@ -109,7 +135,7 @@
       <tr class="table-light">
         <th colspan="5" class="text-end">Grand total (plan):</th>
         <th class="num">{{ '%.2f'|format(grand.total) }}</th>
-        <th colspan="3"></th>
+        <th colspan="4"></th>
       </tr>
     </tfoot>
   </table>
@@ -122,6 +148,8 @@
 <h5 class="mt-4">Issued Items (this WO)</h5>
 <style>
   .row-ret { background: #fff5f5; }
+  .inv-badge { font-size:.75rem; }
+  .num { text-align:right; font-variant-numeric: tabular-nums; }
 </style>
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
@@ -140,12 +168,12 @@
         {% for r in issued_items %}
           {% set is_ret = (r.quantity or 0) < 0 %}
           <tr class="{% if is_ret %}row-ret{% endif %}">
-            <td>{{ r.issue_date.strftime('%Y-%m-%d %H:%M') if r.issue_date else '—' }}</td>
+            <td>{{ r.issue_date|local_dt }}</td>
             <td class="text-nowrap">{{ '%06d'|format(r.invoice_number) if r.invoice_number else '—' }}</td>
             <td><code>{{ r.part.part_number if r.part else r.part_id }}</code></td>
             <td>{{ r.part.name if r.part else '—' }}</td>
-            <td class="text-end">{{ r.quantity }}</td>
-            <td class="text-end">{{ '%.2f'|format(r.unit_cost_at_issue or 0) }}</td>
+            <td class="num">{{ r.quantity }}</td>
+            <td class="num">{{ '%.2f'|format(r.unit_cost_at_issue or 0) }}</td>
           </tr>
         {% endfor %}
       {% else %}
@@ -155,23 +183,28 @@
   </table>
 </div>
 
-{# --- GRAND TOTAL по факту (Issued − Returns) --- #}
-<div class="mt-2 d-flex flex-wrap gap-4">
-  <div><strong>Issued total:</strong> ${{ '%.2f'|format(issued_total or 0) }} <span class="text-muted">(qty {{ issued_qty or 0 }})</span></div>
-  <div><strong>Returned total:</strong> ${{ '%.2f'|format(returned_total or 0) }} <span class="text-muted">(qty {{ returned_qty or 0 }})</span></div>
-  <div>
+{# ===== СВОДКА ПОД ТАБЛИЦЕЙ ===== #}
+<div class="mt-1">
+  <span class="me-3">
+    <strong>Issued total:</strong>
+    ${{ '%.2f'|format(issued_total or 0) }}
+    <span class="text-muted">(qty {{ issued_qty or 0 }})</span>
+  </span>
+  <span class="me-3">
+    <strong>Returned total:</strong>
+    ${{ '%.2f'|format(returned_total or 0) }}
+    <span class="text-muted">(qty {{ returned_qty or 0 }})</span>
+  </span>
+  <span>
     <strong>Grand total (Issued − Returns):</strong>
-    <span class="{{ 'text-danger' if (net_total or 0) < 0 else 'text-success' }}">
-      ${{ '%.2f'|format(net_total or 0) }}
-    </span>
+    ${{ '%.2f'|format(net_total or 0) }}
     <span class="text-muted">(qty {{ net_qty or 0 }})</span>
-  </div>
+  </span>
 </div>
 
-{# ===== Issued Batches (включая RETURN) ===== #}
+{# ===== Issued Batches (Technician View) ===== #}
 <h5 class="mt-4">Issued Batches (Technician View)</h5>
 <style>
-  .inv-badge       { font-size: .75rem; }
   .inv-return-row  { background: #fff5f5; }
   .inv-item-neg    { color: #c92a2a; }
   .inv-item        { line-height: 1.25; }
@@ -187,7 +220,7 @@
         <th class="text-end">Invoice Total</th>
         <th>Report #</th>
         <th>Print</th>
-        {% if current_user.username and (current_user.username|trim) == (wo.technician_name or '')|trim %}
+        {% if (current_user.username and (current_user.username|trim) == (wo.technician_name or '')|trim) or ((current_user.role or '')|lower in ['admin','superadmin']) %}
           <th class="text-center">Confirm</th>
         {% endif %}
       </tr>
@@ -197,7 +230,7 @@
       {% set is_return = b.get('is_return') %}
       {% set is_my_wo = (
         (current_user.username and (current_user.username|trim) == (wo.technician_name or '')|trim)
-        or (current_user.role in ['admin', 'superadmin'])
+        or ((current_user.role or '')|lower in ['admin', 'superadmin'])
       ) %}
 
       <tr class="{% if is_return %}inv-return-row{% endif %}">
@@ -223,6 +256,10 @@
                       {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
                       {% if it.confirmed %}
                         <span class="badge bg-success inv-badge ms-1">✔ confirmed</span>
+                        <span class="small text-muted ms-1">
+                          {% if it.confirmed_by %}by {{ it.confirmed_by }}{% endif %}
+                          {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
+                        </span>
                       {% else %}
                         <label class="ms-2 small text-muted">
                           <input type="checkbox" name="record_ids[]" value="{{ it.id }}"> select
@@ -231,10 +268,19 @@
                     </li>
                   {% endfor %}
                 </ul>
-                <div class="d-flex gap-2">
-                  <input type="hidden" name="invoice_number" value="{{ b.get('report_id') or '' }}">
-                  <button class="btn btn-sm btn-outline-primary" type="submit" name="do" value="confirm_selected" {% if not (items|selectattr('confirmed','equalto',False)|list) %}disabled{% endif %}>Confirm selected</button>
-                  <button class="btn btn-sm btn-primary" type="submit" name="do" value="confirm_invoice" {% if b.get('all_confirmed') or not b.get('report_id') %}disabled{% endif %}>Confirm ALL in invoice</button>
+                <div class="d-flex gap-2 flex-wrap">
+                  <input type="hidden" name="invoice_number" value="{{ b.get('invoice_number') or '' }}">
+                  <button class="btn btn-sm btn-outline-primary" type="submit" name="do" value="confirm_selected"
+                          {% if not (items|selectattr('confirmed','equalto',False)|list) %}disabled{% endif %}>
+                    Confirm selected
+                  </button>
+                  {% if b.get('invoice_number') and (b.get('unconfirmed_count', 0) > 0) %}
+                    <button class="btn btn-sm btn-primary" type="submit" name="do" value="confirm_invoice">
+                      Confirm ALL in invoice
+                    </button>
+                  {% else %}
+                    <button class="btn btn-sm btn-primary" type="button" disabled>Confirm ALL in invoice</button>
+                  {% endif %}
                 </div>
               </form>
             {% else %}
@@ -245,6 +291,10 @@
                     {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
                     {% if it.confirmed %}
                       <span class="badge bg-success inv-badge ms-1">✔ confirmed</span>
+                      <span class="small text-muted ms-1">
+                        {% if it.confirmed_by %}by {{ it.confirmed_by }}{% endif %}
+                        {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
+                      </span>
                     {% endif %}
                   </li>
                 {% endfor %}
@@ -313,8 +363,7 @@
     if (!txt) return;
     try { await navigator.clipboard.writeText(txt); }
     catch(e) {
-      const ta=document.createElement('textarea');
-      ta.value=txt; document.body.appendChild(ta);
+      const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
       ta.select(); document.execCommand('copy'); ta.remove();
     }
   });

@@ -58,6 +58,9 @@ app.config.from_pyfile('config.py', silent=True)  # instance/config.py (если
 # Ограничим размер аплоадов (32 МБ по умолчанию)
 app.config.setdefault("MAX_CONTENT_LENGTH", 32 * 1024 * 1024)
 
+# --- added: таймзона для отображения времени ---
+app.config.setdefault("DISPLAY_TZ", "America/Los_Angeles")
+
 # --- 4.1) Доп. пути для шаблонов ---
 from jinja2 import ChoiceLoader, FileSystemLoader
 extra_templates = [
@@ -104,6 +107,30 @@ logging.info(
     app.config.get("WCCR_IMPORT_DRY_RUN"),
 )
 
+# --- added: Jinja-фильтры локального времени ---
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+def _to_local(dt: datetime, fmt: str):
+    if not dt:
+        return "—"
+    tzname = app.config.get("DISPLAY_TZ", "America/Los_Angeles")
+    try:
+        # считаем, что в БД время хранится как UTC-naive
+        dt_utc = dt.replace(tzinfo=ZoneInfo("UTC"))
+        dt_local = dt_utc.astimezone(ZoneInfo(tzname))
+        return dt_local.strftime(fmt)
+    except Exception:
+        return dt.strftime(fmt)
+
+@app.template_filter("local_dt")
+def jinja_local_dt(dt: datetime, fmt: str = "%Y-%m-%d %H:%M"):
+    return _to_local(dt, fmt)
+
+@app.template_filter("local_date")
+def jinja_local_date(dt: datetime, fmt: str = "%Y-%m-%d"):
+    return _to_local(dt, fmt)
+
 from auth.routes import auth_bp
 from inventory.routes import inventory_bp
 app.register_blueprint(auth_bp)
@@ -115,15 +142,28 @@ logging.info("Flask app configured and blueprints registered.")
 # ВСПОМОГАТЕЛЬНЫЕ МИГРАЦИИ
 # ----------------------------
 def _ensure_column(table: str, column: str, ddl_type: str):
-    """Безопасно добавляет колонку, если её нет (SQLite)."""
+    """Безопасно добавляет колонку, если её нет (SQLite).
+       Если таблицы нет — пропускаем без ошибки."""
     try:
+        # есть ли таблица?
+        row = db.session.execute(
+            db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+            {"t": table}
+        ).fetchone()
+        if not row:
+            logging.info("Skip ensure column %s.%s: table does not exist", table, column)
+            return
+
+        # есть ли колонка?
         rows = db.session.execute(db.text(f"PRAGMA table_info({table})")).fetchall()
         names = {r[1] for r in rows}  # name на индексе 1
-        if column not in names:
-            logging.info("Adding column %s to %s ...", column, table)
-            db.session.execute(db.text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
-            db.session.commit()
-            logging.info("Added column %s to %s.", column, table)
+        if column in names:
+            return
+
+        logging.info("Adding column %s to %s ...", column, table)
+        db.session.execute(db.text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+        db.session.commit()
+        logging.info("Added column %s to %s.", column, table)
     except Exception as e:
         logging.exception("Failed to ensure column %s.%s: %s", table, column, e)
 
@@ -166,6 +206,21 @@ def _backfill_units_for_legacy_parts():
     db.session.commit()
     logging.info("Backfill: created %s units; updated %s parts", created_units, res.rowcount)
 
+# === ГАРАНТИЯ КОЛОНОК ПРИ ЛЮБОМ СТАРТЕ (включая flask CLI) ===
+def _boot_ensure_core_columns():
+    try:
+        with app.app_context():
+            # строки заказов
+            _ensure_column("work_order_parts", "ordered_flag", "INTEGER DEFAULT 0")
+            _ensure_column("work_order_parts", "ordered_date", "DATE")
+            # сами заказы
+            _ensure_column("work_orders", "ordered_date", "DATE")
+    except Exception:
+        logging.exception("Boot ensure columns failed")
+
+_boot_ensure_core_columns()
+# === конец boot ensure ===
+
 # --- 5) Локальный запуск (dev, adhoc HTTPS) ---
 if __name__ == "__main__":
     with app.app_context():
@@ -189,13 +244,10 @@ if __name__ == "__main__":
     debug = os.getenv("DEBUG", "true").lower() == "true"
     use_ssl = os.getenv("USE_SSL", "1").lower() in ("1", "true", "yes")
 
-
     logging.info(f"Starting dev server on https://0.0.0.0:{port} (adhoc TLS), debug={debug}")
     app.run(host='0.0.0.0', port=port, debug=debug, ssl_context='adhoc')
     # else:
     #     logging.info(f"Starting dev server on http://0.0.0.0:{port}, debug={debug}")
     #     app.run(host='0.0.0.0', port=port, debug=debug)
-
-
 
 

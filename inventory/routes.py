@@ -80,6 +80,33 @@ def _is_return_row(r) -> bool:
     except Exception:
         return False
 
+def _ensure_column(table: str, column: str, ddl_type: str):
+    """Безопасно добавляет колонку, если её нет (SQLite).
+       Если таблицы нет — просто логируем и выходим (без ошибок)."""
+    try:
+        # есть ли таблица?
+        row = db.session.execute(
+            db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+            {"t": table}
+        ).fetchone()
+        if not row:
+            logging.info("Skip ensure column %s.%s: table does not exist", table, column)
+            return
+
+        # есть ли колонка?
+        rows = db.session.execute(db.text(f"PRAGMA table_info({table})")).fetchall()
+        names = {r[1] for r in rows}  # name на индексе 1
+        if column in names:
+            return
+
+        logging.info("Adding column %s to %s ...", column, table)
+        db.session.execute(db.text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+        db.session.commit()
+        logging.info("Added column %s to %s.", column, table)
+    except Exception as e:
+        logging.exception("Failed to ensure column %s.%s: %s", table, column, e)
+
+
 def _ensure_invoice_number_for_records(records, issued_to, issued_by, reference_job, issue_date, location):
     """
     Если у всех строк invoice_number == None — создаёт батч и закрепляет уникальный номер.
@@ -1238,20 +1265,78 @@ def search():
 def search_alias():
     # просто проксируем на новый обработчик, сохраняя query params
     return search()
+
+# --- toggle "Ordered" for a single WorkOrderPart ---
+@inventory_bp.post("/work_orders/<int:wo_id>/parts/<int:wop_id>/toggle_ordered", endpoint="wo_toggle_ordered")
+@login_required
+def wo_toggle_ordered(wo_id: int, wop_id: int):
+    from flask import request, flash, redirect, url_for
+    from datetime import date
+    from extensions import db
+    from models import WorkOrderPart, WorkOrder
+    from flask_login import current_user
+
+    wop = db.session.get(WorkOrderPart, wop_id)
+    if not wop or getattr(wop, "work_order_id", None) != wo_id:
+        flash("Part row not found for this Work Order.", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    wo = db.session.get(WorkOrder, wo_id)
+    me   = (getattr(current_user, "username", "") or "").strip().lower()
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    tech = (getattr(wo, "technician_name", "") or "").strip().lower()
+
+    if not (role in ("admin", "superadmin") or (me and me == tech)):
+        flash("You are not allowed to change ordered status for this WO.", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    new_state = (request.form.get("state") or "0").strip().lower() in ("1","true","on","yes")
+
+    try:
+        # sync флаги/статусы
+        if hasattr(wop, "ordered_flag"):
+            wop.ordered_flag = bool(new_state)
+        if hasattr(wop, "status"):
+            wop.status = "ordered" if new_state else "search_ordered"
+        if hasattr(wop, "line_status"):
+            wop.line_status = "ordered" if new_state else "search_ordered"
+
+        # дата:
+        if hasattr(wop, "ordered_date"):
+            if new_state:
+                # если даты нет — поставим сегодня; если есть — не трогаем
+                if not wop.ordered_date:
+                    wop.ordered_date = date.today()
+            else:
+                # снятие чекбокса — чистим дату
+                wop.ordered_date = None
+
+        db.session.commit()
+        flash(("Ordered set" if new_state else "Ordered cleared") + " for the part.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to update: {e}", "danger")
+
+    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
 @inventory_bp.get("/work_orders/<int:wo_id>", endpoint="wo_detail")
 @login_required
 def wo_detail(wo_id):
     """
     Work Order details page (flat + multi-appliance) + инвойсные партии,
     включая возвраты (RETURN). Подсветка зелёным = PN с NET > 0.
-    Добавлено:
+
+    Дополнительно:
       - issued_items (построчный журнал для этого WO)
       - агрегаты Issued/Returned/Net по сумме и количеству (SQLite-safe)
-      - в items теперь есть id и confirmed, а в batch — флаги any/all_confirmed
+      - в items: id/confirmed/confirmed_by/confirmed_at
+      - в batch: any/all_confirmed, unconfirmed_count, invoice_number
+      - can_confirm — право подтверждать (техник своего WO или admin/superadmin)
     """
     from flask import current_app, render_template, flash, redirect, url_for
     from sqlalchemy import func, or_, case
     from sqlalchemy.orm import selectinload, joinedload
+    from flask_login import current_user
     from extensions import db
     from models import WorkOrder, WorkUnit, WorkOrderPart
 
@@ -1272,6 +1357,15 @@ def wo_detail(wo_id):
     if not wo:
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
+
+    # ---- 1.1 Право на подтверждение (техник этого WO или admin/superadmin)
+    try:
+        me = (getattr(current_user, "username", "") or "").strip().lower()
+        tech_name = (wo.technician_name or "").strip().lower()
+        role = (getattr(current_user, "role", "") or "").strip().lower()
+        can_confirm = (role in ["admin", "superadmin"]) or (me and me == tech_name)
+    except Exception:
+        can_confirm = False
 
     # ---- 2) Поставщики (для справки)
     suppliers = []
@@ -1317,31 +1411,31 @@ def wo_detail(wo_id):
             issued_qty=issued_qty,
             returned_qty=returned_qty,
             net_qty=net_qty,
+            can_confirm=can_confirm,
         )
 
     try:
         canon = (wo.canonical_job or "").strip()
-        issued_to = (wo.technician_name or "").strip()
 
-        # База (и для списка, и для агрегатов, и для батчей)
+        # БАЗОВЫЙ запрос: НЕ фильтруем по issued_to, чтобы ничего не прятать.
         base_q = (
             db.session.query(IssuedPartRecord)
             .options(joinedload(IssuedPartRecord.part), joinedload(IssuedPartRecord.batch))
             .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
-            .filter(
-                func.trim(IssuedPartRecord.issued_to) == issued_to,
+        )
+        if canon:
+            base_q = base_q.filter(
                 or_(
                     func.trim(IssuedPartRecord.reference_job) == canon,
                     func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
                     func.trim(IssuedBatch.reference_job) == canon,
                 ),
             )
-        )
 
         # 3.1 Построчный журнал
-        issued_items = (
-            base_q.order_by(IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()).all()
-        )
+        issued_items = base_q.order_by(
+            IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()
+        ).all()
 
         # 3.2 Агрегаты (SQLite-friendly SUM(CASE ...))
         money_issued = func.coalesce(
@@ -1349,18 +1443,20 @@ def wo_detail(wo_id):
                 case(
                     (IssuedPartRecord.quantity > 0,
                      IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
-                    else_=0
+                    else_=0,
                 )
-            ), 0.0
+            ),
+            0.0,
         )
         money_returned = func.coalesce(
             func.sum(
                 case(
                     (IssuedPartRecord.quantity < 0,
                      -IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
-                    else_=0
+                    else_=0,
                 )
-            ), 0.0
+            ),
+            0.0,
         )
         qty_issued = func.coalesce(
             func.sum(case((IssuedPartRecord.quantity > 0, IssuedPartRecord.quantity), else_=0)), 0
@@ -1369,20 +1465,20 @@ def wo_detail(wo_id):
             func.sum(case((IssuedPartRecord.quantity < 0, -IssuedPartRecord.quantity), else_=0)), 0
         )
 
-        agg = (
+        agg_q = (
             db.session.query(money_issued, money_returned, qty_issued, qty_returned)
             .select_from(IssuedPartRecord)
             .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
-            .filter(
-                func.trim(IssuedPartRecord.issued_to) == issued_to,
+        )
+        if canon:
+            agg_q = agg_q.filter(
                 or_(
                     func.trim(IssuedPartRecord.reference_job) == canon,
                     func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
                     func.trim(IssuedBatch.reference_job) == canon,
                 ),
             )
-            .one()
-        )
+        agg = agg_q.one()
 
         issued_total   = float(agg[0] or 0.0)
         returned_total = float(agg[1] or 0.0)
@@ -1392,10 +1488,9 @@ def wo_detail(wo_id):
         net_qty        = issued_qty - returned_qty
 
         # 3.3 Группировка для нижней таблицы (batches)
-        rows = issued_items
         from collections import defaultdict
         grouped = defaultdict(list)
-        for r in rows:
+        for r in issued_items:
             if getattr(r, "batch_id", None):
                 key = ("batch", r.batch_id)
             elif getattr(r, "invoice_number", None):
@@ -1404,6 +1499,26 @@ def wo_detail(wo_id):
                 key = ("ungrouped", f"{r.issue_date:%Y%m%d%H%M%S}-{r.issued_to}-{r.reference_job or ''}")
             grouped[key].append(r)
 
+        # локализация времени
+        try:
+            from zoneinfo import ZoneInfo  # py3.9+
+            tzname = current_app.config.get("DISPLAY_TZ", "America/Los_Angeles")
+            _tz = ZoneInfo(tzname)
+            _utc = ZoneInfo("UTC")
+        except Exception:
+            ZoneInfo = None
+            _tz = _utc = None
+
+        def _fmt_local(dt):
+            if not dt:
+                return "—"
+            if _tz and _utc:
+                try:
+                    return dt.replace(tzinfo=_utc).astimezone(_tz).strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    pass
+            return dt.strftime("%Y-%m-%d %H:%M")
+
         def _extract(rec: "IssuedPartRecord"):
             rid = rec.id
             pn = (getattr(rec.part, "part_number", None) or "").strip().upper()
@@ -1411,25 +1526,31 @@ def wo_detail(wo_id):
             qty = int(rec.quantity or 0)
             price = float(rec.unit_cost_at_issue or 0.0)
             confirmed = bool(getattr(rec, "confirmed_by_tech", False))
-            return rid, pn, nm, qty, price, confirmed
+            who = getattr(rec, "confirmed_by", None) or None
+            when = getattr(rec, "confirmed_at", None)
+            when_s = when.strftime("%Y-%m-%d %H:%M") if when else None
+            return rid, pn, nm, qty, price, confirmed, who, when_s
 
         net_by_pn = defaultdict(int)
+        batches = []
 
         for _, recs in grouped.items():
             b = recs[0].batch if recs and getattr(recs[0], "batch", None) else None
             issued_at = (b.issue_date if b else recs[0].issue_date)
-            issued_at_str = issued_at.strftime("%Y-%m-%d %H:%M")
+            issued_at_str = _fmt_local(issued_at)
+
             tech = recs[0].issued_to
-            ref = (b.reference_job if b else (recs[0].reference_job or "")) or ""
+            ref  = (b.reference_job if b else (recs[0].reference_job or "")) or ""
             report_id = (b.invoice_number if b else recs[0].invoice_number)
-            location = getattr(b, "location", None)
+            location  = getattr(b, "location", None)
 
             ref_is_return = "RETURN" in ref.upper()
             items = []
             total_value_raw = 0.0
+            unconfirmed_count = 0
 
             for rec in recs:
-                rid, pn, name, qty, price, confirmed = _extract(rec)
+                rid, pn, name, qty, price, confirmed, who, when_s = _extract(rec)
                 if not pn or qty == 0:
                     continue
                 line_total = qty * price
@@ -1439,6 +1560,9 @@ def wo_detail(wo_id):
                 eff_sign = -1 if is_item_return else 1
                 net_by_pn[pn] += eff_sign * abs(qty)
 
+                if (not confirmed) and qty > 0:
+                    unconfirmed_count += 1
+
                 items.append({
                     "id": rid,
                     "pn": pn,
@@ -1447,11 +1571,12 @@ def wo_detail(wo_id):
                     "unit_price": price,
                     "negative": (line_total < 0) or is_item_return,
                     "confirmed": confirmed,
+                    "confirmed_by": who,
+                    "confirmed_at": when_s,
                 })
 
             is_group_return = (total_value_raw < 0) or ref_is_return
-
-            all_conf = all(it.get("confirmed") for it in items) if items else False
+            all_conf = (unconfirmed_count == 0) and bool(items)
             any_conf = any(it.get("confirmed") for it in items) if items else False
 
             batches.append({
@@ -1461,11 +1586,13 @@ def wo_detail(wo_id):
                 "reference_job": ref,
                 "location": location,
                 "report_id": report_id,
+                "invoice_number": report_id,
                 "is_return": is_group_return,
                 "total_value": total_value_raw,
                 "items": items,
                 "all_confirmed": all_conf,
                 "any_confirmed": any_conf,
+                "unconfirmed_count": unconfirmed_count,
             })
 
         invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
@@ -1493,6 +1620,7 @@ def wo_detail(wo_id):
         issued_qty=issued_qty,
         returned_qty=returned_qty,
         net_qty=net_qty,
+        can_confirm=can_confirm,
     )
 
 @inventory_bp.post("/work_orders/new", endpoint="wo_create")
@@ -1622,7 +1750,9 @@ def wo_save():
     from flask import request, session, redirect, url_for, flash, current_app
     from models import WorkOrder, WorkUnit, WorkOrderPart
     from extensions import db
+    from flask_login import current_user
     import re
+    from datetime import date
 
     # доступ
     if (getattr(current_user, "role", "") or "").lower() not in ("admin", "superadmin"):
@@ -1641,6 +1771,8 @@ def wo_save():
         if x is None or x == "": return default
         try: return float(x)
         except: return default
+    def _b(x):
+        return str(x).strip().lower() in ("1", "true", "on", "yes", "y")
 
     wo_id = (f.get("wo_id") or "").strip()
     is_new = not wo_id
@@ -1662,7 +1794,7 @@ def wo_save():
     st = (f.get("status") or "search_ordered").strip()
     wo.status = st if st in ("search_ordered", "ordered", "done") else "search_ordered"
 
-    # витринные хедеры (если присланы)
+    # витринные хедеры
     brand_hdr  = (f.get("brand")  or "").strip()
     model_hdr  = _clip(f.get("model"), 25)
     serial_hdr = _clip(f.get("serial"), 25)
@@ -1670,7 +1802,7 @@ def wo_save():
     if model_hdr:  wo.model  = model_hdr
     if serial_hdr: wo.serial = serial_hdr
 
-    # ---- REGEX-парсер units/rows (включая ordered_flag) ----
+    # ---- REGEX-парсер ----
     re_unit = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
     re_row  = re.compile(
         r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|"
@@ -1691,7 +1823,13 @@ def wo_save():
             ui, ri, name = int(m.group(1)), int(m.group(2)), m.group(3)
             units_map.setdefault(ui, {"rows": {}})
             units_map[ui]["rows"].setdefault(ri, {})
-            units_map[ui]["rows"][ri][name] = f.get(key)
+            # ВАЖНО: если поле может прийти как hidden+checkbox — берём последнее значение
+            if name in ("ordered_flag", "backorder_flag"):
+                vals = request.form.getlist(key)
+                val = vals[-1] if vals else f.get(key)
+            else:
+                val = f.get(key)
+            units_map[ui]["rows"][ri][name] = val
 
     # собрать payload
     units_payload = []
@@ -1708,19 +1846,14 @@ def wo_save():
             wh_raw   = (r.get("warehouse")  or r.get("unit_label") or "").strip()
             sup_raw  = (r.get("supplier")   or r.get("supplier_name") or "").strip()
             ucost    = _f(r.get("unit_cost"), None)
-            bo_flag  = bool(r.get("backorder_flag"))
+            bo_flag  = _b(r.get("backorder_flag"))
             lstatus  = (r.get("status") or "search_ordered").strip()
-
-            # hidden ordered_flag (0/1) — JS синхронизирует при submit
-            try:
-                ord_flag = bool(int(r.get("ordered_flag") or 0))
-            except Exception:
-                ord_flag = False
+            ord_flag = _b(r.get("ordered_flag"))
 
             if pn and qty > 0:
                 new_rows_count += 1
                 rows.append({
-                    "part_number": _clip(pn, 80),
+                    "part_number": _clip(pn, 80),  # уже UPPER
                     "part_name":   _clip(r.get("part_name"), 120),
                     "quantity":    qty,
                     "alt_numbers": _clip(alt_raw, 200),
@@ -1729,7 +1862,7 @@ def wo_save():
                     "unit_cost":   ucost,
                     "backorder_flag": bo_flag,
                     "line_status": lstatus if lstatus in ("search_ordered","ordered","done") else "search_ordered",
-                    "ordered_flag": ord_flag,
+                    "ordered_flag": ord_flag,  # уже True/False
                 })
 
         brand  = (u.get("brand")  or "").strip()
@@ -1742,26 +1875,48 @@ def wo_save():
                                len(units_payload),
                                sum(len(x.get('rows') or []) for x in units_payload))
 
-    # 1) Ничего не добавили/не изменили — сохраняем только шапку и остаёмся в detail
+    # 1) Только шапка — выходим
     if new_rows_count == 0:
         db.session.commit()
         flash("Work Order saved.", "success")
         return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
-    # 2) Если rows распарсились пустыми — не трогаем старые parts
+    # 2) Пусто — откат
     if not units_payload:
         flash("Nothing parsable in rows. Nothing was changed.", "warning")
         db.session.rollback()
         return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
-    # Удаляем прежние units/parts только теперь, когда уверены, что есть что записать
+    # === индекс старых строк до удаления, чтобы сохранить ordered_date ===
+    def _norm_supplier(s):
+        s = (s or "").strip()
+        return " ".join(s.split()).lower()
+
+    def _unit_key(b, m, s):
+        return (_clip(b, 80).lower(), _clip(m, 25).lower(), _clip(s, 25).lower())
+
+    old_index = {}
+    if not is_new:
+        for old_u in (wo.units or []):
+            uk = _unit_key(old_u.brand or "", old_u.model or "", old_u.serial or "")
+            for old_p in (old_u.parts or []):
+                pn = ((old_p.part_number or "").strip().upper())
+                supn = _norm_supplier(old_p.supplier)
+                was_ordered = (
+                    bool(getattr(old_p, "ordered_flag", False)) or
+                    ((getattr(old_p, "status", "") or "").lower() == "ordered") or
+                    ((getattr(old_p, "line_status", "") or "").lower() == "ordered")
+                )
+                old_index[(uk, pn, supn)] = (was_ordered, getattr(old_p, "ordered_date", None))
+
+    # Удаляем прежние units/parts
     for u in list(getattr(wo, "units", []) or []):
         for p in list(getattr(u, "parts", []) or []):
             db.session.delete(p)
         db.session.delete(u)
     db.session.flush()
 
-    # витринные поля: если пустые — возьмём из первого юнита
+    # витринные поля из первого юнита при необходимости
     def _first_nonempty(lst, key):
         for it in lst or []:
             v = (it.get(key) or "").strip()
@@ -1776,6 +1931,7 @@ def wo_save():
 
     suppliers_seen = []
 
+    # Создаём заново, НО восстанавливаем ordered_date по ключу
     for up in units_payload:
         unit = WorkUnit(
             work_order=wo,
@@ -1786,6 +1942,8 @@ def wo_save():
         db.session.add(unit)
         db.session.flush()
 
+        uk = _unit_key(unit.brand or "", unit.model or "", unit.serial or "")
+
         for r in (up.get("rows") or []):
             sup = r.get("supplier") or ""
             if sup:
@@ -1793,19 +1951,33 @@ def wo_save():
                 if s_norm and s_norm.lower() not in [x.lower() for x in suppliers_seen]:
                     suppliers_seen.append(s_norm)
 
-            # финальный ordered — учитываем статус WO
-            ord_final = bool(r.get("ordered_flag")) if (wo.status == "ordered") else False
+            pn_upper = r["part_number"]      # уже UPPER
+            sup_norm = _norm_supplier(sup)
+            ord_in   = bool(r.get("ordered_flag"))  # уже True/False из payload
+
+            prev_state = old_index.get((uk, pn_upper, sup_norm))
+            prev_was_ordered, prev_date = (prev_state if prev_state else (False, None))
+
+            if ord_in:
+                ord_date = (prev_date or date.today()) if prev_was_ordered else date.today()
+            else:
+                ord_date = None
+
+            current_app.logger.debug(
+                "WO_SAVE row pn=%s sup=%s ord_in=%s prev=(%s,%s) -> date=%s",
+                pn_upper, sup_norm, ord_in, prev_was_ordered, prev_date, ord_date
+            )
 
             wop = WorkOrderPart(
                 work_order=wo,
                 unit=unit,
-                part_number=r["part_number"],
+                part_number=pn_upper,
                 part_name=(r.get("part_name") or None),
                 quantity=int(r.get("quantity") or 0),
                 alt_part_numbers=(r.get("alt_numbers") or None),
                 supplier=(sup or None),
                 backorder_flag=bool(r.get("backorder_flag")),
-                status=("ordered" if ord_final else "search_ordered"),
+                status=("ordered" if ord_in else "search_ordered"),
             )
 
             if hasattr(wop, "warehouse"):
@@ -1819,7 +1991,11 @@ def wo_save():
                     except: wop.unit_cost = None
 
             if hasattr(wop, "ordered_flag"):
-                wop.ordered_flag = ord_final
+                wop.ordered_flag = ord_in
+            if hasattr(wop, "ordered_date"):
+                wop.ordered_date = ord_date
+            if hasattr(wop, "line_status"):
+                wop.line_status = "ordered" if ord_in else "search_ordered"
 
             db.session.add(wop)
 
@@ -1838,7 +2014,6 @@ def wo_save():
         session.modified = True
 
     flash("Work Order saved.", "success")
-    # после сохранения — в detail (Work Order #N)
     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
 @inventory_bp.get("/api/stock_hint", endpoint="api_stock_hint")
@@ -2402,7 +2577,7 @@ def wo_edit(wo_id: int):
 
     wo = WorkOrder.query.get_or_404(wo_id)
 
-    # Преобразуем ORM → payload для multi-шаблона
+    # ORM → payload
     units = []
     for u in (getattr(wo, "units", []) or []):
         rows = []
@@ -2413,16 +2588,14 @@ def wo_edit(wo_id: int):
                 "part_name":      getattr(p, "part_name", "") or "",
                 "quantity":       int(getattr(p, "quantity", 0) or 0),
                 "alt_numbers":    getattr(p, "alt_numbers", "") or "",
-                # соответствие твоему savex:
                 "warehouse":      getattr(p, "warehouse", "") or "",
                 "supplier":       getattr(p, "supplier", "") or "",
                 "backorder_flag": bool(getattr(p, "backorder_flag", False)),
                 "line_status":    getattr(p, "line_status", "") or "search_ordered",
-                "unit_cost":      (
+                "unit_cost": (
                     float(getattr(p, "unit_cost")) if getattr(p, "unit_cost") is not None else None
                 ),
             })
-        # если в юните нет строк — добавим одну пустую
         if not rows:
             rows = [{
                 "id": None,
@@ -2432,7 +2605,6 @@ def wo_edit(wo_id: int):
                 "backorder_flag": False, "line_status": "search_ordered",
                 "unit_cost": 0.0,
             }]
-
         units.append({
             "id":     getattr(u, "id", None),
             "brand":  getattr(u, "brand", "") or "",
@@ -2441,7 +2613,6 @@ def wo_edit(wo_id: int):
             "rows":   rows,
         })
 
-    # если у заказа ещё нет юнитов — создаём один из шапки/пустой
     if not units:
         units = [{
             "brand":  wo.brand or "",
@@ -2459,7 +2630,6 @@ def wo_edit(wo_id: int):
 
     recent_suppliers = session.get("recent_suppliers", []) or []
 
-    # Важно: всегда рендерим multi-форму (есть кнопка "+ Add appliance")
     return render_template(
         "wo_form_units.html",
         wo=wo,
@@ -2467,6 +2637,7 @@ def wo_edit(wo_id: int):
         recent_suppliers=recent_suppliers,
         readonly=readonly,
     )
+
 
 @inventory_bp.post("/work_orders/<int:wo_id>/delete", endpoint="wo_delete")
 @login_required
@@ -2564,253 +2735,136 @@ def api_part_lookup():
     return jsonify({"found": True, "name": getattr(part, "name", "") or "", "wh": wh, "stock_hint": stock_hint})
 
 
-@inventory_bp.post("/work_orders/savex")
-@login_required
-def wo_savex():
-    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
-        flash("Access denied", "danger")
-        return redirect(url_for("inventory.wo_list"))
-
-    from models import WorkOrder, WorkUnit, WorkOrderPart, Part
-    from extensions import db
-    from sqlalchemy import func
-
-    f = request.form
-
-    # helpers
-    def _tech_norm(x: str) -> str:
-        return (x or "").strip().upper()
-
-    def _f(x, default=0.0):
-        try:
-            return float(x)
-        except Exception:
-            return float(default)
-
-    def _i(x, default=0):
-        try:
-            return int(x)
-        except Exception:
-            return int(default)
-
-    def _clip(s: str, n: int) -> str:
-        return (s or "").strip()[:n]
-
-    # header
-    wo_id        = (f.get("wo_id") or "").strip()
-    tech         = _tech_norm(f.get("technician_name"))
-    job_numbers  = (f.get("job_numbers") or "").strip()
-    brand_hdr    = (f.get("brand") or "").strip()
-    model_hdr    = _clip(f.get("model"), 25)
-    serial_hdr   = _clip(f.get("serial"), 25)
-    job_type     = (f.get("job_type") or "BASE").strip().upper()
-    status_hdr   = (f.get("status") or "search_ordered").strip()
-    delivery_fee   = _f(f.get("delivery_fee"), 0)
-    markup_percent = _f(f.get("markup_percent"), 0)
-
-    # ---------- 1) ПАРСИМ PAYLOAD (без изменений БД) ----------
-    units_payload = []
-    try:
-        # если есть ваш универсальный парсер — используем его
-        from inventory.utils import _parse_units_form
-        units_payload = _parse_units_form(f) or []
-    except Exception:
-        units_payload = []
-
-    # Fallback — однотабличная форма
-    if not units_payload:
-        rows = []
-        idx = 0
-        while True:
-            key = f"rows[{idx}][part_number]"
-            if key not in f:
-                break
-
-            pn = (f.get(key) or "").strip().upper()
-            qty = _i(f.get(f"rows[{idx}][quantity]") or 0, 0)
-
-            alt_raw = (
-                (f.get(f"rows[{idx}][alt_pn]") or "") or
-                (f.get(f"rows[{idx}][alt_numbers]") or "") or
-                (f.get(f"rows[{idx}][alt_part_numbers]") or "")
-            ).strip()
-
-            unit_cost = f.get(f"rows[{idx}][unit_cost]")
-            try:
-                unit_cost = float(unit_cost) if (unit_cost not in (None, "")) else None
-            except Exception:
-                unit_cost = None
-
-            total_hint = f.get(f"rows[{idx}][line_total]")
-            try:
-                total_hint = float(total_hint) if (total_hint not in (None, "")) else None
-            except Exception:
-                total_hint = None
-
-            # ВАЖНО: читаем ordered_flag из скрытого поля (0/1)
-            ordered_flag_raw = f.get(f"rows[{idx}][ordered_flag]")
-            try:
-                ordered_flag = bool(int(ordered_flag_raw))
-            except Exception:
-                ordered_flag = False
-
-            row = {
-                "part_number": pn,
-                "part_name": (f.get(f"rows[{idx}][part_name]") or "").strip(),
-                "quantity": qty,
-                "alt_numbers": alt_raw,
-                "warehouse": (f.get(f"rows[{idx}][warehouse]") or "").strip(),
-                "supplier":  (f.get(f"rows[{idx}][supplier]")  or "").strip(),
-                "unit_cost": unit_cost,
-                "total_hint": total_hint,
-                "backorder_flag": bool(f.get(f"rows[{idx}][backorder_flag]")),
-                "stock_hint": (f.get(f"rows[{idx}][stock_hint]") or "").strip().upper(),
-                "issue_flag": bool(f.get(f"rows[{idx}][issue_flag]")),
-                "ordered_flag": ordered_flag,  # ← добавили
-            }
-            if pn and qty > 0:
-                rows.append(row)
-            idx += 1
-
-        if rows or any([brand_hdr, model_hdr, serial_hdr]):
-            units_payload = [{
-                "brand": brand_hdr,
-                "model": model_hdr,
-                "serial": serial_hdr,
-                "rows": rows
-            }]
-
-    # Если в шапке указаны brand/model/serial — дублируем в первый юнит
-    if any([brand_hdr, model_hdr, serial_hdr]) and units_payload:
-        first = units_payload[0]
-        if not ((first.get("brand") or "").strip() == brand_hdr and
-                (first.get("model") or "").strip() == model_hdr and
-                (first.get("serial") or "").strip() == serial_hdr):
-            units_payload = [{"brand": brand_hdr, "model": model_hdr, "serial": serial_hdr, "rows": []}] + units_payload
-
-    def _first_nonempty(lst, key):
-        for it in lst or []:
-            v = (it.get(key) or "").strip()
-            if v:
-                return v
-        return ""
-
-    # ---------- 2) СЕРВЕРНАЯ ВАЛИДАЦИЯ SUP (обязательное) ----------
-    def _collect_missing_sup(payload):
-        missing = []
-        for u in payload or []:
-            for r in (u.get("rows") or []):
-                pn  = (r.get("part_number") or "").strip().upper()
-                qty = _i(r.get("quantity") or 0, 0)
-                sup = (r.get("supplier") or "").strip()
-                if pn and qty > 0 and not sup:
-                    missing.append(pn)
-        return sorted(set(missing))
-
-    missing_pns = _collect_missing_sup(units_payload)
-    if missing_pns:
-        flash(f"Supplier (Sup) is required for: {', '.join(missing_pns)}", "danger")
-        if wo_id:
-            return redirect(url_for("inventory.wo_edit", wo_id=int(wo_id)))
-        else:
-            return redirect(url_for("inventory.wo_new"))
-
-    # ---------- 3) СОХРАНЕНИЕ В БД ----------
-    if wo_id:
-        wo = WorkOrder.query.get_or_404(int(wo_id))
-    else:
-        wo = WorkOrder()
-        db.session.add(wo)
-
-    wo.technician_name = tech
-    wo.job_numbers     = job_numbers
-    wo.job_type        = job_type
-    wo.status          = status_hdr if status_hdr in ("search_ordered", "ordered", "done") else "search_ordered"
-    wo.delivery_fee    = delivery_fee
-    wo.markup_percent  = markup_percent
-
-    wo.brand  = _clip(_first_nonempty(units_payload, "brand"), 40)
-    wo.model  = _clip(_first_nonempty(units_payload, "model"), 25)
-    wo.serial = _clip(_first_nonempty(units_payload, "serial"), 25)
-
-    # чистая пересборка юнитов
-    if wo_id:
-        for u in list(getattr(wo, "units", []) or []):
-            db.session.delete(u)
-        db.session.flush()
-
-    # сохраняем
-    for u in units_payload or []:
-        has_meta = any([(u.get("brand") or "").strip(),
-                        (u.get("model") or "").strip(),
-                        (u.get("serial") or "").strip()])
-        rows = u.get("rows") or []
-        if not has_meta and not rows:
-            continue
-
-        unit = WorkUnit(
-            work_order=wo,
-            brand=(u.get("brand") or "").strip(),
-            model=_clip(u.get("model"), 25),
-            serial=_clip(u.get("serial"), 25),
-        )
-        db.session.add(unit)
-        db.session.flush()
-
-        for r in rows:
-            pn = _clip((r.get("part_number") or "").upper(), 80)
-            if not pn:
-                continue
-            qty = _i(r.get("quantity") or 0, 0)
-
-            uc = r.get("unit_cost")
-            try:
-                unit_cost = float(uc) if (uc not in (None, "")) else None
-            except Exception:
-                unit_cost = None
-
-            alt_raw = (r.get("alt_numbers") or r.get("alt_part_numbers") or "")
-            tokens = [_clip(t, 20) for t in (alt_raw.split(",") if isinstance(alt_raw, str) else [])]
-            alt_joined = ",".join([t for t in tokens if t])
-
-            part_rec   = Part.query.filter(func.upper(Part.part_number) == pn).first()
-            part_name  = _clip(r.get("part_name") or (getattr(part_rec, "name", None) or ""), 120)
-            wh_from_db = getattr(part_rec, "location", None) or getattr(part_rec, "wh", None) or ""
-            warehouse  = _clip(r.get("warehouse") or wh_from_db, 120)
-
-            supplier_val = _clip((r.get("supplier") or "").strip(), 80)
-
-            # ВАЖНО: ordered_flag. Сохраняем только когда общий статус 'ordered'
-            ordered_flag_in = bool(int(r.get("ordered_flag") or 0))
-            ordered_flag_final = ordered_flag_in if (wo.status == "ordered") else False
-
-            wop = WorkOrderPart(
-                work_order=wo,
-                unit=unit,
-                part_number=pn,
-                part_name=part_name,
-                quantity=qty,
-                alt_numbers=alt_joined,
-                warehouse=warehouse,
-                supplier=supplier_val,
-                backorder_flag=bool(r.get("backorder_flag")),
-            )
-
-            if hasattr(wop, "unit_cost"):
-                wop.unit_cost = unit_cost
-
-            # Сохраняем ordered флаг/статус
-            if hasattr(wop, "ordered_flag"):
-                wop.ordered_flag = ordered_flag_final
-            # если отдельного поля нет — маппим в line_status
-            if hasattr(wop, "line_status"):
-                wop.line_status = "ordered" if ordered_flag_final else "search_ordered"
-
-            db.session.add(wop)
-
-    db.session.commit()
-    flash("Work Order saved.", "success")
-    return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+# @inventory_bp.post("/work_orders/savex")
+# @login_required
+# def wo_savex():
+#     if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+#         flash("Access denied", "danger")
+#         return redirect(url_for("inventory.wo_list"))
+#
+#     from models import WorkOrder, WorkUnit, WorkOrderPart, Part
+#     from extensions import db
+#     from sqlalchemy import func
+#     from datetime import date
+#
+#     f = request.form
+#
+#     def _f(x, default=0.0):
+#         try: return float(x)
+#         except: return float(default)
+#
+#     def _i(x, default=0):
+#         try: return int(x)
+#         except: return int(default)
+#
+#     def _clip(s: str, n: int) -> str:
+#         return (s or "").strip()[:n]
+#
+#     wo_id = (f.get("wo_id") or "").strip()
+#     tech  = (f.get("technician_name") or "").strip().upper()
+#     job_numbers = (f.get("job_numbers") or "").strip()
+#     job_type = (f.get("job_type") or "BASE").strip().upper()
+#     status_hdr = (f.get("status") or "search_ordered").strip()
+#     delivery_fee   = _f(f.get("delivery_fee"), 0)
+#     markup_percent = _f(f.get("markup_percent"), 0)
+#
+#     # Парсим форму
+#     try:
+#         from inventory.utils import _parse_units_form
+#         units_payload = _parse_units_form(f) or []
+#     except Exception:
+#         units_payload = []
+#
+#     if not units_payload:
+#         flash("Invalid or empty form submission.", "danger")
+#         return redirect(url_for("inventory.wo_list"))
+#
+#     # Проверка supplier
+#     missing_pns = []
+#     for u in units_payload:
+#         for r in (u.get("rows") or []):
+#             if (r.get("part_number") or "").strip() and not (r.get("supplier") or "").strip():
+#                 missing_pns.append(r["part_number"])
+#     if missing_pns:
+#         flash(f"Supplier is required for: {', '.join(set(missing_pns))}", "danger")
+#         if wo_id:
+#             return redirect(url_for("inventory.wo_edit", wo_id=int(wo_id)))
+#         else:
+#             return redirect(url_for("inventory.wo_new"))
+#
+#     # Создание/обновление WO
+#     if wo_id:
+#         wo = WorkOrder.query.get_or_404(int(wo_id))
+#     else:
+#         wo = WorkOrder()
+#         db.session.add(wo)
+#
+#     wo.technician_name = tech
+#     wo.job_numbers = job_numbers
+#     wo.job_type = job_type
+#     wo.status = status_hdr if status_hdr in ("search_ordered", "ordered", "done") else "search_ordered"
+#     wo.delivery_fee = delivery_fee
+#     wo.markup_percent = markup_percent
+#
+#     # Удаляем старые юниты
+#     if wo_id:
+#         for u in list(getattr(wo, "units", []) or []):
+#             db.session.delete(u)
+#         db.session.flush()
+#
+#     # Пересоздание юнитов
+#     for u in units_payload:
+#         unit = WorkUnit(
+#             work_order=wo,
+#             brand=(u.get("brand") or "").strip(),
+#             model=_clip(u.get("model"), 25),
+#             serial=_clip(u.get("serial"), 25),
+#         )
+#         db.session.add(unit)
+#         db.session.flush()
+#
+#         for r in (u.get("rows") or []):
+#             pn = _clip((r.get("part_number") or "").upper(), 80)
+#             if not pn:
+#                 continue
+#             qty = _i(r.get("quantity") or 0)
+#             supplier_val = _clip((r.get("supplier") or "").strip(), 80)
+#
+#             part_rec = Part.query.filter(func.upper(Part.part_number) == pn).first()
+#             part_name = _clip(r.get("part_name") or getattr(part_rec, "name", "") or "", 120)
+#             warehouse = _clip(r.get("warehouse") or getattr(part_rec, "location", "") or "", 120)
+#             unit_cost = _f(r.get("unit_cost") or 0)
+#             alt_raw = (r.get("alt_numbers") or "").strip()
+#
+#             wop = WorkOrderPart(
+#                 work_order=wo,
+#                 unit=unit,
+#                 part_number=pn,
+#                 part_name=part_name,
+#                 quantity=qty,
+#                 supplier=supplier_val,
+#                 warehouse=warehouse,
+#                 backorder_flag=bool(r.get("backorder_flag")),
+#             )
+#
+#             # 🔹 ORD: флаг и дата
+#             ord_on = bool(r.get("ordered_flag")) or ((r.get("line_status") or "").lower() == "ordered")
+#             if hasattr(wop, "line_status"):
+#                 wop.line_status = "ordered" if ord_on else "search_ordered"
+#             if hasattr(wop, "status"):
+#                 wop.status = "ordered" if ord_on else "search_ordered"
+#             if hasattr(wop, "ordered_date"):
+#                 # при установке ORD — ставим сегодняшнюю дату
+#                 wop.ordered_date = date.today() if ord_on else None
+#
+#             if hasattr(wop, "unit_cost"):
+#                 wop.unit_cost = unit_cost
+#
+#             db.session.add(wop)
+#
+#     db.session.commit()
+#     flash("Work Order saved.", "success")
+#     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
 @inventory_bp.post("/work_orders/<int:wo_id>/units/<int:unit_id>/issue_instock")
 @login_required
