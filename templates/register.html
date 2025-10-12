@@ -1,22 +1,29 @@
 {% extends "base.html" %}
-
 {% block content %}
 <h2>Create New User</h2>
 
-<form method="POST" action="{{ url_for('auth.register') }}">
-    <label for="username">Username:</label>
-    <input type="text" name="username" required><br>
+<form method="POST" action="{{ url_for('auth.register') }}" class="card p-3" style="max-width:520px">
+  <div class="mb-2">
+    <label class="form-label">Username:</label>
+    <input type="text" name="username" class="form-control" required>
+  </div>
 
-    <label for="password">Password:</label>
-    <input type="password" name="password" required><br>
+  <div class="mb-2">
+    <label class="form-label">Password:</label>
+    <input type="password" name="password" class="form-control" required>
+  </div>
 
-    <label for="role">Role:</label>
-    <select name="role" required>
-        <option value="user">User</option>
-        <option value="viewer">Viewer</option>
-        <option value="admin">Admin</option>
-    </select><br>
+  <div class="mb-3">
+    <label class="form-label">Role:</label>
+    <select name="role" class="form-select" required>
+      {% for value, caption in roles %}
+        <option value="{{ value }}" {% if value=='technician' %}selected{% endif %}>{{ caption }}</option>
+      {% endfor %}
+    </select>
+    <div class="form-text">If unsure, pick <code>Technician</code>.</div>
+  </div>
 
-    <button type="submit">Create User</button>
+  <button type="submit" class="btn btn-primary">Create User</button>
 </form>
 {% endblock %}
+

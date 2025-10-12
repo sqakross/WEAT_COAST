@@ -4,10 +4,11 @@
   <h3 class="mb-0">Work Order #{{ wo.id }}</h3>
   <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">← Back to list</a>
-    {% if (current_user.role or '')|lower in ['admin','superadmin'] %}
+    {% set role_low = (current_user.role or '')|lower %}
+    {% if role_low in ['admin','superadmin'] %}
       <a class="btn btn-outline-primary" href="{{ url_for('inventory.wo_edit', wo_id=wo.id) }}">✏️ Edit</a>
     {% endif %}
-    {% if (current_user.role or '')|lower == 'superadmin' %}
+    {% if role_low == 'superadmin' %}
       <form method="post" action="{{ url_for('inventory.wo_delete', wo_id=wo.id) }}" class="d-inline" onsubmit="return confirm('Delete Work Order #{{ wo.id }}? This cannot be undone.');">
         <button class="btn btn-outline-danger" type="submit">🗑️ Delete</button>
       </form>
@@ -17,14 +18,14 @@
 
 {% set u0 = (wo.units|first) %}
 <div class="row g-3 mb-3">
-  <div class="col-md-3"><strong>Technician:</strong> {{ wo.technician_name or '—' }}</div>
+  <div class="col-md-3"><strong>Technician:</strong> {{ wo.technician_username or wo.technician_name or '—' }}</div>
   <div class="col-md-4">
     <strong>Job(s):</strong>
     <span id="wo-jobs">{{ wo.job_numbers or '' }}</span>
     <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="copyJobs">Copy</button>
     <div class="text-muted small">primary: <code>{{ wo.canonical_job or '—' }}</code></div>
   </div>
-  <div class="col-md-3"><strong>Brand/Model:</strong> {{ (wo.brand or (u0 and u0.brand) or '') ~ ' ' ~ (wo.model or (u0 and u0.model) or '') }}</div>
+  <div class="col-md-3"><strong>Brand/Model:</strong> {{ ((u0 and u0.brand) or wo.brand or '') ~ ' ' ~ ((u0 and u0.model) or wo.model or '') }} </div>
   <div class="col-md-2"><strong>Serial:</strong> {{ wo.serial or (u0 and u0.serial) or '—' }}</div>
   <div class="col-md-3">
     <strong>Type:</strong>
@@ -41,7 +42,7 @@
   <div class="col-md-3"><strong>Created:</strong> {{ wo.created_at|local_date if wo.created_at else '—' }}</div>
 </div>
 
-{# собрать строки из multi/legacy #}
+{# ===== Parts table (как было) ===== #}
 {% set ns = namespace(all_parts=[]) %}
 {% if wo.units and (wo.units|length) > 0 %}
   {% for u in wo.units %}
@@ -50,8 +51,6 @@
 {% elif wo.parts %}
   {% set ns.all_parts = ns.all_parts + wo.parts %}
 {% endif %}
-
-{# PN для зелёной подсветки приходит из view #}
 {% set invoiced_set = (invoiced_pns or []) %}
 
 {% if ns.all_parts and (ns.all_parts|length) > 0 %}
@@ -81,15 +80,12 @@
       {% for p in ns.all_parts %}
         {% set pn_str = (p.part_number or '')|string|trim|upper %}
         {% set is_invoiced = pn_str in invoiced_set %}
-
-        {# НОРМАЛИЗУЕМ ordered_flag и учитываем статусы #}
         {% set oflag = p.ordered_flag if p.ordered_flag is defined else None %}
         {% set oflag_norm = (oflag not in (None, False, 0, '0', '', 'false', 'False')) %}
         {% set is_ordered =
              oflag_norm
              or ((p.status or '')|lower == 'ordered')
              or ((p.line_status or '')|lower == 'ordered') %}
-
         {% set qty = p.quantity or 0 %}
         {% set unit = (p.unit_cost if p.unit_cost is defined and p.unit_cost is not none else 0.0) %}
         {% set total = (qty * unit) %}
@@ -106,27 +102,14 @@
           <td class="num">{{ '%.2f'|format(unit) }}</td>
           <td class="num">{{ '%.2f'|format(total) }}</td>
           <td>{{ p.supplier or '' }}</td>
-
-          {# Ordered: только чтение #}
           <td class="text-center">
             <input type="checkbox" class="form-check-input" disabled {% if is_ordered %}checked{% endif %}>
           </td>
-
-          {# Дата заказа #}
           <td class="text-center">
-            {% if p.ordered_date %}
-              {{ p.ordered_date|local_date }}
-            {% else %}
-              <span class="text-muted">—</span>
-            {% endif %}
+            {% if p.ordered_date %}{{ p.ordered_date|local_date }}{% else %}<span class="text-muted">—</span>{% endif %}
           </td>
-
           <td>
-            {% if p.backorder_flag %}
-              <span class="badge bg-warning text-dark">B/O</span>
-            {% else %}
-              <span class="text-muted">—</span>
-            {% endif %}
+            {% if p.backorder_flag %}<span class="badge bg-warning text-dark">B/O</span>{% else %}<span class="text-muted">—</span>{% endif %}
           </td>
         </tr>
       {% endfor %}
@@ -183,23 +166,11 @@
   </table>
 </div>
 
-{# ===== СВОДКА ПОД ТАБЛИЦЕЙ ===== #}
+{# ===== Summary ===== #}
 <div class="mt-1">
-  <span class="me-3">
-    <strong>Issued total:</strong>
-    ${{ '%.2f'|format(issued_total or 0) }}
-    <span class="text-muted">(qty {{ issued_qty or 0 }})</span>
-  </span>
-  <span class="me-3">
-    <strong>Returned total:</strong>
-    ${{ '%.2f'|format(returned_total or 0) }}
-    <span class="text-muted">(qty {{ returned_qty or 0 }})</span>
-  </span>
-  <span>
-    <strong>Grand total (Issued − Returns):</strong>
-    ${{ '%.2f'|format(net_total or 0) }}
-    <span class="text-muted">(qty {{ net_qty or 0 }})</span>
-  </span>
+  <span class="me-3"><strong>Issued total:</strong> ${{ '%.2f'|format(issued_total or 0) }} <span class="text-muted">(qty {{ issued_qty or 0 }})</span></span>
+  <span class="me-3"><strong>Returned total:</strong> ${{ '%.2f'|format(returned_total or 0) }} <span class="text-muted">(qty {{ returned_qty or 0 }})</span></span>
+  <span><strong>Grand total (Issued − Returns):</strong> ${{ '%.2f'|format(net_total or 0) }} <span class="text-muted">(qty {{ net_qty or 0 }})</span></span>
 </div>
 
 {# ===== Issued Batches (Technician View) ===== #}
@@ -209,6 +180,7 @@
   .inv-item-neg    { color: #c92a2a; }
   .inv-item        { line-height: 1.25; }
 </style>
+
 <div class="table-responsive">
   <table class="table table-sm table-hover align-middle">
     <thead class="table-light">
@@ -220,7 +192,7 @@
         <th class="text-end">Invoice Total</th>
         <th>Report #</th>
         <th>Print</th>
-        {% if (current_user.username and (current_user.username|trim) == (wo.technician_name or '')|trim) or ((current_user.role or '')|lower in ['admin','superadmin']) %}
+        {% if can_confirm_any %}
           <th class="text-center">Confirm</th>
         {% endif %}
       </tr>
@@ -228,11 +200,6 @@
     <tbody>
       {% for b in batches %}
       {% set is_return = b.get('is_return') %}
-      {% set is_my_wo = (
-        (current_user.username and (current_user.username|trim) == (wo.technician_name or '')|trim)
-        or ((current_user.role or '')|lower in ['admin', 'superadmin'])
-      ) %}
-
       <tr class="{% if is_return %}inv-return-row{% endif %}">
         <td>
           {{ b.get('issued_at') }}
@@ -247,7 +214,7 @@
         <td>
           {% set items = b.get('items') %}
           {% if items and (items|length) > 0 %}
-            {% if is_my_wo %}
+            {% if can_confirm_any %}
               <form method="post" action="{{ url_for('inventory.wo_confirm_lines', wo_id=wo.id) }}">
                 <ul class="mb-2 ps-3">
                   {% for it in items %}
@@ -304,17 +271,15 @@
             <span class="text-muted">—</span>
           {% endif %}
         </td>
+
         {% set total_value = b.get('total_value', 0.0) %}
         <td class="text-end {% if total_value < 0 %}inv-item-neg{% endif %}">
           ${{ '%.2f'|format(total_value) }}
-          {% if is_return %}
-            <span class="badge bg-danger inv-badge">RETURN</span>
-          {% else %}
-            <span class="badge bg-success inv-badge">ISSUED</span>
-          {% endif %}
+          {% if is_return %}<span class="badge bg-danger inv-badge">RETURN</span>{% else %}<span class="badge bg-success inv-badge">ISSUED</span>{% endif %}
         </td>
+
         <td class="text-nowrap">
-          {% if b.get('report_id') %}
+          {% if b.get('report_id') and can_view_docs %}
             {% set tech = b.get('technician') or wo.technician_name or '' %}
             {% set job  = b.get('reference_job') or wo.canonical_job or '' %}
             <a class="btn btn-sm btn-outline-secondary"
@@ -324,8 +289,9 @@
             <span class="text-muted">—</span>
           {% endif %}
         </td>
+
         <td>
-          {% if b.get('report_id') %}
+          {% if b.get('report_id') and can_view_docs %}
             <a class="btn btn-sm btn-outline-primary"
                href="/invoice/pdf?invoice_number={{ b.get('report_id') }}&print=1"
                target="_blank" rel="noopener">Print</a>
@@ -333,14 +299,12 @@
             <span class="text-muted">—</span>
           {% endif %}
         </td>
-        {% if is_my_wo %}
+
+        {% if can_confirm_any %}
           <td class="text-center align-middle">
-            {% if b.get('all_confirmed') %}
-              ✅
-            {% elif b.get('any_confirmed') %}
-              ☑️
-            {% else %}
-              ☐
+            {% if b.get('all_confirmed') %}✅
+            {% elif b.get('any_confirmed') %}☑️
+            {% else %}☐
             {% endif %}
           </td>
         {% endif %}

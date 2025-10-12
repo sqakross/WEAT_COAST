@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
+{# EDIT MODE only if wo AND wo.id exist #}
+{% set IS_EDIT = (wo and wo.id) %}
 {% set RO = readonly or False %}
 {% set dis = 'disabled' if RO else '' %}
 {% set ro  = 'readonly' if RO else '' %}
-{% set IS_EDIT = wo is not none %}
 
 <style>
   .col-narrow{width:90px}
@@ -16,31 +17,51 @@
   .wo-form .unit-table .issue-check{position:relative; z-index:3; pointer-events:auto!important; opacity:1!important; cursor:pointer;}
   .wo-form .unit-table td.issue-cell, .wo-form .unit-table td.issue-cell *{ pointer-events:auto!important; }
   tr.issued-row{ background:#f1f3f5; color:#6c757d; }
-  /* колонка Ordered скрыта по умолчанию */
-  .unit-table .ordered-col{ display:none; }
+  .unit-table .ordered-col{ display:none; } /* hide “Ordered” col by default */
 </style>
 
-<h3>{{ RO and 'View' or (wo and 'Edit' or 'New') }} Work Order (multi-appliance)</h3>
+<h3>{{ RO and 'View' or (IS_EDIT and 'Edit' or 'New') }} Work Order (multi-appliance)</h3>
 
-<!-- ВАЖНО: отправляем на wo_save -->
 <form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm" class="wo-form">
   {% if IS_EDIT %}<input type="hidden" name="wo_id" value="{{ wo.id }}">{% endif %}
 
   <div class="row g-3 mb-3">
     <div class="col-md-3">
       <label class="form-label">Technician</label>
-      <input id="technicianInput" name="technician_name" class="form-control" required list="technicianList"
-             value="{{ wo.technician_name if IS_EDIT else '' }}" {{ ro }} {{ dis }}>
-      <datalist id="technicianList"></datalist>
+      {% if not RO %}
+        <select name="technician_id" class="form-select" required {{ dis }}>
+          <option value="">— select technician —</option>
+          {% for tid, uname in (technicians or []) %}
+            <option value="{{ tid }}"
+              {% if (selected_tech_id and tid == selected_tech_id)
+                    or (not selected_tech_id and selected_tech_username and (selected_tech_username|lower == (uname|lower))) %}selected{% endif %}>
+              {{ uname }}
+            </option>
+          {% endfor %}
+        </select>
+        <input type="hidden" name="technician_name"
+               value="{{ selected_tech_username or (IS_EDIT and wo.technician_name) or '' }}">
+        <div class="form-text">
+          This list includes only users with the <code>technician</code> role.
+        </div>
+      {% else %}
+        <div class="form-control-plaintext">
+          {{ selected_tech_username or (IS_EDIT and wo.technician_name) or '—' }}
+        </div>
+        <input type="hidden" name="technician_id" value="{{ selected_tech_id or '' }}">
+        <input type="hidden" name="technician_name"
+               value="{{ selected_tech_username or (IS_EDIT and wo.technician_name) or '' }}">
+      {% endif %}
     </div>
+
     <div class="col-md-3">
       <label class="form-label">Job number(s) (comma separated)</label>
       <input name="job_numbers" class="form-control" placeholder="98356, 98256"
-             value="{{ wo.job_numbers if IS_EDIT else '' }}" {{ ro }} {{ dis }}>
+             value="{{ IS_EDIT and wo.job_numbers or '' }}" {{ ro }} {{ dis }}>
     </div>
     <div class="col-md-2">
       <label class="form-label">Job type</label>
-      {% set jt = (wo.job_type if IS_EDIT else 'BASE') %}
+      {% set jt = (IS_EDIT and wo.job_type or 'BASE') %}
       <select name="job_type" class="form-select" {{ dis }}>
         <option value="BASE" {{ 'selected' if jt=='BASE' else '' }}>BASE</option>
         <option value="INSURANCE" {{ 'selected' if jt=='INSURANCE' else '' }}>INSURANCE</option>
@@ -49,16 +70,16 @@
     <div class="col-md-2">
       <label class="form-label">Delivery fee ($)</label>
       <input id="deliveryFee" type="number" step="0.01" name="delivery_fee" class="form-control"
-             value="{{ '%.2f'|format(wo.delivery_fee) if IS_EDIT and wo.delivery_fee is not none else '0.00' }}" {{ ro }} {{ dis }}>
+             value="{{ IS_EDIT and wo.delivery_fee is not none and ('%.2f'|format(wo.delivery_fee)) or '0.00' }}" {{ ro }} {{ dis }}>
     </div>
     <div class="col-md-2">
       <label class="form-label">Markup (%)</label>
       <input id="markupPercent" type="number" step="0.01" name="markup_percent" class="form-control"
-             value="{{ '%.2f'|format(wo.markup_percent) if IS_EDIT and wo.markup_percent is not none else '0.00' }}" {{ ro }} {{ dis }}>
+             value="{{ IS_EDIT and wo.markup_percent is not none and ('%.2f'|format(wo.markup_percent)) or '0.00' }}" {{ ro }} {{ dis }}>
     </div>
     <div class="col-md-2">
       <label class="form-label">Status</label>
-      {% set st = (wo.status if IS_EDIT else 'search_ordered') %}
+      {% set st = (IS_EDIT and wo.status or 'search_ordered') %}
       <select name="status" class="form-select" {{ dis }}>
         <option value="search_ordered" {{ 'selected' if st=='search_ordered' else '' }}>search_ordered</option>
         <option value="ordered" {{ 'selected' if st=='ordered' else '' }}>ordered</option>
@@ -117,35 +138,24 @@
               {% for r in (u.rows or []) %}
               {% set ri = loop.index0 %}
               {% set issued_full = ((r.issued_qty or 0) >= (r.quantity or 0)) %}
-
-              {# вычисляем «заказан» #}
               {% set rf = (r.ordered_flag if r.ordered_flag is defined else (r.ordered if r.ordered is defined else 0)) %}
               {% set is_ord = (rf in (True, 1, '1')) or
                                (r.status is defined and (r.status or '')|lower == 'ordered') or
                                (r.line_status is defined and (r.line_status or '')|lower == 'ordered') %}
-
               <tr class="{{ 'issued-row' if issued_full else '' }}">
                 <td><input class="form-control pn" name="units[{{ ui }}][rows][{{ ri }}][part_number]" value="{{ r.part_number or '' }}" maxlength="80" {{ ro }} {{ dis }}></td>
                 <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][alt_numbers]" value="{{ r.alt_numbers or '' }}" {{ ro }} {{ dis }}></td>
                 <td><input class="form-control part-name" name="units[{{ ui }}][rows][{{ ri }}][part_name]" value="{{ r.part_name or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
                 <td class="num"><input class="form-control qty" name="units[{{ ui }}][rows][{{ ri }}][quantity]" type="number" min="0" value="{{ r.quantity or 1 }}" {{ ro }} {{ dis }}></td>
-                <td class="num"><input class="form-control unit-cost" name="units[{{ ui }}][rows][{{ ri }}][unit_cost]" type="number" step="0.01" min="0" value="{{ '%.2f'|format(r.unit_cost) if r.unit_cost is defined and r.unit_cost is not none else '0.00' }}" {{ ro }} {{ dis }}></td>
+                <td class="num"><input class="form-control unit-cost" name="units[{{ ui }}][rows][{{ ri }}][unit_cost]" type="number" step="0.01" min="0" value="{{ r.unit_cost is not none and ('%.2f'|format(r.unit_cost)) or '0.00' }}" {{ ro }} {{ dis }}></td>
                 <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
-
-                {# WH #}
                 <td><input class="form-control wh-input" name="units[{{ ui }}][rows][{{ ri }}][warehouse]" value="{{ r.warehouse or r.unit_label or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
-
-                {# 🔸 B/O ПЕРЕД Supplier #}
                 <td class="text-center">
                   <div class="form-check d-flex justify-content-center m-0">
                     <input class="form-check-input" type="checkbox" name="units[{{ ui }}][rows][{{ ri }}][backorder_flag]" {% if r.backorder_flag %}checked{% endif %} {{ dis }}>
                   </div>
                 </td>
-
-                {# Supplier #}
                 <td><input class="form-control supplier-input" name="units[{{ ui }}][rows][{{ ri }}][supplier]" list="suppliers_datalist" value="{{ r.supplier or '' }}" {{ ro }} {{ dis }}></td>
-
-                <!-- Ordered -->
                 <td class="text-center ordered-col">
                   <input type="hidden" class="ordered-val"
                          name="units[{{ ui }}][rows][{{ ri }}][ordered_flag]"
@@ -153,9 +163,7 @@
                   <input type="checkbox" class="form-check-input ordered-check"
                          {% if is_ord %}checked{% endif %} {{ dis }}>
                 </td>
-
                 <td class="hint">—</td>
-
                 <td class="text-center issue-cell">
                   {% if not RO %}
                     <div class="form-check d-flex justify-content-center m-0">
@@ -167,7 +175,6 @@
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
-
                 <td class="text-center">{% if not RO %}<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>{% endif %}</td>
               </tr>
               {% endfor %}
@@ -205,23 +212,40 @@
       <button type="button" id="selectAllInStockBtn" class="btn btn-outline-secondary">Select all in-stock</button>
       <button type="button" id="issueSelectedBtn" class="btn btn-success" {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>Issue selected</button>
     {% endif %}
+    {# SAFE “Back”: use detail only if wo.id exists; otherwise go to list #}
     {% if IS_EDIT %}
       <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">Back</a>
     {% else %}
-      <button type="button" class="btn btn-outline-secondary" onclick="history.back()">Back</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Back</a>
     {% endif %}
   </div>
 </form>
 
 {% set issue_action = IS_EDIT and url_for('inventory.wo_issue_instock', wo_id=wo.id) or '#' %}
 <form id="issueForm" method="post" action="{{ issue_action }}">
-  <input type="hidden" name="wo_id" value="{{ wo.id if IS_EDIT else '' }}">
+  <input type="hidden" name="wo_id" value="{{ IS_EDIT and wo.id or '' }}">
   <input type="hidden" name="part_ids" id="issue_part_ids">
   <input type="hidden" name="set_status" id="issue_set_status" value="">
 </form>
 {% endblock %}
 
 {% block extra_js %}
+<script>
+/* Keep hidden technician_name synced with the selected technician_id */
+(function(){
+  const sel  = document.querySelector('select[name="technician_id"]');
+  const hidN = document.querySelector('input[name="technician_name"]');
+  if (sel && hidN) {
+    const sync = () => {
+      const opt = sel.options[sel.selectedIndex];
+      hidN.value = opt ? (opt.text || '').trim() : '';
+    };
+    sel.addEventListener('change', sync);
+    sync();
+  }
+})();
+</script>
+
 <script>
 (function(){
   const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
@@ -247,7 +271,6 @@
   }
   statusSel?.addEventListener('change', updateSupplierRequired);
 
-  /* Показ/скрытие колонки Ordered */
   function toggleOrderedCols(){
     const show = statusSel && statusSel.value === 'ordered';
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
@@ -261,7 +284,6 @@
   }
   statusSel?.addEventListener('change', toggleOrderedCols);
 
-  /* Синхронизация скрытого ordered_flag перед сабмитом */
   form?.addEventListener('submit', ()=>{
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
       const cb  = cell.querySelector('.ordered-check');
@@ -324,7 +346,7 @@
 
   function fetchHint(tr){
     const pn  = (tr.querySelector('.pn')?.value||'').trim().toUpperCase();
-    const qty = parseInt(tr.querySelector('.qty')?.value||'0',10)||0;
+       const qty = parseInt(tr.querySelector('.qty')?.value||'0',10)||0;
     const hintEl = tr.querySelector('.hint');
     if(!pn||qty<=0){ if(hintEl) hintEl.textContent='—'; setIssueEnabled(tr,false); return; }
     const whNow = (tr.querySelector('.wh-input')?.value||'').trim();
@@ -362,7 +384,6 @@
       .catch(()=>{ if(hintEl) hintEl.textContent='—'; setIssueEnabled(tr,false); });
   }
 
-  /* sync Ordered checkbox -> hidden value по change */
   unitsWrap.addEventListener('change', (e)=>{
     if (e.target.classList.contains('ordered-check')){
       const td  = e.target.closest('td');
@@ -382,18 +403,13 @@
   <td class="num"><input class="form-control qty" name="units[${ui}][rows][${ri}][quantity]" type="number" min="0" value="1" ${ro}></td>
   <td class="num"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${ro}></td>
   <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
-
   <td><input class="form-control wh-input" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
-
   <td class="text-center"><div class="form-check d-flex justify-content-center m-0"><input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]" ${thebo}></div></td>
-
   <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
-
   <td class="text-center ordered-col">
     <input type="hidden" class="ordered-val" name="units[${ui}][rows][${ri}][ordered_flag]" value="0">
     <input type="checkbox" class="form-check-input ordered-check" ${thebo}>
   </td>
-
   <td class="hint">—</td>
   <td class="text-center issue-cell"><div class="form-check d-flex justify-content-center m-0"><input type="checkbox" class="form-check-input issue-check" name="issue_ids" value="${ui}_${ri}" ${IS_EDIT?'':'disabled'}></div></td>
   <td class="text-center">${IS_RO?'':'<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>'}</td>
@@ -456,7 +472,7 @@
 </div>`;
   }
 
-  /* делегированные обработчики */
+  /* events */
   unitsWrap.addEventListener('input', (e)=>{
     const tr=e.target.closest('tr'); const card=e.target.closest('.card'); if(!card) return;
     if(tr && (e.target.classList.contains('qty')||e.target.classList.contains('unit-cost'))) recomputeUnitSubtotal(card);

@@ -1,6 +1,7 @@
 from datetime import datetime, date
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy.orm import relationship, validates
 
 from extensions import db
 
@@ -8,11 +9,33 @@ from extensions import db
 # User roles
 # --------------------------------
 ROLE_SUPERADMIN = 'superadmin'
-ROLE_ADMIN = 'admin'
-ROLE_USER = 'user'
-ROLE_VIEWER = 'viewer'
+ROLE_ADMIN      = 'admin'
+ROLE_USER       = 'user'
+ROLE_VIEWER     = 'viewer'
 ROLE_TECHNICIAN = 'technician'
 
+# Разрешённые значения ролей
+ALLOWED_ROLES = {
+    ROLE_SUPERADMIN,
+    ROLE_ADMIN,
+    ROLE_TECHNICIAN,
+    ROLE_USER,
+    ROLE_VIEWER,
+}
+
+# Синонимы/варианты написания, которые приводим к канону
+ROLE_ALIASES = {
+    'tech': ROLE_TECHNICIAN,
+    'technician': ROLE_TECHNICIAN,
+    'super': ROLE_SUPERADMIN,
+    'sa': ROLE_SUPERADMIN,
+    'admin': ROLE_ADMIN,
+    'administrator': ROLE_ADMIN,
+    'viewer': ROLE_VIEWER,
+    'read_only': ROLE_VIEWER,
+    'user': ROLE_USER,
+    'employee': ROLE_USER,
+}
 
 # --------------------------------
 # Users
@@ -21,7 +44,16 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
-    role = db.Column(db.String(20), nullable=False, default=ROLE_USER)
+
+    # дефолт по умолчанию — technician (как ты хотел)
+    role = db.Column(db.String(20), nullable=False, default=ROLE_TECHNICIAN)
+
+    @validates("role")
+    def _validate_role(self, key, value: str | None):
+        """Нормализация роли: маппим алиасы → канон; если неизвестно — technician."""
+        v = (value or "").strip().lower()
+        v = ROLE_ALIASES.get(v, v)
+        return v if v in ALLOWED_ROLES else ROLE_TECHNICIAN
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -46,6 +78,8 @@ class WorkOrder(db.Model):
     __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
+    technician_id = db.Column(db.Integer, db.ForeignKey("user.id"), index=True, nullable=True)
+    technician = relationship("User", lazy="joined")
 
     # multi-appliance: список юнитов (по приборам)
     units = db.relationship(
@@ -91,6 +125,19 @@ class WorkOrder(db.Model):
             except ValueError:
                 pass
         return str(max(ints)) if ints else (nums[0] if nums else "")
+
+    @property
+    def technician_username(self) -> str:
+        # единое «логическое имя» техника
+        if self.technician and self.technician.username:
+            return self.technician.username
+        return self.technician_name or ""
+
+    def set_technician(self, user: "User"):
+        """Присвоить техника и синхронизировать имя для совместимости."""
+        self.technician = user
+        self.technician_id = user.id
+        self.technician_name = user.username
 
 
 # --------------------------------
@@ -317,6 +364,39 @@ class OrderItem(db.Model):
     date_received= db.Column(db.DateTime)
     notes        = db.Column(db.Text)
     row_key      = db.Column(db.String(512), unique=True)
+
+class GoodsReceipt(db.Model):
+    __tablename__ = "goods_receipts"
+    id = db.Column(db.Integer, primary_key=True)
+    supplier_name = db.Column(db.String(200), nullable=False, index=True)
+    invoice_number = db.Column(db.String(64), nullable=True)          # можно пустым для ручного
+    invoice_date = db.Column(db.Date, nullable=True)
+    currency = db.Column(db.String(8), default="USD")
+    notes = db.Column(db.Text, nullable=True)
+
+    status = db.Column(db.String(16), default="draft", nullable=False) # draft|posted
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_by = db.Column(db.Integer, nullable=True)                  # current_user.id
+    posted_at = db.Column(db.DateTime, nullable=True)
+    posted_by = db.Column(db.Integer, nullable=True)
+
+    __table_args__ = (
+        db.Index("ix_gr_supplier_invoice", "supplier_name", "invoice_number"),
+    )
+
+class GoodsReceiptLine(db.Model):
+    __tablename__ = "goods_receipt_lines"
+    id = db.Column(db.Integer, primary_key=True)
+    goods_receipt_id = db.Column(db.Integer, db.ForeignKey("goods_receipts.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    line_no = db.Column(db.Integer, default=1)
+    part_number = db.Column(db.String(120), nullable=False, index=True)
+    part_name = db.Column(db.String(255), nullable=True)
+    quantity = db.Column(db.Integer, default=1, nullable=False)
+    unit_cost = db.Column(db.Float, default=0.0, nullable=True)
+    location = db.Column(db.String(64), nullable=True)
+
+    goods_receipt = db.relationship("GoodsReceipt", backref=db.backref("lines", cascade="all, delete-orphan"))
 
 
 

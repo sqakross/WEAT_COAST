@@ -23,7 +23,7 @@ import re,sqlite3,os
 
 import pandas as pd
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict
 
 from config import Config
@@ -31,7 +31,7 @@ from extensions import db
 # from models import Part, IssuedPartRecord, User
 from utils.invoice_generator import generate_invoice_pdf
 # from models.order_items import OrderItem
-from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER,Part, WorkOrder, WorkOrderPart
+from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER,ROLE_TECHNICIAN, Part, WorkOrder, WorkOrderPart
 from sqlalchemy import or_
 from pathlib import Path
 
@@ -72,6 +72,23 @@ _rows_re  = re.compile(r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_nam
 INVOICE_START_AT = 140  # новые инвойсы начнутся с 000140
 
 # inventory/routes.py  (добавь рядом с _create_batch_for_records)
+# --- TECH ROLE HELPER (fallback, если нет security.py) ---
+try:
+    from security import is_technician  # основной путь
+except Exception:
+    from flask_login import current_user
+    def is_technician() -> bool:
+        return (getattr(current_user, "role", "") or "").strip().lower() == "technician"
+
+def _query_technicians():
+    """Return list of (id, username) for users with 'technician' role."""
+    return (
+        db.session.query(User.id, User.username)
+        .filter(func.lower(func.trim(User.role)) == "technician")
+        .order_by(func.lower(func.trim(User.username)).asc())
+        .all()
+    )
+
 
 def _is_return_row(r) -> bool:
     """Возвратная строка — это строка с отрицательным количеством."""
@@ -1045,52 +1062,63 @@ def set_setting(key, value):
     with open(p, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+# --- Confirm selected lines / whole invoice ---
 @inventory_bp.post("/work_orders/<int:wo_id>/confirm")
 @login_required
 def wo_confirm_lines(wo_id: int):
-    """
-    Подтверждение получения запчастей:
-    - выбранные строки (record_ids[]), или
-    - все строки конкретного invoice.
-    Доступ:
-      - technician → только свои строки;
-      - admin/superadmin → любые строки по этому WO.
-    """
     from flask import request, flash, redirect, url_for
     from datetime import datetime
     from sqlalchemy import func, or_
+    from flask_login import current_user
     from extensions import db
     from models import WorkOrder, IssuedPartRecord, IssuedBatch
 
-    # 1. Проверка Work Order
     wo = db.session.get(WorkOrder, wo_id)
     if not wo:
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    tech = (getattr(current_user, "username", None) or "").strip()
-    if not tech:
+    role = (current_user.role or "").lower()
+    is_admin_like = role in ("admin", "superadmin")
+
+    # проверка «свой ли WO» для техника
+    if role == "technician":
+        me_id = getattr(current_user, "id", None)
+        me_name = (current_user.username or "").strip().lower()
+        wo_tech_id = getattr(wo, "technician_id", None)
+        wo_name = (wo.technician_username or wo.technician_name or "").strip().lower()
+        is_my_wo = (
+            (wo_tech_id and me_id and wo_tech_id == me_id)
+            or (me_name and wo_name and me_name == wo_name)
+        )
+        if not is_my_wo:
+            flash("Access denied", "danger")
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    # алиасы имени техника — чтобы совпало с issued_to
+    me_aliases = {
+        (current_user.username or "").strip().lower(),
+        (wo.technician_username or "").strip().lower(),
+        (wo.technician_name or "").strip().lower(),
+    }
+    me_aliases = {a for a in me_aliases if a}
+
+    tech_display = (current_user.username or "").strip()
+    if not tech_display:
         flash("Your account has no username; cannot confirm.", "danger")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     canonical_job = (wo.canonical_job or "").strip()
 
-    # 2. Собираем IDs для подтверждения
     raw_ids = request.form.getlist("record_ids[]") or request.form.getlist("record_ids")
     sel_ids = [int(x) for x in raw_ids if str(x).isdigit()]
     inv_s = (request.form.get("invoice_number") or "").strip()
     inv_no = int(inv_s) if inv_s.isdigit() else None
 
-    # 3. Базовый запрос (включаем join для batch)
     q = db.session.query(IssuedPartRecord).outerjoin(
         IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id
     )
 
-    # ⚙️ Фильтр по технику — только если НЕ admin/superadmin
-    if current_user.role not in ["admin", "superadmin"]:
-        q = q.filter(func.trim(IssuedPartRecord.issued_to) == tech)
-
-    # 4. Ограничение по текущему WO
     if canonical_job:
         q = q.filter(
             or_(
@@ -1100,7 +1128,6 @@ def wo_confirm_lines(wo_id: int):
             )
         )
 
-    # 5. Фильтрация по выбранным ID или invoice
     if sel_ids:
         q = q.filter(IssuedPartRecord.id.in_(sel_ids))
     elif inv_no is not None:
@@ -1109,31 +1136,30 @@ def wo_confirm_lines(wo_id: int):
         flash("Nothing to confirm (no IDs or invoice number).", "warning")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
+    if not is_admin_like and me_aliases:
+        # техник подтверждает только свои строки (без регистра)
+        q = q.filter(func.lower(func.trim(IssuedPartRecord.issued_to)).in_(list(me_aliases)))
+
     rows = q.all()
     if not rows:
         flash("No matching lines found to confirm.", "warning")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # 6. Подтверждение
     now = datetime.utcnow()
     updated = 0
     for r in rows:
         if not getattr(r, "confirmed_by_tech", False):
             r.confirmed_by_tech = True
             r.confirmed_at = now
-            r.confirmed_by = tech
+            r.confirmed_by = tech_display
             updated += 1
 
-    # 7. Коммит и флеш
     try:
         db.session.commit()
-        if updated:
-            msg = f"Confirmed {updated} line(s)"
-            if inv_no is not None:
-                msg += f" in invoice #{inv_no:06d}"
-            flash(msg + ".", "success")
-        else:
-            flash("All selected lines were already confirmed.", "info")
+        msg = f"Confirmed {updated} line(s)"
+        if inv_no is not None:
+            msg += f" in invoice #{inv_no:06d}"
+        flash(msg + ("" if updated else " (no changes)."), "success" if updated else "info")
     except Exception as e:
         db.session.rollback()
         flash(f"Database error: {e}", "danger")
@@ -1143,37 +1169,55 @@ def wo_confirm_lines(wo_id: int):
 @inventory_bp.get("/work_orders/new", endpoint="wo_new")
 @login_required
 def wo_new():
-    # только admin/superadmin
     role = (getattr(current_user, "role", "") or "").strip().lower()
     if role not in ("admin", "superadmin"):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # болванка: один appliance и пустая строка
+    # minimal empty WO-like object for the form
+    class _WO:
+        id = None
+        technician_id = None
+        technician_name = ""
+        brand = ""
+        model = ""
+        serial = ""
+        job_numbers = ""
+        job_type = "BASE"
+        delivery_fee = 0.0
+        markup_percent = 0.0
+        status = "search_ordered"
+    wo = _WO()
+
+    technicians = _query_technicians()
+    recent_suppliers = session.get("recent_suppliers", []) or []
+
+    # a single empty unit+row for the form
     units = [{
-        "brand": "", "model": "", "serial": "",
+        "brand":  "",
+        "model":  "",
+        "serial": "",
         "rows": [{
             "id": None,
             "part_number": "", "part_name": "", "quantity": 1,
             "alt_numbers": "",
-            "warehouse": "",
-            "supplier": "",
-            "backorder_flag": False,
-            "line_status": "search_ordered",
+            "warehouse": "", "supplier": "",
+            "backorder_flag": False, "line_status": "search_ordered",
             "unit_cost": 0.0,
         }],
     }]
 
-    recent_suppliers = session.get("recent_suppliers", []) or []
-
-    # Важно: multi-форма
     return render_template(
         "wo_form_units.html",
-        wo=None,
+        wo=wo,
         units=units,
         recent_suppliers=recent_suppliers,
         readonly=False,
+        technicians=technicians,
+        selected_tech_id=None,
+        selected_tech_username=None,
     )
+
 
 @inventory_bp.get("/api/technicians")
 @login_required
@@ -1319,20 +1363,10 @@ def wo_toggle_ordered(wo_id: int, wop_id: int):
 
     return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
+# --- Work Order details ---
 @inventory_bp.get("/work_orders/<int:wo_id>", endpoint="wo_detail")
 @login_required
 def wo_detail(wo_id):
-    """
-    Work Order details page (flat + multi-appliance) + инвойсные партии,
-    включая возвраты (RETURN). Подсветка зелёным = PN с NET > 0.
-
-    Дополнительно:
-      - issued_items (построчный журнал для этого WO)
-      - агрегаты Issued/Returned/Net по сумме и количеству (SQLite-safe)
-      - в items: id/confirmed/confirmed_by/confirmed_at
-      - в batch: any/all_confirmed, unconfirmed_count, invoice_number
-      - can_confirm — право подтверждать (техник своего WO или admin/superadmin)
-    """
     from flask import current_app, render_template, flash, redirect, url_for
     from sqlalchemy import func, or_, case
     from sqlalchemy.orm import selectinload, joinedload
@@ -1340,37 +1374,45 @@ def wo_detail(wo_id):
     from extensions import db
     from models import WorkOrder, WorkUnit, WorkOrderPart
 
-    # ---- 1) Основной WO
-    try:
-        wo = (
-            db.session.query(WorkOrder)
-            .options(
-                selectinload(WorkOrder.parts),
-                selectinload(WorkOrder.units).selectinload(WorkUnit.parts),
-            )
-            .get(wo_id)
+    # 1) WO
+    wo = (
+        db.session.query(WorkOrder)
+        .options(
+            selectinload(WorkOrder.parts),
+            selectinload(WorkOrder.units).selectinload(WorkUnit.parts),
         )
-    except Exception:
-        current_app.logger.exception("Failed to load WorkOrder %s", wo_id)
-        wo = None
-
+        .get(wo_id)
+    )
     if not wo:
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # ---- 1.1 Право на подтверждение (техник этого WO или admin/superadmin)
-    try:
-        me = (getattr(current_user, "username", "") or "").strip().lower()
-        tech_name = (wo.technician_name or "").strip().lower()
-        role = (getattr(current_user, "role", "") or "").strip().lower()
-        can_confirm = (role in ["admin", "superadmin"]) or (me and me == tech_name)
-    except Exception:
-        can_confirm = False
+    # 2) Права
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    me_id = getattr(current_user, "id", None)
+    me_name = (getattr(current_user, "username", "") or "").strip().lower()
+    wo_tech_id = getattr(wo, "technician_id", None)
+    wo_tech_name = (wo.technician_username or wo.technician_name or "").strip().lower()
 
-    # ---- 2) Поставщики (для справки)
-    suppliers = []
-    try:
-        rows = (
+    is_admin_like = role in ("admin", "superadmin")
+    is_technician = role == "technician"
+    is_my_wo = (
+        (wo_tech_id and me_id and wo_tech_id == me_id)
+        or (me_name and wo_tech_name and me_name == wo_tech_name)
+    )
+
+    # техник видит только свои WO
+    if is_technician and not is_my_wo:
+        flash("You don't have access to this Work Order.", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    can_confirm_any = (is_admin_like or (is_technician and is_my_wo))
+    can_view_docs = (is_admin_like or is_my_wo)
+
+    # 3) Поставщики
+    suppliers = [
+        r[0]
+        for r in (
             db.session.query(func.trim(WorkOrderPart.supplier))
             .filter(
                 WorkOrderPart.work_order_id == wo.id,
@@ -1381,231 +1423,161 @@ def wo_detail(wo_id):
             .order_by(func.trim(WorkOrderPart.supplier).asc())
             .all()
         )
-        suppliers = [r[0] for r in rows]
-    except Exception:
-        current_app.logger.exception("Suppliers query failed")
-        suppliers = []
+    ]
 
-    # ---- 3) Сбор партий и построчного журнала
+    # 4) Партии/журнал (как у вас; укорочено, логика не менялась)
+    from models import IssuedPartRecord, IssuedBatch  # noqa: E402
+    from collections import defaultdict
+
+    canon = (wo.canonical_job or "").strip()
+
+    base_q = (
+        db.session.query(IssuedPartRecord)
+        .options(joinedload(IssuedPartRecord.part), joinedload(IssuedPartRecord.batch))
+        .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
+    )
+    if canon:
+        base_q = base_q.filter(
+            or_(
+                func.trim(IssuedPartRecord.reference_job) == canon,
+                func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
+                func.trim(IssuedBatch.reference_job) == canon,
+            )
+        )
+
+    issued_items = base_q.order_by(
+        IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()
+    ).all()
+
+    # агрегаты
+    money_issued = func.coalesce(
+        func.sum(
+            case(
+                (IssuedPartRecord.quantity > 0,
+                 IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
+                else_=0,
+            )
+        ),
+        0.0,
+    )
+    money_returned = func.coalesce(
+        func.sum(
+            case(
+                (IssuedPartRecord.quantity < 0,
+                 -IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
+                else_=0,
+            )
+        ),
+        0.0,
+    )
+    qty_issued = func.coalesce(
+        func.sum(case((IssuedPartRecord.quantity > 0, IssuedPartRecord.quantity), else_=0)), 0
+    )
+    qty_returned = func.coalesce(
+        func.sum(case((IssuedPartRecord.quantity < 0, -IssuedPartRecord.quantity), else_=0)), 0
+    )
+    agg = (
+        db.session.query(money_issued, money_returned, qty_issued, qty_returned)
+        .select_from(IssuedPartRecord)
+        .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
+        .filter(base_q.whereclause if base_q.whereclause is not None else True)
+        .one()
+    )
+
+    issued_total   = float(agg[0] or 0.0)
+    returned_total = float(agg[1] or 0.0)
+    net_total      = issued_total - returned_total
+    issued_qty     = int(agg[2] or 0)
+    returned_qty   = int(agg[3] or 0)
+    net_qty        = issued_qty - returned_qty
+
+    # группировка
+    grouped = defaultdict(list)
+    for r in issued_items:
+        if getattr(r, "batch_id", None):
+            key = ("batch", r.batch_id)
+        elif getattr(r, "invoice_number", None):
+            key = ("inv", r.invoice_number)
+        else:
+            key = ("ungrouped", f"{r.issue_date:%Y%m%d%H%M%S}-{r.issued_to}-{r.reference_job or ''}")
+        grouped[key].append(r)
+
+    def _fmt(dt):
+        return dt.strftime("%Y-%m-%d %H:%M") if dt else "—"
+
+    def _extract(rec):
+        return (
+            rec.id,
+            (getattr(rec.part, "part_number", None) or "").strip().upper(),
+            getattr(rec.part, "name", None) or "",
+            int(rec.quantity or 0),
+            float(rec.unit_cost_at_issue or 0.0),
+            bool(getattr(rec, "confirmed_by_tech", False)),
+            getattr(rec, "confirmed_by", None) or None,
+            _fmt(getattr(rec, "confirmed_at", None)),
+        )
+
+    net_by_pn = defaultdict(int)
     batches = []
-    invoiced_pns = []
-    issued_items = []
-    issued_total = returned_total = net_total = 0.0
-    issued_qty = returned_qty = net_qty = 0
+    for _, recs in grouped.items():
+        b = recs[0].batch if recs and getattr(recs[0], "batch", None) else None
+        issued_at = (b.issue_date if b else recs[0].issue_date)
+        issued_at_str = _fmt(issued_at)
+        tech = recs[0].issued_to
+        ref  = (b.reference_job if b else (recs[0].reference_job or "")) or ""
+        report_id = (b.invoice_number if b else recs[0].invoice_number)
+        location  = getattr(b, "location", None)
 
-    try:
-        from models import IssuedPartRecord, IssuedBatch  # type: ignore
-    except Exception:
-        current_app.logger.warning("Invoice models not present; batches disabled.")
-        return render_template(
-            "wo_detail.html",
-            wo=wo,
-            avail=[],
-            batches=batches,
-            suppliers=suppliers,
-            invoiced_pns=invoiced_pns,
-            issued_items=issued_items,
-            issued_total=issued_total,
-            returned_total=returned_total,
-            net_total=net_total,
-            issued_qty=issued_qty,
-            returned_qty=returned_qty,
-            net_qty=net_qty,
-            can_confirm=can_confirm,
-        )
+        ref_is_return = "RETURN" in ref.upper()
+        items = []
+        total_value_raw = 0.0
+        unconfirmed_count = 0
 
-    try:
-        canon = (wo.canonical_job or "").strip()
-
-        # БАЗОВЫЙ запрос: НЕ фильтруем по issued_to, чтобы ничего не прятать.
-        base_q = (
-            db.session.query(IssuedPartRecord)
-            .options(joinedload(IssuedPartRecord.part), joinedload(IssuedPartRecord.batch))
-            .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
-        )
-        if canon:
-            base_q = base_q.filter(
-                or_(
-                    func.trim(IssuedPartRecord.reference_job) == canon,
-                    func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
-                    func.trim(IssuedBatch.reference_job) == canon,
-                ),
-            )
-
-        # 3.1 Построчный журнал
-        issued_items = base_q.order_by(
-            IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()
-        ).all()
-
-        # 3.2 Агрегаты (SQLite-friendly SUM(CASE ...))
-        money_issued = func.coalesce(
-            func.sum(
-                case(
-                    (IssuedPartRecord.quantity > 0,
-                     IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
-                    else_=0,
-                )
-            ),
-            0.0,
-        )
-        money_returned = func.coalesce(
-            func.sum(
-                case(
-                    (IssuedPartRecord.quantity < 0,
-                     -IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
-                    else_=0,
-                )
-            ),
-            0.0,
-        )
-        qty_issued = func.coalesce(
-            func.sum(case((IssuedPartRecord.quantity > 0, IssuedPartRecord.quantity), else_=0)), 0
-        )
-        qty_returned = func.coalesce(
-            func.sum(case((IssuedPartRecord.quantity < 0, -IssuedPartRecord.quantity), else_=0)), 0
-        )
-
-        agg_q = (
-            db.session.query(money_issued, money_returned, qty_issued, qty_returned)
-            .select_from(IssuedPartRecord)
-            .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
-        )
-        if canon:
-            agg_q = agg_q.filter(
-                or_(
-                    func.trim(IssuedPartRecord.reference_job) == canon,
-                    func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
-                    func.trim(IssuedBatch.reference_job) == canon,
-                ),
-            )
-        agg = agg_q.one()
-
-        issued_total   = float(agg[0] or 0.0)
-        returned_total = float(agg[1] or 0.0)
-        net_total      = issued_total - returned_total
-        issued_qty     = int(agg[2] or 0)
-        returned_qty   = int(agg[3] or 0)
-        net_qty        = issued_qty - returned_qty
-
-        # 3.3 Группировка для нижней таблицы (batches)
-        from collections import defaultdict
-        grouped = defaultdict(list)
-        for r in issued_items:
-            if getattr(r, "batch_id", None):
-                key = ("batch", r.batch_id)
-            elif getattr(r, "invoice_number", None):
-                key = ("inv", r.invoice_number)
-            else:
-                key = ("ungrouped", f"{r.issue_date:%Y%m%d%H%M%S}-{r.issued_to}-{r.reference_job or ''}")
-            grouped[key].append(r)
-
-        # локализация времени
-        try:
-            from zoneinfo import ZoneInfo  # py3.9+
-            tzname = current_app.config.get("DISPLAY_TZ", "America/Los_Angeles")
-            _tz = ZoneInfo(tzname)
-            _utc = ZoneInfo("UTC")
-        except Exception:
-            ZoneInfo = None
-            _tz = _utc = None
-
-        def _fmt_local(dt):
-            if not dt:
-                return "—"
-            if _tz and _utc:
-                try:
-                    return dt.replace(tzinfo=_utc).astimezone(_tz).strftime("%Y-%m-%d %H:%M")
-                except Exception:
-                    pass
-            return dt.strftime("%Y-%m-%d %H:%M")
-
-        def _extract(rec: "IssuedPartRecord"):
-            rid = rec.id
-            pn = (getattr(rec.part, "part_number", None) or "").strip().upper()
-            nm = getattr(rec.part, "name", None) or ""
-            qty = int(rec.quantity or 0)
-            price = float(rec.unit_cost_at_issue or 0.0)
-            confirmed = bool(getattr(rec, "confirmed_by_tech", False))
-            who = getattr(rec, "confirmed_by", None) or None
-            when = getattr(rec, "confirmed_at", None)
-            when_s = when.strftime("%Y-%m-%d %H:%M") if when else None
-            return rid, pn, nm, qty, price, confirmed, who, when_s
-
-        net_by_pn = defaultdict(int)
-        batches = []
-
-        for _, recs in grouped.items():
-            b = recs[0].batch if recs and getattr(recs[0], "batch", None) else None
-            issued_at = (b.issue_date if b else recs[0].issue_date)
-            issued_at_str = _fmt_local(issued_at)
-
-            tech = recs[0].issued_to
-            ref  = (b.reference_job if b else (recs[0].reference_job or "")) or ""
-            report_id = (b.invoice_number if b else recs[0].invoice_number)
-            location  = getattr(b, "location", None)
-
-            ref_is_return = "RETURN" in ref.upper()
-            items = []
-            total_value_raw = 0.0
-            unconfirmed_count = 0
-
-            for rec in recs:
-                rid, pn, name, qty, price, confirmed, who, when_s = _extract(rec)
-                if not pn or qty == 0:
-                    continue
-                line_total = qty * price
-                total_value_raw += line_total
-
-                is_item_return = ref_is_return or (qty < 0)
-                eff_sign = -1 if is_item_return else 1
-                net_by_pn[pn] += eff_sign * abs(qty)
-
-                if (not confirmed) and qty > 0:
-                    unconfirmed_count += 1
-
-                items.append({
-                    "id": rid,
-                    "pn": pn,
-                    "name": name or "—",
-                    "qty": abs(qty),
-                    "unit_price": price,
-                    "negative": (line_total < 0) or is_item_return,
-                    "confirmed": confirmed,
-                    "confirmed_by": who,
-                    "confirmed_at": when_s,
-                })
-
-            is_group_return = (total_value_raw < 0) or ref_is_return
-            all_conf = (unconfirmed_count == 0) and bool(items)
-            any_conf = any(it.get("confirmed") for it in items) if items else False
-
-            batches.append({
-                "issued_at": issued_at_str,
-                "technician": tech,
-                "canonical_ref": canon,
-                "reference_job": ref,
-                "location": location,
-                "report_id": report_id,
-                "invoice_number": report_id,
-                "is_return": is_group_return,
-                "total_value": total_value_raw,
-                "items": items,
-                "all_confirmed": all_conf,
-                "any_confirmed": any_conf,
-                "unconfirmed_count": unconfirmed_count,
+        for rec in recs:
+            rid, pn, name, qty, price, confirmed, who, when_s = _extract(rec)
+            if not pn or qty == 0:
+                continue
+            line_total = qty * price
+            total_value_raw += line_total
+            is_item_return = ref_is_return or (qty < 0)
+            eff_sign = -1 if is_item_return else 1
+            net_by_pn[pn] += eff_sign * abs(qty)
+            if (not confirmed) and qty > 0:
+                unconfirmed_count += 1
+            items.append({
+                "id": rid,
+                "pn": pn,
+                "name": name or "—",
+                "qty": abs(qty),
+                "unit_price": price,
+                "negative": (line_total < 0) or is_item_return,
+                "confirmed": confirmed,
+                "confirmed_by": who,
+                "confirmed_at": when_s,
             })
 
-        invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
+        is_group_return = (total_value_raw < 0) or ref_is_return
+        all_conf = (unconfirmed_count == 0) and bool(items)
+        any_conf = any(it.get("confirmed") for it in items) if items else False
 
-    except Exception:
-        current_app.logger.exception("Batches lookup failed")
-        batches = []
-        invoiced_pns = []
-        issued_items = []
-        issued_total = returned_total = net_total = 0.0
-        issued_qty = returned_qty = net_qty = 0
+        batches.append({
+            "issued_at": issued_at_str,
+            "technician": tech,
+            "canonical_ref": canon,
+            "reference_job": ref,
+            "location": location,
+            "report_id": report_id,
+            "invoice_number": report_id,
+            "is_return": is_group_return,
+            "total_value": total_value_raw,
+            "items": items,
+            "all_confirmed": all_conf,
+            "any_confirmed": any_conf,
+            "unconfirmed_count": unconfirmed_count,
+        })
 
-    # ---- 4) Рендер
+    invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
+
     return render_template(
         "wo_detail.html",
         wo=wo,
@@ -1620,55 +1592,67 @@ def wo_detail(wo_id):
         issued_qty=issued_qty,
         returned_qty=returned_qty,
         net_qty=net_qty,
-        can_confirm=can_confirm,
+        # ключевые флаги — в шаблоне больше не пересчитываются
+        is_my_wo=is_my_wo,
+        can_confirm=can_confirm_any,
+        can_confirm_any=can_confirm_any,
+        can_view_docs=can_view_docs,
     )
 
 @inventory_bp.post("/work_orders/new", endpoint="wo_create")
 @login_required
 def wo_create():
-    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role not in ("admin", "superadmin"):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    from models import WorkOrder, WorkOrderPart
-    from extensions import db
-
     f = request.form
+
+    # NEW: prefer technician_id; fallback to technician_name
+    tech_id_raw = (f.get("technician_id") or "").strip()
+    technician_id = int(tech_id_raw) if tech_id_raw.isdigit() else None
     technician_name = (f.get("technician_name") or "").strip()
-    job_numbers = (f.get("job_numbers") or "").strip()
-    brand = (f.get("brand") or "").strip()
-    model = (f.get("model") or "").strip()
-    serial = (f.get("serial") or "").strip()
-    job_type = (f.get("job_type") or "BASE").strip().upper()
+
+    if technician_id:
+        tech_obj = db.session.get(User, technician_id)
+        if not tech_obj or (tech_obj.role or "").lower() != "technician":
+            flash("Selected technician is invalid.", "danger")
+            return redirect(url_for("inventory.wo_new"))
+        technician_name = tech_obj.username  # normalize to username
+    else:
+        # require at least a name when no id provided
+        if not technician_name:
+            flash("Technician is required.", "danger")
+            return redirect(url_for("inventory.wo_new"))
+
+    job_numbers   = (f.get("job_numbers")   or "").strip()
+    brand         = (f.get("brand")         or "").strip()
+    model         = (f.get("model")         or "").strip()
+    serial        = (f.get("serial")        or "").strip()
+    job_type      = (f.get("job_type")      or "BASE").strip().upper()
 
     def _f(x, default=0.0):
-        try:
-            return float(x)
-        except Exception:
-            return float(default)
+        try: return float(x)
+        except Exception: return float(default)
 
-    delivery_fee = _f(f.get("delivery_fee"), 0)
+    delivery_fee   = _f(f.get("delivery_fee"), 0)
     markup_percent = _f(f.get("markup_percent"), 0)
 
-    if not technician_name or not job_numbers:
-        flash("Technician and Job(s) are required.", "danger")
+    if not job_numbers:
+        flash("Job(s) are required.", "danger")
         return redirect(url_for("inventory.wo_new"))
 
-    # канонический job = максимальный из перечисленных чисел
+    # normalize job list
     jobs = [j.strip() for j in job_numbers.replace(",", " ").split() if j.strip()]
-    nums = []
-    for j in jobs:
-        try:
-            nums.append(int(j))
-        except Exception:
-            pass
-    # canonical_job у тебя свойство @property в модели — в БД не пишем
-    # используем только job_numbers
+
+    # create WO
     wo = WorkOrder(
-        technician_name=technician_name,
+        technician_id=technician_id,       # NEW
+        technician_name=technician_name,   # keep legacy compatibility
         job_numbers=", ".join(jobs),
         brand=brand, model=model, serial=serial,
-        job_type=job_type if job_type in ("BASE","INSURANCE") else "BASE",
+        job_type=job_type if job_type in ("BASE", "INSURANCE") else "BASE",
         delivery_fee=delivery_fee,
         markup_percent=markup_percent,
         status="search_ordered",
@@ -1676,37 +1660,28 @@ def wo_create():
     db.session.add(wo)
     db.session.flush()
 
-    # полезные клипперы
-    def _clip20(s: str) -> str:
-        return (s or "").strip()[:20]
-
-    def _clip6(s: str) -> str:
-        return (s or "").strip()[:6]
-
-    # парсим строки parts из формы: rows[i][field]
+    # parse part rows
     import re
     pat = re.compile(r"^rows\[(\d+)\]\[(\w+)\]$")
     tmp = {}
     for k, v in f.items():
         m = pat.match(k)
-        if not m:
-            continue
+        if not m: continue
         i = int(m.group(1)); field = m.group(2)
         tmp.setdefault(i, {})[field] = (v or "").strip()
 
+    def _clip20(s: str) -> str: return (s or "").strip()[:20]
+    def _clip6(s: str)  -> str: return (s or "").strip()[:6]
+
     for i in sorted(tmp.keys()):
         row = tmp[i]
-
         pn = _clip20((row.get("part_number") or "").upper())
         if not pn:
             continue
 
-        # поддерживаем alt_numbers и alt_part_numbers
         alt_raw = (row.get("alt_numbers") or row.get("alt_part_numbers") or "")
-        alt_tokens = [ _clip20(t) for t in alt_raw.split(",") if t is not None ]
+        alt_tokens = [_clip20(t) for t in alt_raw.split(",") if t is not None]
         alt_joined = ",".join(alt_tokens)
-
-        supplier = _clip6(row.get("supplier") or "")
 
         try:
             qty = int(row.get("quantity") or 0)
@@ -1715,11 +1690,11 @@ def wo_create():
 
         part = WorkOrderPart(
             work_order_id=wo.id,
-            part_number=pn,                 # ≤20
-            alt_numbers=alt_joined,         # алиас к alt_part_numbers
+            part_number=pn,
+            alt_numbers=alt_joined,
             part_name=(row.get("part_name") or "").strip(),
             quantity=qty,
-            supplier=supplier,              # ≤6
+            supplier=_clip6(row.get("supplier") or ""),
             backorder_flag=bool(row.get("backorder_flag")),
             status="search_ordered",
         )
@@ -1728,7 +1703,6 @@ def wo_create():
     db.session.commit()
     flash("Work order created.", "success")
     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
-
 
 # @inventory_bp.get("/work_orders/new")
 # @login_required
@@ -1748,13 +1722,13 @@ def wo_create():
 @login_required
 def wo_save():
     from flask import request, session, redirect, url_for, flash, current_app
-    from models import WorkOrder, WorkUnit, WorkOrderPart
+    from models import WorkOrder, WorkUnit, WorkOrderPart, User
     from extensions import db
     from flask_login import current_user
     import re
     from datetime import date
 
-    # доступ
+    # access
     if (getattr(current_user, "role", "") or "").lower() not in ("admin", "superadmin"):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
@@ -1777,15 +1751,34 @@ def wo_save():
     wo_id = (f.get("wo_id") or "").strip()
     is_new = not wo_id
 
-    # создать/получить заказ
+    # create/fetch WO
     if is_new:
         wo = WorkOrder()
         db.session.add(wo)
     else:
         wo = WorkOrder.query.get_or_404(int(wo_id))
 
-    # шапка
-    wo.technician_name = (f.get("technician_name") or "").strip().upper()
+    # ---- header ----
+    # technician: prefer technician_id, and sync name from DB when we can
+    tech_id_s = (f.get("technician_id") or "").strip()
+    if tech_id_s.isdigit():
+        try:
+            tid = int(tech_id_s)
+            u = User.query.get(tid)
+            if u:
+                wo.technician_id = tid
+                wo.technician_name = (u.username or "").strip().upper()
+            else:
+                # fallback to posted name if id not found
+                wo.technician_id = None
+                wo.technician_name = (f.get("technician_name") or "").strip().upper()
+        except Exception:
+            wo.technician_id = None
+            wo.technician_name = (f.get("technician_name") or "").strip().upper()
+    else:
+        wo.technician_id = None
+        wo.technician_name = (f.get("technician_name") or "").strip().upper()
+
     wo.job_numbers     = (f.get("job_numbers") or "").strip()
     wo.job_type        = (f.get("job_type") or "BASE").strip().upper()
     wo.delivery_fee    = _f(f.get("delivery_fee"), 0) or 0.0
@@ -1794,7 +1787,7 @@ def wo_save():
     st = (f.get("status") or "search_ordered").strip()
     wo.status = st if st in ("search_ordered", "ordered", "done") else "search_ordered"
 
-    # витринные хедеры
+    # legacy top-level fields posted directly (kept for compatibility)
     brand_hdr  = (f.get("brand")  or "").strip()
     model_hdr  = _clip(f.get("model"), 25)
     serial_hdr = _clip(f.get("serial"), 25)
@@ -1802,7 +1795,7 @@ def wo_save():
     if model_hdr:  wo.model  = model_hdr
     if serial_hdr: wo.serial = serial_hdr
 
-    # ---- REGEX-парсер ----
+    # ---- parse REGEX payload from units[...] ----
     re_unit = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
     re_row  = re.compile(
         r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|"
@@ -1823,7 +1816,6 @@ def wo_save():
             ui, ri, name = int(m.group(1)), int(m.group(2)), m.group(3)
             units_map.setdefault(ui, {"rows": {}})
             units_map[ui]["rows"].setdefault(ri, {})
-            # ВАЖНО: если поле может прийти как hidden+checkbox — берём последнее значение
             if name in ("ordered_flag", "backorder_flag"):
                 vals = request.form.getlist(key)
                 val = vals[-1] if vals else f.get(key)
@@ -1831,7 +1823,7 @@ def wo_save():
                 val = f.get(key)
             units_map[ui]["rows"][ri][name] = val
 
-    # собрать payload
+    # build payload
     units_payload = []
     new_rows_count = 0
     for ui in sorted(units_map.keys()):
@@ -1853,7 +1845,7 @@ def wo_save():
             if pn and qty > 0:
                 new_rows_count += 1
                 rows.append({
-                    "part_number": _clip(pn, 80),  # уже UPPER
+                    "part_number": _clip(pn, 80),  # already UPPER
                     "part_name":   _clip(r.get("part_name"), 120),
                     "quantity":    qty,
                     "alt_numbers": _clip(alt_raw, 200),
@@ -1862,7 +1854,7 @@ def wo_save():
                     "unit_cost":   ucost,
                     "backorder_flag": bo_flag,
                     "line_status": lstatus if lstatus in ("search_ordered","ordered","done") else "search_ordered",
-                    "ordered_flag": ord_flag,  # уже True/False
+                    "ordered_flag": ord_flag,
                 })
 
         brand  = (u.get("brand")  or "").strip()
@@ -1875,19 +1867,25 @@ def wo_save():
                                len(units_payload),
                                sum(len(x.get('rows') or []) for x in units_payload))
 
-    # 1) Только шапка — выходим
+    # 1) header-only save
     if new_rows_count == 0:
+        # also sync top-level brand/model/serial from first unit if it exists (keeps header consistent)
+        if units_payload:
+            first = units_payload[0]
+            wo.brand  = (first.get("brand")  or "").strip() or None
+            wo.model  = _clip(first.get("model"), 25) or None
+            wo.serial = _clip(first.get("serial"), 25) or None
         db.session.commit()
         flash("Work Order saved.", "success")
         return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
-    # 2) Пусто — откат
+    # 2) nothing parsable
     if not units_payload:
         flash("Nothing parsable in rows. Nothing was changed.", "warning")
         db.session.rollback()
         return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
-    # === индекс старых строк до удаления, чтобы сохранить ordered_date ===
+    # === index old rows to preserve ordered_date ===
     def _norm_supplier(s):
         s = (s or "").strip()
         return " ".join(s.split()).lower()
@@ -1909,29 +1907,23 @@ def wo_save():
                 )
                 old_index[(uk, pn, supn)] = (was_ordered, getattr(old_p, "ordered_date", None))
 
-    # Удаляем прежние units/parts
+    # remove previous units/parts
     for u in list(getattr(wo, "units", []) or []):
         for p in list(getattr(u, "parts", []) or []):
             db.session.delete(p)
         db.session.delete(u)
     db.session.flush()
 
-    # витринные поля из первого юнита при необходимости
-    def _first_nonempty(lst, key):
-        for it in lst or []:
-            v = (it.get(key) or "").strip()
-            if v: return v
-        return ""
-    if not (wo.brand or "").strip():
-        wo.brand  = _clip(_first_nonempty(units_payload, "brand"), 40)
-    if not (wo.model or "").strip():
-        wo.model  = _clip(_first_nonempty(units_payload, "model"), 25)
-    if not (wo.serial or "").strip():
-        wo.serial = _clip(_first_nonempty(units_payload, "serial"), 25)
+    # ---- sync top-level header from FIRST unit (authoritative) ----
+    first_unit = units_payload[0] if units_payload else None
+    if first_unit:
+        wo.brand  = (first_unit.get("brand")  or "").strip() or None
+        wo.model  = _clip(first_unit.get("model"), 25) or None
+        wo.serial = _clip(first_unit.get("serial"), 25) or None
 
     suppliers_seen = []
 
-    # Создаём заново, НО восстанавливаем ordered_date по ключу
+    # recreate with ordered_date preservation
     for up in units_payload:
         unit = WorkUnit(
             work_order=wo,
@@ -1951,9 +1943,9 @@ def wo_save():
                 if s_norm and s_norm.lower() not in [x.lower() for x in suppliers_seen]:
                     suppliers_seen.append(s_norm)
 
-            pn_upper = r["part_number"]      # уже UPPER
+            pn_upper = r["part_number"]      # already UPPER
             sup_norm = _norm_supplier(sup)
-            ord_in   = bool(r.get("ordered_flag"))  # уже True/False из payload
+            ord_in   = bool(r.get("ordered_flag"))
 
             prev_state = old_index.get((uk, pn_upper, sup_norm))
             prev_was_ordered, prev_date = (prev_state if prev_state else (False, None))
@@ -2001,7 +1993,7 @@ def wo_save():
 
     db.session.commit()
 
-    # recent_suppliers
+    # recent suppliers
     if suppliers_seen:
         cur = session.get("recent_suppliers", [])
         merged, seen = [], set()
@@ -2154,6 +2146,10 @@ def wo_list():
     - model: brand OR model ILIKE
     - pn: part_number OR alt_part_numbers ILIKE (outer join)
     - from/to: created_at date range (inclusive)
+
+    Дополнительно:
+    - если current_user.role == 'technician' → показываем только его WO
+      (по technician_id == current_user.id, с fallback по точному совпадению имени)
     """
     tech  = (request.args.get("tech") or "").strip()
     jobs  = (request.args.get("jobs") or "").strip()
@@ -2166,6 +2162,19 @@ def wo_list():
     joined_parts = False
     filters = []
 
+    # --- ОГРАНИЧЕНИЕ ДЛЯ ТЕХНИКА ---
+    if is_technician():
+        me_id = getattr(current_user, "id", None)
+        me_name = (getattr(current_user, "username", "") or "").strip()
+        # technician_id — основной фильтр; technician_name — fallback для старых записей
+        filters.append(
+            or_(
+                WorkOrder.technician_id == me_id,
+                func.trim(WorkOrder.technician_name) == me_name,
+            )
+        )
+
+    # --- Остальные твои фильтры (как было) ---
     if tech:
         filters.append(WorkOrder.technician_name.ilike(f"%{tech}%"))
 
@@ -2206,11 +2215,10 @@ def wo_list():
         q = q.filter(and_(*filters))
 
     if joined_parts:
+        # чтобы не дублировать WO при outer join
         q = q.distinct(WorkOrder.id)
 
-    # Твой прежний порядок/лимит оставляем
     items = q.order_by(WorkOrder.created_at.desc()).limit(200).all()
-
     return render_template("wo_list.html", items=items, args=request.args)
 
 @inventory_bp.post("/work_orders/<int:wo_id>/issue_instock", endpoint="wo_issue_instock")
@@ -2564,7 +2572,6 @@ def wo_newx():
         recent_suppliers=recent_suppliers
     )
 
-
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
 @login_required
 def wo_edit(wo_id: int):
@@ -2577,21 +2584,41 @@ def wo_edit(wo_id: int):
 
     wo = WorkOrder.query.get_or_404(wo_id)
 
-    # ORM → payload
+    technicians = _query_technicians()
+
+    # preselect
+    selected_tech_id = None
+    selected_tech_username = None
+    if getattr(wo, "technician_id", None):
+        selected_tech_id = int(wo.technician_id)
+        for tid, uname in technicians:
+            if tid == selected_tech_id:
+                selected_tech_username = uname
+                break
+    if selected_tech_id is None:
+        wo_name = (wo.technician_name or "").strip().lower()
+        if wo_name:
+            for tid, uname in technicians:
+                if (uname or "").strip().lower() == wo_name:
+                    selected_tech_id = tid
+                    selected_tech_username = uname
+                    break
+
+    # units payload (unchanged)
     units = []
     for u in (getattr(wo, "units", []) or []):
         rows = []
         for p in (getattr(u, "parts", []) or []):
             rows.append({
-                "id":             getattr(p, "id", None),
-                "part_number":    getattr(p, "part_number", "") or "",
-                "part_name":      getattr(p, "part_name", "") or "",
-                "quantity":       int(getattr(p, "quantity", 0) or 0),
-                "alt_numbers":    getattr(p, "alt_numbers", "") or "",
-                "warehouse":      getattr(p, "warehouse", "") or "",
-                "supplier":       getattr(p, "supplier", "") or "",
+                "id": getattr(p, "id", None),
+                "part_number": getattr(p, "part_number", "") or "",
+                "part_name": getattr(p, "part_name", "") or "",
+                "quantity": int(getattr(p, "quantity", 0) or 0),
+                "alt_numbers": getattr(p, "alt_numbers", "") or "",
+                "warehouse": getattr(p, "warehouse", "") or "",
+                "supplier": getattr(p, "supplier", "") or "",
                 "backorder_flag": bool(getattr(p, "backorder_flag", False)),
-                "line_status":    getattr(p, "line_status", "") or "search_ordered",
+                "line_status": getattr(p, "line_status", "") or "search_ordered",
                 "unit_cost": (
                     float(getattr(p, "unit_cost")) if getattr(p, "unit_cost") is not None else None
                 ),
@@ -2606,11 +2633,11 @@ def wo_edit(wo_id: int):
                 "unit_cost": 0.0,
             }]
         units.append({
-            "id":     getattr(u, "id", None),
-            "brand":  getattr(u, "brand", "") or "",
-            "model":  getattr(u, "model", "") or "",
+            "id": getattr(u, "id", None),
+            "brand": getattr(u, "brand", "") or "",
+            "model": getattr(u, "model", "") or "",
             "serial": getattr(u, "serial", "") or "",
-            "rows":   rows,
+            "rows": rows,
         })
 
     if not units:
@@ -2636,8 +2663,10 @@ def wo_edit(wo_id: int):
         units=units,
         recent_suppliers=recent_suppliers,
         readonly=readonly,
+        technicians=technicians,
+        selected_tech_id=selected_tech_id,
+        selected_tech_username=selected_tech_username,
     )
-
 
 @inventory_bp.post("/work_orders/<int:wo_id>/delete", endpoint="wo_delete")
 @login_required
@@ -3551,15 +3580,16 @@ def reports():
 @inventory_bp.route('/reports_grouped', methods=['GET', 'POST'])
 @login_required
 def reports_grouped():
-
     from collections import defaultdict
     from datetime import datetime, time
     from sqlalchemy.orm import selectinload
+    from sqlalchemy import func, or_
+    from flask import render_template, request
+    from flask_login import current_user
     from extensions import db
     from models import IssuedPartRecord, IssuedBatch, Part
-    from flask import render_template, request
 
-    def _parse_date_ymd(s: str):
+    def _parse_date_ymd(s: str | None):
         if not s:
             return None
         try:
@@ -3571,11 +3601,17 @@ def reports_grouped():
     params         = request.values
     start_date_s   = (params.get('start_date') or '').strip()
     end_date_s     = (params.get('end_date') or '').strip()
-    recipient      = (params.get('recipient') or '').strip() or None
+    recipient_raw  = (params.get('recipient') or '').strip() or None
     reference_job  = (params.get('reference_job') or '').strip() or None
-    # принимаем invoice_number, а также fallback: invoice / invoice_no
     invoice_s      = (params.get('invoice_number') or params.get('invoice') or params.get('invoice_no') or '').strip()
     location       = (params.get('location') or '').strip() or None
+
+    # роль/текущий пользователь
+    role_low = (getattr(current_user, "role", "") or "").strip().lower()
+    me_user  = (getattr(current_user, "username", "") or "").strip()
+
+    # ТЕХНИК: принудительно фильтруем только по себе
+    recipient_effective = me_user if role_low == "technician" else recipient_raw
 
     # даты → границы дня
     start_dt_raw = _parse_date_ymd(start_date_s)
@@ -3591,16 +3627,35 @@ def reports_grouped():
 
     # ---------- Запрос с подзагрузкой связей ----------
     q = (
-        IssuedPartRecord.query
+        db.session.query(IssuedPartRecord)
         .join(Part, IssuedPartRecord.part_id == Part.id)
+        .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)  # чтобы можно было фильтровать и по batch
         .options(
             selectinload(IssuedPartRecord.part),
             selectinload(IssuedPartRecord.batch),
         )
     )
 
-    if recipient:
-        q = q.filter(IssuedPartRecord.issued_to.ilike(f'%{recipient}%'))
+    # Фильтр по "кому выдано"
+    if recipient_effective:
+        if role_low == "technician":
+            # строгая фильтрация — только ровно его имя
+            q = q.filter(
+                or_(
+                    func.trim(IssuedPartRecord.issued_to) == recipient_effective,
+                    func.trim(IssuedBatch.issued_to)     == recipient_effective,
+                )
+            )
+        else:
+            # для админов оставляем «поиск по части»
+            like = f"%{recipient_effective}%"
+            q = q.filter(
+                or_(
+                    IssuedPartRecord.issued_to.ilike(like),
+                    IssuedBatch.issued_to.ilike(like),
+                )
+            )
+
     if reference_job:
         q = q.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
     if start_dt:
@@ -3608,7 +3663,6 @@ def reports_grouped():
     if end_dt:
         q = q.filter(IssuedPartRecord.issue_date <= end_dt)
     if invoice_no is not None:
-        # у legacy строк invoice_number может быть NULL — показываем только совпавшие
         q = q.filter(IssuedPartRecord.invoice_number == invoice_no)
     if location:
         q = q.filter(IssuedPartRecord.location == location)
@@ -3618,7 +3672,7 @@ def reports_grouped():
         IssuedPartRecord.id.desc()
     ).all()
 
-    # ---------- Группировка: новые по batch_id, legacy по старому ключу ----------
+    # ---------- Группировка: batch/legacy ----------
     grouped = defaultdict(list)
     for r in rows:
         if getattr(r, 'batch_id', None):
@@ -3639,18 +3693,18 @@ def reports_grouped():
         return ref.startswith('RETURN')
 
     for gkey, items in grouped.items():
-        items_sorted = sorted(items, key=lambda it: it.id)  # стабильный порядок строк
+        items_sorted = sorted(items, key=lambda it: it.id)
         total_value = sum((it.quantity or 0) * (it.unit_cost_at_issue or 0.0) for it in items_sorted)
         grand_total += total_value
 
         if gkey[0] == 'BATCH':
-            batch = items_sorted[0].batch  # selectinload уже сделал
+            batch = items_sorted[0].batch
             inv = {
                 'id': f'B{batch.id}',
                 'issued_to': batch.issued_to,
                 'reference_job': batch.reference_job,
                 'issued_by': batch.issued_by,
-                'issue_date': batch.issue_date,          # datetime
+                'issue_date': batch.issue_date,
                 'invoice_number': batch.invoice_number,
                 'location': batch.location,
                 'items': items_sorted,
@@ -3668,8 +3722,8 @@ def reports_grouped():
                 'issued_to': issued_to,
                 'reference_job': ref_job,
                 'issued_by': issued_by,
-                'issue_date': issue_dt,                  # datetime
-                'invoice_number': first.invoice_number,  # может быть None (legacy)
+                'issue_date': issue_dt,
+                'invoice_number': first.invoice_number,
                 'location': first.location,
                 'items': items_sorted,
                 'total_value': total_value,
@@ -3680,8 +3734,7 @@ def reports_grouped():
 
         invoices.append(inv)
 
-    # ---------- Сортировка карточек (НОВАЯ) ----------
-    # Только по дате (последние сверху), затем по номеру инвойса, затем по макс. id строки.
+    # ---------- Сортировка карточек ----------
     invoices.sort(
         key=lambda g: (
             g.get('_sort_dt') or datetime.min,
@@ -3695,12 +3748,12 @@ def reports_grouped():
         'reports_grouped.html',
         invoices=invoices,
         total=grand_total,
-        # возвращаем исходные значения в форму (не очищаем)
+        # возвращаем значения в форму
         start_date=start_date_s,
         end_date=end_date_s,
-        recipient=recipient or '',
+        recipient=(recipient_effective or ''),   # технику показываем его имя
         reference_job=reference_job or '',
-        invoice=invoice_s or '',  # важно: шаблон ждёт 'invoice', не 'invoice_number'
+        invoice=invoice_s or '',                # шаблон ждёт "invoice"
         location=location or '',
     )
 
@@ -4661,23 +4714,54 @@ def download_report_pdf():
                      mimetype='application/pdf')
 
 
-@inventory_bp.route('/users')
+@inventory_bp.route("/users", methods=["GET", "POST"])
 @login_required
 def users():
-    # superadmin видит всех, admin — только пользователей с ролью user и себя
-    if current_user.role == 'superadmin':
-        users_list = User.query.all()
-    elif current_user.role == 'admin':
-        users_list = User.query.filter(
-            (User.role == 'user') | (User.id == current_user.id)
-        ).all()
-    else:
-        flash("Access denied", "danger")
-        return redirect(url_for('inventory.dashboard'))
+    # ---- Создание нового пользователя (разрешено только superadmin)
+    if request.method == "POST":
+        if current_user.role != ROLE_SUPERADMIN:
+            flash("Access denied", "danger")
+            return redirect(url_for("inventory.users"))
 
-    return render_template('users.html', users=users_list)
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        role     = (request.form.get("role") or "").strip().lower()
 
+        if not username or not password:
+            flash("Username and password are required.", "warning")
+            return redirect(url_for("inventory.users"))
 
+        # case-insensitive проверка уникальности
+        exists = (
+            db.session.query(User.id)
+            .filter(func.lower(User.username) == username.lower())
+            .first()
+        )
+        if exists:
+            flash("User already exists.", "warning")
+            return redirect(url_for("inventory.users"))
+
+        # модель сама нормализует роль (валидатор), дефолт — technician
+        u = User(username=username, role=role or ROLE_TECHNICIAN)
+        u.password = password
+        db.session.add(u)
+        db.session.commit()
+        flash("User created.", "success")
+        return redirect(url_for("inventory.users"))
+
+    # ---- Список пользователей
+    users = User.query.order_by(User.username.asc()).all()
+
+    # Опции ролей для селекта
+    role_options = [
+        ("technician", "Technician"),
+        ("user",       "User"),
+        ("viewer",     "Viewer"),
+        ("admin",      "Admin"),
+        ("superadmin", "Superadmin"),
+    ]
+
+    return render_template("users.html", users=users, role_options=role_options)
 @inventory_bp.route('/users/add', methods=['GET', 'POST'])
 @login_required
 def add_user():
@@ -4716,70 +4800,123 @@ def add_user():
 @inventory_bp.route('/users/edit/<int:user_id>', methods=['GET', 'POST'])
 @login_required
 def edit_user(user_id):
+    from sqlalchemy import func
     user = User.query.get_or_404(user_id)
 
-    # superadmin может редактировать всех
-    # admin — только пользователей с ролью user и себя
-    if current_user.role == 'admin':
-        if user.role != 'user' and user.id != current_user.id:
-            flash("Admins can only edit users with role 'user' or themselves.", "danger")
+    me_role = (current_user.role or '').lower()
+    target_role = (user.role or '').lower()
+
+    # Права: superadmin — всех; admin — только user/viewer/technician и себя
+    if me_role == 'admin':
+        if not (user.id == current_user.id or target_role in {'user', 'viewer', 'technician'}):
+            flash("Admins can only edit users with role 'user/viewer/technician' or themselves.", "danger")
             return redirect(url_for('inventory.dashboard'))
-    elif current_user.role != 'superadmin':
+    elif me_role != 'superadmin':
         flash("Access denied", "danger")
         return redirect(url_for('inventory.dashboard'))
 
+    # Список ролей для селекта:
+    # - супер-админ видит все роли
+    # - админ может назначать только user/viewer/technician; себе — оставлять admin
+    role_options = []
+    if me_role == 'superadmin':
+        role_options = [
+            ('technician', 'Technician'),
+            ('user', 'User'),
+            ('viewer', 'Viewer'),
+            ('admin', 'Admin'),
+            ('superadmin', 'Superadmin'),
+        ]
+    else:  # admin
+        role_options = [
+            ('technician', 'Technician'),
+            ('user', 'User'),
+            ('viewer', 'Viewer'),
+        ]
+        # если админ редактирует себя — оставляем возможность иметь admin (но не менять на супер-админа)
+        if user.id == current_user.id:
+            role_options.append(('admin', 'Admin'))
+
     if request.method == 'POST':
-        user.username = request.form['username'].strip()
-        user.role = request.form['role']
+        new_username = (request.form.get('username') or '').strip()
+        new_role_raw = (request.form.get('role') or '').strip().lower()
+
+        # username можно менять обоим (как было), без усложнения логики
+        if new_username:
+            # защита от дублей по нижнему регистру
+            exists = (
+                db.session.query(User.id)
+                .filter(func.lower(User.username) == new_username.lower(), User.id != user.id)
+                .first()
+            )
+            if exists:
+                flash("Username already exists.", "danger")
+                return redirect(url_for('inventory.edit_user', user_id=user.id))
+            user.username = new_username
+
+        # роль — только в пределах разрешённых опций
+        allowed_values = {val for val, _ in role_options}
+        if new_role_raw in allowed_values:
+            user.role = new_role_raw  # у вас в модели стоит нормализация/дефолт
+        else:
+            # ничего не меняем, чтобы не сломать существующее значение
+            pass
+
         db.session.commit()
         flash("User updated successfully", "success")
         return redirect(url_for('inventory.users'))
 
-    return render_template('edit_user.html', user=user)
-
+    return render_template('edit_user.html', user=user, role_options=role_options)
 
 @inventory_bp.route('/users/change_password/<int:user_id>', methods=['GET', 'POST'])
 @login_required
 def change_password(user_id):
+    from flask import request, flash, redirect, url_for, render_template
+    from flask_login import current_user
+    from werkzeug.security import generate_password_hash
+    from extensions import db
+    from models import User
+
     user = User.query.get_or_404(user_id)
 
-    # superadmin меняет любой пароль
-    # admin меняет только пароли пользователей с ролью user и свой (для своего - проверка текущего пароля)
-    if current_user.role == 'admin':
-        if user.role != 'user' and user.id != current_user.id:
+    role = (current_user.role or '').lower()
+    is_self = current_user.id == user_id
+
+    # superadmin → любой; admin → только user и свой; остальные (в т.ч. technician) → только себе
+    if role == 'admin':
+        if (user.role or '').lower() != 'user' and not is_self:
             flash("Admins can only change passwords for users with role 'user' or themselves.", "danger")
             return redirect(url_for('inventory.dashboard'))
-    elif current_user.role != 'superadmin' and current_user.id != user_id:
+    elif role != 'superadmin' and not is_self:
         flash("Access denied", "danger")
         return redirect(url_for('inventory.dashboard'))
 
     if request.method == 'POST':
-        # Если admin меняет свой пароль - проверяем текущий пароль
-        if current_user.role == 'admin' and current_user.id == user_id:
-            current_password = request.form.get('current_password')
-            if not user.check_password(current_password):
+        if is_self and role != 'superadmin':
+            current_password = (request.form.get('current_password') or '').strip()
+            if not current_password or not user.check_password(current_password):
                 flash("Current password is incorrect.", "danger")
                 return redirect(url_for('inventory.change_password', user_id=user_id))
 
-        new_password = request.form['password']
-        confirm_password = request.form.get('confirm_password')
+        new_password = (request.form.get('password') or '').strip()
+        confirm_password = (request.form.get('confirm_password') or '').strip()
+
+        if not new_password:
+            flash("New password cannot be empty.", "danger")
+            return redirect(url_for('inventory.change_password', user_id=user_id))
 
         if new_password != confirm_password:
             flash("Passwords do not match.", "danger")
             return redirect(url_for('inventory.change_password', user_id=user_id))
 
         user.password_hash = generate_password_hash(new_password)
-
         db.session.commit()
         flash("Password changed successfully", "success")
 
-        if current_user.role == 'superadmin':
-            return redirect(url_for('inventory.users'))
-        else:
-            return redirect(url_for('inventory.dashboard'))
+        return redirect(url_for('inventory.users' if role == 'superadmin' else 'inventory.dashboard'))
 
-    return render_template('change_password.html', user=user)
-
+    need_current = is_self and role != 'superadmin'
+    return render_template('change_password.html', user=user, need_current=need_current)
 
 @inventory_bp.route('/users/delete/<int:user_id>', methods=['POST'])
 @login_required

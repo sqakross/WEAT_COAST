@@ -1,36 +1,114 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>User Management</h2>
-<a href="{{ url_for('inventory.add_user') }}">Add New User</a>
-<table>
-  <thead>
-    <tr>
-      <th>Username</th>
-      <th>Role</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for user in users %}
-    <tr>
-      <td>{{ user.username }}</td>
-      <td>{{ user.role }}</td>
-      <td>
-        {% if current_user.role == 'superadmin' or (current_user.role == 'admin' and user.role == 'user') or user.id == current_user.id %}
-          <a href="{{ url_for('inventory.edit_user', user_id=user.id) }}">Edit</a> |
-          <a href="{{ url_for('inventory.change_password', user_id=user.id) }}">Change Password</a>
-          {% if current_user.role == 'superadmin' and user.id != current_user.id %}
-            | <form action="{{ url_for('inventory.delete_user', user_id=user.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('Delete user?');">
-                <button type="submit">Delete</button>
-              </form>
+<h3>Manage Users</h3>
+
+<div class="card mb-3" style="max-width: 720px;">
+  <div class="card-header">Create New User</div>
+  <div class="card-body">
+    <!-- ВАЖНО: постим на тот же роут /users -->
+    <form method="post" action="{{ url_for('inventory.users') }}" class="row g-2">
+      <div class="col-md-4">
+        <label class="form-label mb-1">Username</label>
+        <input name="username" class="form-control" placeholder="e.g. tech.john" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label mb-1">Password</label>
+        <input type="password" name="password" class="form-control" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label mb-1">Role</label>
+        <div class="input-group">
+          <select name="role" class="form-select">
+            {% for value, caption in role_options %}
+              {% if value == 'superadmin' and (current_user.role or '')|lower != 'superadmin' %}
+                {# не показываем superadmin не-суперадмину #}
+              {% else %}
+                <option value="{{ value }}" {% if value=='technician' %}selected{% endif %}>{{ caption }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+          <button class="btn btn-primary" type="submit">Create</button>
+        </div>
+        <div class="form-text">If unsure, pick <a href="#" tabindex="-1">Technician</a>.</div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="d-flex mb-2 gap-2" style="max-width: 720px;">
+  <input id="usersSearch" class="form-control" placeholder="Search username or role…">
+</div>
+
+<div class="table-responsive" style="max-width: 720px;">
+  <table class="table table-sm table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>Username</th>
+        <th>Role</th>
+        <th class="text-end">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="usersTbody">
+      {% for u in users %}
+      <tr>
+        <td>
+          {{ u.username }}
+          {% if u.id == current_user.id %}
+            <div class="small text-muted">This is you</div>
           {% endif %}
-        {% else %}
-          -
-        {% endif %}
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+        </td>
+        <td>
+          {% set r=(u.role or '')|lower %}
+          {% if r=='superadmin' %}
+            <span class="badge bg-dark">superadmin</span>
+          {% elif r=='admin' %}
+            <span class="badge bg-primary">admin</span>
+          {% elif r=='technician' %}
+            <span class="badge bg-success">technician</span>
+          {% elif r=='viewer' %}
+            <span class="badge bg-secondary">viewer</span>
+          {% else %}
+            <span class="badge bg-light text-muted">user</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          <div class="btn-group btn-group-sm">
+            {% if (current_user.role or '')|lower == 'superadmin'
+                  or ((current_user.role or '')|lower == 'admin' and (u.role or '')|lower in ['user','viewer','technician'])
+                  or u.id == current_user.id %}
+              <a class="btn btn-outline-secondary" href="{{ url_for('inventory.edit_user', user_id=u.id) }}">Edit</a>
+              <a class="btn btn-outline-primary" href="{{ url_for('inventory.change_password', user_id=u.id) }}">Change Password</a>
+              {% if (current_user.role or '')|lower == 'superadmin' and u.id != current_user.id %}
+                <form method="post" action="{{ url_for('inventory.delete_user', user_id=u.id) }}" onsubmit="return confirm('Delete user {{u.username}}?');">
+                  <button class="btn btn-outline-danger" type="submit">Delete</button>
+                </form>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // простой клиентский поиск
+  (function(){
+    const q = document.getElementById('usersSearch');
+    const tbody = document.getElementById('usersTbody');
+    q?.addEventListener('input', ()=>{
+      const needle = (q.value||'').toLowerCase();
+      [...tbody.querySelectorAll('tr')].forEach(tr=>{
+        const text = tr.textContent.toLowerCase();
+        tr.style.display = text.includes(needle) ? '' : 'none';
+      });
+    });
+  })();
+</script>
 {% endblock %}
 

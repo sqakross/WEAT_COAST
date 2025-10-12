@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>WEST COAST CHIEF REPAIR - Inventory System</title>
 
-  <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
         rel="stylesheet"
         integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
@@ -43,38 +42,31 @@
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.issue_part' %} active{% endif %}"
                href="{{ url_for('inventory.issue_part') }}">Issue Part</a>
           </li>
-            {% set is_wo = request.endpoint and request.endpoint.startswith('inventory.wo_') %}
-            <li class="nav-item">
-                <a class="nav-link{{ ' active' if is_wo else '' }}"
-                    href="{{ url_for('inventory.wo_list') }}">
-                    Work Orders
-                </a>
-<!--          <li class="nav-item">-->
-<!--            <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.wo_list' %} active{% endif %}"-->
-<!--               href="{{ url_for('inventory.wo_list') }}">Work Orders</a>-->
+
+          {% set is_wo = request.endpoint and request.endpoint.startswith('inventory.wo_') %}
+          <li class="nav-item">
+            <a class="nav-link{{ ' active' if is_wo else '' }}"
+               href="{{ url_for('inventory.wo_list') }}">Work Orders</a>
           </li>
+
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.reports') %} active{% endif %}"
                href="{{ url_for('inventory.reports_grouped') }}">Reports</a>
           </li>
+
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.import_parts') %} active{% endif %}"
                href="{{ url_for('inventory.import_parts') }}">Import Parts</a>
           </li>
 
-          <!-- Compare dropdown -->
           <li class="nav-item dropdown">
             <a class="nav-link dropdown-toggle" href="#" id="compareDropdown" role="button"
                data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">
               Compare Parts
             </a>
             <ul class="dropdown-menu" aria-labelledby="compareDropdown">
-              <li>
-                <a class="dropdown-item" href="{{ url_for('inventory.download_marcone_report') }}">📥 Marcone Report</a>
-              </li>
-              <li>
-                <a class="dropdown-item" href="{{ url_for('inventory.download_reliable_report') }}">📥 Reliable Report</a>
-              </li>
+              <li><a class="dropdown-item" href="{{ url_for('inventory.download_marcone_report') }}">📥 Marcone Report</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('inventory.download_reliable_report') }}">📥 Reliable Report</a></li>
             </ul>
           </li>
 
@@ -87,15 +79,21 @@
         </ul>
 
         {% if current_user.is_authenticated %}
-        <div class="d-flex align-items-center">
-          <span class="text-white me-3">
-            Welcome, <strong>{{ current_user.username }}</strong> ({{ current_user.role.capitalize() }})
+        <div class="d-flex align-items-center gap-2">
+          <span class="text-white me-2">
+            Welcome, <strong>{{ current_user.username }}</strong>
+            <span class="badge bg-light text-dark text-capitalize ms-1">{{ current_user.role }}</span>
           </span>
-          {% if current_user.role == 'user' %}
-            <a href="{{ url_for('inventory.change_password', user_id=current_user.id) }}"
-               class="btn btn-outline-light btn-sm me-2">🔑 Change Password</a>
-          {% endif %}
-          <a href="{{ url_for('auth.logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
+
+          <!-- Всегда заметные кнопки -->
+          <a class="btn btn-outline-light btn-sm"
+             href="{{ url_for('inventory.change_password', user_id=current_user.id) }}">
+            🔑 Change password
+          </a>
+          <a class="btn btn-light btn-sm"
+             href="{{ url_for('auth.logout') }}">
+            Logout
+          </a>
         </div>
         {% endif %}
       </div>
@@ -117,7 +115,6 @@
     {% block content %}{% endblock %}
   </main>
 
-  <!-- Global Toast container -->
   <div class="position-fixed bottom-0 end-0 p-3" style="z-index:1080">
     <div id="globalToast" class="toast align-items-center text-bg-success border-0" role="alert"
          aria-live="assertive" aria-atomic="true">
@@ -129,13 +126,11 @@
     </div>
   </div>
 
-  <!-- Bootstrap JS (bundle) -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
           integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
           crossorigin="anonymous"></script>
 
   <script>
-    // Глобальный хелпер тоста (с фолбэком)
     window.showToast = function (msg, opts = {}) {
       const el = document.getElementById('globalToast');
       const body = document.getElementById('globalToastBody');
@@ -145,7 +140,6 @@
         const t = new bootstrap.Toast(el, { delay: opts.delay || 2000 });
         t.show();
       } else {
-        // fallback (если Bootstrap не загрузился)
         alert(body.textContent);
       }
     };
@@ -154,6 +148,3 @@
   {% block extra_js %}{% endblock %}
 </body>
 </html>
-
-
-

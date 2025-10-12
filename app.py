@@ -1,13 +1,17 @@
-from flask import Flask
+from flask import Flask, request, redirect, url_for
 from config import Config
 import os, sys, io, logging
 from logging.handlers import RotatingFileHandler
 from extensions import db, login_manager
+from flask_login import current_user
+from sqlalchemy.orm import relationship
+
 
 # + Sentry
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
+from security import is_technician
 
 # --- 1) Форсируем UTF-8 для stdout/stderr (кириллица в print) ---
 def _force_utf8_stdio():
@@ -138,6 +142,109 @@ app.register_blueprint(inventory_bp)
 
 logging.info("Flask app configured and blueprints registered.")
 
+# --- Ограничение навигации для роли technician (white-list) ---
+# Разрешённые endpoint'ы для техника. Подставь/оставь только те, что реально есть.
+ALLOWED_TECH_ENDPOINTS = {
+    # Work Orders
+    "inventory.wo_list",
+    "inventory.wo_detail",
+
+    # Если есть подтверждения и печать:
+    "inventory.wo_confirm_lines",   # <-- твой POST-роут подтверждения
+    # "inventory.batch_confirm",    # если нет — можно снять
+    # "inventory.print_report",     # если нет — можно снять
+
+    # Отчёты — только группированный, но дальше мы подстрижём параметры
+    "inventory.reports_grouped",
+
+    # Смена пароля и выход
+    "inventory.change_password",
+    "auth.logout",
+
+    # login и статика
+    "auth.login",
+    "static",
+}
+
+# VIEWER: только Work Orders (лист + деталка) и Reports; смена пароля себе; выход; статика.
+ALLOWED_VIEWER_ENDPOINTS = {
+    "inventory.wo_list",
+    "inventory.wo_detail",
+    "inventory.reports_grouped",
+
+    "inventory.change_password",
+    "auth.logout",
+
+    "static",
+}
+
+def _is_allowed_for_tech(endpoint: str) -> bool:
+    if not endpoint:
+        return False
+
+    # Статика всегда нужна
+    if endpoint == "static":
+        return True
+
+    # Work Orders (список, детали, подтверждение)
+    if endpoint.startswith("inventory.wo_"):
+        # включает: inventory.wo_list, inventory.wo_detail, inventory.wo_confirm_lines, и т.д.
+        return True
+
+    # Отчёты технику по его работам (кнопка Open Report ведёт сюда)
+    if endpoint.startswith("inventory.reports_"):
+        # например: inventory.reports_grouped
+        return True
+
+    # Печать PDF (кнопка Print)
+    if endpoint in {"inventory.invoice_pdf", "inventory.print_invoice", "inventory.print_report"}:
+        return True
+
+    # Смена пароля и выход
+    if endpoint in {"inventory.change_password", "auth.logout"}:
+        return True
+
+    return False
+
+from urllib.parse import urlencode
+
+@app.before_request
+def restrict_role_routes():
+    """
+    Ограничиваем доступ по ролям 'technician' и 'viewer' *только* разрешёнными endpoint'ами.
+    Все остальные запросы уводим на список Work Orders.
+    Для остальных ролей (admin/superadmin/user) — без ограничений (остаются проверки в роутерах/шаблонах).
+    """
+    try:
+        if not getattr(current_user, "is_authenticated", False):
+            return  # гость — пусть доходит до /login
+
+        ep = (request.endpoint or "").strip()
+        role = (getattr(current_user, "role", "") or "").strip().lower()
+
+        if role == "technician":
+            if ep in ALLOWED_TECH_ENDPOINTS:
+                return
+            # health/ping допускаем на всякий случай
+            if ep.endswith(".health") or ep.endswith(".ping"):
+                return
+            return redirect(url_for("inventory.wo_list"))
+
+        if role == "viewer":
+            if ep in ALLOWED_VIEWER_ENDPOINTS:
+                return
+            if ep.endswith(".health") or ep.endswith(".ping"):
+                return
+            return redirect(url_for("inventory.wo_list"))
+
+        # другие роли — без общего редиректа (остаются локальные проверки прав)
+        return
+    except Exception:
+        # в случае ошибки не блокируем, но для safety уводим на список WO
+        try:
+            return redirect(url_for("inventory.wo_list"))
+        except Exception:
+            return
 # ----------------------------
 # ВСПОМОГАТЕЛЬНЫЕ МИГРАЦИИ
 # ----------------------------
