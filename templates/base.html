@@ -49,6 +49,9 @@
                href="{{ url_for('inventory.wo_list') }}">Work Orders</a>
           </li>
 
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('inventory.receiving_list') }}">Receiving</a></li>
+
+
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.reports') %} active{% endif %}"
                href="{{ url_for('inventory.reports_grouped') }}">Reports</a>

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Receiving Batches</h3>
+
+<form class="row g-2 mb-3" method="get">
+  <div class="col-auto"><input name="supplier" class="form-control" placeholder="Supplier" value="{{ filters.supplier }}"></div>
+  <div class="col-auto"><input name="invoice" class="form-control" placeholder="Invoice #" value="{{ filters.invoice }}"></div>
+  <div class="col-auto"><input name="date_from" type="date" class="form-control" value="{{ filters.date_from }}"></div>
+  <div class="col-auto"><input name="date_to" type="date" class="form-control" value="{{ filters.date_to }}"></div>
+  <div class="col-auto">
+    <select name="status" class="form-select">
+      <option value="">Any status</option>
+      <option value="draft"  {{ 'selected' if filters.status=='draft'  }}>Draft</option>
+      <option value="posted" {{ 'selected' if filters.status=='posted' }}>Posted</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-primary">Search</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_new') }}">+ New Batch</a>
+  </div>
+</form>
+
+<table class="table table-sm table-hover align-middle">
+  <thead>
+    <tr>
+      <th>ID</th><th>Date</th><th>Supplier</th><th>Invoice #</th><th>Status</th>
+      <th class="text-end">Qty</th><th class="text-end">Total Cost</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for b in batches %}
+    <tr onclick="location.href='{{ url_for('inventory.receiving_detail', batch_id=b.id) }}'" style="cursor:pointer">
+      <td>{{ b.id }}</td>
+      <td>{{ b.invoice_date or '—' }}</td>
+      <td>{{ b.supplier_name }}</td>
+      <td>{{ b.invoice_number }}</td>
+      <td>{% if b.status=='posted' %}<span class="badge bg-success">posted</span>{% else %}<span class="badge bg-secondary">draft</span>{% endif %}</td>
+      <td class="text-end">{{ b.total_qty }}</td>
+      <td class="text-end">{{ b.currency }} {{ '%.2f' % b.total_cost }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

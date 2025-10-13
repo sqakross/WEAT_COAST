@@ -1,8 +1,8 @@
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func, or_, and_
-from models import IssuedPartRecord, WorkOrder, WorkOrderPart, TechReceiveLog, IssuedBatch, Part
+from models import IssuedPartRecord, WorkOrder, WorkOrderPart, TechReceiveLog, IssuedBatch, Part, ReceivingBatch, ReceivingItem
 import json
-# from extensions import db
+from services.receiving import post_receiving_batch
 import pdfplumber
 from pdf2image import convert_from_path
 import pytesseract
@@ -5640,6 +5640,118 @@ def _already_returned_qty_for_source(src) -> int:
     )
     # total_neg отрицательный или 0 → возвращаем модуль
     return abs(int(total_neg))
+
+@inventory_bp.get("/receiving", endpoint="receiving_list")
+@login_required
+def receiving_list():
+    q = ReceivingBatch.query
+    supplier = (request.args.get("supplier") or "").strip()
+    inv = (request.args.get("invoice") or "").strip()
+    d1 = (request.args.get("date_from") or "").strip()
+    d2 = (request.args.get("date_to") or "").strip()
+    status = (request.args.get("status") or "").strip()
+
+    if supplier:
+        q = q.filter(ReceivingBatch.supplier_name.ilike(f"%{supplier}%"))
+    if inv:
+        q = q.filter(ReceivingBatch.invoice_number.ilike(f"%{inv}%"))
+    if status in ("draft", "posted"):
+        q = q.filter(ReceivingBatch.status == status)
+
+    def _parse_date(s):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    d1p, d2p = _parse_date(d1), _parse_date(d2)
+    if d1p:
+        q = q.filter(ReceivingBatch.invoice_date >= d1p)
+    if d2p:
+        q = q.filter(ReceivingBatch.invoice_date <= d2p)
+
+    batches = q.order_by(ReceivingBatch.invoice_date.desc().nullslast(), ReceivingBatch.id.desc()).all()
+    return render_template("receiving_list.html", batches=batches, filters={
+        "supplier": supplier, "invoice": inv, "date_from": d1, "date_to": d2, "status": status
+    })
+
+
+@inventory_bp.get("/receiving/new", endpoint="receiving_new")
+@login_required
+def receiving_new():
+    return render_template("receiving_edit.html", batch=None, today=datetime.utcnow().date())
+
+
+@inventory_bp.post("/receiving/save", endpoint="receiving_save")
+@login_required
+def receiving_save():
+    f = request.form
+    batch_id = f.get("batch_id")
+    if batch_id:
+        batch = ReceivingBatch.query.get(int(batch_id))
+        if not batch:
+            flash("Receiving batch not found", "danger")
+            return redirect(url_for("inventory.receiving_list"))
+        if batch.status == "posted":
+            flash("Batch already posted", "warning")
+            return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+    else:
+        batch = ReceivingBatch(created_by=getattr(current_user, "id", None))
+
+    batch.supplier_name = (f.get("supplier_name") or "").strip()
+    batch.invoice_number = (f.get("invoice_number") or "").strip()
+    try:
+        batch.invoice_date = datetime.strptime((f.get("invoice_date") or ""), "%Y-%m-%d").date()
+    except Exception:
+        batch.invoice_date = None
+    batch.notes = (f.get("notes") or "").strip()
+    batch.currency = (f.get("currency") or "USD").strip()[:8] or "USD"
+
+    # перезаполним позиции
+    batch.items.clear()
+    idx = 0
+    while True:
+        key_base = f"rows[{idx}]"
+        pn = (f.get(f"{key_base}[part_number]") or "").strip()
+        has_any = any(k.startswith(f"rows[{idx}]") for k in f.keys())
+        if not has_any:
+            break
+        if pn:
+            item = ReceivingItem(
+                part_number=pn,
+                part_name=(f.get(f"{key_base}[part_name]") or "").strip(),
+                quantity=int(f.get(f"{key_base}[quantity]") or 0),
+                unit_cost=float(f.get(f"{key_base}[unit_cost]") or 0),
+                location=(f.get(f"{key_base}[location]") or "").strip()[:64],
+            )
+            batch.items.append(item)
+        idx += 1
+
+    db.session.add(batch)
+    db.session.commit()
+
+    if f.get("action") == "post":
+        post_receiving_batch(batch.id, getattr(current_user, "id", None))
+        flash("Batch posted & stock updated", "success")
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+
+    flash("Draft saved", "success")
+    return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+
+
+@inventory_bp.get("/receiving/<int:batch_id>", endpoint="receiving_detail")
+@login_required
+def receiving_detail(batch_id):
+    batch = ReceivingBatch.query.get_or_404(batch_id)
+    return render_template("receiving_detail.html", batch=batch)
+
+
+@inventory_bp.post("/receiving/<int:batch_id>/post", endpoint="receiving_post")
+@login_required
+def receiving_post(batch_id):
+    post_receiving_batch(batch_id, getattr(current_user, "id", None))
+    flash("Batch posted", "success")
+    return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
 
 

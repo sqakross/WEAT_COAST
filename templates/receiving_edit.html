@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>{{ 'Edit Receiving' if batch else 'New Receiving' }}</h3>
+<form method="post" action="{{ url_for('inventory.receiving_save') }}">
+  {% if batch %}<input type="hidden" name="batch_id" value="{{ batch.id }}">{% endif %}
+
+  <div class="row g-2">
+    <div class="col-md-3"><label class="form-label">Supplier</label>
+      <input name="supplier_name" class="form-control" required value="{{ batch.supplier_name if batch else '' }}"></div>
+    <div class="col-md-3"><label class="form-label">Invoice #</label>
+      <input name="invoice_number" class="form-control" value="{{ batch.invoice_number if batch else '' }}"></div>
+    <div class="col-md-3"><label class="form-label">Invoice Date</label>
+      <input name="invoice_date" type="date" class="form-control" value="{{ batch.invoice_date if batch else today }}"></div>
+    <div class="col-md-1"><label class="form-label">Currency</label>
+      <input name="currency" class="form-control" value="{{ batch.currency if batch else 'USD' }}"></div>
+    <div class="col-md-2"><label class="form-label">Notes</label>
+      <input name="notes" class="form-control" value="{{ batch.notes if batch else '' }}"></div>
+  </div>
+
+  <hr>
+  <div class="d-flex justify-content-between">
+    <h5 class="mb-0">Items</h5>
+    <button class="btn btn-outline-secondary btn-sm" type="button" onclick="addRow()">+ Add Row</button>
+  </div>
+
+  <div class="table-responsive mt-2">
+    <table class="table table-sm align-middle" id="rowsTable">
+      <thead><tr>
+        <th>Part #</th><th>Part Name</th><th>Qty</th><th>Unit Cost</th><th>Location</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% if batch and batch.items %}
+        {% for i, it in enumerate(batch.items) %}
+          <tr>
+            <td><input name="rows[{{i}}][part_number]" class="form-control" value="{{ it.part_number }}" required></td>
+            <td><input name="rows[{{i}}][part_name]" class="form-control" value="{{ it.part_name or '' }}"></td>
+            <td><input name="rows[{{i}}][quantity]" type="number" min="0" class="form-control" value="{{ it.quantity }}" required></td>
+            <td><input name="rows[{{i}}][unit_cost]" type="number" step="0.01" min="0" class="form-control" value="{{ it.unit_cost or 0 }}"></td>
+            <td><input name="rows[{{i}}][location]" class="form-control" value="{{ it.location or '' }}"></td>
+            <td><button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">Delete</button></td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td><input name="rows[0][part_number]" class="form-control" required></td>
+          <td><input name="rows[0][part_name]" class="form-control"></td>
+          <td><input name="rows[0][quantity]" type="number" min="0" class="form-control" value="1" required></td>
+          <td><input name="rows[0][unit_cost]" type="number" step="0.01" min="0" class="form-control" value="0"></td>
+          <td><input name="rows[0][location]" class="form-control"></td>
+          <td><button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">Delete</button></td>
+        </tr>
+      {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button name="action" value="save" class="btn btn-primary">Save Draft</button>
+    <button name="action" value="post" class="btn btn-success" onclick="return confirm('Post and update stock?')">Post & Update Stock</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_list') }}">Back</a>
+  </div>
+</form>
+
+<script>
+function addRow() {
+  const tbody = document.querySelector('#rowsTable tbody');
+  const idx = tbody.querySelectorAll('tr').length;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input name="rows[${idx}][part_number]" class="form-control" required></td>
+    <td><input name="rows[${idx}][part_name]" class="form-control"></td>
+    <td><input name="rows[${idx}][quantity]" type="number" min="0" class="form-control" value="1" required></td>
+    <td><input name="rows[${idx}][unit_cost]" type="number" step="0.01" min="0" class="form-control" value="0"></td>
+    <td><input name="rows[${idx}][location]" class="form-control"></td>
+    <td><button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">Delete</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+</script>
+{% endblock %}

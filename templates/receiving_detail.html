@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h3>Receiving #{{ batch.id }}</h3>
+  <div class="d-flex gap-2">
+    {% if batch.status != 'posted' %}
+      <a class="btn btn-primary" href="{{ url_for('inventory.receiving_new') }}?edit={{ batch.id }}">Edit</a>
+      <form method="post" action="{{ url_for('inventory.receiving_post', batch_id=batch.id) }}" onsubmit="return confirm('Post and update stock?')">
+        <button class="btn btn-success" type="submit">Post</button>
+      </form>
+    {% endif %}
+    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_list') }}">Back</a>
+  </div>
+</div>
+
+<div class="mb-2">
+  <span class="badge {{ 'bg-success' if batch.status=='posted' else 'bg-secondary' }}">{{ batch.status }}</span>
+</div>
+
+<div class="row g-2 mb-2">
+  <div class="col-md-3"><b>Supplier:</b> {{ batch.supplier_name }}</div>
+  <div class="col-md-3"><b>Invoice #:</b> {{ batch.invoice_number or '—' }}</div>
+  <div class="col-md-3"><b>Invoice Date:</b> {{ batch.invoice_date or '—' }}</div>
+  <div class="col-md-3"><b>Currency:</b> {{ batch.currency }}</div>
+</div>
+<div class="mb-3"><b>Notes:</b> {{ batch.notes or '—' }}</div>
+
+<table class="table table-sm">
+  <thead><tr>
+    <th>#</th><th>Part #</th><th>Part Name</th>
+    <th class="text-end">Qty</th><th class="text-end">Unit Cost</th><th class="text-end">Line Total</th><th>Location</th>
+  </tr></thead>
+  <tbody>
+    {% for i, it in enumerate(batch.items, start=1) %}
+      <tr>
+        <td>{{ i }}</td>
+        <td>{{ it.part_number }}</td>
+        <td>{{ it.part_name or '' }}</td>
+        <td class="text-end">{{ it.quantity }}</td>
+        <td class="text-end">{{ '%.2f' % (it.unit_cost or 0) }}</td>
+        <td class="text-end">{{ '%.2f' % ((it.unit_cost or 0) * (it.quantity or 0)) }}</td>
+        <td>{{ it.location or '' }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <th colspan="3" class="text-end">Totals:</th>
+      <th class="text-end">{{ batch.total_qty }}</th>
+      <th></th>
+      <th class="text-end">{{ batch.currency }} {{ '%.2f' % batch.total_cost }}</th>
+      <th></th>
+    </tr>
+  </tfoot>
+</table>
+{% endblock %}
