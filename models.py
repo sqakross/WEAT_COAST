@@ -336,12 +336,12 @@ class GoodsReceipt(db.Model):
     created_by = db.Column(db.Integer)
     posted_at = db.Column(db.DateTime)
     posted_by = db.Column(db.Integer)
+    attachment_path = db.Column(db.String(512))
 
 
 class GoodsReceiptLine(db.Model):
     __tablename__ = "goods_receipt_lines"
     __table_args__ = {"extend_existing": True}
-
     id = db.Column(db.Integer, primary_key=True)
     goods_receipt_id = db.Column(db.Integer, db.ForeignKey("goods_receipts.id", ondelete="CASCADE"), nullable=False, index=True)
     line_no = db.Column(db.Integer, default=1)

@@ -21,12 +21,15 @@ COLUMN_SYNONYMS = {
     "part_number": [
         "PART #","PART","PART NO","SKU","ITEM","ITEM #","ITEM NO",
         "PN","PART NUMBER","MFR PART #",
-        "PRODUCT"              # <- add
+        "PRODUCT"              # <- ОСТАЁТСЯ здесь, это PN
     ],
-    "part_name":   ["DESCR.","DESCRIPTION","ITEM DESCRIPTION","DESC","NAME","PRODUCT","ITEM NAME","PART NAME"],
+    "part_name":   [
+        "DESCR.","DESCRIPTION","ITEM DESCRIPTION","DESC","NAME",
+        "ITEM NAME","PART NAME"  # ВАЖНО: БЕЗ "PRODUCT"
+    ],
     "quantity":    [
         "QTY","QUANTITY","QTY ORDERED","ORDERED QTY","Q-ty","ORDER QTY",
-        "SHIPPED"             # <- add (Reliable)
+        "SHIPPED"             # Reliable: shipped = фактическое
     ],
     "unit_cost":   ["UNIT PRICE","UNITPRICE","PRICE","UNIT COST","COST","PRICE $","PRICE USD",
                     "UNIT $","UNIT NET","PRICE EA","PRICE EACH","EACH","EA"],
@@ -36,12 +39,15 @@ COLUMN_SYNONYMS = {
     "location":    ["LOCATION","SHELF","BIN","PLACE","LOC"],
 }
 
+
 # Optional: map supplier -> default location if vendor didn’t specify any
 SUPPLIER_LOCATION_MAP = {
-    "reliable": "RELIABLE",
-    "reliableparts": "RELIABLE",
-    "marcone": "MARCONE",
-    "marcone supply": "MARCONE",
+    # короткие коды, которых ты ожидаешь в базе/интерфейсе
+    "reliable": "REL",
+    "reliableparts": "REL",
+    "reliable parts": "REL",
+    "marcone": "MAR",
+    "marcone supply": "MAR",
 }
 
 # Rows we never want as line items
@@ -183,7 +189,7 @@ def _token_is_numeric_pn(tok: str) -> bool:
        Guardrails so we don't confuse with qty or amounts."""
     t = tok.strip().replace(" ", "")
     # pure digits with reasonable length
-    if t.isdigit() and 6 <= len(t) <= 12:
+    if t.isdigit() and 5 <= len(t) <= 12:   # было 6 <= len(t) <= 12
         return True
     # digit groups with dashes like "30-3132-48"
     if re.fullmatch(r"\d{2,}(?:-\d{2,})+", t):
@@ -217,6 +223,10 @@ def _cleanup_description(desc: str, pn: str = "") -> str:
     Keeps output UPPERCASE.
     """
     s0 = str(desc or "")
+
+    # >>> FIX: убрать мусорные псевдостроки до любой другой обработки
+    s0 = re.sub(r'\b(?:nan|none|null|n/?a)\b', ' ', s0, flags=re.I)
+    # <<<
 
     # --- 1) Extract any fraction from text or PN (1/2", 1/2 in, 1/2)
     FRACTION_ANY = re.compile(r'\b(\d{1,3})\s*/\s*(\d{1,3})\s*(?:["”“″]|IN(?:CH(?:ES)?)?)?\b', re.I)
@@ -252,7 +262,6 @@ def _cleanup_description(desc: str, pn: str = "") -> str:
     # drop small flags like F/S and inch quotes right after a fraction (1/2")
     s = re.sub(r"\bF/?S\b", " ", s)             # drop F/S
     s = re.sub(r'(?<=\d/\d)"', "", s)           # 1/2" -> 1/2
-
 
     # --- 5) Unglue common tokens (extend list as needed)
     TOKENS = [
@@ -293,26 +302,39 @@ def _looks_good_pn(tok: str) -> bool:
 
 def _parse_reliable_by_columns(df: pd.DataFrame, supplier_hint, default_location) -> pd.DataFrame:
     """
-    Column-first parser for Reliable.
-    - If df has no real headers, lift a header row from the first few lines.
-    - QTY comes from 'Shipped' (or the 2nd small integer left of 'Product').
-    - Unit price from 'Price/Unit Price' (fallback: smallest money in the row).
-    - Description from 'Description' (fallback: stitch from the next 1–2 rows).
+    Надёжный column-first для Reliable.
+    - Поднимаем заголовки из первых 10 строк, если текущие бесполезные.
+    - PN берём из колонки PRODUCT/PART#, но если там мусор — извлекаем PN из всей строки.
+    - SHIPPED → QTY, UNIT PRICE → unit_cost.
+    - Жёстко скипаем строки с TERMS/REMIT/TOTAL/… до разбора.
     """
     if df is None or df.empty:
         return pd.DataFrame()
 
+    def _is_noise_line(vals) -> bool:
+        s = _row_to_text(vals).upper()
+        return any(w in s for w in _RELIABLE_SKIP)
+
+    df0 = df.copy()
+
     def _rebind_headers_if_needed(df_in: pd.DataFrame) -> pd.DataFrame:
-        # Try to find a header row within the first 6 rows
-        for r in range(min(6, len(df_in))):
+        heads_now = " ".join([_normh(c) for c in df_in.columns])
+        have_key_now = (("PRODUCT" in heads_now or "PART" in heads_now) and
+                        ("DESCR"   in heads_now or "DESCRIPTION" in heads_now) and
+                        ("PRICE"   in heads_now or "UNIT PRICE"  in heads_now) and
+                        ("SHIPPED" in heads_now or "QTY" in heads_now or "QUANTITY" in heads_now))
+        if have_key_now:
+            return df_in
+        limit = min(10, len(df_in))
+        for r in range(limit):
             row = [_normh(x) for x in df_in.iloc[r].tolist()]
-            row_set = set(row)
-            looks_like_header = (
-                ("PRODUCT" in row_set or any("PRODUCT" in x for x in row)) and
-                ("PRICE" in row_set or "UNIT PRICE" in row_set or "SHIPPED" in row_set)
-            )
-            if looks_like_header:
-                df2 = df_in.iloc[r + 1 : ].copy()
+            row_text = " ".join(row)
+            looks = (("PRODUCT" in row_text or "PART" in row_text) and
+                     ("DESCR"   in row_text or "DESCRIPTION" in row_text) and
+                     ("PRICE"   in row_text or "UNIT PRICE"  in row_text) and
+                     ("SHIPPED" in row_text or "QTY" in row_text or "QUANTITY" in row_text))
+            if looks:
+                df2 = df_in.iloc[r+1:].copy()
                 headers = []
                 for j, val in enumerate(df_in.iloc[r].tolist()):
                     h = str(val).strip() if str(val).strip() else f"C{j}"
@@ -321,98 +343,76 @@ def _parse_reliable_by_columns(df: pd.DataFrame, supplier_hint, default_location
                 return df2
         return df_in
 
-    # 1) Try with current headers; if key cols not found, lift headers then try again
-    part_col  = _find_col(df, ["PRODUCT","PART #","PART NO","ITEM","ITEM #","MFR PART #"])
+    df = _rebind_headers_if_needed(df0)
+
+    part_col  = _find_col(df, ["PRODUCT","PART #","PART NO","ITEM","ITEM #","MFR PART #","PRODUCT"])
     desc_col  = _find_col(df, ["DESCRIPTION","ITEM DESCRIPTION","DESCR.","DESC"])
     qty_col   = _find_col(df, ["SHIPPED","QTY","QUANTITY"])
     price_col = _find_col(df, ["PRICE","UNIT PRICE","UNIT COST","PRICE USD","UNIT $"])
 
-    if not part_col or (not qty_col and df.columns.dtype != object):
-        df = _rebind_headers_if_needed(df)
-        part_col  = _find_col(df, ["PRODUCT","PART #","PART NO","ITEM","ITEM #","MFR PART #"])
-        desc_col  = _find_col(df, ["DESCRIPTION","ITEM DESCRIPTION","DESCR.","DESC"])
-        qty_col   = _find_col(df, ["SHIPPED","QTY","QUANTITY"])
-        price_col = _find_col(df, ["PRICE","UNIT PRICE","UNIT COST","PRICE USD","UNIT $"])
+    if not part_col and not desc_col:
+        return pd.DataFrame()  # уйдём в line-fallback
 
-    if not part_col:
-        return pd.DataFrame()  # give chance to wide-fallback
-
-    # If no explicit DESCRIPTION, pick 1–3 cols to the right of PRODUCT (skip MAKE/NARDA)
-    if not desc_col:
+    if not desc_col and part_col:
         try:
             pi = df.columns.get_loc(part_col)
             for j in range(pi + 1, min(pi + 4, df.shape[1])):
                 h = _normh(df.columns[j])
                 if "MAKE" in h or "NARDA" in h:
                     continue
-                desc_col = df.columns[j]
-                break
+                desc_col = df.columns[j]; break
         except Exception:
             pass
 
-    # Columns left of PRODUCT: typically Ordered | Unit | Shipped | Backorder
-    pre_cols = list(df.columns[: df.columns.get_loc(part_col)])
+    pre_cols = []
+    if part_col:
+        try:
+            pre_cols = list(df.columns[: df.columns.get_loc(part_col)])
+        except Exception:
+            pre_cols = []
 
     rows = []
     for i in range(len(df)):
-        pn = _norm(df.at[i, part_col]) if i in df.index else ""
-        if not pn:
-            continue
-        upn = pn.upper()
-        if upn.startswith(("SHIPMENT MARKING", "REF:", "TRACK")):
+        row_vals = df.iloc[i, :].tolist()
+        if _is_noise_line(row_vals):
             continue
 
-        # ---- QTY (prefer SHIPPED)
-        ship = _to_int(df.at[i, qty_col]) if qty_col else None
+        line_text = _row_to_text(row_vals)
+
+        # PN из колонки или из строки
+        pn_cell = _norm(df.at[i, part_col]) if part_col and i in df.index else ""
+        pn = pn_cell if (pn_cell and (_looks_good_pn(pn_cell) or _token_is_numeric_pn(pn_cell))) else _pick_pn_from_tokens(line_text.split())
+        if not pn:
+            continue
+
+        # QTY (Ship)
+        ship = _to_int(df.at[i, qty_col]) if qty_col and i in df.index else None
         if not ship or ship <= 0:
             ints = []
             for c in pre_cols:
-                try:
-                    v = _to_int(df.at[i, c])
-                except Exception:
-                    v = None
+                v = _to_int(df.at[i, c]) if i in df.index else None
                 if v is not None:
                     ints.append(v)
-            if len(ints) >= 2:
-                ship = ints[1]  # Ord, Ship, B/O => 2nd is Ship
-            elif ints:
-                ship = ints[0]
-            else:
-                ship = 0
+            ship = ints[1] if len(ints) >= 2 else (ints[0] if ints else 0)
         if ship is None or ship <= 0:
-            continue  # only actually shipped lines
+            continue
 
-        # ---- Unit price
+        # UNIT COST
         unit_cost = _to_float(df.at[i, price_col]) if price_col else None
         if unit_cost is None or pd.isna(unit_cost):
-            money = _row_money_values_strict(df.iloc[i, :].tolist())
+            money = _row_money_values_strict(row_vals)
             unit_cost = min(money) if money else None
 
-        # ---- Description (prefer desc_col)
-        raw = _norm(df.at[i, desc_col]) if desc_col else ""
-        # If empty/too short, try stitching from next 1–2 rows (common for Reliable PDFs)
-        def _good_text(s: str) -> bool:
-            if not s:
-                return False
-            U = s.upper()
-            if U.startswith(("SHIPMENT MARKING", "REF:", "TRACK")):
-                return False
-            # avoid rows that are just money/amounts
-            return bool(re.search(r"[A-Z]", U))
+        # DESCRIPTION: из колонки → если пусто/‘nan’ → из всей строки до первой суммы
+        raw_desc = _norm(df.at[i, desc_col]) if desc_col and i in df.index else ""
+        if not raw_desc or raw_desc.lower() == "nan" or len(re.sub(r"[^A-Za-z0-9]+", "", raw_desc)) < 3:
+            s = re.sub(rf"\b{re.escape(pn)}\b", " ", line_text, flags=re.I)
+            mfirst = MONEY_ANY.search(s)
+            if mfirst:
+                s = s[:mfirst.start()]
+            raw_desc = s
 
-        if len(re.sub(r"[^A-Za-z0-9]+", "", raw)) < 3:
-            for k in (1, 2):
-                if i + k < len(df):
-                    candidate = _norm(df.at[i + k, desc_col]) if desc_col else ""
-                    if _good_text(candidate):
-                        raw = candidate
-                        break
-            if len(re.sub(r"[^A-Za-z0-9]+", "", raw)) < 3:
-                # ultimate fallback: whole row text
-                raw = _row_to_text(df.iloc[i, :].tolist())
-
-        raw = re.sub(rf"\b{re.escape(pn)}\b", " ", raw, flags=re.I)
-        desc = _cleanup_description(raw, pn)
+        desc = _cleanup_description(raw_desc, pn)
         if len(re.sub(r"[^A-Za-z0-9]+", "", desc)) < 3:
             continue
 
@@ -850,7 +850,7 @@ _RELIABLE_SKIP = tuple(k for k in _NOISE_PREFIXES) + (
 
 _UNIT_TOKENS = r"(EA|EACH|PC|PCS|PK|PKG|BOX|BG|CS)"
 
-def _parse_marcone_table_like(
+def _parse_marcone_table_like_headered(
     df: pd.DataFrame,
     *,
     supplier_hint: str,
@@ -1104,68 +1104,134 @@ def _parse_marcone_lines(
     df: pd.DataFrame, *, supplier_hint: str, source_file: str, default_location: str
 ) -> pd.DataFrame:
     """
-    Robust line-based Marcone parser.
+    Line-based Marcone parser with robust PN and QTY extraction.
 
-    Strategy per row:
-      - Collapse row to a single string.
-      - Find ALL money tokens; take the substring AFTER the last one → parse integers there.
-        The last integer in that tail is treated as Ship (QTY). Skip Ship==0.
-      - Unit price = smallest money on the line (closest to "unit").
-      - PN = first plausible token (letters+digits) OR numeric-only PN patterns.
-      - Description = text BEFORE the last money, minus PN/qty/unit tokens → _cleanup_description.
+    - Finds dashed PNs like DA82-01415A / DC61-04406A with optional NV2/NW2 prefix.
+    - Allows punctuation/parentheses immediately after a PN (e.g., DA62-03441A(2)).
+    - QTY: prefer last integer AFTER the last $; otherwise pick the last integer
+      on the line that is not inside any PN span and is not a tiny packaging
+      count directly after '('.
     """
+
     if df is None or df.empty:
         return pd.DataFrame()
 
-    int_pat = re.compile(r"\b\d+\b")
+    # Normalize unicode hyphens to ASCII '-' to stabilize matching.
+    HYPHENS = "\u2010\u2011\u2012\u2013\u2014\u2212\uFE58\uFE63\uFF0D"
+    HNORM = re.compile(f"[{HYPHENS}]")
+
+    # Money and integers.
+    INT = re.compile(r"\b\d+\b")
+
+    # PN detector:
+    # - optional "N V/W 2" prefix with spaces allowed: NV2, NW2, N V2, N W2
+    # - core dashed PN like DA82-01415A, DC61-04406A, DA97-12345B
+    # - allow punctuation/parenthesis right after: use a lookahead for non-word/dash or end
+    PN_ALL = re.compile(
+        r"(?:\bN\s*[VW]\s*2\s*[,/|-]?\s*)?([A-Z]{2,4}\d{2,}-\d{3,}[A-Z0-9]*)"
+        r"(?=(?:[^A-Za-z0-9-]|$))",
+        re.I,
+    )
+
+    def _overlap(a, b):
+        if not a or not b:
+            return False
+        return not (a[1] <= b[0] or b[1] <= a[0])
 
     items = []
+
     for _, row in df.iterrows():
-        # Join visible cells into one line
+        # Collapse visible cells into one line.
         parts = []
         for v in row.tolist():
             s = str(v).strip()
             if s and s.lower() != "nan":
                 parts.append(s)
-        line = " ".join(parts)
-        if not line:
+        line_raw = " ".join(parts)
+        if not line_raw:
             continue
 
+        line = HNORM.sub("-", line_raw)
         U = line.upper()
+
         if any(w in U for w in _MARCONE_SKIP_WORDS):
             continue
 
-        # --- locate the last money token and the tail after it
+        # All money tokens on the line (we'll use them for unit price and tail).
         m_all = list(MONEY_ANY.finditer(line))
         if not m_all:
             continue
         last_money = m_all[-1]
-        tail = line[last_money.end():]
 
-        # --- Ship quantity = LAST integer found in the tail (if any)
-        ints = [int(x) for x in int_pat.findall(tail)]
-        ship = ints[-1] if ints else 0
-        if ship <= 0:
-            continue  # skip unshipped lines
+        # ---- Part number(s) ----
+        pn = ""
+        pn_spans = []  # spans of all matched PNs to exclude their digits later
 
-        # --- Unit price = smallest money token on the entire line (heuristic)
-        unit_cost = _pick_unit_price([m.group(0) for m in m_all])
+        cand = list(PN_ALL.finditer(line))
+        if cand:
+            # Pick the earliest PN on the line as the main PN.
+            cand.sort(key=lambda m: m.start(1))
+            pn = cand[0].group(1).upper()
+            pn_spans = [m.span(1) for m in cand]  # keep all PN spans to ignore their digits
+        else:
+            # Fallback: token-based picker (previous behavior).
+            toks = [t for t in re.split(r"\s+", line) if t]
+            toks = [re.sub(r"[^A-Za-z0-9.\-]", "", t) for t in toks if t]
+            pn = _pick_pn_from_tokens(toks) or ""
+            if pn:
+                m = re.search(rf"\b{re.escape(pn)}\b", line, flags=re.I)
+                if m:
+                    pn_spans = [m.span()]
 
-        # --- Part number: pick from tokens (supports alnum and numeric-only PNs)
-        tokens = [re.sub(r"[^A-Za-z0-9\-./]", "", t) for t in line.split()]
-        tokens = [t for t in tokens if t]
-        pn = _pick_pn_from_tokens(tokens)
         if not pn:
             continue
 
-        # --- Description: left side before the last money
+        # ---- Quantity (Ship) ----
+        ints_all = list(INT.finditer(line))
+        # Prefer tail ints after the last money.
+        tail_ints = [m for m in ints_all if m.start() >= last_money.end()]
+
+        def _is_packaging_small(m):
+            # Treat "(...2)" right after a PN as packaging, not ship qty.
+            # If the digit is preceded by '(' with no more than 1 whitespace, consider it packaging.
+            start = m.start()
+            return start > 0 and line[max(0, start - 2):start].strip().startswith("(") and int(m.group(0)) <= 9
+
+        ship_val = None
+        if tail_ints:
+            # Use the last tail integer that is not inside a PN and not a packaging "(2)".
+            for m in reversed(tail_ints):
+                if any(_overlap(m.span(), ps) for ps in pn_spans):
+                    continue
+                if _is_packaging_small(m):
+                    continue
+                ship_val = int(m.group(0))
+                break
+        if ship_val is None:
+            # Fallback: last integer on the line, excluding those inside PNs and packaging "(2)".
+            for m in reversed(ints_all):
+                if any(_overlap(m.span(), ps) for ps in pn_spans):
+                    continue
+                if _is_packaging_small(m):
+                    continue
+                ship_val = int(m.group(0))
+                break
+
+        if ship_val is None or ship_val <= 0:
+            continue
+
+        # ---- Unit price: pick the smallest money token (heuristic) ----
+        unit_cost = _pick_unit_price([m.group(0) for m in m_all])
+
+        # ---- Description: text before last money, cleaned ----
         left = line[:last_money.start()]
-        # remove PN everywhere (once is enough visually)
         left = re.sub(rf"\b{re.escape(pn)}\b", " ", left, flags=re.I)
-        # remove explicit unit/QTY words and loose integers
+        # Remove *other* PNs as well to avoid noise in description.
+        for ps in pn_spans[1:]:
+            other = line[ps[0]:ps[1]]
+            left = left.replace(other, " ")
         left = re.sub(rf"\b{UNIT_TOKENS}\b", " ", left, flags=re.I)
         left = re.sub(r"\bQTY\b\s*\d{1,4}\b", " ", left, flags=re.I)
-        # small integers that are often Ord/B/O near the start
         left = re.sub(r"^\s*(\d+\s+){1,3}", " ", left)
         desc = _cleanup_description(left, pn)
 
@@ -1175,7 +1241,7 @@ def _parse_marcone_lines(
         items.append({
             "part_number": pn,
             "part_name": desc,
-            "quantity": int(ship),
+            "quantity": int(ship_val),
             "unit_cost": unit_cost if unit_cost is not None else np.nan,
             "supplier": supplier_hint or "Marcone",
             "location": SUPPLIER_LOCATION_MAP.get("marcone", default_location),
@@ -1185,6 +1251,7 @@ def _parse_marcone_lines(
 
     cols = ["part_number","part_name","quantity","unit_cost","supplier","location","order_no","date"]
     return pd.DataFrame(items, columns=cols)
+
 
 def _parse_reliable_from_pdf_text(pdf_path: str, *, supplier_hint: str,
                                   default_location: str) -> pd.DataFrame:
@@ -1233,10 +1300,10 @@ def normalize_table(df: pd.DataFrame, supplier_hint=None, *, source_file: str = 
     Fast paths:
       - Marcone: QTY must come from 'Ship' and rows with Ship==0 are skipped.
                  Order of attempts:
-                   1) _parse_marcone_table_like (header-based table)
-                   2) _parse_marcone_lines      (row-to-line text when headers are messy)
-                   3) _parse_marcone_from_pdf_text (raw PDF text)
-      - Reliable: wide-table or explicit hint
+                   1) _parse_marcone_lines                (row-to-line text when headers are messy)
+                   2) _parse_marcone_table_like_headered  (header-based table; fallback to old name)
+                   3) _parse_marcone_from_pdf_text        (raw PDF text)
+      - Reliable: wide-table or explicit hint  → if few/empty → line parser → raw PDF text
     """
     issues: list[str] = []
     final_cols = ["part_number","part_name","quantity","unit_cost","supplier","location","order_no","date"]
@@ -1249,24 +1316,27 @@ def normalize_table(df: pd.DataFrame, supplier_hint=None, *, source_file: str = 
     )
 
     if df is not None and len(df) > 0 and is_marcone:
-        # 1) header-driven table parse
-        parsed = _parse_marcone_table_like(
+        # 1) Сначала строковый парсер (надежнее при "склеенных" ячейках)
+        parsed = _parse_marcone_lines(
             df,
             supplier_hint=supplier_hint or "Marcone",
             source_file=source_file,
             default_location=default_location,
         )
 
-        # 2) NEW: line-based fallback when headers/columns are not reliable
+        # 2) Если пусто — колоночный/header-based.
+        #    Поддерживаем два имени: новое и старое.
         if parsed is None or parsed.empty:
-            parsed = _parse_marcone_lines(
-                df,
-                supplier_hint=supplier_hint or "Marcone",
-                source_file=source_file,
-                default_location=default_location,
-            )
+            headered_parser = globals().get("_parse_marcone_table_like_headered") or globals().get("_parse_marcone_table_like")
+            if headered_parser:
+                parsed = headered_parser(
+                    df,
+                    supplier_hint=supplier_hint or "Marcone",
+                    source_file=source_file,
+                    default_location=default_location,
+                )
 
-        # 3) raw PDF text fallback (only for PDFs) if still empty
+        # 3) Если всё ещё пусто и это PDF — fallback по сырому тексту
         if (parsed is None or parsed.empty) and str(source_file).lower().endswith(".pdf"):
             parsed = _parse_marcone_from_pdf_text(
                 source_file,
@@ -1274,8 +1344,16 @@ def normalize_table(df: pd.DataFrame, supplier_hint=None, *, source_file: str = 
                 default_location=default_location,
             )
 
-        # finalize early if anything was parsed
+        # Если что-то распарсили — завершаем рано
         if parsed is not None and not parsed.empty:
+            # Safety: если вдруг пришёл только qty — приведём к quantity
+            if "quantity" not in parsed.columns and "qty" in parsed.columns:
+                parsed["quantity"] = pd.to_numeric(parsed["qty"], errors="coerce").fillna(0).astype(int)
+
+            # Гарантируем наличие date
+            if "date" not in parsed.columns:
+                parsed["date"] = ""
+
             parsed["source_file"] = source_file
 
             # build stable row_key (vectorized)
@@ -1304,17 +1382,41 @@ def normalize_table(df: pd.DataFrame, supplier_hint=None, *, source_file: str = 
         is_reliable = False
 
     if df is not None and len(df) and (is_reliable or looks_wide):
+        # 1) wide-парсер
         parsed = _parse_reliable_wide(df, supplier_hint, default_location)
-        # fallback: parse PDF text lines directly if the table had only totals/etc.
+
+        # 2) Если пусто ИЛИ подозрительно мало строк — безопасно пробуем строковый парсер
+        if parsed is None or parsed.empty or len(parsed) < 3:
+            try:
+                parsed2 = _parse_reliable_lines(
+                    df,
+                    supplier_hint=supplier_hint or "ReliableParts",
+                    source_file=source_file,
+                    default_location=default_location,
+                )
+                if parsed2 is not None and not parsed2.empty:
+                    parsed = parsed2
+            except Exception:
+                pass
+
+        # 3) Если всё ещё пусто — для PDF читаем сырой текст
         if (parsed is None or parsed.empty) and source_file and str(source_file).lower().endswith(".pdf"):
-            parsed_txt = _parse_reliable_from_pdf_text(
-                source_file,
-                supplier_hint=supplier_hint or "ReliableParts",
-                default_location=default_location,
-            )
-            if parsed_txt is not None and not parsed_txt.empty:
-                parsed = parsed_txt
+            try:
+                parsed_txt = _parse_reliable_from_pdf_text(
+                    source_file,
+                    supplier_hint=supplier_hint or "ReliableParts",
+                    default_location=default_location,
+                )
+                if parsed_txt is not None and not parsed_txt.empty:
+                    parsed = parsed_txt
+            except Exception:
+                pass
+
         if parsed is not None and not parsed.empty:
+            # Гарантируем наличие date
+            if "date" not in parsed.columns:
+                parsed["date"] = ""
+
             parsed["source_file"] = source_file
 
             # build stable row_key (vectorized)

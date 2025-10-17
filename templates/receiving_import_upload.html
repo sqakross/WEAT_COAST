@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Import Receiving from PDF</h3>
+
+<form method="post"
+      action="{{ url_for('inventory.receiving_import_upload') }}"
+      enctype="multipart/form-data"
+      class="row g-3">
+
+  <div class="col-12">
+    <div class="alert alert-info py-2">
+      Upload supplier invoice (PDF). We’ll parse items → preview → create a Receiving batch.
+    </div>
+  </div>
+
+  <div class="col-md-5">
+    <label class="form-label">PDF file</label>
+    <input type="file" name="file" accept="application/pdf" class="form-control" required>
+    <div class="form-text">Supported: text-PDF; optionally use OCR for scans.</div>
+  </div>
+
+  <div class="col-md-3">
+    <label class="form-label">Supplier (optional)</label>
+    <input name="supplier" class="form-control" placeholder="Reliable Parts | Marcone">
+  </div>
+
+  <div class="col-md-2">
+    <label class="form-label">Invoice #</label>
+    <input name="invoice_number" class="form-control" placeholder="">
+  </div>
+
+  <div class="col-md-2">
+    <label class="form-label">Invoice Date</label>
+    <input type="date" name="invoice_date" class="form-control">
+  </div>
+
+  <div class="col-md-2">
+    <div class="form-check mt-2 pt-4">
+      <input class="form-check-input" type="checkbox" name="try_ocr" id="try_ocr">
+      <label class="form-check-label" for="try_ocr">Use OCR (for scanned PDFs)</label>
+    </div>
+  </div>
+
+  <div class="col-10">
+    <label class="form-label">Notes</label>
+    <input name="notes" class="form-control" placeholder="Optional note (will be saved in batch)">
+  </div>
+
+  <div class="col-12 d-flex gap-2">
+    <button class="btn btn-primary">Parse</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_list') }}">Back</a>
+  </div>
+</form>
+{% endblock %}
+

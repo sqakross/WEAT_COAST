@@ -3,6 +3,7 @@ import os
 
 class Config:
     # Secrets
+
     SECRET_KEY = os.environ.get("SECRET_KEY", "your-very-secure-key")
 
     # Paths
@@ -21,5 +22,5 @@ class Config:
     TESSERACT_EXE = os.environ.get("TESSERACT_EXE", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 
     # Import feature flags (keep your defaults)
-    WCCR_IMPORT_ENABLED = int(os.environ.get("WCCR_IMPORT_ENABLED", "0"))   # 1 to actually apply
-    WCCR_IMPORT_DRY_RUN = int(os.environ.get("WCCR_IMPORT_DRY_RUN", "1"))   # 1 = preview only
+    WCCR_IMPORT_ENABLED = int(os.environ.get("WCCR_IMPORT_ENABLED", "1"))  # default 1 = применять
+    WCCR_IMPORT_DRY_RUN = int(os.environ.get("WCCR_IMPORT_DRY_RUN", "0"))  # default 0 = не dry

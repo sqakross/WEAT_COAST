@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Preview & Edit Import</h3>
+
+<form method="post" action="{{ url_for('inventory.receiving_import_apply') }}">
+  <!-- hidden: путь к исходному PDF -->
+  <input type="hidden" name="attachment_path" value="{{ meta.attachment_path }}">
+
+  <div class="row g-2 mb-3">
+    <div class="col-md-3">
+      <label class="form-label">Supplier</label>
+      <input class="form-control" name="supplier" value="{{ meta.supplier }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Invoice #</label>
+      <input class="form-control" name="invoice_number" value="{{ meta.invoice }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Date</label>
+      <input type="date" class="form-control" name="invoice_date" value="{{ meta.date }}">
+    </div>
+    <div class="col-md-1">
+      <label class="form-label">Currency</label>
+      <input class="form-control" name="currency" value="{{ meta.currency }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Notes</label>
+      <input class="form-control" name="notes" value="{{ meta.notes }}">
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm align-middle" id="rowsTable">
+      <thead>
+        <tr>
+          <th style="width: 18%">PART #</th>
+          <th>DESCRIPTION</th>
+          <th style="width: 10%" class="text-end">QTY</th>
+          <th style="width: 14%" class="text-end">UNIT COST</th>
+          <th style="width: 16%">LOCATION</th>
+          <th style="width: 6%"></th>
+        </tr>
+      </thead>
+      <tbody id="rowsTbody">
+        {% for r in rows %}
+        {% set i = loop.index0 %}
+        <tr>
+          <td><input name="rows[{{ i }}][part_number]" class="form-control" value="{{ r.part_number }}" required></td>
+          <td><input name="rows[{{ i }}][part_name]"   class="form-control" value="{{ r.part_name }}"></td>
+          <td><input name="rows[{{ i }}][quantity]"    type="number" min="0" class="form-control text-end" value="{{ r.quantity or 1 }}" required></td>
+          <td><input name="rows[{{ i }}][unit_cost]"   type="number" step="0.01" min="0" class="form-control text-end" value="{{ r.unit_cost or 0 }}"></td>
+          <td><input name="rows[{{ i }}][location]"    class="form-control" value="{{ r.location or r.supplier }}"></td>
+          <td class="text-end">
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">×</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button name="action" value="save" class="btn btn-primary">Create Draft</button>
+    <button name="action" value="post" class="btn btn-success" onclick="return confirm('Create & post to stock?')">Create & Post</button>
+    <button type="button" class="btn btn-outline-secondary" onclick="addRow()">+ Add Row</button>
+    <a class="btn btn-outline-dark" href="{{ url_for('inventory.receiving_list') }}">Cancel</a>
+  </div>
+</form>
+
+<script>
+function addRow() {
+  const tbody = document.getElementById('rowsTbody');
+  const i = tbody.querySelectorAll('tr').length;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input name="rows[${i}][part_number]" class="form-control" required></td>
+    <td><input name="rows[${i}][part_name]"   class="form-control"></td>
+    <td><input name="rows[${i}][quantity]"    type="number" min="0" class="form-control text-end" value="1" required></td>
+    <td><input name="rows[${i}][unit_cost]"   type="number" step="0.01" min="0" class="form-control text-end" value="0"></td>
+    <td><input name="rows[${i}][location]"    class="form-control"></td>
+    <td class="text-end">
+      <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">×</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+}
+</script>
+{% endblock %}
+

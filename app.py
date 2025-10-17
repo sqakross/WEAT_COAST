@@ -59,6 +59,15 @@ app = Flask(__name__, instance_relative_config=True)
 app.config.from_object(Config)
 app.config.from_pyfile('config.py', silent=True)  # instance/config.py (если есть)
 
+app.config['WCCR_IMPORT_ENABLED'] = 1   # применяем импорт
+app.config['WCCR_IMPORT_DRY_RUN'] = 0   # не dry-run
+
+logging.info(
+    "WCCR flags (FINAL): enabled=%s, dry=%s",
+    app.config.get("WCCR_IMPORT_ENABLED"),
+    app.config.get("WCCR_IMPORT_DRY_RUN"),
+)
+
 # Ограничим размер аплоадов (32 МБ по умолчанию)
 app.config.setdefault("MAX_CONTENT_LENGTH", 32 * 1024 * 1024)
 
