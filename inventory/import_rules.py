@@ -1104,144 +1104,113 @@ def _parse_marcone_lines(
     df: pd.DataFrame, *, supplier_hint: str, source_file: str, default_location: str
 ) -> pd.DataFrame:
     """
-    Line-based Marcone parser with robust PN and QTY extraction.
-
-    - Finds dashed PNs like DA82-01415A / DC61-04406A with optional NV2/NW2 prefix.
-    - Allows punctuation/parentheses immediately after a PN (e.g., DA62-03441A(2)).
-    - QTY: prefer last integer AFTER the last $; otherwise pick the last integer
-      on the line that is not inside any PN span and is not a tiny packaging
-      count directly after '('.
+    Robust Marcone line parser (row-to-line).
+    Rules:
+      - Skip header/footer/noise lines.
+      - Parse ALL money tokens; if the last money == 0.00 -> treat as backorder/no-ship and skip.
+      - Quantity: prefer the first integer at the start of the line; if missing, fall back to
+        the last integer AFTER the last money token.
+      - Unit price: pick the smallest money token on the line (unit is always the smallest).
+      - PN: first plausible token that looks like a part number (alnum + dashes allowed).
+      - Description: text between PN and the first money, then cleaned by _cleanup_description.
     """
-
     if df is None or df.empty:
         return pd.DataFrame()
 
-    # Normalize unicode hyphens to ASCII '-' to stabilize matching.
-    HYPHENS = "\u2010\u2011\u2012\u2013\u2014\u2212\uFE58\uFE63\uFF0D"
-    HNORM = re.compile(f"[{HYPHENS}]")
+    # Hard filters to drop invoice scaffolding lines fast.
+    SKIP_WORDS = {
+        "CUSTOMER", "INVOICE", "BILL TO", "SHIP TO", "REMIT", "MARCONe", "MARCONe.COM",
+        "PHONE", "PO #", "INTERNAL -", "TRACKING", "SUBTOTAL", "INVOICE TOTAL",
+        "DELIVERY", "SALES TAX", "C.O.D.", "HANDLING", "TOTALB/OSHIP"
+    }
 
-    # Money and integers.
-    INT = re.compile(r"\b\d+\b")
+    # Regexes we'll reuse
+    money_re = re.compile(r"\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})|[0-9]+\.[0-9]{2})\b")
+    leading_qty_re = re.compile(r"^\s*(\d{1,4})\b")  # first integer at line start
+    # PN tokens allow letters/digits plus - . /
+    token_clean = re.compile(r"[^A-Za-z0-9\-./]+")
 
-    # PN detector:
-    # - optional "N V/W 2" prefix with spaces allowed: NV2, NW2, N V2, N W2
-    # - core dashed PN like DA82-01415A, DC61-04406A, DA97-12345B
-    # - allow punctuation/parenthesis right after: use a lookahead for non-word/dash or end
-    PN_ALL = re.compile(
-        r"(?:\bN\s*[VW]\s*2\s*[,/|-]?\s*)?([A-Z]{2,4}\d{2,}-\d{3,}[A-Z0-9]*)"
-        r"(?=(?:[^A-Za-z0-9-]|$))",
-        re.I,
-    )
+    rows = []
 
-    def _overlap(a, b):
-        if not a or not b:
-            return False
-        return not (a[1] <= b[0] or b[1] <= a[0])
-
-    items = []
-
-    for _, row in df.iterrows():
-        # Collapse visible cells into one line.
+    for _, r in df.iterrows():
+        # Collapse the visible cells into one line of text.
         parts = []
-        for v in row.tolist():
+        for v in r.tolist():
             s = str(v).strip()
             if s and s.lower() != "nan":
                 parts.append(s)
-        line_raw = " ".join(parts)
-        if not line_raw:
+        line = " ".join(parts)
+        if not line:
             continue
 
-        line = HNORM.sub("-", line_raw)
         U = line.upper()
-
-        if any(w in U for w in _MARCONE_SKIP_WORDS):
+        if any(w in U for w in SKIP_WORDS):
             continue
 
-        # All money tokens on the line (we'll use them for unit price and tail).
-        m_all = list(MONEY_ANY.finditer(line))
-        if not m_all:
+        # Find all money tokens. We require at least 2 (unit, MSRP) and usually 3 (unit, MSRP, total).
+        m_all = list(money_re.finditer(line))
+        if len(m_all) < 2:
+            # Not a priced item row; likely header/noise.
             continue
-        last_money = m_all[-1]
 
-        # ---- Part number(s) ----
-        pn = ""
-        pn_spans = []  # spans of all matched PNs to exclude their digits later
+        # Last money is the line total in Marcone PDFs; $0.00 -> backorder/no-ship -> skip.
+        def _to_amount(m):
+            # convert '1,234.56' -> 1234.56
+            return float(m.group(1).replace(",", ""))
 
-        cand = list(PN_ALL.finditer(line))
-        if cand:
-            # Pick the earliest PN on the line as the main PN.
-            cand.sort(key=lambda m: m.start(1))
-            pn = cand[0].group(1).upper()
-            pn_spans = [m.span(1) for m in cand]  # keep all PN spans to ignore their digits
-        else:
-            # Fallback: token-based picker (previous behavior).
-            toks = [t for t in re.split(r"\s+", line) if t]
-            toks = [re.sub(r"[^A-Za-z0-9.\-]", "", t) for t in toks if t]
-            pn = _pick_pn_from_tokens(toks) or ""
-            if pn:
-                m = re.search(rf"\b{re.escape(pn)}\b", line, flags=re.I)
-                if m:
-                    pn_spans = [m.span()]
+        last_amt = _to_amount(m_all[-1])
+        if last_amt == 0.0:
+            # Backordered lines like DA82-01415A / DC61-04406A (total $0.00) — do not import.
+            continue
 
+        # Quantity: prefer the leading integer at the very start of the line (matches shipped qty on shipped rows).
+        qty = None
+        m_qty = leading_qty_re.search(line)
+        if m_qty:
+            qty = int(m_qty.group(1))
+
+        # As a fallback, use the last integer AFTER the last money token (some extractions place Ship there).
+        if qty is None:
+            tail = line[m_all[-1].end():]
+            tail_ints = re.findall(r"\b\d+\b", tail)
+            if tail_ints:
+                qty = int(tail_ints[-1])
+
+        # Final guard
+        if not qty or qty <= 0:
+            continue
+
+        # Unit cost = smallest money on the line (unit price is always the smallest of unit/MSRP/total).
+        unit_cost = min(_to_amount(m) for m in m_all)
+
+        # Part number: first plausible token.
+        raw_tokens = [token_clean.sub("", t) for t in line.split()]
+        raw_tokens = [t for t in raw_tokens if t]  # keep non-empty
+        pn = _pick_pn_from_tokens(raw_tokens)
         if not pn:
             continue
 
-        # ---- Quantity (Ship) ----
-        ints_all = list(INT.finditer(line))
-        # Prefer tail ints after the last money.
-        tail_ints = [m for m in ints_all if m.start() >= last_money.end()]
+        # Description: slice from right after PN up to the first money token.
+        try:
+            pn_pos = re.search(re.escape(pn), line, flags=re.I)
+        except re.error:
+            pn_pos = None
+        if pn_pos is None:
+            # fallback: use everything before first money
+            left = line[: m_all[0].start()]
+        else:
+            left = line[pn_pos.end(): m_all[0].start()]
 
-        def _is_packaging_small(m):
-            # Treat "(...2)" right after a PN as packaging, not ship qty.
-            # If the digit is preceded by '(' with no more than 1 whitespace, consider it packaging.
-            start = m.start()
-            return start > 0 and line[max(0, start - 2):start].strip().startswith("(") and int(m.group(0)) <= 9
-
-        ship_val = None
-        if tail_ints:
-            # Use the last tail integer that is not inside a PN and not a packaging "(2)".
-            for m in reversed(tail_ints):
-                if any(_overlap(m.span(), ps) for ps in pn_spans):
-                    continue
-                if _is_packaging_small(m):
-                    continue
-                ship_val = int(m.group(0))
-                break
-        if ship_val is None:
-            # Fallback: last integer on the line, excluding those inside PNs and packaging "(2)".
-            for m in reversed(ints_all):
-                if any(_overlap(m.span(), ps) for ps in pn_spans):
-                    continue
-                if _is_packaging_small(m):
-                    continue
-                ship_val = int(m.group(0))
-                break
-
-        if ship_val is None or ship_val <= 0:
-            continue
-
-        # ---- Unit price: pick the smallest money token (heuristic) ----
-        unit_cost = _pick_unit_price([m.group(0) for m in m_all])
-
-        # ---- Description: text before last money, cleaned ----
-        left = line[:last_money.start()]
-        left = re.sub(rf"\b{re.escape(pn)}\b", " ", left, flags=re.I)
-        # Remove *other* PNs as well to avoid noise in description.
-        for ps in pn_spans[1:]:
-            other = line[ps[0]:ps[1]]
-            left = left.replace(other, " ")
-        left = re.sub(rf"\b{UNIT_TOKENS}\b", " ", left, flags=re.I)
-        left = re.sub(r"\bQTY\b\s*\d{1,4}\b", " ", left, flags=re.I)
-        left = re.sub(r"^\s*(\d+\s+){1,3}", " ", left)
+        # Clean up description (keeps size fractions like 1/2, removes qty/price noise, uppercases, etc.)
         desc = _cleanup_description(left, pn)
-
+        # Require a minimum of 3 alnum chars to avoid stray junk.
         if len(re.sub(r"[^A-Za-z0-9]+", "", desc)) < 3:
             continue
 
-        items.append({
+        rows.append({
             "part_number": pn,
             "part_name": desc,
-            "quantity": int(ship_val),
+            "quantity": int(qty),
             "unit_cost": unit_cost if unit_cost is not None else np.nan,
             "supplier": supplier_hint or "Marcone",
             "location": SUPPLIER_LOCATION_MAP.get("marcone", default_location),
@@ -1250,7 +1219,7 @@ def _parse_marcone_lines(
         })
 
     cols = ["part_number","part_name","quantity","unit_cost","supplier","location","order_no","date"]
-    return pd.DataFrame(items, columns=cols)
+    return pd.DataFrame(rows, columns=cols)
 
 
 def _parse_reliable_from_pdf_text(pdf_path: str, *, supplier_hint: str,

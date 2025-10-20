@@ -1,79 +1,84 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-2">
-  <h3>Receiving #{{ batch.id }}</h3>
-  <div class="d-flex gap-2">
-    {% if batch.attachment_path %}
-      <a class="btn btn-outline-primary"
-         href="{{ url_for('inventory.download_receiving_attachment', batch_id=batch.id) }}"
-         target="_blank">Open PDF</a>
-    {% endif %}
-    {% if batch.status != 'posted' %}
-      <a class="btn btn-primary" href="{{ url_for('inventory.receiving_new') }}?edit={{ batch.id }}">Edit</a>
-      <form method="post" action="{{ url_for('inventory.receiving_post', batch_id=batch.id) }}" onsubmit="return confirm('Post and update stock?')">
-        <button class="btn btn-success" type="submit">Post</button>
+<h3>Receiving Batch #{{ batch.id }}</h3>
+
+{% set lines = (batch|attr('lines')|default(batch|attr('items'), true)|default([], true)) %}
+{% set curr = batch|attr('currency')|default('USD', true) %}
+{% set role = current_user.role if current_user.is_authenticated else '' %}
+{% set can_super = current_user.is_authenticated and (
+  role == 'superadmin' or (current_user.is_superadmin|default(false)) or (current_user.is_super_admin|default(false))
+) %}
+
+<div class="row mb-3">
+  <div class="col">
+    <div><strong>Supplier:</strong> {{ batch|attr('supplier_name')|default('', true) }}</div>
+    <div><strong>Invoice #:</strong> {{ batch|attr('invoice_number')|default('—', true) }}</div>
+    <div><strong>Date:</strong> {{ batch|attr('invoice_date')|default('—', true) }}</div>
+    <div>
+      <strong>Status:</strong>
+      {% if (batch|attr('status')|default('', true)) == 'posted' %}
+        <span class="badge bg-success">posted</span>
+      {% else %}
+        <span class="badge bg-secondary">draft</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col text-end">
+    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_list') }}">Back</a>
+
+    {% if can_super %}
+      <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}" method="post" style="display:inline;">
+        <button class="btn {{ 'btn-warning' if (batch|attr('status')|default('', true)) == 'posted' else 'btn-primary' }}" type="submit">
+          {{ 'Unpost' if (batch|attr('status')|default('', true)) == 'posted' else 'Post' }}
+        </button>
+      </form>
+
+      <form action="{{ url_for('inventory.receiving_delete', batch_id=batch.id) }}" method="post" style="display:inline;"
+            onsubmit="return confirm('Delete batch #{{ batch.id }}? This cannot be undone.');">
+        <button class="btn btn-danger" type="submit">Delete</button>
       </form>
     {% endif %}
-    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_list') }}">Back</a>
   </div>
 </div>
 
-<div class="mb-2">
-  <span class="badge {{ 'bg-success' if batch.status=='posted' else 'bg-secondary' }}">{{ batch.status }}</span>
-</div>
-
-<div class="row g-2 mb-2">
-  <div class="col-md-3"><b>Supplier:</b> {{ batch.supplier_name }}</div>
-  <div class="col-md-3"><b>Invoice #:</b> {{ batch.invoice_number or '—' }}</div>
-  <div class="col-md-3"><b>Invoice Date:</b> {{ batch.invoice_date or '—' }}</div>
-  <div class="col-md-3"><b>Currency:</b> {{ batch.currency }}</div>
-</div>
-
-{% if batch.notes %}
-  <div class="mb-3"><b>Notes:</b> {{ batch.notes }}</div>
-{% endif %}
-
-{% set ns = namespace(total_qty=0, total_cost=0.0) %}
-
-<div class="table-responsive">
-  <table class="table table-sm">
-    <thead>
+<table class="table table-sm table-hover align-middle">
+  <thead>
+    <tr>
+      <th style="width:60px;">#</th>
+      <th style="width:160px;">Part #</th>
+      <th>Description</th>
+      <th style="width:120px;" class="text-end">Qty</th>
+      <th style="width:140px;" class="text-end">Unit Cost</th>
+      <th style="width:140px;" class="text-end">Line Total</th>
+      <th style="width:120px;">Location</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% set grand = 0.0 %}
+    {% for it in lines %}
+      {% set pn   = (it|attr('part') and (it.part|attr('number')|default('', true))) or (it|attr('part_number')|default('', true)) %}
+      {% set name = (it|attr('part') and (it.part|attr('name')|default('', true)))   or (it|attr('part_name')|default('', true)) %}
+      {% set qty  = (it|attr('qty')|default(it|attr('quantity'), true)|default(0, true)) | int %}
+      {% set ucost = (it|attr('unit_cost')|default(it|attr('unit_cost_at_issue'), true)|default(0.0, true)) | float %}
+      {% set line_total = (qty * ucost) %}
+      {% set grand = grand + line_total %}
       <tr>
-        <th>#</th>
-        <th>Part #</th>
-        <th>Part Name</th>
-        <th class="text-end">Qty</th>
-        <th class="text-end">Unit Cost</th>
-        <th class="text-end">Line Total</th>
-        <th>Location</th>
+        <td>{{ loop.index }}</td>
+        <td>{{ pn }}</td>
+        <td>{{ name }}</td>
+        <td class="text-end">{{ qty }}</td>
+        <td class="text-end">{{ curr }} {{ '%.2f' % ucost }}</td>
+        <td class="text-end">{{ curr }} {{ '%.2f' % line_total }}</td>
+        <td>{{ it|attr('location')|default((it|attr('part') and it.part|attr('location')|default('', true)) or '', true) }}</td>
       </tr>
-    </thead>
-    <tbody>
-      {% for i, it in enumerate(batch.lines, start=1) %}
-        {% set line_total = (it.unit_cost or 0) * (it.quantity or 0) %}
-        {% set ns.total_qty = ns.total_qty + (it.quantity or 0) %}
-        {% set ns.total_cost = ns.total_cost + line_total %}
-        <tr>
-          <td>{{ i }}</td>
-          <td>{{ it.part_number }}</td>
-          <td>{{ it.part_name or '' }}</td>
-          <td class="text-end">{{ it.quantity }}</td>
-          <td class="text-end">{{ '%.2f' % (it.unit_cost or 0) }}</td>
-          <td class="text-end">{{ '%.2f' % line_total }}</td>
-          <td>{{ it.location or '' }}</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-    <tfoot>
-      <tr>
-        <th colspan="3" class="text-end">Totals:</th>
-        <th class="text-end">{{ ns.total_qty }}</th>
-        <th></th>
-        <th class="text-end">{{ batch.currency }} {{ '%.2f' % ns.total_cost }}</th>
-        <th></th>
-      </tr>
-    </tfoot>
-  </table>
-</div>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <th colspan="5" class="text-end">Total:</th>
+      <th class="text-end">{{ curr }} {{ '%.2f' % grand }}</th>
+      <th></th>
+    </tr>
+  </tfoot>
+</table>
 {% endblock %}
-

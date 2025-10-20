@@ -148,6 +148,118 @@ def _apply_default_location(obj, default_loc: str):
 
     return obj
 
+def _clear_dedup_keys_for_batch(batch_id: int) -> int:
+    """
+    Пытаемся удалить все дедуп-ключи, связанные с указанным batch_id.
+    Возвращаем количество удалённых ключей (или 0, если не удалось найти где хранится).
+    Поддерживает несколько стратегий, чтобы не ломать ваш текущий стор.
+    """
+    deleted = 0
+
+    # Стратегия 1: если есть таблица с ключами (напр., models.ImportDedupKey)
+    try:
+        from models import ImportDedupKey  # ваша таблица может называться иначе
+        from sqlalchemy import or_, cast, String
+        q = ImportDedupKey.query
+
+        # 1а) по batch_id в meta (если meta_json / meta / data есть)
+        # пробуем разные имена поля
+        meta_cols = [c for c in ("meta_json", "meta", "data") if hasattr(ImportDedupKey, c)]
+        conds = []
+        for mc in meta_cols:
+            col = getattr(ImportDedupKey, mc)
+            # простая LIKE-проверка по строковому полю (работает и для JSONTEXT)
+            conds.append(cast(col, String).ilike(f'%\"batch_id\": {batch_id}%'))
+            conds.append(cast(col, String).ilike(f"%\"batch_id\":\"{batch_id}\"%"))
+
+        # 1б) по шаблону ключа (если вдруг ключи имели суффикс |B{batch_id})
+        if hasattr(ImportDedupKey, "key"):
+            conds.append(getattr(ImportDedupKey, "key").ilike(f"%|B{batch_id}"))
+
+        if conds:
+            rows = q.filter(or_(*conds)).all()
+            for row in rows:
+                db.session.delete(row)
+                deleted += 1
+            if rows:
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # Стратегия 2: стор через функции (если у вас есть del_key / iter_keys)
+    # Ничего не знаем о сторе — пробуем «от греха подальше»
+    try:
+        from inventory.dedup_store import iter_keys, del_key  # если у вас такой модуль есть
+        for k, meta in iter_keys():
+            try:
+                if str(meta.get("batch_id", "")) == str(batch_id) or f"|B{batch_id}" in k:
+                    del_key(k)
+                    deleted += 1
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Стратегия 3: если есть простые функции del_keys_by_batch (вдруг уже реализовали)
+    try:
+        from inventory.dedup_store import del_keys_by_batch  # noqa
+        deleted += del_keys_by_batch(batch_id) or 0
+    except Exception:
+        pass
+
+    return deleted
+
+@inventory_bp.post("/receiving/<int:batch_id>/delete", endpoint="receiving_delete_batch")
+@login_required
+def receiving_delete_batch(batch_id):
+    # --- доступ только супер-админу ---
+    role = getattr(current_user, "role", "") or ""
+    if not (role == "superadmin" or getattr(current_user, "is_superadmin", False) or getattr(current_user, "is_super_admin", False)):
+        return ("Forbidden", 403)
+
+    from models import ReceivingBatch
+    batch = db.session.get(ReceivingBatch, batch_id)
+    if not batch:
+        flash("Batch not found.", "warning")
+        return redirect(url_for("inventory.receiving_list"))
+
+    try:
+        # удаляем строки + сам батч (как у вас уже сделано)
+        # ...
+        db.session.delete(batch)
+        db.session.commit()
+        # --- авто-чистка дедуп-ключей ---
+        removed = _clear_dedup_keys_for_batch(batch_id)
+        if removed:
+            flash(f"Batch #{batch_id} deleted. Dedup keys removed: {removed}.", "success")
+        else:
+            flash(f"Batch #{batch_id} deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to delete batch: {e}", "danger")
+
+    return redirect(url_for("inventory.receiving_list"))
+
+@inventory_bp.post("/receiving/<int:batch_id>/clear-keys", endpoint="receiving_clear_keys")
+@login_required
+def receiving_clear_keys(batch_id):
+    role = getattr(current_user, "role", "") or ""
+    if not (role == "superadmin" or getattr(current_user, "is_superadmin", False) or getattr(current_user, "is_super_admin", False)):
+        return ("Forbidden", 403)
+
+    removed = 0
+    try:
+        removed = _clear_dedup_keys_for_batch(batch_id)
+        if removed:
+            flash(f"Dedup keys cleared for Batch #{batch_id} (removed: {removed}).", "success")
+        else:
+            flash(f"No dedup keys found for Batch #{batch_id}.", "info")
+    except Exception as e:
+        flash(f"Failed to clear keys: {e}", "danger")
+
+    return redirect(url_for("inventory.receiving_list"))
+
+
 def _ensure_norm_columns(df, default_loc: str, saved_path: str):
     import pandas as pd
     df = _coerce_norm_df(df).copy()
@@ -4603,17 +4715,17 @@ def update_invoice():
         return max(int(mb), int(ml)) + 1
 
     def _ensure_invoice_number_for_records(
-            records,
-            issued_to,
-            issued_by,
-            reference_job,
-            issue_date,
-            location,
-            force_new=False
+        records,
+        issued_to,
+        issued_by,
+        reference_job,
+        issue_date,
+        location,
+        force_new=False
     ):
         """
-        Безопасная версия: если force_new=True — всегда создаёт новый batch с уникальным invoice_number.
-        Используется для повторных возвратов и дополнительных выдач.
+        Safe version: when force_new=True — always creates a new batch with a unique invoice_number.
+        Used for repeated returns / extra issues.
         """
         from extensions import db
         from models import IssuedBatch
@@ -4621,11 +4733,11 @@ def update_invoice():
         if not records:
             return None
 
-        # Если не требуется новый номер, и хотя бы одна запись его уже имеет — ничего не делаем
+        # If not forced and at least one record already has a number — do nothing
         if not force_new and any(getattr(r, "invoice_number", None) for r in records):
             return None
 
-        # Основной путь — твой helper
+        # Primary path — your helper
         try:
             batch = _create_batch_for_records(
                 records=records,
@@ -4639,7 +4751,7 @@ def update_invoice():
         except Exception:
             db.session.rollback()
 
-        # fallback — резервируем вручную
+        # Fallback — reserve manually
         for _ in range(5):
             inv_no = _next_invoice_number()
             try:
@@ -4667,15 +4779,6 @@ def update_invoice():
     def _already_returned_qty_for(r) -> int:
         """
         How many units have already been returned against the same *issued* row r.
-
-        Rule (robust):
-          - match by the same part (part_id),
-          - same receiver (issued_to),
-          - reference_job is exactly 'RETURN <r.reference_job>' when r.reference_job is set,
-            otherwise ANY 'RETURN%' (legacy empty ref),
-          - quantity < 0 (returns).
-        We DO NOT depend on invoice_number or issued_by — returns may later receive
-        their own number / be performed by another user.
         """
         if r is None or (r.quantity or 0) <= 0 or not getattr(r, "part_id", None):
             return 0
@@ -4688,8 +4791,6 @@ def update_invoice():
                 .filter(IssuedPartRecord.part_id == part_id,
                         IssuedPartRecord.issued_to == issued_to,
                         IssuedPartRecord.quantity < 0))
-
-        # reference match
         if ref_orig:
             base = base.filter(IssuedPartRecord.reference_job == f"RETURN {ref_orig}")
         else:
@@ -4819,7 +4920,6 @@ def update_invoice():
         return redirect(url_for('inventory.reports_grouped'))
 
     # ---------- RETURN SELECTED (with hard cap) ----------
-    # ---------- RETURN SELECTED (with hard cap) ----------
     if do_return:
         try:
             created = 0
@@ -4878,7 +4978,7 @@ def update_invoice():
 
                 created += 1
 
-            # 🔥 ДОБАВЛЯЕМ ЭТО СРАЗУ ПОСЛЕ ЦИКЛА
+            # assign a fresh invoice number for the newly created return rows
             if created:
                 new_returns = (
                     db.session.query(IssuedPartRecord)
@@ -4889,17 +4989,15 @@ def update_invoice():
                     .all()
                 )
                 if new_returns:
-                    # Возьмём reference_job прямо из возвратной строки
                     return_ref = getattr(new_returns[0], "reference_job", None) or "RETURN"
-
                     _ensure_invoice_number_for_records(
                         records=new_returns,
                         issued_to=getattr(new_returns[0], "issued_to", None),
                         issued_by=issued_by,
-                        reference_job=return_ref,  # ✅ ключевой параметр
+                        reference_job=return_ref,
                         issue_date=datetime.utcnow(),
                         location=getattr(new_returns[0], "location", None) or location,
-                        force_new=True  # ✅ создаёт новый invoice number
+                        force_new=True
                     )
 
             db.session.commit()
@@ -5685,6 +5783,7 @@ from sqlalchemy.exc import IntegrityError
 @inventory_bp.route("/import-parts", methods=["GET", "POST"], endpoint="import_parts_upload")
 def import_parts_upload():
     import os
+    import re
     import logging
     from datetime import datetime, date
     from sqlalchemy.exc import IntegrityError
@@ -5713,6 +5812,59 @@ def import_parts_upload():
             return pd.DataFrame(df)
         except Exception:
             return None
+
+    # put this helper inside import_parts_upload() (near other helpers)
+    def _infer_invoice_number(norm_df, source_file: str, supplier_hint: str | None) -> str:
+        """
+        Try very hard to find a human invoice number:
+        1) prefer any non-empty values from common columns in the parsed DF,
+        2) try to extract long digit token from the filename,
+        3) for PDFs try a quick 'Invoice:' scan via PyMuPDF/pdfminer,
+        4) return "" if nothing looks sane.
+        """
+        # 1) look in DF columns we already standardize
+        if norm_df is not None:
+            for col in ("invoice_no", "invoice", "order_no", "ref", "reference"):
+                if col in norm_df.columns:
+                    vals = [str(x).strip() for x in norm_df[col].dropna().astype(str).tolist()]
+                    vals = [v for v in vals if v and v.lower() not in ("nan", "none", "null")]
+                    if vals:
+                        # pick the most frequent non-empty token
+                        from collections import Counter
+                        c = Counter(vals)
+                        best = c.most_common(1)[0][0]
+                        # prefer a digit-ish token if present
+                        m = re.search(r"\b\d{6,}\b", best.replace(" ", ""))
+                        if m:
+                            return m.group(0)
+                        return best
+
+        # 2) file name guess (longest 6+ digits run)
+        base = os.path.basename(source_file)
+        m = re.findall(r"\d{6,}", base)
+        if m:
+            return max(m, key=len)
+
+        # 3) PDF text scan: look for 'Invoice:' followed by a digit block
+        if str(source_file).lower().endswith(".pdf"):
+            text = ""
+            try:
+                import fitz  # PyMuPDF
+                with fitz.open(source_file) as d:
+                    for i in range(min(3, d.page_count)):
+                        text += d[i].get_text() + "\n"
+            except Exception:
+                try:
+                    from pdfminer.high_level import extract_text
+                    text = extract_text(source_file) or ""
+                except Exception:
+                    text = ""
+            if text:
+                mm = re.search(r"Invoice[^0-9]*([0-9]{6,})", text, flags=re.I)
+                if mm:
+                    return mm.group(1)
+
+        return ""
 
     def _ensure_norm_columns(df, default_loc: str, saved_path: str):
         """
@@ -5760,12 +5912,33 @@ def import_parts_upload():
         for col in ("part_number", "part_name", "supplier", "order_no", "invoice_no", "row_key", "source_file"):
             df[col] = df[col].astype(str).replace({"None": ""}).fillna("").str.strip()
 
-        # row_key — только где пусто
+        # row_key — только где пусто (делаем устойчиво-уникальным на строку файла)
         rk_empty = df["row_key"].isna() | (df["row_key"].astype(str).str.strip() == "")
         if rk_empty.any():
+            df = df.reset_index(drop=False).rename(columns={"index": "__row_i"})
+            file_id = os.path.basename(str(saved_path or ""))
+
             def _mk_key(row):
-                return f"{row.loc['part_number']}/{row.loc['location']}/{row.loc['qty']}/{row.loc['unit_cost']}"
+                pn   = str(row.get("part_number", "")).strip().upper()
+                loc  = str(row.get("location", "")).strip().upper()
+                try:
+                    qty_local = int(pd.to_numeric(row.get("qty", 0), errors="coerce") or 0)
+                except Exception:
+                    qty_local = 0
+                cost = row.get("unit_cost", None)
+                if pd.isna(cost):
+                    cost = "NA"
+                else:
+                    try:
+                        cost = float(cost)
+                    except Exception:
+                        cost = "NA"
+                i = int(row.get("__row_i", 0) or 0)
+                return f"{file_id}|{i}|{pn}|{loc}|{qty_local}|{cost}"
+
             df.loc[rk_empty, "row_key"] = df[rk_empty].apply(_mk_key, axis=1)
+            if "__row_i" in df.columns:
+                del df["__row_i"]
 
         # подчистить полностью пустые строки
         drop_mask = (
@@ -5829,6 +6002,24 @@ def import_parts_upload():
         except Exception:
             pass
         return None
+
+    # NEW helper: merge locations without duplicates (A1 + MAR -> A1/MAR)
+    def _merge_locations(old_loc: str | None, new_loc: str | None) -> str:
+        """
+        Merge two location strings into a stable 'A/B' form:
+        - Uppercases tokens
+        - Splits by '/'
+        - Removes empties and duplicates while preserving order
+        """
+        out: list[str] = []
+        for raw in (old_loc, new_loc):
+            if not raw:
+                continue
+            for token in str(raw).upper().split("/"):
+                t = token.strip()
+                if t and t not in out:
+                    out.append(t)
+        return "/".join(out)
     # ==========================================================================
 
     enabled = int(current_app.config.get("WCCR_IMPORT_ENABLED", 0))
@@ -5868,6 +6059,9 @@ def import_parts_upload():
 
         norm = _ensure_norm_columns(norm, default_loc, saved_path)
         flash(f"Supplier hint: {supplier_hint or 'None'}, default location: {default_loc}", "info")
+
+        # >>> НОВОЕ: определим номер инвойса заранее
+        invoice_guess = _infer_invoice_number(norm, saved_path, supplier_hint) or ""
 
         # --- SAVE — остаёмся в превью
         if "save" in request.form:
@@ -5923,7 +6117,7 @@ def import_parts_upload():
 
                 batch_kwargs = {}
                 if B_SUP:   batch_kwargs[B_SUP]   = (supplier_hint or "Unknown")
-                if B_INV:   batch_kwargs[B_INV]   = ""
+                if B_INV:   batch_kwargs[B_INV]   = invoice_guess  # <<< ставим реальный номер
                 if B_DATE:  batch_kwargs[B_DATE]  = date.today()
                 if B_CURR:  batch_kwargs[B_CURR]  = "USD"
                 if B_NOTES: batch_kwargs[B_NOTES] = f"Imported from {os.path.basename(saved_path)}"
@@ -5954,6 +6148,14 @@ def import_parts_upload():
                 return has_key(rk)
 
             def make_movement(m: dict) -> None:
+                """
+                Apply one normalized movement row to inventory:
+                - Find/create Part by PN only (ignore location for lookup)
+                - Increase quantity
+                - Overwrite unit cost if provided
+                - Merge locations: old/new -> 'OLD/NEW' (no duplicates)
+                - Create ReceivingItem if model is available
+                """
                 PartModel = Part
 
                 PN_FIELDS   = ["part_number","number","sku","code","partnum","pn"]
@@ -5973,36 +6175,65 @@ def import_parts_upload():
                 if pn_field is None or qty_field is None:
                     raise RuntimeError("Не найдено поле PART # или QTY в модели Part.")
 
-                # 1) найти/создать Part
-                filters = {pn_field: m["part_number"]}
-                if loc_field:
-                    filters[loc_field] = m.get("location")
+                incoming_pn   = m["part_number"]
+                incoming_qty  = int(m.get("qty") or m.get("quantity") or 0)
+                incoming_cost = m.get("unit_cost")
+                incoming_name = m.get("part_name") or ""
+                incoming_loc  = (m.get("location") or "").strip().upper()
+                incoming_sup  = m.get("supplier") or ""
 
-                part = PartModel.query.filter_by(**filters).first()
+                # 1) Find by PN only (do not include location in the filter)
+                part = PartModel.query.filter(getattr(PartModel, pn_field) == incoming_pn).first()
+
                 if not part:
-                    kwargs = dict(filters)
-                    kwargs[qty_field] = 0
-                    if name_field and m.get("part_name"):   kwargs[name_field] = m["part_name"]
-                    if cost_field and (m.get("unit_cost") is not None):
-                        kwargs[cost_field] = float(m["unit_cost"])
-                    if sup_field and m.get("supplier"):     kwargs[sup_field]  = m["supplier"]
+                    # Create a new Part
+                    kwargs = {
+                        pn_field: incoming_pn,
+                        qty_field: 0,  # will increase below
+                    }
+                    if name_field and incoming_name:
+                        kwargs[name_field] = incoming_name
+                    if loc_field:
+                        kwargs[loc_field] = incoming_loc
+                    if cost_field and (incoming_cost is not None):
+                        kwargs[cost_field] = float(incoming_cost)
+                    if sup_field and incoming_sup:
+                        kwargs[sup_field] = incoming_sup
+
                     part = PartModel(**kwargs)
                     session.add(part)
-                    session.flush()
+                    try:
+                        session.flush()  # get part.id
+                    except IntegrityError:
+                        # Race condition safety: try to read again
+                        session.rollback()
+                        part = PartModel.query.filter(getattr(PartModel, pn_field) == incoming_pn).first()
+                        if not part:
+                            raise
 
-                # актуализируем имя/цену
-                if name_field and not getattr(part, name_field) and m.get("part_name"):
-                    setattr(part, name_field, m["part_name"])
-                if cost_field and (m.get("unit_cost") is not None):
-                    setattr(part, cost_field, float(m["unit_cost"]))
+                # 2) Update existing part fields
+                # Quantity: add incoming
+                current_qty = getattr(part, qty_field) or 0
+                setattr(part, qty_field, int(current_qty) + incoming_qty)
 
-                add_qty = int(m.get("qty") or m.get("quantity") or 0)
+                # Unit cost: overwrite if provided (last price wins)
+                if cost_field and (incoming_cost is not None):
+                    setattr(part, cost_field, float(incoming_cost))
 
-                # 2) строка приёмки — поддержка обеих схем
+                # Name: fill in if missing
+                if name_field and incoming_name and not getattr(part, name_field):
+                    setattr(part, name_field, incoming_name)
+
+                # Location: merge old + new -> 'OLD/NEW' (no duplicates)
+                if loc_field:
+                    merged = _merge_locations(getattr(part, loc_field), incoming_loc)
+                    setattr(part, loc_field, merged)
+
+                # 3) Receiving line (if the model exists)
                 if ItemModel is not None and batch is not None and batch_id_field is not None:
                     I_BATCH = _pick_field(ItemModel, ["goods_receipt_id", "batch_id", "receiving_id"])
                     I_PART  = _pick_field(ItemModel, ["part_id","item_part_id"])
-                    I_PN    = _pick_field(ItemModel, ["part_number","part","sku","code"])   # если нет part_id
+                    I_PN    = _pick_field(ItemModel, ["part_number","part","sku","code"])
                     I_PNAME = _pick_field(ItemModel, ["part_name","name","descr","description","title"])
                     I_QTY   = _pick_field(ItemModel, ["qty","quantity"])
                     I_COST  = _pick_field(ItemModel, ["unit_cost","cost","price","unitprice"])
@@ -6011,19 +6242,15 @@ def import_parts_upload():
                     try:
                         item_kwargs = {}
                         if I_BATCH: item_kwargs[I_BATCH] = getattr(batch, batch_id_field)
-
                         if I_PART:
-                            # схема с part_id
                             item_kwargs[I_PART] = getattr(part, "id", None)
                         else:
-                            # схема без part_id — пишем PN/NAME напрямую
-                            if I_PN:    item_kwargs[I_PN]    = m.get("part_number")
-                            if I_PNAME: item_kwargs[I_PNAME] = m.get("part_name")
-
-                        if I_QTY:   item_kwargs[I_QTY] = add_qty
-                        if I_COST and (m.get("unit_cost") is not None):
-                            item_kwargs[I_COST] = float(m["unit_cost"])
-                        if I_LOC:   item_kwargs[I_LOC] = m.get("location")
+                            if I_PN:    item_kwargs[I_PN]    = incoming_pn
+                            if I_PNAME: item_kwargs[I_PNAME] = incoming_name
+                        if I_QTY:   item_kwargs[I_QTY]   = incoming_qty
+                        if I_COST and (incoming_cost is not None):
+                            item_kwargs[I_COST] = float(incoming_cost)
+                        if I_LOC:   item_kwargs[I_LOC]   = incoming_loc
 
                         if item_kwargs.get(I_QTY, 0) > 0:
                             session.add(ItemModel(**item_kwargs))
@@ -6036,11 +6263,16 @@ def import_parts_upload():
                         logging.exception("Failed to create ReceivingItem: %s", e)
                         flash("Не удалось создать строку приёмки (см. лог).", "warning")
 
-                # 3) приход на склад
-                setattr(part, qty_field, (getattr(part, qty_field) or 0) + add_qty)
-
+                # 4) Save changes and mark dedup key
                 session.commit()
-                add_key(m["row_key"], {"file": m["source_file"]})
+                # Добавим batch_id в метаданные, если батч есть (назад совместимо)
+                meta = {"file": m.get("source_file")}
+                try:
+                    if batch is not None and batch_id_field:
+                        meta["batch_id"] = getattr(batch, batch_id_field)
+                except Exception:
+                    pass
+                add_key(m["row_key"], meta)
 
             built, errors = build_receive_movements(
                 norm,
@@ -6105,6 +6337,7 @@ def import_parts_upload():
 
     # ===== C) GET → форма загрузки ============================================
     return render_template("import_parts.html")
+
 
 @inventory_bp.get("/orders/", endpoint="list_orders")
 def list_orders():
@@ -6444,6 +6677,8 @@ def _already_returned_qty_for_source(src) -> int:
 @inventory_bp.get("/receiving", endpoint="receiving_list")
 @login_required
 def receiving_list():
+    from sqlalchemy import func
+
     q = ReceivingBatch.query
     supplier = (request.args.get("supplier") or "").strip()
     inv = (request.args.get("invoice") or "").strip()
@@ -6470,11 +6705,156 @@ def receiving_list():
     if d2p:
         q = q.filter(ReceivingBatch.invoice_date <= d2p)
 
-    batches = q.order_by(ReceivingBatch.invoice_date.desc().nullslast(), ReceivingBatch.id.desc()).all()
-    return render_template("receiving_list.html", batches=batches, filters={
-        "supplier": supplier, "invoice": inv, "date_from": d1, "date_to": d2, "status": status
-    })
+    batches = q.order_by(
+        ReceivingBatch.invoice_date.desc().nullslast(),
+        ReceivingBatch.id.desc()
+    ).all()
 
+    # compute totals per batch (works with both schemas)
+    totals = {}
+    for b in batches:
+        try:
+            lines = getattr(b, "items", []) or getattr(b, "lines", []) or []
+            total = 0.0
+            for ln in lines:
+                # flexible attr names
+                qty  = getattr(ln, "qty", None) or getattr(ln, "quantity", 0) or 0
+                cost = getattr(ln, "unit_cost", None) or getattr(ln, "price", None) or 0.0
+                try:
+                    total += float(cost) * int(qty)
+                except Exception:
+                    pass
+            totals[b.id] = total
+        except Exception:
+            totals[b.id] = 0.0
+
+    # pass a superadmin flag; be defensive with attribute names
+    can_admin = bool(
+        getattr(current_user, "is_superadmin", False) or
+        getattr(current_user, "is_super_admin", False) or
+        getattr(current_user, "is_admin", False)
+    )
+
+    return render_template(
+        "receiving_list.html",
+        batches=batches,
+        totals=totals,
+        can_admin=can_admin,
+        filters={
+            "supplier": supplier, "invoice": inv,
+            "date_from": d1, "date_to": d2, "status": status
+        }
+    )
+
+# --- Receiving: toggle posted/draft (superadmin only) ------------------------
+@inventory_bp.post("/receiving/<int:batch_id>/toggle", endpoint="receiving_toggle")
+@login_required
+def receiving_toggle(batch_id: int):
+    from extensions import db
+    from models import ReceivingBatch  # или GoodsReceipt / Receiving — ваш alias сверху уже есть
+
+    if getattr(current_user, "role", "") != "superadmin":
+        flash("Only superadmin can post/unpost receiving.", "danger")
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
+
+    batch = db.session.get(ReceivingBatch, batch_id)
+    if not batch:
+        flash("Batch not found.", "warning")
+        return redirect(url_for("inventory.receiving_list"))
+
+    status = (getattr(batch, "status", "") or "").strip().lower()
+    new_status = "draft" if status == "posted" else "posted"
+    try:
+        setattr(batch, "status", new_status)
+        db.session.commit()
+        flash(f"Batch #{batch_id} set to {new_status}.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to toggle status: {e}", "danger")
+
+    return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
+
+
+# --- Receiving: delete batch (superadmin only) -------------------------------
+@inventory_bp.post("/receiving/<int:batch_id>/delete", endpoint="receiving_delete")
+@login_required
+def receiving_delete(batch_id: int):
+    from extensions import db
+    # Пытаемся импортировать обе возможные модели строк
+    try:
+        from models import ReceivingBatch as BatchModel
+    except Exception:
+        try:
+            from models import GoodsReceipt as BatchModel
+        except Exception:
+            BatchModel = None
+
+    try:
+        from models import ReceivingItem as LineModel
+    except Exception:
+        try:
+            from models import GoodsReceiptLine as LineModel
+        except Exception:
+            LineModel = None
+
+    from models import Part
+
+    if getattr(current_user, "role", "") != "superadmin":
+        flash("Only superadmin can delete receiving.", "danger")
+        return redirect(url_for("inventory.receiving_list"))
+
+    if BatchModel is None:
+        flash("Receiving model not found.", "danger")
+        return redirect(url_for("inventory.receiving_list"))
+
+    batch = db.session.get(BatchModel, batch_id)
+    if not batch:
+        flash("Batch not found.", "warning")
+        return redirect(url_for("inventory.receiving_list"))
+
+    # Достаём список линий безопасно (lines или items)
+    lines = getattr(batch, "lines", None)
+    if lines is None:
+        lines = getattr(batch, "items", []) or []
+
+    try:
+        # 1) Откатить остатки на складе
+        for it in list(lines):
+            # qty/quantity
+            qty = getattr(it, "qty", None)
+            if qty is None:
+                qty = getattr(it, "quantity", 0)
+            try:
+                qty = int(qty or 0)
+            except Exception:
+                qty = 0
+
+            # связанный Part
+            part = getattr(it, "part", None)
+            if part is None:
+                # иногда нет relationship — пробуем найти по part_id
+                pid = getattr(it, "part_id", None)
+                if pid:
+                    part = db.session.get(Part, pid)
+
+            if part and qty:
+                # При удалении приёмки вычитаем то, что приходовали
+                current = int(getattr(part, "quantity", 0) or 0)
+                setattr(part, "quantity", current - qty)
+
+            # удалить линию
+            db.session.delete(it)
+
+        # 2) удалить сам batch
+        db.session.delete(batch)
+
+        db.session.commit()
+        flash(f"Batch #{batch_id} deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to delete batch: {e}", "danger")
+
+    return redirect(url_for("inventory.receiving_list"))
 
 @inventory_bp.get("/receiving/new", endpoint="receiving_new")
 @login_required

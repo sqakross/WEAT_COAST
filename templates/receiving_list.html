@@ -20,23 +20,76 @@
   </div>
 </form>
 
+{# Только супер-админ #}
+{% set role = current_user.role if current_user.is_authenticated else '' %}
+{% set can_super = current_user.is_authenticated and (
+  role == 'superadmin' or (current_user.is_superadmin|default(false)) or (current_user.is_super_admin|default(false))
+) %}
+
 <table class="table table-sm table-hover align-middle">
   <thead>
     <tr>
-      <th>ID</th><th>Date</th><th>Supplier</th><th>Invoice #</th><th>Status</th>
-      <th class="text-end">Qty</th><th class="text-end">Total Cost</th>
+      <th style="width:60px;">ID</th>
+      <th style="width:110px;">Date</th>
+      <th>Supplier</th>
+      <th style="width:160px;">Invoice #</th>
+      <th style="width:100px;">Status</th>
+      <th style="width:80px;" class="text-end">Qty</th>
+      <th style="width:140px;" class="text-end">Total Cost</th>
+      {% if can_super %}<th style="width:260px;">Actions</th>{% endif %}
     </tr>
   </thead>
   <tbody>
   {% for b in batches %}
+    {# безопасно берём строки #}
+    {% set lines = (b.lines if (b.lines is defined) else (b.items if (b.items is defined) else [])) %}
+    {% set ns = namespace(qty=0, total=0.0) %}
+    {% for it in lines %}
+      {% set q = (it.qty|default(it.quantity, true)|default(0, true))|int %}
+      {% set u = (it.unit_cost|default(it.unit_cost_at_issue, true)|default(0.0, true))|float %}
+      {% set ns.qty = ns.qty + q %}
+      {% set ns.total = ns.total + (q * u) %}
+    {% endfor %}
     <tr onclick="location.href='{{ url_for('inventory.receiving_detail', batch_id=b.id) }}'" style="cursor:pointer">
       <td>{{ b.id }}</td>
-      <td>{{ b.invoice_date or '—' }}</td>
-      <td>{{ b.supplier_name }}</td>
-      <td>{{ b.invoice_number }}</td>
-      <td>{% if b.status=='posted' %}<span class="badge bg-success">posted</span>{% else %}<span class="badge bg-secondary">draft</span>{% endif %}</td>
-      <td class="text-end">{{ b.total_qty }}</td>
-      <td class="text-end">{{ b.currency }} {{ '%.2f' % b.total_cost }}</td>
+      <td>{{ b.invoice_date|default('—', true) }}</td>
+      <td>{{ b.supplier_name|default('', true) }}</td>
+      <td>{{ b.invoice_number|default('', true) }}</td>
+      <td>
+        {% if (b.status|default('', true)) == 'posted' %}
+          <span class="badge bg-success">posted</span>
+        {% else %}
+          <span class="badge bg-secondary">draft</span>
+        {% endif %}
+      </td>
+      <td class="text-end">{{ ns.qty }}</td>
+      <td class="text-end">
+        {{ b.currency|default('USD', true) }} {{ '%.2f' % (totals.get(b.id, ns.total) if totals is defined else ns.total) }}
+      </td>
+
+      {% if can_super %}
+      {# Область кнопок не должна кликать всю строку #}
+      <td onclick="event.stopPropagation();">
+        {# Post / Unpost (endpoint должен существовать как receiving_toggle) #}
+        <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}" method="post" style="display:inline;">
+          <button class="btn btn-sm {{ 'btn-warning' if (b.status|default('', true)) == 'posted' else 'btn-primary' }}" type="submit">
+            {{ 'Unpost' if (b.status|default('', true)) == 'posted' else 'Post' }}
+          </button>
+        </form>
+
+        {# Ручная чистка ключей — только супер-админ #}
+        <form action="{{ url_for('inventory.receiving_clear_keys', batch_id=b.id) }}" method="post" style="display:inline;"
+              onsubmit="return confirm('Clear import keys for batch #{{ b.id }}? This allows re-import from the same file.');">
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Clear keys</button>
+        </form>
+
+        {# Удаление батча: после commit() у тебя уже вызывается авто-чистка #}
+        <form action="{{ url_for('inventory.receiving_delete', batch_id=b.id) }}" method="post" style="display:inline;"
+              onsubmit="return confirm('Delete batch #{{ b.id }}? This will also clear its import keys.');">
+          <button class="btn btn-sm btn-danger" type="submit">Delete</button>
+        </form>
+      </td>
+      {% endif %}
     </tr>
   {% endfor %}
   </tbody>
