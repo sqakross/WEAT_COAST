@@ -93,6 +93,7 @@ ALLOWED_PDF = {".pdf"}
 SUPPLIER_LOC_DEFAULTS = {
     "reliable": "REL",
     "marcone":  "MAR",
+    "marcon":   "MAR",
 }
 
 # inventory/routes.py  (добавь рядом с _create_batch_for_records)
@@ -114,6 +115,21 @@ def _query_technicians():
         .order_by(func.lower(func.trim(User.username)).asc())
         .all()
     )
+
+# рядом с другими утилитами
+def _is_superadmin_user(u) -> bool:
+    role = (getattr(u, "role", "") or "").strip().lower()
+    # поддерживаем все твои варианты флагов
+    return (
+        role in ("superadmin", "super admin")
+        or bool(getattr(u, "is_superadmin", False))
+        or bool(getattr(u, "is_super_admin", False))
+    )
+
+# def _is_superadmin() -> bool:
+#     from flask_login import current_user
+#     return (getattr(current_user, "role", "") or "").lower() == "superadmin"
+
 
 def _supplier_to_default_location(supplier_hint: str | None) -> str:
     """По имени/подсказке поставщика выбрать дефолтную локацию."""
@@ -148,108 +164,431 @@ def _apply_default_location(obj, default_loc: str):
 
     return obj
 
-def _clear_dedup_keys_for_batch(batch_id: int) -> int:
+def _resolve_default_loc(df, default_loc: str | None, saved_path: str, supplier_hint: str | None = None) -> str:
     """
-    Пытаемся удалить все дедуп-ключи, связанные с указанным batch_id.
-    Возвращаем количество удалённых ключей (или 0, если не удалось найти где хранится).
-    Поддерживает несколько стратегий, чтобы не ломать ваш текущий стор.
+    Надёжно выбираем дефолтную локацию:
+    1) Явный default_loc (если передали)
+    2) supplier_hint (из контента / формы)
+    3) df['supplier'] (если распознался текстом)
+    4) имя файла (contains 'reliable'/'marcone' и т.п.)
+    5) MAIN
+    """
+    # 1) уже переданный default_loc
+    if default_loc:
+        return str(default_loc).strip().upper()
+
+    # 2) supplier_hint
+    loc = _supplier_to_default_location(supplier_hint)
+    if loc and loc != "MAIN":
+        return loc
+
+    # 3) колонка supplier в DF
+    try:
+        if df is not None and "supplier" in df.columns:
+            vals = " ".join(str(x) for x in df["supplier"].dropna().astype(str).tolist()).lower()
+            loc3 = _supplier_to_default_location(vals)
+            if loc3 and loc3 != "MAIN":
+                return loc3
+    except Exception:
+        pass
+
+    # 4) имя файла
+    base = (saved_path or "").lower()
+    loc4 = _supplier_to_default_location(base)
+    if loc4 and loc4 != "MAIN":
+        return loc4
+
+    # 5) запасной вариант
+    return "MAIN"
+
+
+def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invoice: str | None = None) -> int:
+    """
+    Удаляет записи анти-дедупа, связанные с batch_id / supplier / invoice.
+    Возвращает количество удалённых записей.
+    Стратегии:
+      1) ImportDedupKey (если есть).
+      2) inventory.dedup_store (если есть).
+      3) Рефлексия БД по 'dedup' + 'import' + 'processed' + 'parse' + 'lock' + 'invoice' таблицам.
+         Матч по:
+           - batch_id/receiving_batch_id/goods_receipt_id
+           - supplier/supplier_name/vendor/vendor_name
+           - invoice/invoice_number/inv_no/inv_number/invoice_no/order_no
+           - key/hash/fingerprint
+           - source_file/filename/file_path
+           - JSON-поля (meta_json/meta/data) по batch_id/supplier/invoice
     """
     deleted = 0
+    sup = (supplier or "").strip()
+    inv = (invoice  or "").strip()
 
-    # Стратегия 1: если есть таблица с ключами (напр., models.ImportDedupKey)
+    # --- Стратегия 1: ImportDedupKey (если модель существует) ---
     try:
-        from models import ImportDedupKey  # ваша таблица может называться иначе
-        from sqlalchemy import or_, cast, String
+        from models import ImportDedupKey
+        from sqlalchemy import or_, cast, String, func
+
         q = ImportDedupKey.query
+        or_conds = []
 
-        # 1а) по batch_id в meta (если meta_json / meta / data есть)
-        # пробуем разные имена поля
-        meta_cols = [c for c in ("meta_json", "meta", "data") if hasattr(ImportDedupKey, c)]
-        conds = []
-        for mc in meta_cols:
-            col = getattr(ImportDedupKey, mc)
-            # простая LIKE-проверка по строковому полю (работает и для JSONTEXT)
-            conds.append(cast(col, String).ilike(f'%\"batch_id\": {batch_id}%'))
-            conds.append(cast(col, String).ilike(f"%\"batch_id\":\"{batch_id}\"%"))
+        # JSON-поля: batch_id, supplier, invoice
+        for mc in ("meta_json", "meta", "data"):
+            if hasattr(ImportDedupKey, mc):
+                col = getattr(ImportDedupKey, mc)
+                or_conds.append(cast(col, String).ilike(f'%\"batch_id\": {batch_id}%'))
+                or_conds.append(cast(col, String).ilike(f'%\"batch_id\":\"{batch_id}\"%'))
+                if sup:
+                    or_conds.append(cast(col, String).ilike(f'%\"supplier\":\"{sup}\"%'))
+                    or_conds.append(cast(col, String).ilike(f'%\"supplier_name\":\"{sup}\"%'))
+                if inv:
+                    or_conds.append(cast(col, String).ilike(f'%\"invoice\":\"{inv}\"%'))
+                    or_conds.append(cast(col, String).ilike(f'%\"invoice_number\":\"{inv}\"%'))
+                    or_conds.append(cast(col, String).ilike(f'%\"invoice_no\":\"{inv}\"%'))
+                    or_conds.append(cast(col, String).ilike(f'%\"order_no\":\"{inv}\"%'))
 
-        # 1б) по шаблону ключа (если вдруг ключи имели суффикс |B{batch_id})
-        if hasattr(ImportDedupKey, "key"):
-            conds.append(getattr(ImportDedupKey, "key").ilike(f"%|B{batch_id}"))
+        # key/hash
+        for name in ("key", "hash", "fingerprint"):
+            if hasattr(ImportDedupKey, name):
+                col = getattr(ImportDedupKey, name)
+                if batch_id:
+                    or_conds.append(col.ilike(f"%|B{batch_id}"))
+                if sup and inv:
+                    or_conds.append(func.upper(col) == (sup + inv).upper())
 
-        if conds:
-            rows = q.filter(or_(*conds)).all()
+        # supplier/invoice прямыми колонками
+        if sup and hasattr(ImportDedupKey, "supplier"):
+            or_conds.append(func.upper(getattr(ImportDedupKey, "supplier")) == sup.upper())
+        if sup and hasattr(ImportDedupKey, "supplier_name"):
+            or_conds.append(func.upper(getattr(ImportDedupKey, "supplier_name")) == sup.upper())
+        for inv_col in ("invoice_number", "invoice", "invoice_no", "order_no"):
+            if inv and hasattr(ImportDedupKey, inv_col):
+                or_conds.append(func.upper(getattr(ImportDedupKey, inv_col)) == inv.upper())
+
+        # файловые колонки
+        for file_col in ("source_file", "filename", "file_path"):
+            if hasattr(ImportDedupKey, file_col):
+                col = getattr(ImportDedupKey, file_col)
+                # если в meta нет - всё равно почистим по наличию файла, см. откуда вызывает парсер
+                # оставляем без условия — зависит от твоего кейса
+
+        if or_conds:
+            rows = q.filter(or_(*or_conds)).all()
             for row in rows:
                 db.session.delete(row)
                 deleted += 1
             if rows:
                 db.session.commit()
+    except ImportError:
+        pass
     except Exception:
         db.session.rollback()
 
-    # Стратегия 2: стор через функции (если у вас есть del_key / iter_keys)
-    # Ничего не знаем о сторе — пробуем «от греха подальше»
+    # --- Стратегия 2: dedup_store API (если есть) ---
     try:
-        from inventory.dedup_store import iter_keys, del_key  # если у вас такой модуль есть
+        try:
+            from inventory.dedup_store import iter_keys, del_key  # type: ignore
+        except Exception:
+            from inventory.import_ledger import iter_keys, del_key  # fallback
+
         for k, meta in iter_keys():
             try:
-                if str(meta.get("batch_id", "")) == str(batch_id) or f"|B{batch_id}" in k:
-                    del_key(k)
-                    deleted += 1
+                meta = meta or {}
+                bid = str(meta.get("batch_id", ""))
+                if bid == str(batch_id) or f"|B{batch_id}" in str(k):
+                    if sup and str(meta.get("supplier", "")).strip():
+                        if str(meta.get("supplier")).strip().upper() != sup.upper():
+                            continue
+                    if inv and str(meta.get("invoice", "")).strip():
+                        if str(meta.get("invoice")).strip().upper() != inv.upper():
+                            continue
+                    if del_key(k):
+                        deleted += 1
             except Exception:
                 continue
     except Exception:
         pass
 
-    # Стратегия 3: если есть простые функции del_keys_by_batch (вдруг уже реализовали)
+    # 2b) del_keys_by_batch
     try:
-        from inventory.dedup_store import del_keys_by_batch  # noqa
-        deleted += del_keys_by_batch(batch_id) or 0
+        try:
+            from inventory.dedup_store import del_keys_by_batch  # type: ignore
+        except Exception:
+            from inventory.import_ledger import del_keys_by_batch  # fallback
+        deleted += int(del_keys_by_batch(batch_id) or 0)
     except Exception:
         pass
 
-    return deleted
+    # --- Стратегия 3: расширенная рефлексия БД ---
+    try:
+        import sqlalchemy as sa
+        engine = db.session.get_bind()
+        insp   = sa.inspect(engine)
 
-@inventory_bp.post("/receiving/<int:batch_id>/delete", endpoint="receiving_delete_batch")
+        TABLE_NAME_HINTS = ("dedup", "import", "processed", "parse", "lock", "invoice")
+        POSSIBLE_BATCH   = ("batch_id", "goods_receipt_id", "receiving_batch_id")
+        POSSIBLE_SUP     = ("supplier", "supplier_name", "vendor", "vendor_name")
+        POSSIBLE_INV     = ("invoice", "invoice_number", "inv_no", "inv_number", "invoice_no", "order_no")
+        POSSIBLE_KEY     = ("key", "hash", "fingerprint")
+        POSSIBLE_FILE    = ("source_file", "filename", "file_path")
+        META_CANDS       = ("meta_json", "meta", "data")
+
+        for tname in insp.get_table_names():
+            lname = tname.lower()
+            if not any(h in lname for h in TABLE_NAME_HINTS):
+                continue
+
+            meta = sa.MetaData()
+            try:
+                table = sa.Table(tname, meta, autoload_with=engine)
+            except Exception:
+                continue
+
+            cols = {c.name.lower(): c for c in table.columns}
+
+            col_batch = next((cols[n] for n in POSSIBLE_BATCH if n in cols), None)
+            col_sup   = next((cols[n] for n in POSSIBLE_SUP   if n in cols), None)
+            col_inv   = next((cols[n] for n in POSSIBLE_INV   if n in cols), None)
+            col_key   = next((cols[n] for n in POSSIBLE_KEY   if n in cols), None)
+            col_file  = next((cols[n] for n in POSSIBLE_FILE  if n in cols), None)
+
+            or_conds = []
+            if col_batch is not None:
+                or_conds.append(col_batch == int(batch_id))
+            if sup and col_sup is not None:
+                or_conds.append(sa.func.upper(col_sup) == sup.upper())
+            if inv and col_inv is not None:
+                or_conds.append(sa.func.upper(col_inv) == inv.upper())
+            if col_key is not None:
+                # два популярных паттерна ключей
+                if batch_id:
+                    or_conds.append(sa.cast(col_key, String).ilike(f"%|B{batch_id}"))
+                if sup and inv:
+                    or_conds.append(sa.func.upper(col_key) == (sup + inv).upper())
+            # JSON-поля
+            for mc in META_CANDS:
+                if mc in cols:
+                    jcol = cols[mc]
+                    or_conds.append(sa.cast(jcol, String).ilike(f'%\"batch_id\": {batch_id}%'))
+                    or_conds.append(sa.cast(jcol, String).ilike(f'%\"batch_id\":\"{batch_id}\"%'))
+                    if sup:
+                        or_conds.append(sa.cast(jcol, String).ilike(f'%\"supplier\":\"{sup}\"%'))
+                        or_conds.append(sa.cast(jcol, String).ilike(f'%\"supplier_name\":\"{sup}\"%'))
+                    if inv:
+                        for invk in ("invoice", "invoice_number", "invoice_no", "order_no"):
+                            or_conds.append(sa.cast(jcol, String).ilike(f'%\"{invk}\":\"{inv}\"%'))
+
+            if not or_conds:
+                continue
+
+            stmt = sa.delete(table).where(sa.or_(*or_conds))
+            try:
+                res = engine.execute(stmt)
+                deleted += int(getattr(res, "rowcount", 0) or 0)
+            except Exception:
+                continue
+
+        if deleted:
+            db.session.commit()
+    except Exception:
+        pass
+
+    return int(deleted or 0)
+
+@inventory_bp.post("/receiving/<int:batch_id>/delete", endpoint="receiving_delete")
 @login_required
-def receiving_delete_batch(batch_id):
-    # --- доступ только супер-админу ---
-    role = getattr(current_user, "role", "") or ""
-    if not (role == "superadmin" or getattr(current_user, "is_superadmin", False) or getattr(current_user, "is_super_admin", False)):
-        return ("Forbidden", 403)
+def receiving_delete(batch_id: int):
+    from flask import current_app, flash, redirect, url_for
+    from flask_login import current_user
+    from extensions import db
+    from sqlalchemy import func
+    from models import ReceivingBatch, Part
+    # unpost — оставляем, он нужен если действительно был status=posted
+    from services.receiving import unpost_receiving_batch
 
-    from models import ReceivingBatch
+    # --- доступ ---
+    role = (getattr(current_user, "role", "") or "").lower()
+    if not (role == "superadmin" or getattr(current_user, "is_superadmin", False) or getattr(current_user, "is_super_admin", False)):
+        flash("Only superadmin can delete receiving.", "danger")
+        return redirect(url_for("inventory.receiving_list"))
+
     batch = db.session.get(ReceivingBatch, batch_id)
     if not batch:
         flash("Batch not found.", "warning")
         return redirect(url_for("inventory.receiving_list"))
 
+    supplier = (getattr(batch, "supplier_name", "") or "").strip()
+    invoice  = (getattr(batch, "invoice_number", "") or "").strip()
+    status   = (getattr(batch, "status", "") or "").lower()
+
+    # Соберём строки и PN до любых модификаций
+    def _get_lines_for_batch(b):
+        try:
+            return list(b.items or [])
+        except Exception:
+            try:
+                from models import GoodsReceiptLine
+                return list(GoodsReceiptLine.query.filter_by(goods_receipt_id=b.id).all())
+            except Exception:
+                return []
+
+    lines = _get_lines_for_batch(batch)
+    pns = { (getattr(it, "part_number", "") or "").strip().upper() for it in lines if (getattr(it, "part_number", "") or "").strip() }
+
+    current_app.logger.info(
+        "[DELETE RECEIVING] start: batch_id=%s, status=%s, supplier=%s, invoice=%s, pns=%s",
+        batch_id, status, supplier, invoice, sorted(pns)
+    )
+
+    # 0) БЕЗОПАСНЫЙ откат остатков по строкам (на случай, если парсер уже плюсанул qty в драфте)
+    #    Вычитаем qty из Part.quantity / Part.on_hand, но не уходим в минус.
     try:
-        # удаляем строки + сам батч (как у вас уже сделано)
-        # ...
+        for it in lines:
+            qty = getattr(it, "qty", None)
+            if qty is None:
+                qty = getattr(it, "quantity", 0)
+            try:
+                qty = int(qty or 0)
+            except Exception:
+                qty = 0
+            if qty <= 0:
+                continue
+
+            pn = (getattr(it, "part_number", "") or "").strip()
+            if not pn:
+                continue
+
+            part = Part.query.filter(func.upper(Part.part_number) == pn.upper()).first()
+            if not part:
+                continue
+
+            if hasattr(part, "on_hand"):
+                cur = int(part.on_hand or 0)
+                part.on_hand = max(0, cur - qty)
+            else:
+                cur = int(getattr(part, "quantity", 0) or 0)
+                setattr(part, "quantity", max(0, cur - qty))
+        db.session.flush()
+        current_app.logger.info("[DELETE RECEIVING] draft-safe stock rollback applied for batch_id=%s", batch_id)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning("[DELETE RECEIVING] draft-safe stock rollback failed; continuing", exc_info=True)
+
+    # 1) unpost при необходимости (для совместимости, если статус был posted)
+    if status == "posted":
+        try:
+            unpost_receiving_batch(batch.id, getattr(current_user, "id", None))
+            current_app.logger.info("[DELETE RECEIVING] unposted batch_id=%s", batch_id)
+            batch = db.session.get(ReceivingBatch, batch_id)  # обновим объект
+        except Exception as e:
+            current_app.logger.exception("[DELETE RECEIVING] unpost failed for batch_id=%s", batch_id)
+            flash(f"Unable to delete: auto-unpost failed: {e}", "danger")
+            return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
+
+    # 2) удалить батч
+    try:
         db.session.delete(batch)
         db.session.commit()
-        # --- авто-чистка дедуп-ключей ---
-        removed = _clear_dedup_keys_for_batch(batch_id)
-        if removed:
-            flash(f"Batch #{batch_id} deleted. Dedup keys removed: {removed}.", "success")
-        else:
-            flash(f"Batch #{batch_id} deleted.", "success")
+        current_app.logger.info("[DELETE RECEIVING] batch deleted batch_id=%s", batch_id)
     except Exception as e:
         db.session.rollback()
+        current_app.logger.exception("[DELETE RECEIVING] delete failed for batch_id=%s", batch_id)
         flash(f"Failed to delete batch: {e}", "danger")
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
+    # 3) очистить дедуп-ключи — используем вашу функцию, если она определена
+    keys_removed = 0
+    try:
+        fn = globals().get("_clear_dedup_keys_for_batch")
+        if fn:
+            try:
+                removed = fn(batch_id, supplier=supplier, invoice=invoice)  # новая сигнатура
+            except TypeError:
+                removed = fn(batch_id)  # старая сигнатура
+            keys_removed = int(removed or 0)
+            current_app.logger.info("[DELETE RECEIVING] dedup removed=%s", keys_removed)
+        else:
+            current_app.logger.info("[DELETE RECEIVING] no _clear_dedup_keys_for_batch; skip dedup cleanup")
+    except Exception:
+        current_app.logger.warning("[DELETE RECEIVING] dedup cleanup failed", exc_info=True)
+
+    # 4) удалить «осиротевшие» Part (qty<=0 и нет ссылок)
+    parts_removed = 0
+    try:
+        # есть ли таблица строк
+        try:
+            from models import GoodsReceiptLine
+            has_grl = True
+        except Exception:
+            has_grl = False
+
+        for upn in pns:
+            if not upn:
+                continue
+            part = Part.query.filter(func.upper(Part.part_number) == upn).first()
+            if not part:
+                continue
+
+            # остаток
+            qty_now = 0
+            if hasattr(part, "on_hand"):
+                qty_now = int(part.on_hand or 0)
+            else:
+                qty_now = int(getattr(part, "quantity", 0) or 0)
+
+            if qty_now > 0:
+                continue  # есть остаток — не удаляем
+
+            # ссылки
+            refs = 0
+            if has_grl:
+                try:
+                    refs += GoodsReceiptLine.query.filter(func.upper(GoodsReceiptLine.part_number) == upn).count()
+                except Exception:
+                    pass
+            if refs > 0:
+                continue
+
+            db.session.delete(part)
+            parts_removed += 1
+
+        if parts_removed:
+            db.session.commit()
+        current_app.logger.info("[DELETE RECEIVING] parts removed=%s", parts_removed)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning("[DELETE RECEIVING] prune parts failed", exc_info=True)
+
+    # итог
+    msg = f"Batch #{batch_id} deleted."
+    if keys_removed:
+        msg += f" Dedup keys removed: {keys_removed}."
+    if parts_removed:
+        msg += f" Parts removed: {parts_removed}."
+    flash(msg, "success")
+
+    current_app.logger.info(
+        "[DELETE RECEIVING] done batch_id=%s, keys_removed=%s, parts_removed=%s",
+        batch_id, keys_removed, parts_removed
+    )
     return redirect(url_for("inventory.receiving_list"))
 
 @inventory_bp.post("/receiving/<int:batch_id>/clear-keys", endpoint="receiving_clear_keys")
 @login_required
-def receiving_clear_keys(batch_id):
-    role = getattr(current_user, "role", "") or ""
+def receiving_clear_keys(batch_id: int):
+    from flask import flash, redirect, url_for
+    from flask_login import current_user
+    from extensions import db
+    from models import ReceivingBatch
+
+    role = (getattr(current_user, "role", "") or "").lower()
     if not (role == "superadmin" or getattr(current_user, "is_superadmin", False) or getattr(current_user, "is_super_admin", False)):
         return ("Forbidden", 403)
 
-    removed = 0
+    batch = db.session.get(ReceivingBatch, batch_id)
+    supplier = (getattr(batch, "supplier_name", "") or "").strip() if batch else ""
+    invoice  = (getattr(batch, "invoice_number", "") or "").strip() if batch else ""
+
     try:
-        removed = _clear_dedup_keys_for_batch(batch_id)
+        removed = _clear_dedup_keys_for_batch(batch_id, supplier=supplier, invoice=invoice)
         if removed:
             flash(f"Dedup keys cleared for Batch #{batch_id} (removed: {removed}).", "success")
         else:
@@ -259,56 +598,55 @@ def receiving_clear_keys(batch_id):
 
     return redirect(url_for("inventory.receiving_list"))
 
-
-def _ensure_norm_columns(df, default_loc: str, saved_path: str):
-    import pandas as pd
-    df = _coerce_norm_df(df).copy()
-
-    # Базовый набор
-    need_cols = [
-        "part_number", "part_name",
-        "qty", "unit_cost", "location",
-        "row_key", "source_file",
-        "supplier", "order_no", "invoice_no"
-    ]
-    for c in need_cols:
-        if c not in df.columns:
-            df[c] = None
-
-    # qty → int, отрицательные в 0
-    df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
-    df.loc[df["qty"] < 0, "qty"] = 0
-
-    # === ALIASES (ВАЖНО) =====================================================
-    # build_receive_movements ждёт 'quantity' → делаем алиас
-    df["quantity"] = df["qty"]
-
-    # На всякий случай поддержим разные имена цены
-    if "unit_cost" not in df.columns or df["unit_cost"].isna().all():
-        for alt in ["unitcost", "unit_price", "unitprice", "price", "cost", "last_cost"]:
-            if alt in df.columns and not df[alt].isna().all():
-                df["unit_cost"] = df[alt]
-                break
-    # ========================================================================
-
-    # unit_cost → float
-    df["unit_cost"] = pd.to_numeric(df["unit_cost"], errors="coerce")
-
-    # location: только пустые заполняем default_loc
-    empty_loc = df["location"].isna() | (df["location"].astype(str).str.strip() == "")
-    df.loc[empty_loc, "location"] = default_loc
-
-    # source_file: только пустые — путём загрузки
-    empty_sf = df["source_file"].isna() | (df["source_file"].astype(str).str.strip() == "")
-    df.loc[empty_sf, "source_file"] = saved_path
-
-    # row_key: генерим, если пусто
-    def _mk_key(row):
-        return f"{row.get('part_number','')}/{row.get('location','')}/{row.get('qty',0)}/{row.get('unit_cost','')}"
-    empty_rk = df["row_key"].isna() | (df["row_key"].astype(str).str.strip() == "")
-    df.loc[empty_rk, "row_key"] = df[empty_rk].apply(_mk_key, axis=1)
-
-    return df
+# def _ensure_norm_columns(df, default_loc: str, saved_path: str):
+#     import pandas as pd
+#     df = _coerce_norm_df(df).copy()
+#
+#     # Базовый набор
+#     need_cols = [
+#         "part_number", "part_name",
+#         "qty", "unit_cost", "location",
+#         "row_key", "source_file",
+#         "supplier", "order_no", "invoice_no"
+#     ]
+#     for c in need_cols:
+#         if c not in df.columns:
+#             df[c] = None
+#
+#     # qty → int, отрицательные в 0
+#     df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
+#     df.loc[df["qty"] < 0, "qty"] = 0
+#
+#     # === ALIASES (ВАЖНО) =====================================================
+#     # build_receive_movements ждёт 'quantity' → делаем алиас
+#     df["quantity"] = df["qty"]
+#
+#     # На всякий случай поддержим разные имена цены
+#     if "unit_cost" not in df.columns or df["unit_cost"].isna().all():
+#         for alt in ["unitcost", "unit_price", "unitprice", "price", "cost", "last_cost"]:
+#             if alt in df.columns and not df[alt].isna().all():
+#                 df["unit_cost"] = df[alt]
+#                 break
+#     # ========================================================================
+#
+#     # unit_cost → float
+#     df["unit_cost"] = pd.to_numeric(df["unit_cost"], errors="coerce")
+#
+#     # location: только пустые заполняем default_loc
+#     empty_loc = df["location"].isna() | (df["location"].astype(str).str.strip() == "")
+#     df.loc[empty_loc, "location"] = default_loc
+#
+#     # source_file: только пустые — путём загрузки
+#     empty_sf = df["source_file"].isna() | (df["source_file"].astype(str).str.strip() == "")
+#     df.loc[empty_sf, "source_file"] = saved_path
+#
+#     # row_key: генерим, если пусто
+#     def _mk_key(row):
+#         return f"{row.get('part_number','')}/{row.get('location','')}/{row.get('qty',0)}/{row.get('unit_cost','')}"
+#     empty_rk = df["row_key"].isna() | (df["row_key"].astype(str).str.strip() == "")
+#     df.loc[empty_rk, "row_key"] = df[empty_rk].apply(_mk_key, axis=1)
+#
+#     return df
 
 # --- ЖЁСТКАЯ НОРМАЛИЗАЦИЯ ШАПОК ТАБЛИЦЫ ---
 def _harden_preview_headers(df, default_loc: str, supplier_hint: str | None, source_file: str | None):
@@ -424,23 +762,43 @@ def _coerce_norm_df(obj) -> pd.DataFrame:
 def _ensure_norm_columns(norm: pd.DataFrame, default_loc: str, source_file: str) -> pd.DataFrame:
     """
     Гарантирует обязательные колонки под build_receive_movements и безопасные дефолты.
-    Обязательные: part_number, part_name, quantity, unit_cost, location, row_key, source_file
-    Доп. (опциональные, но требуются в билдере): order_no, supplier, date
-    Плюс автофикс quantity (qty->quantity, default=1 если PN есть и qty пустой/<=0)
-    и фильтр полностью пустых строк.
+    Заполняем ТОЛЬКО ПУСТЫЕ location, существующие значения не трогаем.
+    Дополнительно: если переданный default_loc пуст/MAIN — пытаемся вывести
+    дефолт из df['supplier'] и/или имени файла (надёжно против «MAR» на Reliable).
     """
+    import os
     df = _coerce_norm_df(norm).copy()
-    default_loc = (default_loc or "MAIN").upper()
     source_file = (source_file or "").strip()
 
-    # --- создаём отсутствующие колонки ---
+    # --- вычисляем эффективный дефолт ---
+    eff_default_loc = (default_loc or "").strip().upper() or "MAIN"
+    if eff_default_loc == "MAIN":
+        # 1) из df['supplier']
+        try:
+            if "supplier" in df.columns:
+                sample = " ".join(
+                    str(x).lower()
+                    for x in df["supplier"].dropna().astype(str).tolist()
+                )
+                loc = _supplier_to_default_location(sample)
+                if loc and loc != "MAIN":
+                    eff_default_loc = loc
+        except Exception:
+            pass
+        # 2) из имени файла
+        if eff_default_loc == "MAIN":
+            eff_default_loc = _supplier_to_default_location((source_file or "").lower())
+
+        eff_default_loc = (eff_default_loc or "MAIN").upper()
+
+    # --- обязательные/опциональные колонки ---
     required = ["part_number", "part_name", "quantity", "unit_cost", "location", "row_key", "source_file"]
-    optional = ["order_no", "supplier", "date"]  # <- ДОбавили order_no (и заодно supplier/date)
+    optional = ["order_no", "supplier", "date"]
     for col in required + optional:
         if col not in df.columns:
             df[col] = None
 
-    # --- убрать полностью пустые строки (нет PN и нет Description) ---
+    # --- убрать полностью пустые строки (нет PN и Description) ---
     def _blank(s): return (s.fillna("").astype(str).str.strip() == "")
     mask_blank = _blank(df["part_number"]) & _blank(df["part_name"])
     df = df.loc[~mask_blank].copy()
@@ -469,29 +827,29 @@ def _ensure_norm_columns(norm: pd.DataFrame, default_loc: str, source_file: str)
     # --- unit_cost ---
     df["unit_cost"] = df["unit_cost"].apply(_to_float)
 
-    # --- location ---
-    df["location"] = df["location"].fillna("").astype(str).str.strip()
-    df.loc[df["location"] == "", "location"] = default_loc
+    # --- location: заполняем ТОЛЬКО пустые, + верхний регистр ---
+    df["location"] = df["location"].fillna("").astype(str).str.strip().str.upper()
+    df.loc[df["location"] == "", "location"] = eff_default_loc
 
     # --- source_file ---
     df["source_file"] = df["source_file"].fillna("").astype(str)
     df.loc[df["source_file"] == "", "source_file"] = source_file
 
-    # --- order_no / supplier / date: безопасные строки (пусто) ---
+    # --- прочие строковые ---
     for c in ["order_no", "supplier", "date"]:
         df[c] = df[c].fillna("").astype(str).str.strip()
 
-    # --- row_key ---
+    # --- row_key (только пустые) ---
     df["row_key"] = df["row_key"].fillna("").astype(str).str.strip()
     need_key = df["row_key"] == ""
-    df.loc[need_key, "row_key"] = (
-        df["part_number"].fillna("").astype(str).str.strip()
-        + "|" + df["location"].fillna("").astype(str).str.strip()
-        + "|" + df.index.astype(str)
-    )
+    if need_key.any():
+        df.loc[need_key, "row_key"] = (
+            df.loc[need_key, "part_number"].fillna("").astype(str).str.strip().str.upper()
+            + "|" + df.loc[need_key, "location"].fillna("").astype(str).str.strip().str.upper()
+            + "|" + df.index[need_key].astype(str)
+        )
 
     return df
-
 
 def parse_preview_rows_relaxed(form):
     buckets = defaultdict(dict)
@@ -1106,6 +1464,66 @@ def _parse_units_form(form):
         result.append(u)
 
     return result
+
+@inventory_bp.post("/api/issued/confirm_toggle", endpoint="issued_confirm_toggle")
+@login_required
+def issued_confirm_toggle():
+    """
+    Переключает подтверждение одной строки IssuedPartRecord.
+    Доступно только SUPERADMIN. Позволяет и поставить, и снять подтверждение.
+    """
+    from flask import request, redirect, url_for, abort
+    from datetime import datetime, timezone
+    from flask_login import current_user
+    from extensions import db
+    from models import IssuedPartRecord
+
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role != "superadmin":
+        abort(403)
+
+    try:
+        rec_id = int(request.form.get("record_id") or 0)
+    except Exception:
+        rec_id = 0
+
+    new_state = (request.form.get("state") == "1")
+    wo_id = request.form.get("wo_id")
+    return_to = request.form.get("return_to")
+
+    if not rec_id:
+        # просто возвращаемся
+        if return_to:
+            return redirect(return_to)
+        if wo_id:
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+        return redirect(url_for("inventory.wo_list"))
+
+    rec = IssuedPartRecord.query.filter_by(id=rec_id).first()
+    if not rec:
+        if return_to:
+            return redirect(return_to)
+        if wo_id:
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+        return redirect(url_for("inventory.wo_list"))
+
+    # Поля подтверждения: используем те же имена, что уже применяются в wo_detail/_extract
+    rec.confirmed_by_tech = new_state
+    if new_state:
+        rec.confirmed_by = getattr(current_user, "username", "") or getattr(current_user, "email", "")
+        rec.confirmed_at = datetime.now(timezone.utc)
+    else:
+        rec.confirmed_by = None
+        rec.confirmed_at = None
+
+    db.session.commit()
+
+    if return_to:
+        return redirect(return_to)
+    if wo_id:
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+    return redirect(url_for("inventory.wo_list"))
+
 
 @inventory_bp.get("/debug/db_objects")
 def debug_db_objects():
@@ -2148,7 +2566,8 @@ def wo_detail(wo_id):
         flash("You don't have access to this Work Order.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    can_confirm_any = (is_admin_like or (is_technician and is_my_wo))
+    # ⬇⬇⬇ ИЗМЕНЕНО: подтверждать/снимать подтверждение теперь МОЖЕТ ТОЛЬКО SUPERADMIN
+    can_confirm_any = (role == "superadmin")
     can_view_docs = (is_admin_like or is_my_wo)
 
     # 3) Поставщики
@@ -2167,7 +2586,7 @@ def wo_detail(wo_id):
         )
     ]
 
-    # 4) Партии/журнал (как у вас; укорочено, логика не менялась)
+    # 4) Партии/журнал
     from models import IssuedPartRecord, IssuedBatch  # noqa: E402
     from collections import defaultdict
 
@@ -2259,7 +2678,8 @@ def wo_detail(wo_id):
             _fmt(getattr(rec, "confirmed_at", None)),
         )
 
-    net_by_pn = defaultdict(int)
+    from collections import defaultdict as _dd
+    net_by_pn = _dd(int)
     batches = []
     for _, recs in grouped.items():
         b = recs[0].batch if recs and getattr(recs[0], "batch", None) else None
@@ -2334,10 +2754,9 @@ def wo_detail(wo_id):
         issued_qty=issued_qty,
         returned_qty=returned_qty,
         net_qty=net_qty,
-        # ключевые флаги — в шаблоне больше не пересчитываются
         is_my_wo=is_my_wo,
-        can_confirm=can_confirm_any,
-        can_confirm_any=can_confirm_any,
+        can_confirm=can_confirm_any,       # оставлено для обратной совместимости
+        can_confirm_any=can_confirm_any,   # теперь True только у SUPERADMIN
         can_view_docs=can_view_docs,
     )
 
@@ -5789,11 +6208,12 @@ def import_parts_upload():
     from sqlalchemy.exc import IntegrityError
 
     # ===== helpers ============================================================
-    def _supplier_to_default_location(hint: str | None) -> str:
-        s = (hint or "").lower()
-        if "reliable" in s: return "REL"
-        if "marcone" in s or "marcon" in s: return "MAR"
-        if "sears"   in s: return "SEARS"
+    def _supplier_to_default_location(supplier_hint: str | None) -> str:
+        """По имени/подсказке поставщика выбрать дефолтную локацию (по подстроке)."""
+        s = (supplier_hint or "").lower()
+        for key, loc in SUPPLIER_LOC_DEFAULTS.items():
+            if key in s:
+                return loc
         return "MAIN"
 
     def _pick_field(model, candidates):
@@ -5953,12 +6373,12 @@ def import_parts_upload():
         return df
 
     def _detect_supplier_from_content(saved_path: str, df_hint) -> str | None:
-        """
-        Пытаемся понять поставщика по содержимому:
-        1) по тексту датафрейма (если есть),
-        2) по «сырым» текстам PDF (pdfminer / PyMuPDF), без OCR.
-        """
         try:
+            # 0) приоритет по имени файла
+            base = (saved_path or "").lower()
+            if "reliable" in base: return "Reliable Parts"
+            if "marcone" in base or "marcon" in base: return "Marcone"
+
             # 1) из DataFrame
             blob = ""
             if df_hint is not None:
@@ -5978,7 +6398,7 @@ def import_parts_upload():
             if "marcone" in blob_l or "marcon" in blob_l:
                 return "Marcone"
 
-            # 2) из PDF
+            # 2) PDF
             text = ""
             try:
                 import fitz  # PyMuPDF
@@ -5997,8 +6417,7 @@ def import_parts_upload():
                 return "Reliable Parts"
             if "marcone" in tl or "marcone supply" in tl:
                 return "Marcone"
-            if "sears" in tl:
-                return "Sears"
+
         except Exception:
             pass
         return None
@@ -6074,10 +6493,13 @@ def import_parts_upload():
         if "apply" in request.form:
             if dry or not enabled:
                 flash("Импорт в режиме предпросмотра (DRY) или отключён конфигом.", "info")
-                return render_template("import_preview.html",
-                                       rows=norm.to_dict(orient="records"),
-                                       saved_path=saved_path,
-                                       supplier_hint=supplier_hint or "")
+                return render_template(
+                    "import_preview.html",
+                    rows=rows,
+                    saved_path=path_or_saved_path,
+                    supplier_hint=supplier_hint or "",
+                    default_loc=default_loc or "MAIN",  # <<< добавили
+                )
 
             session = db.session
 
@@ -6265,13 +6687,19 @@ def import_parts_upload():
 
                 # 4) Save changes and mark dedup key
                 session.commit()
-                # Добавим batch_id в метаданные, если батч есть (назад совместимо)
-                meta = {"file": m.get("source_file")}
+
+                # --- метаданные для ключа: чтобы потом можно было чистить по batch/supplier/invoice
+                meta = {
+                    "file": m.get("source_file"),
+                    "supplier": (m.get("supplier") or "").strip(),
+                    "invoice": (invoice_guess or "").strip(),  # <<<<< ВАЖНО
+                }
                 try:
                     if batch is not None and batch_id_field:
                         meta["batch_id"] = getattr(batch, batch_id_field)
                 except Exception:
                     pass
+
                 add_key(m["row_key"], meta)
 
             built, errors = build_receive_movements(
@@ -6776,126 +7204,86 @@ def receiving_toggle(batch_id: int):
 
 
 # --- Receiving: delete batch (superadmin only) -------------------------------
-@inventory_bp.post("/receiving/<int:batch_id>/delete", endpoint="receiving_delete")
-@login_required
-def receiving_delete(batch_id: int):
-    from extensions import db
-    # Пытаемся импортировать обе возможные модели строк
-    try:
-        from models import ReceivingBatch as BatchModel
-    except Exception:
-        try:
-            from models import GoodsReceipt as BatchModel
-        except Exception:
-            BatchModel = None
-
-    try:
-        from models import ReceivingItem as LineModel
-    except Exception:
-        try:
-            from models import GoodsReceiptLine as LineModel
-        except Exception:
-            LineModel = None
-
-    from models import Part
-
-    if getattr(current_user, "role", "") != "superadmin":
-        flash("Only superadmin can delete receiving.", "danger")
-        return redirect(url_for("inventory.receiving_list"))
-
-    if BatchModel is None:
-        flash("Receiving model not found.", "danger")
-        return redirect(url_for("inventory.receiving_list"))
-
-    batch = db.session.get(BatchModel, batch_id)
-    if not batch:
-        flash("Batch not found.", "warning")
-        return redirect(url_for("inventory.receiving_list"))
-
-    # Достаём список линий безопасно (lines или items)
-    lines = getattr(batch, "lines", None)
-    if lines is None:
-        lines = getattr(batch, "items", []) or []
-
-    try:
-        # 1) Откатить остатки на складе
-        for it in list(lines):
-            # qty/quantity
-            qty = getattr(it, "qty", None)
-            if qty is None:
-                qty = getattr(it, "quantity", 0)
-            try:
-                qty = int(qty or 0)
-            except Exception:
-                qty = 0
-
-            # связанный Part
-            part = getattr(it, "part", None)
-            if part is None:
-                # иногда нет relationship — пробуем найти по part_id
-                pid = getattr(it, "part_id", None)
-                if pid:
-                    part = db.session.get(Part, pid)
-
-            if part and qty:
-                # При удалении приёмки вычитаем то, что приходовали
-                current = int(getattr(part, "quantity", 0) or 0)
-                setattr(part, "quantity", current - qty)
-
-            # удалить линию
-            db.session.delete(it)
-
-        # 2) удалить сам batch
-        db.session.delete(batch)
-
-        db.session.commit()
-        flash(f"Batch #{batch_id} deleted.", "success")
-    except Exception as e:
-        db.session.rollback()
-        flash(f"Failed to delete batch: {e}", "danger")
-
-    return redirect(url_for("inventory.receiving_list"))
 
 @inventory_bp.get("/receiving/new", endpoint="receiving_new")
 @login_required
 def receiving_new():
     return render_template("receiving_edit.html", batch=None, today=datetime.utcnow().date())
 
+from services.receiving import unpost_receiving_batch
+
+@inventory_bp.post("/receiving/<int:batch_id>/unpost", endpoint="receiving_unpost")
+@login_required
+def receiving_unpost(batch_id: int):
+    if not _is_superadmin():
+        flash("Access denied: only superadmin can unpost.", "danger")
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
+
+    try:
+        unpost_receiving_batch(batch_id, getattr(current_user, "id", None))
+        flash("Batch unposted & stock rolled back.", "success")
+    except Exception as e:
+        current_app.logger.exception("Unpost failed")
+        flash(f"Unpost failed: {e}", "danger")
+    return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
 @inventory_bp.post("/receiving/save", endpoint="receiving_save")
 @login_required
 def receiving_save():
+    from flask import request, redirect, url_for, flash
+    from datetime import datetime
+    from flask_login import current_user
+
+    from extensions import db
+    from models import ReceivingBatch, ReceivingItem, Part  # ← добавили Part для sync имён
+    from sqlalchemy import func  # ← для case-insensitive поиска PN
+
     f = request.form
     batch_id = f.get("batch_id")
+
+    # доступ
+    if not _is_superadmin_user(current_user):
+        flash("Access denied: only superadmin can edit Receiving.", "danger")
+        if batch_id:
+            return redirect(url_for("inventory.receiving_detail", batch_id=int(batch_id)))
+        return redirect(url_for("inventory.receiving_list"))
+
+    # загрузка/создание батча
     if batch_id:
         batch = ReceivingBatch.query.get(int(batch_id))
         if not batch:
             flash("Receiving batch not found", "danger")
             return redirect(url_for("inventory.receiving_list"))
-        if batch.status == "posted":
+        if (batch.status or "").lower() == "posted":
             flash("Batch already posted", "warning")
             return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
     else:
         batch = ReceivingBatch(created_by=getattr(current_user, "id", None))
+        if not getattr(batch, "status", None):
+            batch.status = "draft"
 
-    batch.supplier_name = (f.get("supplier_name") or "").strip()
+    # шапка
+    batch.supplier_name  = (f.get("supplier_name") or "").strip()
     batch.invoice_number = (f.get("invoice_number") or "").strip()
     try:
         batch.invoice_date = datetime.strptime((f.get("invoice_date") or ""), "%Y-%m-%d").date()
     except Exception:
-        batch.invoice_date = None
-    batch.notes = (f.get("notes") or "").strip()
-    batch.currency = (f.get("currency") or "USD").strip()[:8] or "USD"
+        try:
+            batch.invoice_date = datetime.strptime((f.get("invoice_date") or ""), "%m/%d/%Y").date()
+        except Exception:
+            batch.invoice_date = None
+    batch.notes    = (f.get("notes") or "").strip()
+    batch.currency = ((f.get("currency") or "USD").strip()[:8] or "USD")
 
-    # перезаполним позиции
+    # строки
     batch.items.clear()
     idx = 0
     while True:
         key_base = f"rows[{idx}]"
-        pn = (f.get(f"{key_base}[part_number]") or "").strip()
         has_any = any(k.startswith(f"rows[{idx}]") for k in f.keys())
         if not has_any:
             break
+        pn = (f.get(f"{key_base}[part_number]") or "").strip()
         if pn:
             item = ReceivingItem(
                 part_number=pn,
@@ -6910,21 +7298,85 @@ def receiving_save():
     db.session.add(batch)
     db.session.commit()
 
-    if f.get("action") == "post":
+    # если нажали POST — приходуем как обычно
+    if (f.get("action") or "").lower() == "post":
         post_receiving_batch(batch.id, getattr(current_user, "id", None))
         flash("Batch posted & stock updated", "success")
         return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
-    flash("Draft saved", "success")
-    return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+    # ✅ НОВОЕ: Save Draft → синхронизируем Part.name по PN (без движения склада)
+    try:
+        if hasattr(Part, "name"):
+            for it in (batch.items or []):
+                pn = (it.part_number or "").strip()
+                new_name = (it.part_name or "").strip()
+                if not pn or not new_name:
+                    continue
+                part = Part.query.filter(func.upper(Part.part_number) == pn.upper()).first()
+                if part:
+                    old_name = (getattr(part, "name", "") or "").strip()
+                    if old_name != new_name:
+                        part.name = new_name
+            db.session.commit()
+            flash("Draft saved. Part names synced with catalog.", "success")
+        else:
+            flash("Draft saved.", "success")
+    except Exception:
+        db.session.rollback()
+        # не ломаем сохранение, просто предупреждаем
+        flash("Draft saved, but name sync failed.", "warning")
 
+    return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
 @inventory_bp.get("/receiving/<int:batch_id>", endpoint="receiving_detail")
 @login_required
 def receiving_detail(batch_id):
-    batch = ReceivingBatch.query.get_or_404(batch_id)
-    return render_template("receiving_detail.html", batch=batch)
+    from models import ReceivingBatch
+    batch = db.session.get(ReceivingBatch, batch_id)
+    if not batch:
+        flash("Batch not found.", "warning")
+        return redirect(url_for("inventory.receiving_list"))
 
+    # ЯВНО берём строки (какая бы ни была relationship: lines или items)
+    lines = (getattr(batch, "lines", None)
+             or getattr(batch, "items", None)
+             or [])
+
+    # Серверный расчёт итога — максимально терпимый к типам
+    def _to_int(x):
+        try:
+            return int(x)
+        except Exception:
+            try:
+                return int(float(str(x).replace(",", ".")))
+            except Exception:
+                return 0
+
+    def _to_float(x):
+        try:
+            return float(x)
+        except Exception:
+            try:
+                return float(str(x).replace(",", ".").replace("$", ""))
+            except Exception:
+                return 0.0
+
+    batch_total = 0.0
+    for it in lines:
+        qty = _to_int(getattr(it, "quantity", None) or getattr(it, "qty", 0))
+        cost = _to_float(
+            getattr(it, "unit_cost", None) or getattr(it, "unit_cost_at_issue", 0.0)
+        )
+        batch_total += qty * cost
+
+    readonly = not _is_superadmin_user(current_user)
+    return render_template(
+        "receiving_detail.html",
+        batch=batch,
+        lines=lines,              # ► прокидываем явные строки
+        batch_total=batch_total,  # ► и итог
+        readonly=readonly
+    )
 
 @inventory_bp.post("/receiving/<int:batch_id>/post", endpoint="receiving_post")
 @login_required
@@ -7219,6 +7671,7 @@ def download_receiving_attachment(batch_id):
         as_attachment=False,
         download_name=os.path.basename(p)
     )
+
 
 
 

@@ -2,6 +2,7 @@ from datetime import datetime, date
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import relationship, validates
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy import CheckConstraint, UniqueConstraint, func
 from extensions import db
 
@@ -318,6 +319,7 @@ class OrderItem(db.Model):
 # --------------------------------
 # Goods Receipts (приход)
 # --------------------------------
+# --- GoodsReceipt (без изменений полей) ---
 class GoodsReceipt(db.Model):
     __tablename__ = "goods_receipts"
     __table_args__ = (
@@ -338,23 +340,58 @@ class GoodsReceipt(db.Model):
     posted_by = db.Column(db.Integer)
     attachment_path = db.Column(db.String(512))
 
+    # ✅ Back-compat alias: batch.items ↔ batch.lines
+    @property
+    def items(self):
+        # Возвращаем тот же InstrumentedList, что и relationship 'lines',
+        # чтобы работали .clear(), .append(), итд.
+        return self.lines
+
+    @hybrid_property
+    def total_cost(self) -> float:
+        try:
+            lines = getattr(self, "lines", None) or []
+            return float(sum(
+                (getattr(it, "quantity", 0) or 0) * (getattr(it, "unit_cost", 0.0) or 0.0)
+                for it in lines
+            ))
+        except Exception:
+            return 0.0
+
 
 class GoodsReceiptLine(db.Model):
     __tablename__ = "goods_receipt_lines"
     __table_args__ = {"extend_existing": True}
+
     id = db.Column(db.Integer, primary_key=True)
-    goods_receipt_id = db.Column(db.Integer, db.ForeignKey("goods_receipts.id", ondelete="CASCADE"), nullable=False, index=True)
-    line_no = db.Column(db.Integer, default=1)
-    part_number = db.Column(db.String(120), nullable=False, index=True)
-    part_name = db.Column(db.String(255))
-    quantity = db.Column(db.Integer, default=1, nullable=False)
-    unit_cost = db.Column(db.Float, default=0.0)
-    location = db.Column(db.String(64))
-    goods_receipt = db.relationship("GoodsReceipt", backref=db.backref("lines", cascade="all, delete-orphan"))
+    goods_receipt_id = db.Column(
+        db.Integer,
+        db.ForeignKey("goods_receipts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    line_no    = db.Column(db.Integer, default=1)
+    part_number= db.Column(db.String(120), nullable=False, index=True)
+    part_name  = db.Column(db.String(255))
+    quantity   = db.Column(db.Integer, default=1, nullable=False)
+    unit_cost  = db.Column(db.Float, default=0.0)
+    location   = db.Column(db.String(64))
 
+    goods_receipt = db.relationship(
+        "GoodsReceipt",
+        backref=db.backref("lines", cascade="all, delete-orphan")
+    )
 
-# --- Backwards-compatible aliases ---
+    @hybrid_property
+    def line_total(self) -> float:
+        try:
+            return float((self.quantity or 0) * (self.unit_cost or 0.0))
+        except Exception:
+            return 0.0
+
+# --- Backwards-compatible aliases (как у тебя) ---
 ReceivingBatch = GoodsReceipt
 ReceivingItem  = GoodsReceiptLine
+
 
 

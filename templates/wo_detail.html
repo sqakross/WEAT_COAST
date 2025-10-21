@@ -214,48 +214,37 @@
         <td>
           {% set items = b.get('items') %}
           {% if items and (items|length) > 0 %}
-            {% if can_confirm_any %}
-              <form method="post" action="{{ url_for('inventory.wo_confirm_lines', wo_id=wo.id) }}">
-                <ul class="mb-2 ps-3">
-                  {% for it in items %}
-                    <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
-                      <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
-                      {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
-                      {% if it.confirmed %}
-                        <span class="badge bg-success inv-badge ms-1">✔ confirmed</span>
-                        <span class="small text-muted ms-1">
-                          {% if it.confirmed_by %}by {{ it.confirmed_by }}{% endif %}
+            <ul class="mb-0 ps-3">
+              {% for it in items %}
+                <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
+                  <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
+                  {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
+
+                  {% if can_confirm_any %}
+                    <form method="post"
+                          action="{{ url_for('inventory.issued_confirm_toggle') }}"
+                          style="display:inline">
+                      <input type="hidden" name="record_id" value="{{ it.id }}">
+                      <input type="hidden" name="wo_id" value="{{ wo.id }}">
+                      <input type="hidden" name="return_to" value="{{ request.full_path }}">
+                      {# Если чекбокс отмечен — отправится state=1; если снят — параметр state не придёт #}
+                      <input type="checkbox"
+                             name="state"
+                             value="1"
+                             class="form-check-input ms-2"
+                             {% if it.confirmed %}checked{% endif %}
+                             onchange="this.form.submit()">
+                      <span class="small text-muted ms-1">
+                        {% if it.confirmed %}
+                          ✔ confirmed
+                          {% if it.confirmed_by %} by {{ it.confirmed_by }}{% endif %}
                           {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
-                        </span>
-                      {% else %}
-                        <label class="ms-2 small text-muted">
-                          <input type="checkbox" name="record_ids[]" value="{{ it.id }}"> select
-                        </label>
-                      {% endif %}
-                    </li>
-                  {% endfor %}
-                </ul>
-                <div class="d-flex gap-2 flex-wrap">
-                  <input type="hidden" name="invoice_number" value="{{ b.get('invoice_number') or '' }}">
-                  <button class="btn btn-sm btn-outline-primary" type="submit" name="do" value="confirm_selected"
-                          {% if not (items|selectattr('confirmed','equalto',False)|list) %}disabled{% endif %}>
-                    Confirm selected
-                  </button>
-                  {% if b.get('invoice_number') and (b.get('unconfirmed_count', 0) > 0) %}
-                    <button class="btn btn-sm btn-primary" type="submit" name="do" value="confirm_invoice">
-                      Confirm ALL in invoice
-                    </button>
+                        {% else %}
+                          unchecked
+                        {% endif %}
+                      </span>
+                    </form>
                   {% else %}
-                    <button class="btn btn-sm btn-primary" type="button" disabled>Confirm ALL in invoice</button>
-                  {% endif %}
-                </div>
-              </form>
-            {% else %}
-              <ul class="mb-0 ps-3">
-                {% for it in items %}
-                  <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
-                    <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
-                    {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
                     {% if it.confirmed %}
                       <span class="badge bg-success inv-badge ms-1">✔ confirmed</span>
                       <span class="small text-muted ms-1">
@@ -263,10 +252,10 @@
                         {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
                       </span>
                     {% endif %}
-                  </li>
-                {% endfor %}
-              </ul>
-            {% endif %}
+                  {% endif %}
+                </li>
+              {% endfor %}
+            </ul>
           {% else %}
             <span class="text-muted">—</span>
           {% endif %}

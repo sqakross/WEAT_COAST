@@ -2,12 +2,15 @@
 {% block content %}
 <h3>Receiving Batch #{{ batch.id }}</h3>
 
-{% set lines = (batch|attr('lines')|default(batch|attr('items'), true)|default([], true)) %}
 {% set curr = batch|attr('currency')|default('USD', true) %}
 {% set role = current_user.role if current_user.is_authenticated else '' %}
 {% set can_super = current_user.is_authenticated and (
   role == 'superadmin' or (current_user.is_superadmin|default(false)) or (current_user.is_super_admin|default(false))
 ) %}
+{% set is_posted = (batch|attr('status')|default('', true)) == 'posted' %}
+{% set RO = is_posted %} {# редактировать строки/шапку можно когда draft; для posted — сначала Unpost #}
+{% set dis = 'disabled' if RO else '' %}
+{% set ro  = 'readonly' if RO else '' %}
 
 <div class="row mb-3">
   <div class="col">
@@ -16,7 +19,7 @@
     <div><strong>Date:</strong> {{ batch|attr('invoice_date')|default('—', true) }}</div>
     <div>
       <strong>Status:</strong>
-      {% if (batch|attr('status')|default('', true)) == 'posted' %}
+      {% if is_posted %}
         <span class="badge bg-success">posted</span>
       {% else %}
         <span class="badge bg-secondary">draft</span>
@@ -28,8 +31,8 @@
 
     {% if can_super %}
       <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}" method="post" style="display:inline;">
-        <button class="btn {{ 'btn-warning' if (batch|attr('status')|default('', true)) == 'posted' else 'btn-primary' }}" type="submit">
-          {{ 'Unpost' if (batch|attr('status')|default('', true)) == 'posted' else 'Post' }}
+        <button class="btn {{ 'btn-warning' if is_posted else 'btn-primary' }}" type="submit">
+          {{ 'Unpost' if is_posted else 'Post' }}
         </button>
       </form>
 
@@ -41,6 +44,7 @@
   </div>
 </div>
 
+{# ---------- READ-ONLY SUMMARY TABLE (как было) ---------- #}
 <table class="table table-sm table-hover align-middle">
   <thead>
     <tr>
@@ -76,9 +80,103 @@
   <tfoot>
     <tr>
       <th colspan="5" class="text-end">Total:</th>
-      <th class="text-end">{{ curr }} {{ '%.2f' % grand }}</th>
+        {# если сервер уже дал сумму — используем её, иначе — jinja-грант #}
+        <th class="text-end">
+            {{ curr }} {{ '%.2f' % (batch_total if batch_total is not none else grand) }}
+        </th>
       <th></th>
     </tr>
   </tfoot>
 </table>
+
+{# ---------- SUPERADMIN EDIT FORM (сервер-сайд проверка будет в receiving_save) ---------- #}
+{% if can_super %}
+  <div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>Edit (superadmin)</span>
+      {% if is_posted %}
+        <span class="text-muted small">Batch is posted — Unpost to edit</span>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory.receiving_save') }}">
+        <input type="hidden" name="batch_id" value="{{ batch.id }}">
+
+        <div class="row g-2 mb-3">
+          <div class="col-md-3">
+            <label class="form-label">Supplier</label>
+            <input name="supplier_name" class="form-control"
+                   value="{{ batch|attr('supplier_name')|default('', true) }}" {{ ro }}>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Invoice #</label>
+            <input name="invoice_number" class="form-control"
+                   value="{{ batch|attr('invoice_number')|default('', true) }}" {{ ro }}>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Invoice Date</label>
+            <input type="date" name="invoice_date" class="form-control"
+                   value="{{ batch.invoice_date and batch.invoice_date.strftime('%Y-%m-%d') or '' }}" {{ dis }}>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Currency</label>
+            <input name="currency" class="form-control" value="{{ curr }}" {{ ro }}>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Notes</label>
+          <textarea name="notes" class="form-control" rows="2" {{ ro }}>{{ batch|attr('notes')|default('', true) }}</textarea>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th style="width:160px;">Part #</th>
+                <th>Part Name</th>
+                <th style="width:120px;">Qty</th>
+                <th style="width:140px;">Unit Cost</th>
+                <th style="width:140px;">Location</th>
+              </tr>
+            </thead>
+            <tbody id="rowsTbody">
+              {% for it in lines %}
+              <tr>
+                <td>
+                  <input name="rows[{{ loop.index0 }}][part_number]" class="form-control form-control-sm"
+                         value="{{ (it|attr('part_number')|default('', true)) }}" {{ ro }}>
+                </td>
+                <td>
+                  <input name="rows[{{ loop.index0 }}][part_name]" class="form-control form-control-sm"
+                         value="{{ (it|attr('part_name')|default('', true)) }}" {{ ro }}>
+                </td>
+                <td>
+                  <input name="rows[{{ loop.index0 }}][quantity]" class="form-control form-control-sm"
+                         value="{{ (it|attr('quantity')|default(0, true)) }}" {{ ro }}>
+                </td>
+                <td>
+                  <input name="rows[{{ loop.index0 }}][unit_cost]" class="form-control form-control-sm"
+                         value="{{ (it|attr('unit_cost')|default(0.0, true)) }}" {{ ro }}>
+                </td>
+                <td>
+                  <input name="rows[{{ loop.index0 }}][location]" class="form-control form-control-sm"
+                         value="{{ (it|attr('location')|default('', true)) }}" {{ ro }}>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary" type="submit" name="action" value="save" {{ dis }}>Save Draft</button>
+          {% if not is_posted %}
+            <button class="btn btn-success" type="submit" name="action" value="post">Post & Update Stock</button>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}

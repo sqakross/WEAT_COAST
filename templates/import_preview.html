@@ -110,6 +110,7 @@
       <td><input class="form-control form-control-sm" name="units[0][rows][${idx}][location]"    value="MAIN"></td>
       <td><button class="btn btn-sm btn-outline-danger del-row" type="button">×</button></td>`;
     tbody.appendChild(tr);
+    applySupplierDefaultToLocations(); // применим дефолт и к новой строке
   });
 
   // Удаление строки
@@ -119,10 +120,51 @@
       e.target.closest('tr')?.remove();
     }
   });
+
+  // ---- АВТО-ПРАВКА LOCATION ПО ПОСТАВЩИКУ (надёжная и деликатная) ----
+  function supplierDefaultFromHint(hint) {
+    const s = (hint || '').toLowerCase();
+    if (s.includes('reliable')) return 'REL';
+    if (s.includes('marcon'))   return 'MAR';
+    if (s.includes('sears'))    return 'SEARS';
+    return 'MAIN';
+  }
+
+  function looksLikeReliable(source, hint) {
+    return /reliable/i.test(source || '') || /reliable/i.test(hint || '');
+  }
+  function looksLikeMarcone(source, hint) {
+    return /marcon/i.test(source || '') || /marcon/i.test(hint || '');
+  }
+
+  function applySupplierDefaultToLocations() {
+    const supplierHint = (document.querySelector('input[name="supplier_hint"]')?.value || '').trim();
+    const savedPath    = (document.querySelector('input[name="saved_path"]')?.value || '').trim();
+    const defLoc       = supplierDefaultFromHint(supplierHint);
+
+    document.querySelectorAll('input[name^="units[0][rows]"][name$="[location]"]').forEach(inp => {
+      const cur = (inp.value || '').trim().toUpperCase();
+
+      // 1) если пусто — ставим дефолт
+      if (!cur) {
+        inp.value = defLoc;
+        return;
+      }
+
+      // 2) если это "чужой" дефолт и файл/подсказка явно другого вендора — мягко исправим
+      if (looksLikeReliable(savedPath, supplierHint) && cur === 'MAR') {
+        inp.value = 'REL';
+        return;
+      }
+      if (looksLikeMarcone(savedPath, supplierHint) && cur === 'REL') {
+        inp.value = 'MAR';
+        return;
+      }
+      // Иначе — не трогаем (считаем, что пользователь уже редактировал)
+    });
+  }
+
+  // запустим на первом рендере
+  applySupplierDefaultToLocations();
 </script>
 {% endblock %}
-
-
-
-
-
