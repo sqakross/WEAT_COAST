@@ -41,33 +41,61 @@ def _sanitize_part_kwargs(raw: dict) -> dict:
     data = {k: v for k, v in data.items() if k in allowed}
     return data
 
+def _merge_locations(old_loc: str | None, new_loc: str | None) -> str:
+    """
+    Склеивает локации стабильно:
+    - переводит в UPPER
+    - разбивает по '/'
+    - убирает пустые и дубликаты
+    - сохраняет порядок появления
+    Примеры:
+      old='C1'   , new='MAR'      -> 'C1/MAR'
+      old='MAR/C1', new='C1'      -> 'MAR/C1'
+      old=None   , new='AMAZ'     -> 'AMAZ'
+      old=''     , new=''         -> ''
+    """
+    out = []
+    for raw in (old_loc, new_loc):
+        if not raw:
+            continue
+        for token in str(raw).upper().split("/"):
+            t = token.strip()
+            if t and t not in out:
+                out.append(t)
+    return "/".join(out)
+
+
 def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
     batch = ReceivingBatch.query.get(batch_id)
     if not batch:
         raise ValueError("Receiving batch not found")
 
+    # не делаем двойной приход
     if (batch.status or "").lower() == "posted":
-        return batch  # уже применили
+        return batch
 
-    for it in (batch.items or []):  # alias items -> lines
-        pn = (it.part_number or "").strip().upper()
+    # идём по позициям батча
+    for it in (batch.items or []):  # у тебя alias items -> lines
+        pn  = (it.part_number or "").strip()
         qty = int(it.quantity or 0)
         if not pn or qty <= 0:
             continue
 
-        # ищем Part по PN (без учёта регистра)
-        part = Part.query.filter(func.upper(Part.part_number) == pn).first()
+        pn_upper = pn.upper()
+
+        # найти Part по PN (case-insensitive)
+        part = Part.query.filter(func.upper(Part.part_number) == pn_upper).first()
 
         if not part:
-            # создать Part (как раньше)
+            # --- создаём новый Part, опираясь на твою _sanitize_part_kwargs
             raw_kwargs = {
-                "part_number": pn,
-                "part_name": it.part_name or "",  # _sanitize_part_kwargs смапит на name, если есть
+                "part_number": pn_upper,
+                "part_name": it.part_name or "",  # _sanitize_part_kwargs скопирует это в name, если надо
             }
             if hasattr(Part, "supplier"):
                 raw_kwargs["supplier"] = (batch.supplier_name or "")[:120]
             if hasattr(Part, "location"):
-                raw_kwargs["location"] = (it.location or "")[:64]
+                raw_kwargs["location"] = (it.location or "").strip()[:64]
             if hasattr(Part, "unit_cost") and it.unit_cost is not None:
                 raw_kwargs["unit_cost"] = float(it.unit_cost or 0)
 
@@ -75,28 +103,49 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
             part = Part(**kwargs)
             db.session.add(part)
             db.session.flush()
+
+            before_qty = 0  # у нового товара склад до прихода = 0
         else:
-            # ✅ НОВОЕ: безопасно обновляем имя из строки, если колонка существует
+            # уже был в каталоге
+            before_qty = _get_part_on_hand(part)
+
+            # безопасный апдейт имени детали
             new_name = (getattr(it, "part_name", "") or "").strip()
             if new_name and hasattr(part, "name"):
                 old_name = (getattr(part, "name", "") or "").strip()
                 if old_name != new_name:
                     part.name = new_name
 
-        # увеличиваем остаток
-        on_hand = _get_part_on_hand(part) + qty
-        _set_part_on_hand(part, on_hand)
+        # === теперь инвентарь ===
 
-        # обновим last_cost / unit_cost при желании (только если такие поля есть)
-        if hasattr(part, "last_cost") and it.unit_cost is not None:
-            part.last_cost = float(it.unit_cost or 0)
-        elif hasattr(part, "unit_cost") and it.unit_cost is not None:
-            part.unit_cost = float(it.unit_cost or 0)
+        # 1. увеличиваем остаток
+        _set_part_on_hand(part, before_qty + qty)
 
-        # обновим location, если задана и колонка существует
-        if hasattr(part, "location") and (it.location or "").strip():
-            part.location = (it.location or "").strip()[:64]
+        # 2. обновляем cost (last_cost / unit_cost), если пришёл
+        if it.unit_cost is not None:
+            try:
+                cost_val = float(it.unit_cost or 0)
+            except Exception:
+                cost_val = None
+            if cost_val is not None:
+                if hasattr(part, "last_cost"):
+                    part.last_cost = cost_val
+                elif hasattr(part, "unit_cost"):
+                    part.unit_cost = cost_val
 
+        # 3. обновляем location, НО НЕ ПЕРЕЗАТИРАЕМ
+        if hasattr(part, "location"):
+            incoming_loc = (it.location or "").strip().upper()
+            if incoming_loc:
+                if before_qty > 0:
+                    # товар уже был на складе -> мержим старое+новое
+                    merged = _merge_locations(getattr(part, "location", None), incoming_loc)
+                    part.location = merged[:64]  # safety truncate
+                else:
+                    # товара не было (before_qty == 0) -> просто ставим эту локацию
+                    part.location = incoming_loc[:64]
+
+    # проставить статус батчу
     batch.status = "posted"
     batch.posted_at = datetime.utcnow()
     if current_user_id is not None:
