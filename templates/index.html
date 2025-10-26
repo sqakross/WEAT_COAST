@@ -1,87 +1,332 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="dashboard-filters">
-<div class="sticky-toolbar">
-  <h2>Inventory Dashboard</h2>
 
-  <div class="d-flex flex-wrap gap-3 mb-3">
-    <a href="{{ url_for('inventory.location_report') }}" class="btn btn-primary">📦 View Inventory by Location</a>
-    <a href="{{ url_for('inventory.add_part') }}" class="btn btn-success">➕ Add Part</a> <!-- Эта кнопка добавлена -->
-    <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-secondary">← Back to Dashboard</a>
+<style>
+/* ====== BASIC PAGE LAYOUT ====== */
+.navbar.wccr-topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2000;
+}
+.dashboard-page-wrapper {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 88px 20px 40px;
+  font-family: "Segoe UI", Roboto, sans-serif;
+  color: #111;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* ====== TOOLBAR ====== */
+.sticky-toolbar {
+  position: sticky;
+  top: 48px;
+  z-index: 1500;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+.toolbar-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.toolbar-row-top h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Buttons in toolbar */
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.toolbar-btn:hover {
+  transform: translateY(-1px);
+}
+.toolbar-btn.blue {
+  background-color: #1e40af;
+  color: #fff;
+}
+.toolbar-btn.green {
+  background-color: #059669;
+  color: #fff;
+}
+.toolbar-btn.gray {
+  background-color: #f3f4f6;
+  border: 1px solid #d1d5db;
+  color: #111;
+}
+
+/* Search bar */
+.search-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.search-input {
+  flex: 1 1 260px;
+  min-width: 220px;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+}
+.search-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+.search-btn {
+  background-color: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.search-btn:hover {
+  background-color: #1e3a8a;
+}
+
+/* ====== TABLE ====== */
+.table-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+  overflow-x: auto;
+}
+.inventory-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.inventory-table thead th {
+  background: #f9fafb;
+  color: #374151;
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+.inventory-table tbody tr {
+  border-bottom: 1px solid #f0f0f0;
+}
+.inventory-table tbody tr:hover {
+  background: #f8fafc;
+}
+.inventory-table td {
+  padding: 10px 16px;
+  vertical-align: middle;
+}
+
+/* ====== INLINE EDIT ====== */
+.inline-edit-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.inline-input {
+  width: 80px;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  text-align: right;
+}
+.inline-input:focus {
+  border-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+.save-btn {
+  background-color: #10b981;
+  color: #fff;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.save-btn:hover {
+  background-color: #059669;
+}
+
+/* ====== LOCATION ====== */
+.location-pill {
+  background: #eef2ff;
+  color: #1e3a8a;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ====== ACTION BUTTONS ====== */
+.action-cell {
+  min-width: 250px;
+}
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.action-btn {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.action-issue {
+  background-color: #1e40af;
+  color: #fff;
+  border: none;
+}
+.action-issue:hover {
+  background-color: #1d4ed8;
+}
+.action-edit {
+  background-color: #e5e7eb;
+  color: #111;
+}
+.action-edit:hover {
+  background-color: #d1d5db;
+}
+.action-delete {
+  background-color: #fff;
+  border: 1px solid #dc2626;
+  color: #b91c1c;
+}
+.action-delete:hover {
+  background-color: #fee2e2;
+}
+</style>
+
+<div class="dashboard-page-wrapper">
+
+  <!-- TOOLBAR -->
+  <div class="sticky-toolbar">
+    <div class="toolbar-row-top">
+      <h2>Inventory Dashboard</h2>
+      <div class="toolbar-actions">
+        <a href="{{ url_for('inventory.location_report') }}" class="toolbar-btn blue">📦 View by Location</a>
+        <a href="{{ url_for('inventory.add_part') }}" class="toolbar-btn green">➕ Add Part</a>
+        <a href="{{ url_for('inventory.dashboard') }}" class="toolbar-btn gray">← Back</a>
+      </div>
+    </div>
+
+    <form class="search-row" method="GET" action="{{ url_for('inventory.dashboard') }}">
+      <input
+        class="search-input"
+        type="text"
+        name="search"
+        placeholder="Search by Part Number or Name"
+        value="{{ search_query or '' }}"
+      >
+      <button type="submit" class="search-btn">Search</button>
+    </form>
   </div>
 
-  <form method="GET" action="{{ url_for('inventory.dashboard') }}" style="margin-bottom: 15px;">
-      <input type="text" name="search" placeholder="Search by Part Number or Name" value="{{ search_query or '' }}" style="text-transform: uppercase;">
-      <button type="submit">Search</button>
-  </form>
-</div>
-
-{% if parts %}
-<div class="table-container">
-  <table class="inventory-table">
-<!--<table border="1" cellpadding="5" cellspacing="0" style="width:100%; border-collapse: collapse;">-->
-    <thead>
-        <tr style="background-color:#f2f2f2;">
-            <th>Part Number</th>
-            <th>Name</th>
-            <th>Quantity</th>
-            <th>Unit Cost</th>
-            <th>Location</th>
-            <th>Action</th>
+  <!-- TABLE -->
+  {% if parts %}
+  <div class="table-card">
+    <table class="inventory-table">
+      <thead>
+        <tr>
+          <th>Part Number</th>
+          <th>Name</th>
+          <th>Quantity</th>
+          <th>Unit Cost</th>
+          <th>Location</th>
+          <th>Action</th>
         </tr>
-    </thead>
-    <tbody>
+      </thead>
+      <tbody>
         {% for part in parts %}
         <tr>
-            <td>{{ part.part_number }}</td>
-            <td>{{ part.name }}</td>
+          <td>{{ part.part_number }}</td>
+          <td>{{ part.name }}</td>
 
-            {% if current_user.role == 'superadmin' %}
-            <td>
-                <form method="POST" action="{{ url_for('inventory.update_part_field', part_id=part.id) }}">
-                    <input type="number" name="quantity" value="{{ part.quantity }}" min="0" required style="width: 70px;">
-                    <button type="submit">Save</button>
-                </form>
-            </td>
-            <td>
-                <form method="POST" action="{{ url_for('inventory.update_part_field', part_id=part.id) }}">
-                    <input type="text" name="unit_cost" value="{{ '%.2f'|format(part.unit_cost) }}" required style="width: 70px;">
-                    <button type="submit">Save</button>
-                </form>
-            </td>
-            {% else %}
-            <td>{{ part.quantity }}</td>
-            <td>${{ '%.2f'|format(part.unit_cost) }}</td>
-            {% endif %}
+          {% if current_user.role == 'superadmin' %}
+          <td>
+            <form class="inline-edit-form" method="POST" action="{{ url_for('inventory.update_part_field', part_id=part.id) }}">
+              <input class="inline-input" type="number" name="quantity" value="{{ part.quantity }}" min="0" required>
+              <button type="submit" class="save-btn">Save</button>
+            </form>
+          </td>
+          <td>
+            <form class="inline-edit-form" method="POST" action="{{ url_for('inventory.update_part_field', part_id=part.id) }}">
+              <input class="inline-input" type="text" name="unit_cost" value="{{ '%.2f'|format(part.unit_cost) }}" required>
+              <button type="submit" class="save-btn">Save</button>
+            </form>
+          </td>
+          {% else %}
+          <td>{{ part.quantity }}</td>
+          <td>${{ '%.2f'|format(part.unit_cost) }}</td>
+          {% endif %}
 
-            <td>{{ part.location }}</td>
-            <td>
-                <form method="GET" action="{{ url_for('inventory.issue_part') }}" onsubmit="return confirm('Issue part {{ part.part_number }}?');" style="display:inline;">
-                    <input type="hidden" name="part" value="{{ part.part_number }}">
-                    <button type="submit">Issue Part</button>
-                </form>
+          <td><span class="location-pill">{{ part.location }}</span></td>
 
-                {% if current_user.role in ['superadmin'] %}
-                <a href="{{ url_for('inventory.edit_part', part_id=part.id) }}" style="margin-left: 10px;">Edit</a>
-                {% endif %}
+          <td class="action-cell">
+            <div class="row-actions">
+              <form method="GET" action="{{ url_for('inventory.issue_part') }}" onsubmit="return confirm('Issue part {{ part.part_number }}?');">
+                <input type="hidden" name="part" value="{{ part.part_number }}">
+                <button type="submit" class="action-btn action-issue">Issue</button>
+              </form>
 
-                {% if current_user.role == 'superadmin' %}
-                <form method="POST" action="{{ url_for('inventory.delete_part', part_id=part.id) }}" onsubmit="return confirm('Delete part {{ part.part_number }}?');" style="display:inline; margin-left: 10px;">
-                    <button type="submit">Delete</button>
-                </form>
-                {% endif %}
-            </td>
+              {% if current_user.role in ['superadmin'] %}
+              <a href="{{ url_for('inventory.edit_part', part_id=part.id) }}" class="action-btn action-edit">Edit</a>
+              {% endif %}
+
+              {% if current_user.role == 'superadmin' %}
+              <form method="POST" action="{{ url_for('inventory.delete_part', part_id=part.id) }}" onsubmit="return confirm('Delete part {{ part.part_number }}?');">
+                <button type="submit" class="action-btn action-delete">Delete</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
         </tr>
         {% endfor %}
-    </tbody>
-</table>
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p>No parts found.</p>
+  {% endif %}
 </div>
-{% else %}
-<p>No parts found.</p>
-{% endif %}
+
 {% endblock %}
-
-
 
 

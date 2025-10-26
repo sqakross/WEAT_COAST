@@ -154,36 +154,54 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
     db.session.commit()
     return batch
 
+from datetime import datetime
+from sqlalchemy import func
+from extensions import db
+from models import ReceivingBatch, ReceivingItem, Part
+
 def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
+    """
+    Жёсткий откат прихода:
+    - ВСЕГДА вычитаем qty из Part.quantity по всем строкам батча
+    - переводим батч в draft
+    - не даём уйти в минус
+    - не делаем никаких ранних return
+    """
+
     batch = ReceivingBatch.query.get(batch_id)
     if not batch:
-        raise ValueError("Receiving batch not found")
+        raise ValueError(f"Receiving batch {batch_id} not found")
 
-    if batch.status != "posted":
-        return batch  # уже не в posted — нечего откатывать
-
-    # alias items -> lines уже есть; подстрахуемся на пустой список
+    # пройти по всем строкам партии и снять количество
     for it in (batch.items or []):
-        pn = (it.part_number or "").strip().upper()
+        pn  = (it.part_number or "").strip().upper()
         qty = int(it.quantity or 0)
         if not pn or qty <= 0:
             continue
 
+        # ищем Part по PN
         part = Part.query.filter(func.upper(Part.part_number) == pn).first()
         if not part:
-            # Детали нет — откатывать нечего по этой строке
+            # детали нет в каталоге — нечего откатывать
             continue
 
-        cur = _get_part_on_hand(part)
-        new_qty = cur - qty
-        if new_qty < 0:
-            new_qty = 0  # защитимся от отрицательных остатков
-        _set_part_on_hand(part, new_qty)
+        before_qty = int(part.quantity or 0)
+        after_qty  = before_qty - qty
+        if after_qty < 0:
+            after_qty = 0
 
+        part.quantity = after_qty
+        # цену / location не трогаем специально
+
+    # теперь ставим батч обратно в draft
     batch.status = "draft"
     batch.posted_at = None
-    # posted_by не трогаем (история может быть полезной), но можно очистить:
-    # batch.posted_by = None
+
+    # логируем кто отменил (если такие поля есть)
+    if hasattr(batch, "unposted_by"):
+        batch.unposted_by = current_user_id
+    if hasattr(batch, "unposted_at"):
+        batch.unposted_at = datetime.utcnow()
 
     db.session.commit()
     return batch

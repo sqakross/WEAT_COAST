@@ -1,196 +1,501 @@
 {% extends "base.html" %}
-
 {% block content %}
-<h2>Issue Part</h2>
-<a href="{{ url_for('inventory.reports_grouped') }}" class="btn btn-secondary mb-3">← Back to Reports</a>
 
-<form id="issue_form" onsubmit="return false;">
-    <label for="part_number">Enter Part Number:</label>
-    <input type="text" id="part_number" name="part_number" required style="text-transform: uppercase;">
+<div class="container-fluid py-4 d-flex justify-content-center">
+  <div style="width:100%; max-width:1100px;">
 
-    <div id="part_info" style="margin-top: 10px; padding: 10px; background: #f0f0f0; border-radius: 5px;">
-        <p><strong>Name:</strong> <span id="part_name">—</span></p>
-        <p><strong>Available:</strong> <span id="part_quantity">—</span></p>
+    <!-- HEADER (sticky) -->
+    <div class="d-flex flex-wrap justify-content-between align-items-start mb-3"
+         style="position:sticky; top:0; z-index:10; background:#f8f9fa; padding:.5rem 0;">
+      <div>
+        <h2 class="mb-0 fw-semibold" style="font-size:1.1rem;">Issue Part</h2>
+        <div class="text-muted" style="font-size:.8rem; line-height:1.2;">
+          Scan / type Part → Add to list → Issue All
+        </div>
+      </div>
+
+      <div class="mt-2 mt-sm-0 d-flex flex-wrap gap-2">
+        <a href="{{ url_for('inventory.reports_grouped') }}"
+           class="btn btn-outline-secondary btn-sm">
+          ← Back to Reports
+        </a>
+      </div>
     </div>
 
-    <input type="hidden" id="part_id">
+    <!-- CARD: Who / Job -->
+    <div class="card shadow-sm border-0 mb-3" style="border-radius:.75rem;">
+      <div class="card-body pb-2">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="recipient" style="font-size:.9rem;">
+              Company / Technician
+            </label>
+            <input type="text"
+                   class="form-control form-control-sm text-uppercase"
+                   id="recipient"
+                   list="technicianListIssue"
+                   required
+                   style="font-weight:500; text-transform:uppercase;">
+            <datalist id="technicianListIssue"></datalist>
+            <div class="text-muted" style="font-size:.75rem;">
+              Example: "MIKE / TRUCK1"
+            </div>
+          </div>
 
-    <label for="quantity">Quantity to Issue:</label>
-    <input type="number" id="quantity" min="1" required>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="reference_job" style="font-size:.9rem;">
+              Reference Job
+            </label>
+            <input type="text"
+                   class="form-control form-control-sm"
+                   id="reference_job"
+                   required>
+            <div class="text-muted" style="font-size:.75rem;">
+              Work order / claim / invoice ref
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-    <label for="recipient">Company / Technician:</label>
-    <input type="text" id="recipient" list="technicianListIssue" required>
-    <datalist id="technicianListIssue"></datalist>
+    <!-- CARD: Scan / Add Part -->
+    <div class="card shadow-sm border-0 mb-3" style="border-radius:.75rem;">
+      <div class="card-body pb-2">
 
+        <div class="row g-3 align-items-end">
+          <!-- Part Number -->
+          <div class="col-md-6">
+            <label class="form-label fw-semibold mb-1" for="part_number" style="font-size:.9rem;">
+              Enter / Scan Part Number
+            </label>
+            <input type="text"
+                   class="form-control form-control-sm text-uppercase"
+                   id="part_number"
+                   name="part_number"
+                   required
+                   style="text-transform:uppercase; font-weight:500;"
+                   placeholder="SCAN OR TYPE...">
+            <div class="text-muted" style="font-size:.7rem;">
+              Scanner focus here → scan → leave field
+            </div>
+          </div>
 
-    <label for="reference_job">Reference Job:</label>
-    <input type="text" id="reference_job" required>
+          <!-- Qty to Issue -->
+          <div class="col-md-3">
+            <label class="form-label fw-semibold mb-1" for="quantity" style="font-size:.9rem;">
+              Quantity to Issue
+            </label>
+            <input type="number"
+                   class="form-control form-control-sm text-center"
+                   id="quantity"
+                   min="1"
+                   required>
+          </div>
 
-    <button type="button" id="add_part_btn">Add Part</button>
-</form>
+          <!-- Add button -->
+          <div class="col-md-3 d-grid">
+            <button type="button"
+                    id="add_part_btn"
+                    class="btn btn-primary btn-sm fw-semibold"
+                    style="border-radius:.6rem;">
+              ➕ Add Part
+            </button>
+          </div>
+        </div>
 
-<h3>Parts to Issue:</h3>
-<table id="parts_table" border="1" style="margin-top: 10px; display: none;">
-    <thead>
-        <tr>
-            <th>Part Number</th>
-            <th>Name</th>
-            <th>Quantity</th>
-            <th>Company</th>
-            <th>Reference Job</th>
-            <th>Remove</th>
-        </tr>
-    </thead>
-    <tbody></tbody>
-</table>
+        <!-- Hidden part id -->
+        <input type="hidden" id="part_id">
 
-<form method="POST" action="{{ url_for('inventory.issue_part') }}" id="final_form">
-    <input type="hidden" name="all_parts_json" id="all_parts_json">
-    <button type="submit" style="margin-top: 10px;">Issue All</button>
-</form>
+        <!-- Part info / stock preview -->
+        <div class="mt-3 p-3 bg-light border rounded"
+             style="border-radius:.6rem; font-size:.85rem; line-height:1.3;">
+          <div class="row g-2">
+            <div class="col-md-6">
+              <div class="text-muted" style="font-size:.7rem;">Name</div>
+              <div class="fw-semibold" id="part_name" style="min-height:1.2rem;">—</div>
+            </div>
+            <div class="col-md-6">
+              <div class="text-muted" style="font-size:.7rem;">Available (by location)</div>
+              <div class="fw-semibold" style="min-height:1.2rem;">
+                <span id="part_quantity">—</span>
+                <span class="text-muted"> / </span>
+                <span id="part_locations"
+                      class="text-muted text-uppercase"
+                      style="font-size:.8rem;">—</span>
+              </div>
+              <div class="text-muted" style="font-size:.7rem; line-height:1.2;">
+                Example: MAIN:4 • TRUCK1:2 • VAN2:1
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- CARD: Parts to Issue -->
+    <div class="card shadow-sm border-0" style="border-radius:.75rem;">
+      <div class="card-header bg-white py-2 d-flex justify-content-between align-items-start flex-wrap"
+           style="border-radius:.75rem .75rem 0 0;">
+        <div>
+          <div class="fw-semibold" style="font-size:.9rem;">Parts to Issue</div>
+          <div class="text-muted" style="font-size:.75rem; line-height:1.2;">
+            Review list before issuing. You can remove a line if it's wrong.
+          </div>
+        </div>
+
+        <button id="issue_all_btn"
+                type="button"
+                class="btn btn-success btn-sm fw-semibold mt-2 mt-sm-0"
+                style="border-radius:.6rem; min-width:100px;">
+          ✅ Issue All
+        </button>
+      </div>
+
+      <div class="card-body pt-2">
+        <div class="table-responsive">
+          <table id="parts_table"
+                 class="table table-bordered align-middle mb-0"
+                 style="min-width:700px; font-size:.8rem; display:none;">
+            <thead class="table-light text-center align-middle"
+                   style="font-size:.75rem;">
+              <tr class="text-nowrap">
+                <th style="min-width:90px;">Part #</th>
+                <th style="min-width:180px;">Name</th>
+                <th style="width:70px;">Qty</th>
+                <th style="min-width:110px;">Issued To</th>
+                <th style="min-width:110px;">Reference Job</th>
+                <th style="width:60px;">Remove</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- rows go here -->
+            </tbody>
+          </table>
+
+          <div id="empty_hint"
+               class="text-muted text-center py-4"
+               style="font-size:.8rem;">
+            No parts added yet.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- hidden submit form (kept same route logic you had) -->
+    <form method="POST"
+          action="{{ url_for('inventory.issue_part') }}"
+          id="final_form"
+          style="display:none;">
+      <input type="hidden" name="all_parts_json" id="all_parts_json">
+    </form>
+
+  </div><!-- /max-width wrapper -->
+</div><!-- /container -->
 
 <script>
-let currentQuantity = null;
-const addedParts = [];
+document.addEventListener("DOMContentLoaded", function () {
 
-const partNumberInput = document.getElementById('part_number');
-const nameDisplay = document.getElementById('part_name');
-const quantityDisplay = document.getElementById('part_quantity');
-const hiddenPartId = document.getElementById('part_id');
-const quantityInput = document.getElementById('quantity');
-const recipientInput = document.getElementById('recipient');
-const referenceInput = document.getElementById('reference_job');
-const table = document.getElementById('parts_table').querySelector('tbody');
-const partsTable = document.getElementById('parts_table');
+  // ===== DOM refs =====
+  const partNumberInput   = document.getElementById('part_number');
+  const quantityInput     = document.getElementById('quantity');
+  const recipientInput    = document.getElementById('recipient');
+  const referenceInput    = document.getElementById('reference_job');
+  const addBtn            = document.getElementById('add_part_btn');
 
-function fetchPartData(partNumber) {
-    fetch(`/api/part/${partNumber}`)
-        .then(res => {
-            if (!res.ok) throw new Error("Not found");
-            return res.json();
-        })
-        .then(data => {
-            nameDisplay.textContent = data.name;
-            quantityDisplay.textContent = data.quantity;
-            hiddenPartId.value = data.id;
-            currentQuantity = Number(data.quantity);
-        })
-        .catch(() => {
-            nameDisplay.textContent = '—';
-            quantityDisplay.textContent = '—';
-            hiddenPartId.value = '';
-            currentQuantity = null;
-            alert("⚠ Part not found.");
-        });
-}
+  const nameDisplay       = document.getElementById('part_name');
+  const quantityDisplay   = document.getElementById('part_quantity');
+  const locationsDisplay  = document.getElementById('part_locations');
+  const hiddenPartId      = document.getElementById('part_id');
 
-document.getElementById('add_part_btn').addEventListener('click', () => {
-    const partId = hiddenPartId.value;
-    const partNumber = partNumberInput.value.trim().toUpperCase();
-    const name = nameDisplay.textContent;
-    const quantity = parseInt(quantityInput.value);
-    const recipient = recipientInput.value.trim().toUpperCase();
-    const referenceJob = referenceInput.value.trim();
+  const partsTable        = document.getElementById('parts_table');
+  const tableBody         = partsTable.querySelector('tbody');
+  const allPartsJsonInput = document.getElementById('all_parts_json');
+  const issueAllBtn       = document.getElementById('issue_all_btn');
 
-    if (!partId || !quantity || !recipient || !referenceJob || quantity > currentQuantity) {
-        alert("⚠ Please fill all fields correctly.");
-        return;
+  const emptyHintEl       = document.getElementById('empty_hint');
+
+  // ===== DATA =====
+  // каждая строка:
+  // { part_id, part_number, name, quantity, recipient, reference_job }
+  let addedParts = [];
+
+  // состояние найденного парта
+  let currentMaxQty = null;    // число доступных
+  let currentLocs   = null;    // строка "TS" или объект {MAIN:4,...}
+
+  // ===== helpers =====
+  function normPN(raw) {
+    return (raw || "").trim().toUpperCase();
+  }
+
+  // склеить локации в строку вида "MAIN:4 • TRUCK1:2"
+  function renderLocations(locData) {
+    if (!locData) return "—";
+
+    if (typeof locData === "string") {
+      return locData.trim() || "—";
     }
 
-    addedParts.push({
-        part_id: partId,
-        part_number: partNumber,
-        name,
-        quantity,
-        recipient,
-        reference_job: referenceJob
-    });
-
-    updatePartsTable();
-
-    // Очистка, но курсор остаётся
-    partNumberInput.value = "";
-    nameDisplay.textContent = "—";
-    quantityDisplay.textContent = "—";
-    hiddenPartId.value = "";
-    quantityInput.value = "";
-    partNumberInput.focus();
-});
-
-function updatePartsTable() {
-    table.innerHTML = "";
-    if (addedParts.length === 0) {
-        partsTable.style.display = "none";
-        return;
+    if (typeof locData === "object") {
+      const entries = Object.entries(locData);
+      if (!entries.length) return "—";
+      return entries
+        .map(([loc, qty]) => `${loc}:${qty}`)
+        .join(" • ");
     }
 
+    return "—";
+  }
+
+  // запросить инфу о парте
+  async function lookupPart(pn) {
+    const info = {
+      found: false,
+      id: "",
+      name: "—",
+      qty_available: "—",
+      locs: null
+    };
+
+    if (!pn) return info;
+
+    try {
+      const resp = await fetch(`/api/part/${encodeURIComponent(pn)}`);
+      if (!resp.ok) throw new Error("not found");
+      const data = await resp.json();
+
+      info.found          = true;
+      info.id             = data.id ?? "";
+      info.name           = data.name || "—";
+      info.qty_available  = (data.quantity !== undefined && data.quantity !== null)
+                            ? String(data.quantity)
+                            : "—";
+
+      // поддерживаем обе схемы:
+      // data.locations (dict) ИЛИ data.location (single string)
+      if (data.locations) {
+        info.locs = data.locations;
+      } else if (data.location) {
+        info.locs = data.location;
+      } else {
+        info.locs = null;
+      }
+
+      return info;
+    } catch (err) {
+      return info;
+    }
+  }
+
+  // показать инфу по текущему парту
+  function renderCurrentPart(info) {
+    nameDisplay.textContent      = info.name || "—";
+    quantityDisplay.textContent  = info.qty_available || "—";
+    locationsDisplay.textContent = renderLocations(info.locs);
+
+    hiddenPartId.value           = info.id || "";
+
+    currentMaxQty = (info.qty_available === "—")
+      ? null
+      : parseInt(info.qty_available, 10);
+
+    currentLocs = info.locs || null;
+  }
+
+  async function fetchAndRenderPart() {
+    const pn = normPN(partNumberInput.value);
+    if (!pn) {
+      renderCurrentPart({
+        found:false,id:"",name:"—",qty_available:"—",locs:null
+      });
+      return;
+    }
+
+    const info = await lookupPart(pn);
+    renderCurrentPart(info);
+
+    if (!info.found) {
+      alert("⚠ Part not found.");
+    }
+  }
+
+  // отрисовать таблицу со списком к выдаче
+  function renderTable() {
+    tableBody.innerHTML = "";
+
+    if (!addedParts.length) {
+      if (emptyHintEl) emptyHintEl.style.display = "block";
+      partsTable.style.display = "none";
+      return;
+    }
+
+    if (emptyHintEl) emptyHintEl.style.display = "none";
     partsTable.style.display = "table";
 
-    addedParts.forEach((item, index) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${item.part_number}</td>
-            <td>${item.name}</td>
-            <td>${item.quantity}</td>
-            <td>${item.recipient}</td>
-            <td>${item.reference_job}</td>
-            <td><button type="button" onclick="removePart(${index})">❌</button></td>
-        `;
-        table.appendChild(row);
+    addedParts.forEach((row, idx) => {
+      const tr = document.createElement("tr");
+      tr.classList.add("align-middle", "text-center");
+
+      tr.innerHTML = `
+        <td style="vertical-align:middle;">${row.part_number}</td>
+        <td style="vertical-align:middle; text-align:left;">${row.name}</td>
+        <td style="width:70px; vertical-align:middle;" class="text-end">${row.quantity}</td>
+        <td style="vertical-align:middle;">${row.recipient}</td>
+        <td style="vertical-align:middle;">${row.reference_job}</td>
+        <td style="width:60px; vertical-align:middle;">
+          <button class="btn btn-outline-danger btn-sm"
+                  data-del="${idx}"
+                  style="border-radius:.5rem; padding:.1rem .4rem; font-size:.7rem;">
+            ✖
+          </button>
+        </td>
+      `;
+      tableBody.appendChild(tr);
     });
+  }
 
-    document.getElementById('all_parts_json').value = JSON.stringify(addedParts);
-}
+  // удалить строку
+  tableBody.addEventListener("click", (e) => {
+    const delIdx = e.target.getAttribute("data-del");
+    if (delIdx !== null) {
+      addedParts.splice(parseInt(delIdx,10), 1);
+      renderTable();
+      syncHiddenPayload();
+    }
+  });
 
-function removePart(index) {
-    addedParts.splice(index, 1);
-    updatePartsTable();
-}
+  // синкнуть скрытое поле перед submit
+  function syncHiddenPayload() {
+    allPartsJsonInput.value = JSON.stringify(addedParts);
+  }
 
-document.addEventListener("DOMContentLoaded", function () {
-    const urlParams = new URLSearchParams(window.location.search);
-    const prefillPart = urlParams.get("part");
+  // логика Add Part с мерджем
+  function addCurrentLine() {
+    const pn        = normPN(partNumberInput.value);
+    const qtyReq    = parseInt(quantityInput.value || "0", 10);
+    const issuedTo  = (recipientInput.value || "").trim().toUpperCase();
+    const refJob    = (referenceInput.value || "").trim();
+    const partName  = nameDisplay.textContent || "—";
+    const partId    = hiddenPartId.value;
 
-    if (prefillPart) {
-        partNumberInput.value = prefillPart.toUpperCase();
-        fetchPartData(prefillPart.toUpperCase());
-        setTimeout(() => quantityInput.focus(), 300);
+    // валидация
+    if (!pn || !partId) {
+      alert("⚠ No part selected.");
+      partNumberInput.focus();
+      return;
+    }
+    if (!qtyReq || qtyReq < 1) {
+      alert("⚠ Quantity?");
+      quantityInput.focus();
+      return;
+    }
+    if (currentMaxQty !== null && qtyReq > currentMaxQty) {
+      alert("⚠ Quantity requested exceeds available.");
+      return;
+    }
+    if (!issuedTo) {
+      alert("⚠ Technician / Company required.");
+      recipientInput.focus();
+      return;
+    }
+    if (!refJob) {
+      alert("⚠ Reference job required.");
+      referenceInput.focus();
+      return;
     }
 
-    partNumberInput.addEventListener("blur", function () {
-        const val = partNumberInput.value.trim().toUpperCase();
-        partNumberInput.value = val;
-        if (val !== "") fetchPartData(val);
+    // если тот же part_id, тот же issuedTo и тот же refJob уже есть — увеличиваем qty
+    const existing = addedParts.find(row =>
+      row.part_id       === partId &&
+      row.recipient     === issuedTo &&
+      row.reference_job === refJob
+    );
+
+    if (existing) {
+      const baseQty = parseInt(existing.quantity || "0", 10) || 0;
+      existing.quantity = baseQty + qtyReq;
+    } else {
+      addedParts.push({
+        part_id: partId,
+        part_number: pn,
+        name: partName,
+        quantity: qtyReq,
+        recipient: issuedTo,
+        reference_job: refJob
+      });
+    }
+
+    renderTable();
+    syncHiddenPayload();
+
+    // очистка инпутов и предпросмотра
+    quantityInput.value          = "";
+    partNumberInput.value        = "";
+    hiddenPartId.value           = "";
+    currentMaxQty                = null;
+    currentLocs                  = null;
+
+    nameDisplay.textContent      = "—";
+    quantityDisplay.textContent  = "—";
+    locationsDisplay.textContent = "—";
+
+    // вернём фокус в Part Number (для сканера)
+    partNumberInput.focus();
+  }
+
+  // === EVENTS ===
+
+  // подтягиваем инфу о парте при потере фокуса поля Part #
+  partNumberInput.addEventListener("blur", async () => {
+    await fetchAndRenderPart();
+  });
+
+  // Add Part
+  addBtn.addEventListener("click", () => {
+    addCurrentLine();
+  });
+
+  // Issue All
+  issueAllBtn.addEventListener("click", () => {
+    if (!addedParts.length) {
+      alert("No parts in the list.");
+      return;
+    }
+    // payload уже синканули, просто сабмитим скрытую форму
+    document.getElementById('final_form').submit();
+  });
+
+  // техникам автоподсказка (reuse logic from other pages)
+  (function technicianSuggestInit(){
+    const TECH_SUGGEST_URL = "{{ url_for('inventory.api_technicians') }}";
+    const input = recipientInput;
+    const list  = document.getElementById('technicianListIssue');
+    if (!input || !list) return;
+
+    function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+    function renderOptions(items){
+      list.innerHTML = (items||[]).map(v=>`<option value="${v}">`).join('');
+    }
+
+    const fetchSuggest = debounce((term)=>{
+      term = (term||'').trim().toUpperCase();
+      if (term.length < 2){ renderOptions([]); return; }
+      fetch(`${TECH_SUGGEST_URL}?q=${encodeURIComponent(term)}`)
+        .then(r => r.ok ? r.json() : {items:[]})
+        .then(j => renderOptions(j.items||[]))
+        .catch(()=>renderOptions([]));
+    }, 180);
+
+    input.addEventListener('input', e => fetchSuggest(e.target.value));
+    input.addEventListener('focus', () => fetchSuggest(input.value));
+    input.addEventListener('blur', ()=>{
+      input.value = (input.value||"").trim().toUpperCase();
     });
+  })();
+
 });
-// --- Technician suggestions for Issue Part ---
-(function(){
-  const TECH_SUGGEST_URL = "{{ url_for('inventory.api_technicians') }}";
-  const input = document.getElementById('recipient');
-  const list  = document.getElementById('technicianListIssue');
-  if (!input || !list) return;
-
-  function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-  function renderOptions(items){ list.innerHTML = (items||[]).map(v=>`<option value="${v}">`).join(''); }
-
-  const fetchSuggest = debounce((term)=>{
-    term = (term||'').trim().toUpperCase();
-    if (term.length < 2){ renderOptions([]); return; }
-    fetch(`${TECH_SUGGEST_URL}?q=${encodeURIComponent(term)}`)
-      .then(r => r.ok ? r.json() : {items:[]})
-      .then(j => renderOptions(j.items||[]))
-      .catch(()=>renderOptions([]));
-  }, 180);
-
-  input.addEventListener('input', e => fetchSuggest(e.target.value));
-  input.addEventListener('focus', () => fetchSuggest(input.value));
-  // жёсткая нормализация
-  input.addEventListener('blur', ()=>{ input.value = (input.value||'').trim().toUpperCase(); });
-})();
-
 </script>
+
 {% endblock %}
-
-
-
 

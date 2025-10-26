@@ -1,117 +1,271 @@
 {% extends "base.html" %}
 {% block content %}
 
-{# helper: пусто вместо None/nan #}
 {% macro val(v) -%}
   {{ (v|default('', true) ~ '')|replace('nan','') }}
 {%- endmacro %}
 
-<h2>Preview & Edit Import</h2>
+<div class="container-fluid py-4 d-flex justify-content-center">
+  <div style="width:100%; max-width:1100px;">
 
-<div class="mb-2">
-  <button class="btn btn-primary"
-          form="import-form"
-          name="save"
-          value="1"
-          type="submit">
-    Save edits (stay in preview)
-  </button>
-  <a class="btn btn-secondary" href="{{ url_for('inventory.import_parts_upload') }}">Cancel</a>
-</div>
+    <!-- sticky header / toolbar -->
+    <div class="d-flex flex-wrap justify-content-between align-items-start mb-3"
+         style="position:sticky; top:0; z-index:10; background:#f8f9fa; padding:.5rem 0; border-bottom:1px solid #dee2e6;">
+      <div class="me-3">
+        <div class="fw-semibold text-uppercase"
+             style="font-size:1rem; letter-spacing:.03em; line-height:1.2;">
+          Preview & Edit Import
+        </div>
+        <div class="text-muted" style="font-size:.8rem; line-height:1.2;">
+          Review quantities, costs, and locations before posting to stock
+        </div>
+      </div>
 
-<div class="mb-2">
-  <button id="add-row" class="btn btn-sm btn-outline-info" type="button">
-    Add blank row
-  </button>
-</div>
+      <div class="d-flex flex-column flex-sm-row gap-2 mt-2 mt-sm-0">
+        <a href="{{ url_for('inventory.import_parts_upload') }}"
+           class="btn btn-outline-secondary btn-sm shadow-sm"
+           style="font-weight:500; min-width:140px; border-radius:.6rem;">
+          ← Back / Cancel
+        </a>
+      </div>
+    </div>
 
-<form method="POST"
-      id="import-form"
-      action="{{ url_for('inventory.import_parts_upload') }}">
-  <input type="hidden" name="saved_path" value="{{ saved_path }}">
-  <input type="hidden" name="supplier_hint" value="{{ supplier_hint|default('') }}">
+    <!-- action bar card (Save / Add Row / Apply) -->
+    <div class="card shadow-sm border-0 mb-3"
+         style="border-radius:1rem; background:linear-gradient(#ffffff,#fcfcfc); box-shadow:0 .75rem 1.5rem rgba(0,0,0,.08)!important;">
+      <div class="card-body d-flex flex-wrap gap-2 align-items-center justify-content-between"
+           style="padding:1rem 1.25rem;">
 
-  {# ВАЖНО: эти три скрытых поля удовлетворяют _units_re (brand/model/serial) #}
-  <input type="hidden" name="units[0][brand]"  value="">
-  <input type="hidden" name="units[0][model]"  value="">
-  <input type="hidden" name="units[0][serial]" value="">
+        <div class="d-flex flex-wrap gap-2">
+          <button class="btn btn-primary shadow-sm"
+                  form="import-form"
+                  name="save"
+                  value="1"
+                  type="submit"
+                  style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.85rem; box-shadow:0 .5rem 1rem rgba(13,110,253,.35)!important;">
+            💾 Save Edits (Stay Here)
+          </button>
 
-  <div class="table-responsive">
-    <table id="edit-table" class="table table-striped table-sm align-middle">
-      <thead>
-        <tr>
-          <th>PART #</th>
-          <th>DESCRIPTION</th>
-          <th style="width:88px">QTY</th>
-          <th style="width:120px">UNIT COST</th>
-          <th style="width:120px">LOCATION</th>
-          <th style="width:40px">Del</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for r in rows %}
-        <tr>
-          <td>
-            <input class="form-control form-control-sm"
-                   name="units[0][rows][{{ loop.index0 }}][part_number]"
-                   value="{{ val(r.part_number) }}"
-                   autocomplete="off">
-          </td>
-          <td>
-            <input class="form-control form-control-sm"
-                   name="units[0][rows][{{ loop.index0 }}][part_name]"
-                   value="{{ val(r.part_name) }}"
-                   autocomplete="off">
-          </td>
-          <td>
-            <input class="form-control form-control-sm"
-                   name="units[0][rows][{{ loop.index0 }}][quantity]"
-                   value="{{ val(r.quantity) }}"
-                   inputmode="numeric">
-          </td>
-          <td>
-            <input class="form-control form-control-sm"
-                   name="units[0][rows][{{ loop.index0 }}][unit_cost]"
-                   value="{{ val(r.unit_cost) }}"
-                   inputmode="decimal">
-          </td>
-          <td>
-            <input class="form-control form-control-sm"
-                   name="units[0][rows][{{ loop.index0 }}][location]"
-                   value="{{ val(r.location) }}">
-          </td>
-          <td>
-            <button class="btn btn-sm btn-outline-danger del-row" type="button" aria-label="Delete row">×</button>
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+          <button id="add-row"
+                  class="btn btn-outline-info shadow-sm"
+                  type="button"
+                  style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.85rem;">
+            ➕ Add Blank Row
+          </button>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2">
+          <button class="btn btn-success shadow-sm"
+                  form="import-form"
+                  name="apply"
+                  value="1"
+                  type="submit"
+                  style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.85rem; box-shadow:0 .5rem 1rem rgba(25,135,84,.35)!important;">
+            ✅ Apply Import
+          </button>
+
+          <a class="btn btn-outline-secondary shadow-sm"
+             href="{{ url_for('inventory.import_parts_upload') }}"
+             style="font-weight:500; border-radius:.6rem; padding:.5rem .9rem; font-size:.85rem;">
+            ✖ Cancel
+          </a>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- editable table card -->
+    <div class="card shadow-sm border-0"
+         style="border-radius:1rem; overflow:hidden;">
+      <div class="card-header bg-white border-0"
+           style="border-bottom:1px solid #dee2e6;">
+        <div class="fw-semibold text-uppercase"
+             style="font-size:.8rem; letter-spacing:.05em; color:#6c757d;">
+          Incoming Items
+        </div>
+        <div class="text-muted" style="font-size:.7rem; line-height:1.2;">
+          Check part number, cost, and stock location
+        </div>
+      </div>
+
+      <form method="POST"
+            id="import-form"
+            action="{{ url_for('inventory.import_parts_upload') }}"
+            style="margin:0;">
+        <input type="hidden" name="saved_path" value="{{ saved_path }}">
+        <input type="hidden" name="supplier_hint" value="{{ supplier_hint|default('') }}">
+
+        {# ВАЖНО: эти три скрытых поля удовлетворяют _units_re (brand/model/serial) #}
+        <input type="hidden" name="units[0][brand]"  value="">
+        <input type="hidden" name="units[0][model]"  value="">
+        <input type="hidden" name="units[0][serial]" value="">
+
+        <div class="table-responsive" style="max-height:60vh; border-top:1px solid #dee2e6;">
+          <table id="edit-table"
+                 class="table align-middle mb-0"
+                 style="font-size:.85rem;">
+            <thead class="table-light"
+                   style="position:sticky; top:0; z-index:5; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em;">
+              <tr>
+                <th style="min-width:140px;">Part #</th>
+                <th style="min-width:220px;">Description</th>
+                <th style="width:88px;">Qty</th>
+                <th style="width:120px;">Unit Cost</th>
+                <th style="width:120px;">Location</th>
+                <th style="width:50px;">Del</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+              <tr style="border-top:1px solid #f1f1f1;">
+                <td>
+                  <input class="form-control form-control-sm"
+                         style="border-radius:.5rem; font-size:.8rem;"
+                         name="units[0][rows][{{ loop.index0 }}][part_number]"
+                         value="{{ val(r.part_number) }}"
+                         autocomplete="off">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm"
+                         style="border-radius:.5rem; font-size:.8rem;"
+                         name="units[0][rows][{{ loop.index0 }}][part_name]"
+                         value="{{ val(r.part_name) }}"
+                         autocomplete="off">
+                </td>
+                <td style="width:88px;">
+                  <input class="form-control form-control-sm"
+                         style="border-radius:.5rem; font-size:.8rem; text-align:center;"
+                         name="units[0][rows][{{ loop.index0 }}][quantity]"
+                         value="{{ val(r.quantity) }}"
+                         inputmode="numeric">
+                </td>
+                <td style="width:120px;">
+                  <input class="form-control form-control-sm"
+                         style="border-radius:.5rem; font-size:.8rem; text-align:right;"
+                         name="units[0][rows][{{ loop.index0 }}][unit_cost]"
+                         value="{{ val(r.unit_cost) }}"
+                         inputmode="decimal">
+                </td>
+                <td style="width:120px;">
+                  <input class="form-control form-control-sm"
+                         style="border-radius:.5rem; font-size:.8rem; text-align:center;"
+                         name="units[0][rows][{{ loop.index0 }}][location]"
+                         value="{{ val(r.location) }}">
+                </td>
+                <td style="width:50px;">
+                  <button class="btn btn-sm btn-outline-danger del-row"
+                          type="button"
+                          aria-label="Delete row"
+                          style="border-radius:.5rem; font-size:.8rem; line-height:1.2; padding:.35rem .5rem;">
+                    ×
+                  </button>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- bottom action bar duplicate for long lists -->
+        <div class="card-footer bg-white d-flex flex-wrap gap-2 justify-content-between align-items-start"
+             style="border-top:1px solid #dee2e6; font-size:.75rem;">
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary shadow-sm"
+                    name="save"
+                    value="1"
+                    type="submit"
+                    style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.8rem; box-shadow:0 .5rem 1rem rgba(13,110,253,.35)!important;">
+              💾 Save Edits
+            </button>
+
+            <button id="add-row-bottom"
+                    class="btn btn-outline-info shadow-sm"
+                    type="button"
+                    style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.8rem;">
+              ➕ Add Blank Row
+            </button>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-success shadow-sm"
+                    name="apply"
+                    value="1"
+                    type="submit"
+                    style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.8rem; box-shadow:0 .5rem 1rem rgba(25,135,84,.35)!important;">
+              ✅ Apply Import
+            </button>
+
+            <a class="btn btn-outline-secondary shadow-sm"
+               href="{{ url_for('inventory.import_parts_upload') }}"
+               style="font-weight:500; border-radius:.6rem; padding:.5rem .9rem; font-size:.8rem;">
+              ✖ Cancel
+            </a>
+          </div>
+        </div>
+
+      </form>
+    </div>
+
+    <div class="text-center text-muted mt-4"
+         style="font-size:.7rem; line-height:1.3;">
+      Check for typos before applying. This will affect live stock.
+    </div>
+
   </div>
-
-  <div class="mt-2">
-    <button class="btn btn-primary" name="save"  value="1" type="submit">Save edits (stay in preview)</button>
-    <button class="btn btn-success" name="apply" value="1" type="submit">Apply import</button>
-    <a class="btn btn-secondary" href="{{ url_for('inventory.import_parts_upload') }}">Cancel</a>
-  </div>
-</form>
+</div>
 
 <script>
   // Добавить пустую строку
-  document.getElementById('add-row').addEventListener('click', () => {
+  function addBlankRow() {
     const tbody = document.querySelector('#edit-table tbody');
     const idx = tbody.children.length;
     const tr = document.createElement('tr');
+    tr.style.borderTop = "1px solid #f1f1f1";
     tr.innerHTML = `
-      <td><input class="form-control form-control-sm" name="units[0][rows][${idx}][part_number]" autocomplete="off"></td>
-      <td><input class="form-control form-control-sm" name="units[0][rows][${idx}][part_name]"   autocomplete="off"></td>
-      <td><input class="form-control form-control-sm" name="units[0][rows][${idx}][quantity]"    value="1" inputmode="numeric"></td>
-      <td><input class="form-control form-control-sm" name="units[0][rows][${idx}][unit_cost]"   inputmode="decimal"></td>
-      <td><input class="form-control form-control-sm" name="units[0][rows][${idx}][location]"    value="MAIN"></td>
-      <td><button class="btn btn-sm btn-outline-danger del-row" type="button">×</button></td>`;
+      <td>
+        <input class="form-control form-control-sm"
+               style="border-radius:.5rem; font-size:.8rem;"
+               name="units[0][rows][${idx}][part_number]"
+               autocomplete="off">
+      </td>
+      <td>
+        <input class="form-control form-control-sm"
+               style="border-radius:.5rem; font-size:.8rem;"
+               name="units[0][rows][${idx}][part_name]"
+               autocomplete="off">
+      </td>
+      <td style="width:88px;">
+        <input class="form-control form-control-sm"
+               style="border-radius:.5rem; font-size:.8rem; text-align:center;"
+               name="units[0][rows][${idx}][quantity]"
+               value="1"
+               inputmode="numeric">
+      </td>
+      <td style="width:120px;">
+        <input class="form-control form-control-sm"
+               style="border-radius:.5rem; font-size:.8rem; text-align:right;"
+               name="units[0][rows][${idx}][unit_cost]"
+               inputmode="decimal">
+      </td>
+      <td style="width:120px;">
+        <input class="form-control form-control-sm"
+               style="border-radius:.5rem; font-size:.8rem; text-align:center;"
+               name="units[0][rows][${idx}][location]"
+               value="MAIN">
+      </td>
+      <td style="width:50px;">
+        <button class="btn btn-sm btn-outline-danger del-row"
+                type="button"
+                style="border-radius:.5rem; font-size:.8rem; line-height:1.2; padding:.35rem .5rem;">
+          ×
+        </button>
+      </td>`;
     tbody.appendChild(tr);
-    applySupplierDefaultToLocations(); // применим дефолт и к новой строке
-  });
+    applySupplierDefaultToLocations();
+  }
+
+  document.getElementById('add-row')?.addEventListener('click', addBlankRow);
+  document.getElementById('add-row-bottom')?.addEventListener('click', addBlankRow);
 
   // Удаление строки
   document.addEventListener('click', (e) => {
@@ -121,7 +275,7 @@
     }
   });
 
-  // ---- АВТО-ПРАВКА LOCATION ПО ПОСТАВЩИКУ (надёжная и деликатная) ----
+  // ---- АВТО-ПРАВКА LOCATION ПО ПОСТАВЩИКУ ----
   function supplierDefaultFromHint(hint) {
     const s = (hint || '').toLowerCase();
     if (s.includes('reliable')) return 'REL';
@@ -151,7 +305,7 @@
         return;
       }
 
-      // 2) если это "чужой" дефолт и файл/подсказка явно другого вендора — мягко исправим
+      // 2) мягкая правка поставщика
       if (looksLikeReliable(savedPath, supplierHint) && cur === 'MAR') {
         inp.value = 'REL';
         return;
@@ -160,11 +314,10 @@
         inp.value = 'MAR';
         return;
       }
-      // Иначе — не трогаем (считаем, что пользователь уже редактировал)
     });
   }
 
-  // запустим на первом рендере
+  // при первом рендере
   applySupplierDefaultToLocations();
 </script>
 {% endblock %}
