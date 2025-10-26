@@ -340,11 +340,9 @@ class GoodsReceipt(db.Model):
     posted_by = db.Column(db.Integer)
     attachment_path = db.Column(db.String(512))
 
-    # ✅ Back-compat alias: batch.items ↔ batch.lines
+    # удобный алиас: .items == .lines
     @property
     def items(self):
-        # Возвращаем тот же InstrumentedList, что и relationship 'lines',
-        # чтобы работали .clear(), .append(), итд.
         return self.lines
 
     @hybrid_property

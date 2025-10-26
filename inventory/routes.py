@@ -128,10 +128,6 @@ def _is_superadmin_user(u) -> bool:
         or bool(getattr(u, "is_super_admin", False))
     )
 
-# def _is_superadmin() -> bool:
-#     from flask_login import current_user
-#     return (getattr(current_user, "role", "") or "").lower() == "superadmin"
-
 
 def _supplier_to_default_location(supplier_hint: str | None) -> str:
     """По имени/подсказке поставщика выбрать дефолтную локацию."""
@@ -5688,6 +5684,7 @@ def import_parts():
         src_file=src_name
     )
 
+
 @inventory_bp.route('/invoice/<int:record_id>')
 @login_required
 def invoice(record_id):
@@ -6843,7 +6840,7 @@ def import_parts_upload():
                 make_movement_func=make_movement
             )
 
-            # пытаемся зафиксировать все изменения сразу
+            # пытаемся зафиксировать все изменения по складу и строкам
             try:
                 session.commit()
             except Exception as e:
@@ -6852,18 +6849,54 @@ def import_parts_upload():
                 flash("Ошибка при окончательной записи в базу. Изменения откатились.", "danger")
                 return redirect(url_for("inventory.import_parts_upload"))
 
+            # теперь выставляем батчу статус 'posted', но БЕЗ второго плюса на склад
+            bid = None
+            if batch is not None and batch_id_field:
+                try:
+                    bid = getattr(batch, batch_id_field or "id", None)
+
+                    # перечитываем объект батча из базы, чтобы он был attach'ed
+                    fresh_batch = BatchModel.query.get(bid)
+                    if fresh_batch is not None:
+                        # найти реальные имена колонок status / posted_at / posted_by
+                        B_STAT  = _pick_field(BatchModel, ["status","state"])
+                        B_P_AT  = _pick_field(BatchModel, ["posted_at"])
+                        B_P_BY  = _pick_field(BatchModel, ["posted_by"])
+
+                        if B_STAT:
+                            setattr(fresh_batch, B_STAT, "posted")
+                        if B_P_AT:
+                            setattr(fresh_batch, B_P_AT, datetime.utcnow())
+                        if B_P_BY:
+                            # если у тебя есть current_user.id — лучше его, иначе 0
+                            try:
+                                uid = getattr(current_user, "id", 0)
+                            except Exception:
+                                uid = 0
+                            setattr(fresh_batch, B_P_BY, uid)
+
+                        session.add(fresh_batch)
+                        session.commit()
+
+                except Exception as e:
+                    session.rollback()
+                    logging.exception("Failed to finalize batch status: %s", e)
+                    # не фейлим весь процесс, просто скажем что batch остался draft
+                    flash("Приход сохранён, но статус партии не удалось установить 'posted'.", "warning")
+
             # показать ошибки парсинга строк
             for e in errors:
                 flash(e, "danger")
 
-            # флешим результат
-            if batch is not None and batch_id_field:
-                bid = getattr(batch, batch_id_field or "id", None)
-                flash(f"Создано приходов: {len(built)} (Batch #{bid})", "success")
+            # флешим итог
+            if bid is not None:
+                flash(f"Stock received and posted. Batch #{bid}. Создано строк: {len(built)}", "success")
+                # после успешного импорта ведём на страницу детали партии
+                return redirect(url_for("inventory.receiving_detail", batch_id=bid))
             else:
                 flash(f"Создано приходов: {len(built)} (без записи ReceivingBatch)", "warning")
+                return redirect(url_for("inventory.import_parts_upload"))
 
-            return redirect(url_for("inventory.import_parts_upload"))
 
     # ===== B) первая загрузка файла → превью ==================================
     if request.method == "POST":
@@ -7264,6 +7297,8 @@ def _already_returned_qty_for_source(src) -> int:
 @login_required
 def receiving_list():
     from sqlalchemy import func
+    current_app.logger.warning("### DEBUG receiving_list USING MODEL %s FROM %s TABLENAME=%s", ReceivingBatch, __file__,
+                               getattr(ReceivingBatch, "__tablename__", "?"))
 
     q = ReceivingBatch.query
     supplier = (request.args.get("supplier") or "").strip()
@@ -7336,15 +7371,22 @@ def receiving_list():
 @inventory_bp.post("/receiving/<int:batch_id>/toggle", endpoint="receiving_toggle")
 @login_required
 def receiving_toggle(batch_id: int):
-    from datetime import datetime
-    from sqlalchemy import func
+    from flask import flash, redirect, url_for
+    from flask_login import current_user
     from extensions import db
-    from models import ReceivingBatch, Part
-    from services.receiving import post_receiving_batch  # уже есть у тебя
+    from models import ReceivingBatch
+    from services.receiving import post_receiving_batch, unpost_receiving_batch
 
-    # разрешаем только супер-админу
-    if getattr(current_user, "role", "") != "superadmin":
-        flash("Only superadmin can post/unpost receiving.", "danger")
+    # кто может жать Post / Unpost
+    role_low = (getattr(current_user, "role", "") or "").strip().lower()
+    is_adminish = (
+        role_low in ("admin", "superadmin")
+        or getattr(current_user, "is_admin", False)
+        or getattr(current_user, "is_superadmin", False)
+        or getattr(current_user, "is_super_admin", False)
+    )
+    if not is_adminish:
+        flash("Access denied. Admin only.", "danger")
         return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
     batch = db.session.get(ReceivingBatch, batch_id)
@@ -7352,58 +7394,21 @@ def receiving_toggle(batch_id: int):
         flash("Batch not found.", "warning")
         return redirect(url_for("inventory.receiving_list"))
 
-    status = (getattr(batch, "status", "") or "").strip().lower()
+    status_now = (getattr(batch, "status", "") or "").strip().lower()
 
     try:
-        # =========================
-        # CASE A: сейчас draft -> хотим POST (принять на склад)
-        # =========================
-        if status != "posted":
-            # твоя логика прихода уже готова в сервисе
+        if status_now != "posted":
+            # DRAFT -> POST
             post_receiving_batch(batch.id, getattr(current_user, "id", None))
-            flash("Stock received and posted.", "success")
-            return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
-
-        # =========================
-        # CASE B: сейчас posted -> хотим UNPOST (снять со склада и вернуть в draft)
-        # =========================
-
-        # 1. Для каждой строки партии снять количество со склада
-        for it in (batch.items or []):
-            pn = (it.part_number or "").strip().upper()
-            qty = int(it.quantity or 0)
-
-            if not pn or qty <= 0:
-                continue
-
-            # достаём Part по part_number без учёта регистра
-            part = Part.query.filter(func.upper(Part.part_number) == pn).first()
-            if not part:
-                # если детали нет - нечего списывать
-                continue
-
-            before_qty = int(part.quantity or 0)
-            after_qty = before_qty - qty
-            if after_qty < 0:
-                after_qty = 0
-            part.quantity = after_qty
-
-        # 2. Обновляем сам батч
-        batch.status = "draft"
-        if hasattr(batch, "posted_at"):
-            batch.posted_at = None
-        if hasattr(batch, "unposted_by"):
-            batch.unposted_by = getattr(current_user, "id", None)
-        if hasattr(batch, "unposted_at"):
-            batch.unposted_at = datetime.utcnow()
-
-        db.session.commit()
-
-        flash(f"Batch #{batch.id} set to draft.", "success")
+            flash(f"Batch #{batch.id} posted and stock updated.", "success")
+        else:
+            # POSTED -> UNPOST
+            unpost_receiving_batch(batch.id, getattr(current_user, "id", None))
+            flash(f"Batch #{batch.id} reverted to draft and stock rolled back.", "warning")
 
     except Exception as e:
         db.session.rollback()
-        flash(f"Failed to toggle status: {e}", "danger")
+        flash(f"Failed to toggle: {e}", "danger")
 
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
@@ -7459,35 +7464,26 @@ def receiving_save():
     from sqlalchemy import func
 
     f = request.form
-    batch_id = f.get("batch_id")
+    batch_id = (f.get("batch_id") or "").strip()
+    action = (f.get("action") or "").strip().lower()
+    force_existing = (f.get("force_existing") or "").strip() == "1"
 
-    # мы будем делать только один режим действия:
-    # создать/обновить и ПОСТИТЬ склад
-    # (action не нужен больше как контроль доступа, но мы не ломаем форму:
-    action = (f.get("action") or "").lower()
+    # ---------------- ROLE HELPERS ----------------
+    role_low = (getattr(current_user, "role", "") or "").strip().lower()
 
-    # ---------- ROLE HELPERS ----------
-    def _is_super(u) -> bool:
-        # "superadmin" определения
-        role_low_i = (getattr(u, "role", "") or "").strip().lower()
-        if role_low_i == "superadmin":
+    def is_super(u) -> bool:
+        rl = (getattr(u, "role", "") or "").strip().lower()
+        if rl == "superadmin":
             return True
         if getattr(u, "is_superadmin", False):
             return True
         if getattr(u, "is_super_admin", False):
             return True
-        # если у тебя была helper-функция _is_superadmin_user, она тоже учитывает
-        try:
-            if _is_superadmin_user(u):
-                return True
-        except Exception:
-            pass
         return False
 
-    def _is_adminish(u) -> bool:
-        # любой, кто имеет право на приёмку
-        role_low_i = (getattr(u, "role", "") or "").strip().lower()
-        if role_low_i in ("admin", "superadmin"):
+    def is_adminish(u) -> bool:
+        rl = (getattr(u, "role", "") or "").strip().lower()
+        if rl in ("admin", "superadmin"):
             return True
         if getattr(u, "is_admin", False):
             return True
@@ -7497,137 +7493,142 @@ def receiving_save():
             return True
         return False
 
-    is_super = _is_super(current_user)
-    is_adminish = _is_adminish(current_user)
+    user_is_super = is_super(current_user)
+    user_is_adminish = is_adminish(current_user)
 
-    is_new_batch = not batch_id  # True если создаём новый
+    # figure out: new batch or editing existing
+    is_new_batch = (not batch_id) and (not force_existing)
 
-    # =========================
-    # ACCESS CONTROL
-    # =========================
-    # 1) Новый батч: admin ИЛИ superadmin может принимать товар.
-    #    Этот приём ДОЛЖЕН пойти в сток сразу.
-    # 2) Существующий батч (уже есть в БД):
-    #    Менять может только superadmin, и только если он ещё НЕ posted.
-    #    Если уже posted — тоже нельзя править обычному админу.
-
+    # ------------- ACCESS CONTROL -------------
+    # правила:
+    # 1) новый батч может создать admin / superadmin
+    # 2) существующий батч:
+    #    - draft: admin или superadmin может редактировать
+    #    - posted: никто не редактирует тут (нужно сначала Unpost из toggle)
     if is_new_batch:
-        if not is_adminish:
-            flash("Access denied. only admin or superadmin can receive stock.", "danger")
+        if not user_is_adminish:
+            flash("Access denied. Only admin or superadmin can create receiving.", "danger")
             return redirect(url_for("inventory.receiving_list"))
-
-        # создаём новый батч
         batch = ReceivingBatch(created_by=getattr(current_user, "id", None))
-        # стартовый статус пока ставим draft, но мы потом переведём в posted
-        if not getattr(batch, "status", None):
-            batch.status = "draft"
+        # заполним базовые поля так, чтобы не упасть на NOT NULL
+        batch.status = "draft"
+        batch.created_at = datetime.utcnow()
+        # поставим supplier хотя бы пустую строку, но не None
+        batch.supplier_name = (f.get("supplier_name") or "").strip() or "UNKNOWN"
+        batch.invoice_number = (f.get("invoice_number") or "").strip() or None
+        inv_date_raw = (f.get("invoice_date") or "").strip()
+        inv_date_val = None
+        if inv_date_raw:
+            try:
+                inv_date_val = datetime.strptime(inv_date_raw, "%Y-%m-%d").date()
+            except Exception:
+                try:
+                    inv_date_val = datetime.strptime(inv_date_raw, "%m/%d/%Y").date()
+                except Exception:
+                    inv_date_val = None
+        batch.invoice_date = inv_date_val
+        batch.currency = (f.get("currency") or "USD").strip()[:8] or "USD"
+        batch.notes = (f.get("notes") or "").strip() or None
 
     else:
-        # существующий батч
-        batch = ReceivingBatch.query.get(int(batch_id)) if batch_id else None
+        # existing batch
+        try:
+            batch = ReceivingBatch.query.get(int(batch_id))
+        except Exception:
+            batch = None
+
         if not batch:
-            flash("Receiving batch not found", "danger")
+            flash("Receiving batch not found.", "danger")
             return redirect(url_for("inventory.receiving_list"))
 
-        # если он уже posted — нельзя его править никому кроме супер
-        if (batch.status or "").lower() == "posted" and not is_super:
-            flash("This batch is already posted. Only superadmin can adjust.", "danger")
+        # if already posted -> block edit
+        status_low = (getattr(batch, "status", "") or "").strip().lower()
+        if status_low == "posted":
+            flash("Batch is posted. Unpost first, then edit.", "danger")
             return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
-        # если он ещё не posted — тоже не даём обычному админу редактировать задним числом,
-        # чтобы не переписывали историю после факта
-        if not is_super and not is_new_batch:
-            flash("Only superadmin can edit an existing receiving batch.", "danger")
+        # draft batch can be edited by admin/superadmin
+        if not user_is_adminish:
+            flash("Access denied. Only admin or superadmin can edit a draft batch.", "danger")
             return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
-    # ========== HEADER FIELDS ==========
-    batch.supplier_name  = (f.get("supplier_name") or "").strip()
-    batch.invoice_number = (f.get("invoice_number") or "").strip()
+        # update header fields from form
+        batch.supplier_name  = (f.get("supplier_name") or "").strip() or (batch.supplier_name or "UNKNOWN")
+        batch.invoice_number = (f.get("invoice_number") or "").strip() or None
 
-    inv_date_raw = (f.get("invoice_date") or "").strip()
-    parsed_date = None
-    if inv_date_raw:
-        # сначала YYYY-MM-DD
-        try:
-            parsed_date = datetime.strptime(inv_date_raw, "%Y-%m-%d").date()
-        except Exception:
-            # fallback MM/DD/YYYY
+        inv_date_raw = (f.get("invoice_date") or "").strip()
+        inv_date_val = None
+        if inv_date_raw:
             try:
-                parsed_date = datetime.strptime(inv_date_raw, "%m/%d/%Y").date()
+                inv_date_val = datetime.strptime(inv_date_raw, "%Y-%m-%d").date()
             except Exception:
-                parsed_date = None
-    batch.invoice_date = parsed_date
+                try:
+                    inv_date_val = datetime.strptime(inv_date_raw, "%m/%d/%Y").date()
+                except Exception:
+                    inv_date_val = None
+        batch.invoice_date = inv_date_val
 
-    batch.notes    = (f.get("notes") or "").strip()
-    batch.currency = ((f.get("currency") or "USD").strip()[:8] or "USD")
+        batch.currency = ((f.get("currency") or "USD").strip()[:8] or "USD")
+        batch.notes    = (f.get("notes") or "").strip() or None
 
-    # ========== LINE ITEMS ==========
-    # Пересобираем строки по форме
-    batch.items.clear()
+        # now rebuild lines
+        batch.items.clear()
 
+    # ---------- rebuild/add lines ----------
     idx = 0
     while True:
-        key_base = f"rows[{idx}]"
-        has_any = any(k.startswith(key_base) for k in f.keys())
-        if not has_any:
+        basekey = f"rows[{idx}]"
+        if not any(k.startswith(basekey) for k in f.keys()):
             break
 
-        pn_val = (f.get(f"{key_base}[part_number]") or "").strip()
+        pn_val = (f.get(f"{basekey}[part_number]") or "").strip().upper()
         if pn_val:
+            try:
+                qty_val = int(f.get(f"{basekey}[quantity]") or 0)
+            except:
+                qty_val = 0
+            try:
+                cost_val = float(f.get(f"{basekey}[unit_cost]") or 0.0)
+            except:
+                cost_val = 0.0
+
             item = ReceivingItem(
-                part_number=pn_val,
-                part_name=(f.get(f"{key_base}[part_name]") or "").strip(),
-                quantity=int(f.get(f"{key_base}[quantity]") or 0),
-                unit_cost=float(f.get(f"{key_base}[unit_cost]") or 0),
-                location=(f.get(f"{key_base}[location]") or "").strip()[:64],
+                part_number = pn_val,
+                part_name   = (f.get(f"{basekey}[part_name]") or "").strip(),
+                quantity    = qty_val,
+                unit_cost   = cost_val,
+                location    = (f.get(f"{basekey}[location]") or "").strip()[:64],
             )
             batch.items.append(item)
 
         idx += 1
 
+    # sync part names into Part table (non-destructive)
+    if batch.items:
+        for it in batch.items:
+            pn_sync = (it.part_number or "").strip().upper()
+            new_name = (it.part_name or "").strip()
+            if not pn_sync or not new_name:
+                continue
+            part_obj = Part.query.filter(func.upper(Part.part_number) == pn_sync).first()
+            if part_obj:
+                old_name = (getattr(part_obj, "name", "") or "").strip()
+                if old_name != new_name and new_name:
+                    part_obj.name = new_name
+
+    # save draft
     db.session.add(batch)
-    db.session.commit()   # batch.id теперь гарантированно есть
+    db.session.commit()
 
-    # ========== POST TO STOCK ==========
-    # ВАЖНО: теперь ВСЕГДА постим (для admin и superadmin)
-    # Это то, что ты хочешь: сохранить = оприходовать.
-    # Если супер-админ редактирует незапощенный существующий батч и сохраняет —
-    # он тоже сюда попадает, и мы его постим.
-    post_receiving_batch(batch.id, getattr(current_user, "id", None))
+    # if they clicked the green button "Post & Update Stock"
+    if action == "post":
+        # use your existing stock-posting service
+        from services.receiving import post_receiving_batch
+        post_receiving_batch(batch.id, getattr(current_user, "id", None))
+        flash("Batch posted & stock updated.", "success")
+    else:
+        flash("Draft saved.", "success")
 
-    # помечаем как posted
-    try:
-        batch.status = "posted"
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-        # даже если не смогли обновить статус в БД по какой-то причине,
-        # сток уже пришёл. Мы просто не будем падать.
-        pass
-
-    # ========== SYNC PART NAMES (catalog nice-to-have) ==========
-    try:
-        if hasattr(Part, "name"):
-            for it in (batch.items or []):
-                pn_sync = (it.part_number or "").strip()
-                new_name = (it.part_name or "").strip()
-                if not pn_sync or not new_name:
-                    continue
-
-                part_obj = Part.query.filter(
-                    func.upper(Part.part_number) == pn_sync.upper()
-                ).first()
-                if part_obj:
-                    old_name = (getattr(part_obj, "name", "") or "").strip()
-                    if old_name != new_name:
-                        part_obj.name = new_name
-
-            db.session.commit()
-    except Exception:
-        db.session.rollback()
-        # имя деталей не критично для движения склада — не роняем процесс
-
-    flash("Stock received and posted.", "success")
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
 @inventory_bp.get("/receiving/<int:batch_id>", endpoint="receiving_detail")
@@ -7683,6 +7684,40 @@ def receiving_detail(batch_id):
 @inventory_bp.post("/receiving/<int:batch_id>/post", endpoint="receiving_post")
 @login_required
 def receiving_post(batch_id):
+    from extensions import db
+    from models import ReceivingBatch
+
+    batch = db.session.get(ReceivingBatch, batch_id)
+    if not batch:
+        flash("Batch not found", "danger")
+        return redirect(url_for("inventory.receiving_list"))
+
+    status_now = (batch.status or "").strip().lower()
+
+    # КРИТИЧЕСКИЙ ФИЛЬТР:
+    # если партию уже когда-то фактически оприходовали (твой "призрак"),
+    # то повторно склад трогать нельзя.
+    #
+    # Простая защита: если status уже 'posted' -> не зовём post_receiving_batch
+    # (это уже было), НО также если status == 'draft', НО batch.posted_at уже не пустой,
+    # значит её уже проводили и потом кто-то откатил только поле status.
+    #
+    already_posted_once = False
+    if status_now == "posted":
+        already_posted_once = True
+    else:
+        # иногда баг откатывает только поле status, но оставляет posted_at
+        if getattr(batch, "posted_at", None):
+            already_posted_once = True
+
+    if already_posted_once:
+        flash("Batch already applied to stock. Status updated to POSTED.", "info")
+        # просто выставим статус в БД, без повторного прихода
+        batch.status = "posted"
+        db.session.commit()
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
+
+    # нормальный путь: реально ещё не приходили -> делаем приход
     post_receiving_batch(batch_id, getattr(current_user, "id", None))
     flash("Batch posted", "success")
     return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
@@ -7698,12 +7733,24 @@ def create_receiving_from_rows(
     rows: list[dict],
     created_by=None,
     auto_post: bool = False
-) -> GoodsReceipt:  # или ReceivingBatch, оставь свой класс как есть
-    """Создать шапку прихода + строки из нормализованных rows.
-       Если auto_post=True → сразу провести приход на склад (увеличить остатки)
-       и пометить статус как 'posted'.
+) -> ReceivingBatch:
+
     """
-    gr = GoodsReceipt(
+    Делает так:
+      1. создаёт ReceivingBatch как draft + строки
+      2. commit (чтоб был id)
+      3. если auto_post == True:
+            - вызывает post_receiving_batch(batch.id)
+              (это плюсанёт склад и поставит status='posted')
+            - перечитывает batch из базы (уже posted)
+            - expunge() эту свежую версию, чтобы статус 'posted' не затёрся обратно
+         и возвращает именно ЭТУ версию
+      4. если auto_post == False:
+            - просто возвращает draft, тоже expunge, чтоб не затирал потом
+    """
+
+    # 1. СОЗДАТЬ batch как draft
+    batch = ReceivingBatch(
         supplier_name=(supplier_name or "").strip(),
         invoice_number=(invoice_number or "").strip() or None,
         invoice_date=invoice_date,
@@ -7713,9 +7760,10 @@ def create_receiving_from_rows(
         created_at=datetime.utcnow(),
         created_by=created_by,
     )
-    db.session.add(gr)
-    db.session.flush()
+    db.session.add(batch)
+    db.session.flush()  # batch.id теперь есть
 
+    # 1.5. СОЗДАТЬ строки
     line_no = 1
     for r in rows:
         pn = (r.get("part_number") or r.get("pn") or "").strip()
@@ -7726,8 +7774,7 @@ def create_receiving_from_rows(
         if qty <= 0:
             continue
 
-        line = GoodsReceiptLine(
-            goods_receipt_id=gr.id,
+        line_kwargs = dict(
             line_no=line_no,
             part_number=pn,
             part_name=(r.get("part_name") or r.get("description") or r.get("descr") or "").strip() or None,
@@ -7735,20 +7782,70 @@ def create_receiving_from_rows(
             unit_cost=float((r.get("unit_cost") or r.get("price") or 0) or 0),
             location=(r.get("location") or r.get("supplier") or "").strip() or None,
         )
+
+        # ВАЖНО: у тебя ReceivingItem сейчас создаётся с batch_id=gr.id
+        # если у твоей модели строк реально поле называется goods_receipt_id,
+        # то замени здесь на goods_receipt_id=batch.id
+        line_kwargs["batch_id"] = batch.id
+
+        line = ReceivingItem(**line_kwargs)
         db.session.add(line)
+
         line_no += 1
 
-    # Сохранили черновик с позициями
+    # 2. commit draft+строки, теперь batch и items в базе
     db.session.commit()
 
-    if auto_post:
-        # 1. Проводим на склад (это обновляет остатки И ставит status='posted' внутри)
-        post_receiving_batch(gr.id, current_user_id=created_by)
+    # 3. если НЕ нужно автопостить → просто вернуть draft (но вынести из сессии)
+    if not auto_post:
+        fresh_draft = db.session.get(ReceivingBatch, batch.id)
+        try:
+            from flask import current_app
+            current_app.logger.warning(
+                "### DEBUG create_receiving_from_rows draft return id=%s status=%s",
+                fresh_draft.id,
+                fresh_draft.status,
+            )
+        except Exception:
+            pass
 
-        # 2. На всякий случай перечитаем объект (чтобы у вызывающего был fresh статус)
-        gr = ReceivingBatch.query.get(gr.id)
+        db.session.expunge(fresh_draft)
+        return fresh_draft
 
-    return gr
+    # 4. auto_post == True → проводим на склад и ставим posted
+    post_receiving_batch(batch.id, current_user_id=created_by)
+
+    # перечитываем уже ПОСТНУТУЮ версию
+    posted_batch = db.session.get(ReceivingBatch, batch.id)
+
+    try:
+        from flask import current_app
+        current_app.logger.warning(
+            "### DEBUG create_receiving_from_rows AFTER POST id=%s status=%s",
+            posted_batch.id,
+            posted_batch.status,
+        )
+    except Exception:
+        pass
+
+    # КРИТИЧЕСКИЙ МОМЕНТ:
+    # вынимаем объект из сессии, чтобы никакой следующий commit в этом же request
+    # не смог случайно залить обратно старый статус 'draft'
+    db.session.expunge(posted_batch)
+
+    try:
+        from flask import current_app
+        current_app.logger.warning(
+            "### DEBUG CFR (create_receiving_from_rows) RETURNING batch_id=%s status=%s auto_post=%s file=%s",
+            gr.id,
+            getattr(gr, "status", None),
+            auto_post,
+            __file__,
+        )
+    except Exception:
+        pass
+
+    return posted_batch
 
 
 def _norm_cols(df):
@@ -7863,105 +7960,12 @@ def receiving_import_form():
     """Форма загрузки PDF (или CSV, если захочешь)."""
     return render_template("receiving_import_upload.html")
 
-
-@inventory_bp.post("/receiving/import")
+@inventory_bp.route("/receiving/import", methods=["GET", "POST"])
 @login_required
 def receiving_import_upload():
-    """
-    Принять PDF, распарсить строки, создать партию, сразу оприходовать на склад,
-    пометить как posted и отправить пользователя на деталь батча.
-    """
-    import os
-    from datetime import datetime
-    from flask import current_app, request, redirect, url_for, render_template, flash
-    from werkzeug.utils import secure_filename
-
-    # 1. забираем файл
-    file = request.files.get("file")
-    if not file or not file.filename.strip():
-        flash("Select a PDF file.", "warning")
-        return redirect(url_for("inventory.receiving_import_form"))
-
-    src_name = secure_filename(file.filename)
-    ext = os.path.splitext(src_name)[1].lower()
-    if ext != ".pdf":
-        flash("Only PDF is supported.", "warning")
-        return redirect(url_for("inventory.receiving_import_form"))
-
-    # 2. сохраняем PDF
-    upload_dir = os.path.join(current_app.instance_path, "uploads")
-    os.makedirs(upload_dir, exist_ok=True)
-    pdf_path = os.path.join(
-        upload_dir,
-        f"{datetime.utcnow():%Y%m%d_%H%M%S}_{src_name}"
-    )
-    file.save(pdf_path)
-
-    # 3. парсим PDF → dataframe → rows
-    try_ocr = bool(request.form.get("try_ocr"))
-    df = dataframe_from_pdf(pdf_path, try_ocr=try_ocr)
-
-    df = drop_vendor_noise_rows(df)
-    df = fix_pn_and_description_in_df(df)
-    supplier_hint = detect_supplier_hint(df, os.path.basename(pdf_path))
-    default_loc   = (supplier_hint or "MAIN").upper()
-
-    rows = _norm_cols(df) if (df is not None and not df.empty) else []
-    if not rows:
-        flash("Nothing parsed from PDF. Try OCR option.", "warning")
-        return redirect(url_for("inventory.receiving_import_form"))
-
-    # 4. подставляем локацию и supplier в строки
-    for r in rows:
-        if not (r.get("location") or "").strip():
-            r["location"] = default_loc
-        if supplier_hint and not (r.get("supplier") or "").strip():
-            r["supplier"] = supplier_hint
-
-    # 5. читаем мету из формы (если была) или подсказок
-    supplier = (request.form.get("supplier") or supplier_hint or "").strip()
-    invoice  = (request.form.get("invoice_number") or "").strip()
-    date_s   = (request.form.get("invoice_date") or "").strip()
-    notes    = (request.form.get("notes") or f"Imported from {src_name}").strip()
-    currency = "USD"
-
-    # 6. преобразуем дату
-    inv_date = None
-    try:
-        # пробуем YYYY-MM-DD
-        inv_date = datetime.strptime(date_s, "%Y-%m-%d").date() if date_s else None
-    except Exception:
-        try:
-            # пробуем MM/DD/YYYY
-            inv_date = datetime.strptime(date_s, "%m/%d/%Y").date() if date_s else None
-        except Exception:
-            inv_date = None
-
-    # 7. СОЗДАЁМ ПАРТИЮ В БАЗЕ
-    gr = create_receiving_from_rows(
-        supplier_name = supplier,
-        invoice_number = invoice,
-        invoice_date = inv_date,
-        currency = currency,
-        notes = notes,
-        rows = rows,
-        created_by = getattr(current_user, "id", None),
-        auto_post = False  # мы сейчас вручную вызовем пост ниже
-    )
-
-    # 8. ДОПОЛНИТЕЛЬНО сохраним путь к файлу, если у модели есть поле attachment_path
-    if hasattr(gr, "attachment_path"):
-        gr.attachment_path = pdf_path
-        db.session.commit()
-
-    # 9. ВАЖНОЕ: сразу постим, чтобы:
-    #    - обновить склад
-    #    - batch.status = 'posted'
-    post_receiving_batch(gr.id, current_user_id=getattr(current_user, "id", None))
-
-    # 10. Готово. Показываем деталь уже ПОСТНУТОГО батча, не draft.
-    flash(f"Import received & posted (ID {gr.id})", "success")
-    return redirect(url_for("inventory.receiving_detail", batch_id=gr.id))
+    # legacy path disabled, use /import-parts instead
+    flash("Use Import Parts page instead.", "warning")
+    return redirect(url_for("inventory.import_parts_upload"))
 
 @inventory_bp.get("/receiving/<int:batch_id>/attachment")
 @login_required
@@ -7999,9 +8003,17 @@ def add_part_batch_form():
 @login_required
 def add_part_batch():
     """
-    Принять массив позиций из формы (batch_payload JSON),
-    пройтись по каждой и обновить склад.
+    Новый поток:
+    1. Читаем batch_payload (массив деталей).
+    2. Создаём ReceivingBatch (черновик).
+    3. Создаём ReceivingItem строки из payload.
+    4. Коммитим draft, чтобы получить batch.id.
+    5. Делаем post_receiving_batch(batch.id) → это:
+          - прибавит qty к складу ОДИН РАЗ
+          - выставит batch.status = 'posted'
+    6. Редиректим на receiving_detail(batch_id).
     """
+
     role_low = (getattr(current_user, "role", "") or "").lower()
     if role_low not in ("admin", "superadmin"):
         flash("Access denied", "danger")
@@ -8010,12 +8022,12 @@ def add_part_batch():
     payload_raw = request.form.get("batch_payload", "[]").strip()
     try:
         items = json.loads(payload_raw)
-    except Exception as e:
+    except Exception:
         current_app.logger.exception("Bad batch_payload JSON")
         flash("Invalid batch data", "danger")
         return redirect(url_for("inventory.dashboard"))
 
-    # items look like:
+    # items выглядят так:
     # [
     #   {
     #     "part_number": "WR14X27232",
@@ -8028,68 +8040,73 @@ def add_part_batch():
     #   ...
     # ]
 
-    updated = 0
-    created = 0
+    # ---------- 1. создаём сам batch в status='draft' ----------
+    # supplier/invoice у тебя через этот экран не вводятся.
+    # Дадим что-то нейтральное чтобы в списке Receiving было понятно, откуда пришло:
+    supplier_hint = "ADD-BATCH"
+    invoice_hint  = datetime.utcnow().strftime("BULK-%Y%m%d-%H%M%S")
 
+    batch = ReceivingBatch(
+        supplier_name = supplier_hint,
+        invoice_number = invoice_hint,
+        invoice_date = datetime.utcnow().date(),
+        currency = "USD",
+        notes = "Created via /add-batch",
+        status = "draft",
+        created_at = datetime.utcnow(),
+        created_by = getattr(current_user, "id", None),
+    )
+    db.session.add(batch)
+    db.session.flush()   # теперь batch.id есть
+
+    # ---------- 2. добавляем строки ----------
+    line_no = 1
     for row in items:
         pn  = (row.get("part_number") or "").strip().upper()
         nm  = (row.get("name") or "").strip()
-        qty = row.get("qty")
-        ct  = row.get("cost")
         loc = (row.get("loc") or "").strip().upper()
 
-        # sanity defaults
+        # qty
         try:
-            qty = int(qty)
-        except:
+            qty = int(row.get("qty") or 0)
+        except Exception:
             qty = 0
-        if qty <= 0:
+        if qty <= 0 or not pn:
             continue
 
+        # cost
         try:
-            unit_cost_val = float(ct) if ct not in (None, "",) else None
-        except:
-            unit_cost_val = None
+            unit_cost_val = float(row.get("cost")) if row.get("cost") not in (None, "") else 0.0
+        except Exception:
+            unit_cost_val = 0.0
 
-        if not pn:
-            continue
+        line = ReceivingItem(
+            # твоя строковая модель: для GoodsReceiptLine это goods_receipt_id,
+            # но через алиас ReceivingItem она может называться batch_id в твоём коде.
+            # Мы смотрели твой create_receiving_from_rows: ты делаешь ReceivingItem(batch_id=gr.id ...)
+            # Значит здесь тоже надо batch_id.
+            batch_id    = batch.id,
+            line_no     = line_no,
+            part_number = pn,
+            part_name   = nm or None,
+            quantity    = qty,
+            unit_cost   = unit_cost_val,
+            location    = loc or None,
+        )
+        db.session.add(line)
+        line_no += 1
 
-        # ищем существующий парт по part_number
-        part_obj = Part.query.filter(func.upper(Part.part_number) == pn).first()
+    # ---------- 3. коммитим draft+строки ----------
+    db.session.commit()
 
-        if part_obj:
-            # уже существует -> просто обновляем количество и по возможности поля
-            part_obj.quantity = (part_obj.quantity or 0) + qty
+    # ---------- 4. официально постим через сервис ----------
+    # это увеличит склад И поставит batch.status='posted'
+    from services.receiving import post_receiving_batch
+    post_receiving_batch(batch.id, getattr(current_user, "id", None))
 
-            if unit_cost_val is not None:
-                part_obj.unit_cost = unit_cost_val
-            if loc:
-                part_obj.location = loc
-
-            # name мы НЕ меняем если парт уже есть (по твоему правилу)
-            updated += 1
-
-        else:
-            # нет такого -> создаём новый
-            new_part = Part(
-                part_number = pn,
-                name        = nm,               # тут нужно, чтобы nm был не пустой
-                quantity    = qty,
-                unit_cost   = unit_cost_val or 0,
-                location    = loc or "MAIN"
-            )
-            db.session.add(new_part)
-            created += 1
-
-    try:
-        db.session.commit()
-        flash(f"Batch saved. Updated: {updated}, Created: {created}.", "success")
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.exception("Batch commit failed")
-        flash("Error saving batch. Nothing committed.", "danger")
-
-    return redirect(url_for("inventory.dashboard"))
+    # после post_receiving_batch батч уже posted.
+    flash(f"Stock received and posted. Batch #{batch.id}", "success")
+    return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
 
 

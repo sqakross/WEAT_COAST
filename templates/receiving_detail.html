@@ -1,42 +1,49 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>Receiving Batch #{{ batch.id }}</h3>
 
-{% set curr = batch|attr('currency')|default('USD', true) %}
-{% set role = current_user.role if current_user.is_authenticated else '' %}
-{% set can_super = current_user.is_authenticated and (
-  role == 'superadmin' or (current_user.is_superadmin|default(false)) or (current_user.is_super_admin|default(false))
-) %}
-{% set is_posted = (batch|attr('status')|default('', true)) == 'posted' %}
-{% set RO = is_posted %} {# редактировать строки/шапку можно когда draft; для posted — сначала Unpost #}
-{% set dis = 'disabled' if RO else '' %}
-{% set ro  = 'readonly' if RO else '' %}
-
-<div class="row mb-3">
-  <div class="col">
-    <div><strong>Supplier:</strong> {{ batch|attr('supplier_name')|default('', true) }}</div>
-    <div><strong>Invoice #:</strong> {{ batch|attr('invoice_number')|default('—', true) }}</div>
-    <div><strong>Date:</strong> {{ batch|attr('invoice_date')|default('—', true) }}</div>
-    <div>
-      <strong>Status:</strong>
-      {% if is_posted %}
-        <span class="badge bg-success">posted</span>
-      {% else %}
-        <span class="badge bg-secondary">draft</span>
-      {% endif %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <h3 class="mb-1">Receiving Batch #{{ batch.id }}</h3>
+    <div class="text-muted small">
+      <span class="me-3"><strong>Supplier:</strong> {{ batch|attr('supplier_name')|default('—', true) }}</span>
+      <span class="me-3"><strong>Invoice #:</strong> {{ batch|attr('invoice_number')|default('—', true) }}</span>
+      <span class="me-3"><strong>Date:</strong> {{ batch|attr('invoice_date')|default('—', true) }}</span>
+      <span class="me-3">
+        <strong>Status:</strong>
+        {% set is_posted = (batch|attr('status')|default('', true)) == 'posted' %}
+        {% if is_posted %}
+          <span class="badge bg-success">POSTED</span>
+        {% else %}
+          <span class="badge bg-secondary">DRAFT</span>
+        {% endif %}
+      </span>
     </div>
   </div>
-  <div class="col text-end">
-    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_list') }}">Back</a>
+
+  {# ----- ACTION BUTTONS (admin or superadmin) ----- #}
+  {% set role = (current_user.role if current_user.is_authenticated else '')|lower %}
+  {% set can_super = current_user.is_authenticated and (
+    role in ['admin','superadmin']
+    or (current_user.is_admin|default(false))
+    or (current_user.is_superadmin|default(false))
+    or (current_user.is_super_admin|default(false))
+  ) %}
+
+  <div class="text-end">
+    <a class="btn btn-outline-secondary me-2" href="{{ url_for('inventory.receiving_list') }}">
+      ‹ Back
+    </a>
 
     {% if can_super %}
-      <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}" method="post" style="display:inline;">
+      <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
+            method="post" class="d-inline">
         <button class="btn {{ 'btn-warning' if is_posted else 'btn-primary' }}" type="submit">
           {{ 'Unpost' if is_posted else 'Post' }}
         </button>
       </form>
 
-      <form action="{{ url_for('inventory.receiving_delete', batch_id=batch.id) }}" method="post" style="display:inline;"
+      <form action="{{ url_for('inventory.receiving_delete', batch_id=batch.id) }}"
+            method="post" class="d-inline"
             onsubmit="return confirm('Delete batch #{{ batch.id }}? This cannot be undone.');">
         <button class="btn btn-danger" type="submit">Delete</button>
       </form>
@@ -44,139 +51,190 @@
   </div>
 </div>
 
-{# ---------- READ-ONLY SUMMARY TABLE (как было) ---------- #}
-<table class="table table-sm table-hover align-middle">
-  <thead>
-    <tr>
-      <th style="width:60px;">#</th>
-      <th style="width:160px;">Part #</th>
-      <th>Description</th>
-      <th style="width:120px;" class="text-end">Qty</th>
-      <th style="width:140px;" class="text-end">Unit Cost</th>
-      <th style="width:140px;" class="text-end">Line Total</th>
-      <th style="width:120px;">Location</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% set grand = 0.0 %}
-    {% for it in lines %}
-      {% set pn   = (it|attr('part') and (it.part|attr('number')|default('', true))) or (it|attr('part_number')|default('', true)) %}
-      {% set name = (it|attr('part') and (it.part|attr('name')|default('', true)))   or (it|attr('part_name')|default('', true)) %}
-      {% set qty  = (it|attr('qty')|default(it|attr('quantity'), true)|default(0, true)) | int %}
-      {% set ucost = (it|attr('unit_cost')|default(it|attr('unit_cost_at_issue'), true)|default(0.0, true)) | float %}
-      {% set line_total = (qty * ucost) %}
-      {% set grand = grand + line_total %}
-      <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ pn }}</td>
-        <td>{{ name }}</td>
-        <td class="text-end">{{ qty }}</td>
-        <td class="text-end">{{ curr }} {{ '%.2f' % ucost }}</td>
-        <td class="text-end">{{ curr }} {{ '%.2f' % line_total }}</td>
-        <td>{{ it|attr('location')|default((it|attr('part') and it.part|attr('location')|default('', true)) or '', true) }}</td>
-      </tr>
-    {% endfor %}
-  </tbody>
-  <tfoot>
-    <tr>
-      <th colspan="5" class="text-end">Total:</th>
-        {# если сервер уже дал сумму — используем её, иначе — jinja-грант #}
-        <th class="text-end">
-            {{ curr }} {{ '%.2f' % (batch_total if batch_total is not none else grand) }}
-        </th>
-      <th></th>
-    </tr>
-  </tfoot>
-</table>
+{# ---------- SUMMARY CARD ---------- #}
+<div class="card mb-4 shadow-sm">
+  <div class="card-header d-flex justify-content-between align-items-center py-2">
+    <strong class="small text-uppercase text-muted">Received Items</strong>
+    <span class="small text-muted">
+      Currency:
+      {{ batch|attr('currency')|default('USD', true) }}
+    </span>
+  </div>
 
-{# ---------- SUPERADMIN EDIT FORM (сервер-сайд проверка будет в receiving_save) ---------- #}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th style="width:50px;">#</th>
+          <th style="width:160px;">Part #</th>
+          <th>Description</th>
+          <th style="width:100px;" class="text-end">Qty</th>
+          <th style="width:120px;" class="text-end">Unit Cost</th>
+          <th style="width:140px;" class="text-end">Line Total</th>
+          <th style="width:120px;">Location</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set curr = batch|attr('currency')|default('USD', true) %}
+        {% set grand = 0.0 %}
+        {% for it in lines %}
+          {% set pn   = (it|attr('part') and (it.part|attr('number')|default('', true))) or (it|attr('part_number')|default('', true)) %}
+          {% set name = (it|attr('part') and (it.part|attr('name')|default('', true)))   or (it|attr('part_name')|default('', true)) %}
+          {% set qty  = (it|attr('qty')|default(it|attr('quantity'), true)|default(0, true)) | int %}
+          {% set ucost = (it|attr('unit_cost')|default(it|attr('unit_cost_at_issue'), true)|default(0.0, true)) | float %}
+          {% set line_total = (qty * ucost) %}
+          {% set grand = grand + line_total %}
+          <tr>
+            <td class="text-muted small">{{ loop.index }}</td>
+            <td class="fw-semibold">{{ pn }}</td>
+            <td class="text-truncate" style="max-width: 300px;">{{ name }}</td>
+            <td class="text-end">{{ qty }}</td>
+            <td class="text-end">{{ curr }} {{ '%.2f' % ucost }}</td>
+            <td class="text-end">{{ curr }} {{ '%.2f' % line_total }}</td>
+            <td>{{ it|attr('location')|default((it|attr('part') and it.part|attr('location')|default('', true)) or '', true) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot class="table-light">
+        <tr>
+          <th colspan="5" class="text-end">Total:</th>
+          <th class="text-end">
+            {{ curr }} {{ '%.2f' % (batch_total if batch_total is not none else grand) }}
+          </th>
+          <th></th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  {% if batch|attr('notes') %}
+    <div class="card-footer small text-muted">
+      <strong>Notes:</strong>
+      {{ batch|attr('notes') }}
+    </div>
+  {% endif %}
+</div>
+
+{# ---------- EDIT CARD (Admin / Superadmin) ---------- #}
+
+{% set RO = is_posted %} {# если posted -> readonly #}
+{% set dis = 'disabled' if RO else '' %}
+{% set ro  = 'readonly' if RO else '' %}
+
 {% if can_super %}
-  <div class="card mt-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <span>Edit (superadmin)</span>
+<div class="card shadow-sm">
+  <div class="card-header d-flex justify-content-between align-items-center py-2">
+    <div class="d-flex flex-column">
+      <strong class="small text-uppercase text-muted">Edit Batch</strong>
       {% if is_posted %}
-        <span class="text-muted small">Batch is posted — Unpost to edit</span>
+        <span class="text-muted small">Batch is posted — Unpost to enable editing</span>
+      {% else %}
+        <span class="text-muted small">Draft mode — you can edit and repost</span>
       {% endif %}
     </div>
-    <div class="card-body">
-      <form method="post" action="{{ url_for('inventory.receiving_save') }}">
-        <input type="hidden" name="batch_id" value="{{ batch.id }}">
-
-        <div class="row g-2 mb-3">
-          <div class="col-md-3">
-            <label class="form-label">Supplier</label>
-            <input name="supplier_name" class="form-control"
-                   value="{{ batch|attr('supplier_name')|default('', true) }}" {{ ro }}>
-          </div>
-          <div class="col-md-3">
-            <label class="form-label">Invoice #</label>
-            <input name="invoice_number" class="form-control"
-                   value="{{ batch|attr('invoice_number')|default('', true) }}" {{ ro }}>
-          </div>
-          <div class="col-md-3">
-            <label class="form-label">Invoice Date</label>
-            <input type="date" name="invoice_date" class="form-control"
-                   value="{{ batch.invoice_date and batch.invoice_date.strftime('%Y-%m-%d') or '' }}" {{ dis }}>
-          </div>
-          <div class="col-md-3">
-            <label class="form-label">Currency</label>
-            <input name="currency" class="form-control" value="{{ curr }}" {{ ro }}>
-          </div>
-        </div>
-
-        <div class="mb-3">
-          <label class="form-label">Notes</label>
-          <textarea name="notes" class="form-control" rows="2" {{ ro }}>{{ batch|attr('notes')|default('', true) }}</textarea>
-        </div>
-
-        <div class="table-responsive">
-          <table class="table table-sm align-middle">
-            <thead>
-              <tr>
-                <th style="width:160px;">Part #</th>
-                <th>Part Name</th>
-                <th style="width:120px;">Qty</th>
-                <th style="width:140px;">Unit Cost</th>
-                <th style="width:140px;">Location</th>
-              </tr>
-            </thead>
-            <tbody id="rowsTbody">
-              {% for it in lines %}
-              <tr>
-                <td>
-                  <input name="rows[{{ loop.index0 }}][part_number]" class="form-control form-control-sm"
-                         value="{{ (it|attr('part_number')|default('', true)) }}" {{ ro }}>
-                </td>
-                <td>
-                  <input name="rows[{{ loop.index0 }}][part_name]" class="form-control form-control-sm"
-                         value="{{ (it|attr('part_name')|default('', true)) }}" {{ ro }}>
-                </td>
-                <td>
-                  <input name="rows[{{ loop.index0 }}][quantity]" class="form-control form-control-sm"
-                         value="{{ (it|attr('quantity')|default(0, true)) }}" {{ ro }}>
-                </td>
-                <td>
-                  <input name="rows[{{ loop.index0 }}][unit_cost]" class="form-control form-control-sm"
-                         value="{{ (it|attr('unit_cost')|default(0.0, true)) }}" {{ ro }}>
-                </td>
-                <td>
-                  <input name="rows[{{ loop.index0 }}][location]" class="form-control form-control-sm"
-                         value="{{ (it|attr('location')|default('', true)) }}" {{ ro }}>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-
-        <div class="d-flex gap-2">
-          <button class="btn btn-primary" type="submit" name="action" value="save" {{ dis }}>Save Draft</button>
-          {% if not is_posted %}
-            <button class="btn btn-success" type="submit" name="action" value="post">Post & Update Stock</button>
-          {% endif %}
-        </div>
-      </form>
-    </div>
+    <span class="badge bg-light text-dark border">
+      ID: {{ batch.id }}
+    </span>
   </div>
+
+  <div class="card-body">
+    <form method="post" action="{{ url_for('inventory.receiving_save') }}">
+      <input type="hidden" name="batch_id" value="{{ batch.id }}">
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-3">
+          <label class="form-label small text-muted">Supplier</label>
+          <input name="supplier_name" class="form-control form-control-sm"
+                 value="{{ batch|attr('supplier_name')|default('', true) }}" {{ ro }}>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small text-muted">Invoice #</label>
+          <input name="invoice_number" class="form-control form-control-sm"
+                 value="{{ batch|attr('invoice_number')|default('', true) }}" {{ ro }}>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small text-muted">Invoice Date</label>
+          <input type="date" name="invoice_date" class="form-control form-control-sm"
+                 value="{{ batch.invoice_date and batch.invoice_date.strftime('%Y-%m-%d') or '' }}" {{ dis }}>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small text-muted">Currency</label>
+          <input name="currency" class="form-control form-control-sm"
+                 value="{{ curr }}" {{ ro }}>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label small text-muted">Notes</label>
+        <textarea name="notes" class="form-control form-control-sm" rows="2" {{ ro }}>{{ batch|attr('notes')|default('', true) }}</textarea>
+      </div>
+
+      <div class="table-responsive border rounded mb-3">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr class="text-muted small">
+              <th style="width:160px;">Part #</th>
+              <th>Part Name</th>
+              <th style="width:100px;">Qty</th>
+              <th style="width:120px;">Unit Cost</th>
+              <th style="width:140px;">Location</th>
+            </tr>
+          </thead>
+          <tbody id="rowsTbody">
+            {% for it in lines %}
+            <tr>
+              <td>
+                <input name="rows[{{ loop.index0 }}][part_number]"
+                       class="form-control form-control-sm"
+                       value="{{ (it|attr('part_number')|default('', true)) }}"
+                       {{ ro }}>
+              </td>
+              <td>
+                <input name="rows[{{ loop.index0 }}][part_name]"
+                       class="form-control form-control-sm"
+                       value="{{ (it|attr('part_name')|default('', true)) }}"
+                       {{ ro }}>
+              </td>
+              <td style="max-width:90px;">
+                <input name="rows[{{ loop.index0 }}][quantity]"
+                       class="form-control form-control-sm text-end"
+                       value="{{ (it|attr('quantity')|default(0, true)) }}"
+                       {{ ro }}>
+              </td>
+              <td style="max-width:120px;">
+                <input name="rows[{{ loop.index0 }}][unit_cost]"
+                       class="form-control form-control-sm text-end"
+                       value="{{ (it|attr('unit_cost')|default(0.0, true)) }}"
+                       {{ ro }}>
+              </td>
+              <td style="max-width:140px;">
+                <input name="rows[{{ loop.index0 }}][location]"
+                       class="form-control form-control-sm"
+                       value="{{ (it|attr('location')|default('', true)) }}"
+                       {{ ro }}>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-primary btn-sm"
+                type="submit" name="action" value="save" {{ dis }}>
+          Save Draft
+        </button>
+
+        {% if not is_posted %}
+          <button class="btn btn-success btn-sm"
+                  type="submit" name="action" value="post">
+            Post &amp; Update Stock
+          </button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</div>
 {% endif %}
+
 {% endblock %}
