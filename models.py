@@ -375,6 +375,8 @@ class GoodsReceiptLine(db.Model):
     unit_cost  = db.Column(db.Float, default=0.0)
     location   = db.Column(db.String(64))
 
+    applied_qty = db.Column(db.Integer, default=0, nullable=False)
+
     goods_receipt = db.relationship(
         "GoodsReceipt",
         backref=db.backref("lines", cascade="all, delete-orphan")

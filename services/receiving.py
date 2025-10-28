@@ -120,13 +120,15 @@ def _sanitize_part_kwargs(raw: dict) -> dict:
 
 def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
     """
-    Делает приход:
-    - для каждой строки batch.items плюсуем qty в Part
-    - создаём Part если не было
-    - мёржим location
-    - апдейтим cost
-    - batch.status='posted', posted_at, posted_by
-    - db.session.commit()
+    Провести приход (POST):
+    - если batch уже posted -> просто выходим (ничего не делаем второй раз)
+    - иначе:
+        для каждой строки it в batch.items:
+          - увеличиваем Part.on_hand на it.quantity
+          - создаём Part если его нет
+          - обновляем name / cost / location
+          - сохраняем сколько реально зачислено в it.applied_qty
+        потом помечаем batch как posted и коммитим
     """
     from flask import current_app
 
@@ -136,7 +138,7 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
 
     status_now = (batch.status or "").strip().lower()
     if status_now == "posted":
-        # уже проведён — не дублируем склад
+        # уже проведён — не трогаем склад второй раз
         current_app.logger.info(
             "[RECEIVING_POST] Batch %s is already posted, skipping stock update.",
             batch.id,
@@ -149,18 +151,22 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
         batch.status,
     )
 
-    # обрабатываем строки
+    # обработать строки поставки
     for it in (batch.items or []):
         pn_raw = (it.part_number or "").strip()
-        qty = int(it.quantity or 0)
-        if not pn_raw or qty <= 0:
+        qty_incoming = int(it.quantity or 0)
+
+        # если нет партнамбера или количество некорректно — пропускаем
+        if not pn_raw or qty_incoming <= 0:
             continue
 
         pn_upper = pn_raw.upper()
+
+        # найти существующую запчасть по part_number без учета регистра
         part = Part.query.filter(func.upper(Part.part_number) == pn_upper).first()
 
         if not part:
-            # создаём новую деталь
+            # создаём новую Part
             raw_kwargs = {
                 "part_number": pn_upper,
                 "part_name": it.part_name or "",
@@ -175,7 +181,7 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
             kwargs = _sanitize_part_kwargs(raw_kwargs)
             part = Part(**kwargs)
             db.session.add(part)
-            db.session.flush()
+            db.session.flush()  # получить id и т.д.
 
             before_qty = 0
             current_app.logger.info(
@@ -183,12 +189,12 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
                 pn_upper,
                 part.id,
                 before_qty,
-                qty,
+                qty_incoming,
             )
         else:
             before_qty = _get_part_on_hand(part)
 
-            # синхроним имя (только если новое имя есть и оно отличается)
+            # при желании обновить human name
             new_name = (getattr(it, "part_name", "") or "").strip()
             if new_name and hasattr(part, "name"):
                 old_name = (getattr(part, "name", "") or "").strip()
@@ -200,25 +206,27 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
                 pn_upper,
                 part.id,
                 before_qty,
-                qty,
+                qty_incoming,
             )
 
-        # 1) увеличить остаток
-        _set_part_on_hand(part, before_qty + qty)
+        # ---------- 1) увеличить остаток на складе ----------
+        after_qty = before_qty + qty_incoming
+        _set_part_on_hand(part, after_qty)
 
-        # 2) обновить себестоимость
+        # ---------- 2) обновить себестоимость ----------
         if it.unit_cost is not None:
             try:
                 cost_val = float(it.unit_cost or 0)
             except Exception:
                 cost_val = None
+
             if cost_val is not None:
                 if hasattr(part, "last_cost"):
                     part.last_cost = cost_val
                 elif hasattr(part, "unit_cost"):
                     part.unit_cost = cost_val
 
-        # 3) слить location
+        # ---------- 3) слить location ----------
         if hasattr(part, "location"):
             incoming_loc = (it.location or "").strip().upper()
             if incoming_loc:
@@ -231,7 +239,13 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
                 else:
                     part.location = incoming_loc[:64]
 
-    # проставляем статус posted
+        # ---------- 4) зафиксировать сколько реально применили ----------
+        # теперь у строки есть applied_qty: столько мы реально добавили на склад
+        # (чтобы потом можно было безопасно откатить не больше этого количества)
+        if hasattr(it, "applied_qty"):
+            it.applied_qty = qty_incoming
+
+    # отметить сам batch как posted
     batch.status = "posted"
     batch.posted_at = datetime.utcnow()
     if current_user_id is not None and hasattr(batch, "posted_by"):
@@ -252,20 +266,20 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
 
     return batch
 
-# ---------- core: UNPOST (roll back stock & mark draft) ----------
+
+# ---------- core: UNPOST (rollback stock using applied_qty) ----------
 
 def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     """
-    Безопасный откат прихода:
-    - Только если батч сейчас posted.
-    - Для каждой строки:
-        * уменьшаем Part.on_hand, но не пытаемся забрать то, что уже ушло технику.
-          То есть вычитаем ТОЛЬКО доступную часть.
-        * корректируем Part.location:
-            убираем токены из этой поставки, но оставляем старые.
-            если остаток стал 0 — location чистим.
-    - batch.status='draft', posted_at=None, (unposted_by/unposted_at если есть)
-    - commit()
+    Откат прихода:
+    - работает ТОЛЬКО если batch.status == 'posted'
+    - для каждой строки:
+        мы уменьшаем склад не на it.quantity, а на it.applied_qty (то, что реально зачислили)
+        если сейчас на складе меньше чем applied_qty (уже что-то ушло техникам),
+        то снимаем только то, что осталось (не уходим в минус)
+    - чистим location аккуратно
+    - переводим batch обратно в 'draft'
+    - applied_qty сбрасываем обратно в 0
     """
     from flask import current_app
 
@@ -275,7 +289,6 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
 
     curr_status = (batch.status or "").strip().lower()
     if curr_status != "posted":
-        # Уже draft → считаем, что склад уже откатан
         current_app.logger.info(
             "[RECEIVING_UNPOST] Batch %s not in 'posted' (status='%s'), skipping.",
             batch.id,
@@ -290,51 +303,59 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
 
     for it in (batch.items or []):
         pn = (it.part_number or "").strip().upper()
-        qty_from_this_batch = int(it.quantity or 0)
-        if not pn or qty_from_this_batch <= 0:
+        # вместо it.quantity берём сколько реально зашло
+        qty_applied = int(getattr(it, "applied_qty", 0) or 0)
+
+        if not pn or qty_applied <= 0:
+            # либо строка была пустая, либо не была применена
             continue
 
         part = Part.query.filter(func.upper(Part.part_number) == pn).first()
         if not part:
-            # деталь уже удалили из каталога — окей, просто пропускаем
+            # деталь могла быть удалена вручную из каталога
             continue
 
         before_qty = _get_part_on_hand(part)
 
-        # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
-        # мы НЕ делаем after_qty = before_qty - qty_from_this_batch вслепую.
-        # мы снимаем ТОЛЬКО то, что реально ещё осталось на складе.
-        rollback_qty = qty_from_this_batch if qty_from_this_batch <= before_qty else before_qty
+        # мы не можем снять больше, чем реально осталось на складе сейчас
+        rollback_qty = qty_applied if qty_applied <= before_qty else before_qty
         after_qty = before_qty - rollback_qty
 
+        # записать новый остаток
         _set_part_on_hand(part, after_qty)
 
-        # location cleanup
+        # обновление location:
+        # если остаток стал 0 — просто чистим локацию
+        # иначе пытаемся удалить location от этой поставки
         if hasattr(part, "location"):
             incoming_loc = (it.location or "").strip().upper()
 
             if after_qty == 0:
-                # если после снятия остаток ноль — чистим всю локацию
                 part.location = ""
             else:
-                # иначе вырезаем только ту локацию, которая пришла с этой поставкой
                 if incoming_loc:
                     new_loc = _remove_locations(getattr(part, "location", ""), incoming_loc)
                     part.location = new_loc[:64]
 
         current_app.logger.info(
-            "[RECEIVING_UNPOST] part %s: before=%s, rollback=%s, after=%s",
+            "[RECEIVING_UNPOST] part %s: before=%s, rollback=%s, after=%s (applied_qty was %s)",
             pn,
             before_qty,
             rollback_qty,
             after_qty,
+            qty_applied,
         )
 
-    # батч теперь снова draft
+        # сбрасываем applied_qty в этой строке,
+        # чтобы повторный UNPOST не пытался снова снять те же штуки
+        if hasattr(it, "applied_qty"):
+            it.applied_qty = 0
+
+    # батч становится снова draft
     batch.status = "draft"
     batch.posted_at = None
 
-    # кто сделал откат (если поля есть)
+    # кто сделал UNPOST
     if hasattr(batch, "unposted_by"):
         batch.unposted_by = current_user_id
     if hasattr(batch, "unposted_at"):
@@ -348,6 +369,7 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     )
 
     return batch
+
 
 # ---------- cleanup helper (оставляем как у тебя) ----------
 

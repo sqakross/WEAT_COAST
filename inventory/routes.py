@@ -7616,10 +7616,73 @@ def receiving_list():
     )
 
 # --- Receiving: toggle posted/draft (superadmin only) ------------------------
+# --- helper: запрещаем unpost, если уже было списание в IssuedPartRecord -----
+
+def _batch_consumed_forbid_unpost(batch) -> bool:
+    """
+    Возвращает True если из ЭТОГО прихода уже что-то ушло техникам.
+    В этом случае unpost НЕЛЬЗЯ делать (иначе сломаешь остатки).
+
+    Логика:
+    - соберём все part_number из строк прихода (batch.items / batch.lines)
+    - найдём Part.id для этих part_number
+    - проверим IssuedPartRecord по этим Part.id
+    - если есть хотя бы одна выдача -> True
+    """
+    from sqlalchemy import func
+    from extensions import db
+    from models import Part, IssuedPartRecord
+
+    # получаем строки партии
+    lines = (
+        getattr(batch, "lines", None)
+        or getattr(batch, "items", None)
+        or []
+    )
+
+    # соберём PN из строк
+    part_numbers_upper = []
+    for it in lines:
+        pn = (getattr(it, "part_number", "") or "").strip()
+        if pn:
+            part_numbers_upper.append(pn.upper())
+
+    # если нет нормальных PN -> считаем что расход не доказан => unpost разрешаем
+    if not part_numbers_upper:
+        return False
+
+    # найдём ID деталей по PN
+    part_ids = [
+        row[0]
+        for row in (
+            db.session.query(Part.id)
+            .filter(func.upper(func.trim(Part.part_number)).in_(part_numbers_upper))
+            .all()
+        )
+    ]
+
+    if not part_ids:
+        # не нашли Part вообще -> считаем что нечего сверять => не блокируем
+        return False
+
+    # ищем хоть одну выдачу по этим Part.id
+    used = (
+        db.session.query(IssuedPartRecord.id)
+        .filter(IssuedPartRecord.part_id.in_(part_ids))
+        .limit(1)
+        .first()
+    )
+
+    # True => УЖЕ ЕСТЬ РАСХОД -> блокируем unpost
+    return used is not None
+
+
+# --- Receiving: post/unpost toggle -------------------------------------------
+
 @inventory_bp.post("/receiving/<int:batch_id>/toggle", endpoint="receiving_toggle")
 @login_required
 def receiving_toggle(batch_id: int):
-    from flask import flash, redirect, url_for
+    from flask import flash, redirect, url_for, current_app
     from flask_login import current_user
     from extensions import db
     from models import ReceivingBatch
@@ -7647,20 +7710,45 @@ def receiving_toggle(batch_id: int):
     try:
         if status_now != "posted":
             # DRAFT -> POST
-            post_receiving_batch(batch.id, getattr(current_user, "id", None))
-            flash(f"Batch #{batch.id} posted and stock updated.", "success")
+            post_receiving_batch(
+                batch.id,
+                getattr(current_user, "id", None)
+            )
+            flash(
+                f"Batch #{batch.id} posted and stock updated.",
+                "success"
+            )
+
         else:
             # POSTED -> UNPOST
-            unpost_receiving_batch(batch.id, getattr(current_user, "id", None))
-            flash(f"Batch #{batch.id} reverted to draft and stock rolled back.", "warning")
+            # сначала проверка - было ли уже списание этим деталям?
+            if _batch_consumed_forbid_unpost(batch):
+                # уже выдавали техникам -> запрещаем откат
+                current_app.logger.warning(
+                    "[RECEIVING_TOGGLE] Blocked UNPOST for batch %s: already consumed.",
+                    batch.id,
+                )
+                flash(
+                    "Cannot unpost: items from this batch were already issued to technicians.",
+                    "danger"
+                )
+                return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+
+            # иначе можно безопасно откатить
+            unpost_receiving_batch(
+                batch.id,
+                getattr(current_user, "id", None)
+            )
+            flash(
+                f"Batch #{batch.id} reverted to draft and stock rolled back.",
+                "warning"
+            )
 
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to toggle: {e}", "danger")
 
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
-
-# --- Receiving: delete batch (superadmin only) -------------------------------
 
 @inventory_bp.get("/receiving/new", endpoint="receiving_new")
 @login_required
@@ -7879,21 +7967,87 @@ def receiving_save():
 
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
+def _batch_has_been_consumed(batch):
+    """
+    True = из этого прихода уже что-то УШЛО техникам после того, как мы его провели.
+    Значит:
+      - нельзя менять количества строк
+      - нельзя делать UNPOST
+    False = приход ещё девственно чистый, его можно откатить/править.
+    """
+    # Если батч вообще не posted -> значит он ещё не попал на склад
+    status_low = (getattr(batch, "status", "") or "").strip().lower()
+    if status_low != "posted":
+        return False
+
+    posted_at = getattr(batch, "posted_at", None)
+    if not posted_at:
+        # теоретически не должно быть, но на всякий случай
+        return False
+
+    # Возьмём строки из batch (lines или items)
+    lines = (getattr(batch, "lines", None)
+             or getattr(batch, "items", None)
+             or [])
+
+    # Соберём part_numbers из строк прихода
+    part_numbers = []
+    for it in lines:
+        pn = (getattr(it, "part_number", "") or "").strip()
+        if pn:
+            part_numbers.append(pn.upper())
+
+    if not part_numbers:
+        return False  # нечего проверять
+
+    # Теперь найдём все Part.id, у которых Part.part_number in part_numbers
+    # (сравниваем в верхнем регистре, как ты делаешь в других местах)
+    # ВНИМАНИЕ: func.upper(Part.part_number).in_(...) не всегда красиво оптимизировано SQLite,
+    # но для нас это ок.
+    parts_q = (
+        db.session.query(Part.id)
+        .filter(func.upper(Part.part_number).in_(part_numbers))
+        .all()
+    )
+    part_ids = [row[0] for row in parts_q]
+
+    if not part_ids:
+        return False  # строки прихода какие-то странные, но ок, считаем не потребляли
+
+    # Проверяем: есть ли запись выдачи IssuedPartRecord по ЛЮБОМУ из этих part_id
+    # с issue_date >= posted_at  (issue_date = когда отдали технику)
+    used = (
+        db.session.query(IssuedPartRecord.id)
+        .filter(IssuedPartRecord.part_id.in_(part_ids))
+        .filter(IssuedPartRecord.issue_date >= posted_at)
+        .limit(1)
+        .first()
+    )
+
+    return used is not None
+
 @inventory_bp.get("/receiving/<int:batch_id>", endpoint="receiving_detail")
 @login_required
 def receiving_detail(batch_id):
-    from models import ReceivingBatch
+    from models import ReceivingBatch, Part, IssuedPartRecord
+    from sqlalchemy import func
+    from flask import current_app
+
+    log = current_app.logger
+
     batch = db.session.get(ReceivingBatch, batch_id)
     if not batch:
         flash("Batch not found.", "warning")
         return redirect(url_for("inventory.receiving_list"))
 
-    # ЯВНО берём строки (какая бы ни была relationship: lines или items)
-    lines = (getattr(batch, "lines", None)
-             or getattr(batch, "items", None)
-             or [])
+    # собрать строки батча
+    lines = (
+        getattr(batch, "lines", None)
+        or getattr(batch, "items", None)
+        or []
+    )
 
-    # Серверный расчёт итога — максимально терпимый к типам
+    # ---------- helpers to compute money safely ----------
     def _to_int(x):
         try:
             return int(x)
@@ -7920,13 +8074,143 @@ def receiving_detail(batch_id):
         )
         batch_total += qty * cost
 
-    readonly = not _is_superadmin_user(current_user)
+    # ---------- detect "consumed" ----------
+    def _batch_has_been_consumed(_batch):
+        """
+        consumed = True если мы видим, что хотя бы одна из деталей из этой партии
+        уже фигурирует в IssuedPartRecord (то есть была выдана технику).
+
+        Логика:
+        1. Собираем все part_id напрямую из строк партии (если там есть поле part_id).
+        2. Собираем все part_number из строк партии, находим им Part.id.
+        3. Берём объединение этих Part.id.
+        4. Проверяем IssuedPartRecord по этим Part.id.
+        """
+
+        status_low_local = (getattr(_batch, "status", "") or "").strip().lower()
+        if status_low_local != "posted":
+            # не posted => не считаем как "использовано", ещё черновик
+            log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: not posted -> consumed=False")
+            print(f"[RECV_DETAIL consume-check] batch {batch_id}: not posted -> consumed=False")
+            return False
+
+        # (1) part_ids напрямую из строк, если есть
+        direct_part_ids = []
+        for row in (
+            getattr(_batch, "lines", None)
+            or getattr(_batch, "items", None)
+            or []
+        ):
+            if hasattr(row, "part_id") and getattr(row, "part_id") is not None:
+                try:
+                    direct_part_ids.append(int(row.part_id))
+                except Exception:
+                    pass
+
+        # (2) part_numbers -> Part.id
+        raw_pns = []
+        for row in (
+            getattr(_batch, "lines", None)
+            or getattr(_batch, "items", None)
+            or []
+        ):
+            pn_val = getattr(row, "part_number", None)
+            if pn_val:
+                pn_norm = str(pn_val).strip().upper()
+                if pn_norm:
+                    raw_pns.append(pn_norm)
+
+        # делаем уникальные
+        raw_pns = list({p for p in raw_pns})
+        direct_part_ids = list({pid for pid in direct_part_ids})
+
+        log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: raw_pns={raw_pns}, direct_part_ids(pre)={direct_part_ids}")
+        print(f"[RECV_DETAIL consume-check] batch {batch_id}: raw_pns={raw_pns}, direct_part_ids(pre)={direct_part_ids}")
+
+        # (2b) достаём ID по PN
+        part_ids_from_pn = []
+        if raw_pns:
+            rows_parts = (
+                db.session.query(Part.id, Part.part_number)
+                .filter(func.upper(func.trim(Part.part_number)).in_(raw_pns))
+                .all()
+            )
+            part_ids_from_pn = [row[0] for row in rows_parts]
+
+            log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: part_ids_from_pn={part_ids_from_pn}, parts_matched={[p for _, p in rows_parts]}")
+            print(f"[RECV_DETAIL consume-check] batch {batch_id}: part_ids_from_pn={part_ids_from_pn}")
+
+        # (3) объединяем
+        all_part_ids = set(direct_part_ids) | set(part_ids_from_pn)
+        all_part_ids = list(all_part_ids)
+
+        log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: all_part_ids(final)={all_part_ids}")
+        print(f"[RECV_DETAIL consume-check] batch {batch_id}: all_part_ids(final)={all_part_ids}")
+
+        if not all_part_ids:
+            log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: no part ids -> consumed=False")
+            print(f"[RECV_DETAIL consume-check] batch {batch_id}: no part ids -> consumed=False")
+            return False
+
+        # (4) проверяем, есть ли выдачи по этим Part.id
+        issued_rows = (
+            db.session.query(
+                IssuedPartRecord.id,
+                IssuedPartRecord.part_id,
+                IssuedPartRecord.quantity,
+                IssuedPartRecord.issue_date
+            )
+            .filter(IssuedPartRecord.part_id.in_(all_part_ids))
+            .limit(5)
+            .all()
+        )
+
+        log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: issued_rows={issued_rows}")
+        print(f"[RECV_DETAIL consume-check] batch {batch_id}: issued_rows={issued_rows}")
+
+        return len(issued_rows) > 0
+
+    consumed = _batch_has_been_consumed(batch)
+
+    # ---------- role / permissions ----------
+    role_low = (getattr(current_user, "role", "") or "").lower()
+    is_super = (
+        role_low in ["admin", "superadmin"]
+        or getattr(current_user, "is_admin", False)
+        or getattr(current_user, "is_superadmin", False)
+        or getattr(current_user, "is_super_admin", False)
+    )
+
+    status_low = (getattr(batch, "status", "") or "").strip().lower()
+    is_posted = (status_low == "posted")
+
+    # can_edit: супер + не consumed
+    can_edit = bool(is_super and (not consumed))
+
+    # can_unpost: супер + posted + не consumed
+    can_unpost = bool(is_super and is_posted and (not consumed))
+
+    log.warning(
+        f"[RECV_DETAIL FLAGS] batch {batch_id} "
+        f"status={batch.status} posted?={is_posted} consumed?={consumed} "
+        f"is_super={is_super} => can_edit={can_edit} can_unpost={can_unpost}"
+    )
+    print(
+        f"[RECV_DETAIL FLAGS] batch {batch_id} "
+        f"status={batch.status} posted?={is_posted} consumed?={consumed} "
+        f"is_super={is_super} => can_edit={can_edit} can_unpost={can_unpost}"
+    )
+
     return render_template(
         "receiving_detail.html",
         batch=batch,
-        lines=lines,              # ► прокидываем явные строки
-        batch_total=batch_total,  # ► и итог
-        readonly=readonly
+        lines=lines,
+        batch_total=batch_total,
+
+        readonly=(not can_edit),
+        can_edit=can_edit,
+        can_unpost=can_unpost,
+        consumed=consumed,
     )
 
 @inventory_bp.post("/receiving/<int:batch_id>/post", endpoint="receiving_post")

@@ -34,14 +34,34 @@
       ‹ Back
     </a>
 
-    {% if can_super %}
+    {# Unpost/Post button:
+       - показываем ТОЛЬКО суперюзеру
+       - и ТОЛЬКО если можно unpost (can_unpost из контроллера)
+    #}
+    {% if can_super and can_unpost %}
       <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
             method="post" class="d-inline">
         <button class="btn {{ 'btn-warning' if is_posted else 'btn-primary' }}" type="submit">
           {{ 'Unpost' if is_posted else 'Post' }}
         </button>
       </form>
+    {% elif can_super and (not can_unpost) and is_posted %}
+      {# батч уже частично израсходован -> блокируем Unpost и показываем причину #}
+      <button class="btn btn-warning" type="button" disabled
+              title="Batch already issued to technicians. Cannot unpost.">
+        Unpost
+      </button>
+    {% elif can_super and (not is_posted) %}
+      {# DRAFT состояние: пост разрешён даже если consumed=False (consumed будет False в draft) #}
+      <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
+            method="post" class="d-inline">
+        <button class="btn btn-primary" type="submit">
+          Post
+        </button>
+      </form>
+    {% endif %}
 
+    {% if can_super %}
       <form action="{{ url_for('inventory.receiving_delete', batch_id=batch.id) }}"
             method="post" class="d-inline"
             onsubmit="return confirm('Delete batch #{{ batch.id }}? This cannot be undone.');">
@@ -50,6 +70,15 @@
     {% endif %}
   </div>
 </div>
+
+{# предупреждение, если партия уже потреблена (consumed == True) #}
+{% if consumed %}
+  <div class="alert alert-warning small" style="line-height:1.3;">
+    This batch has already been partially issued to technicians.
+    Quantities and Unpost are locked.
+    To adjust counts, create a correction batch (add only the missing difference).
+  </div>
+{% endif %}
 
 {# ---------- SUMMARY CARD ---------- #}
 <div class="card mb-4 shadow-sm">
@@ -110,26 +139,37 @@
   {% if batch|attr('notes') %}
     <div class="card-footer small text-muted">
       <strong>Notes:</strong>
-      {{ batch|attr('notes') }}
+      {{ batch|attr('notes')|default('', true) }}
     </div>
   {% endif %}
 </div>
 
 {# ---------- EDIT CARD (Admin / Superadmin) ---------- #}
 
-{% set RO = is_posted %} {# если posted -> readonly #}
-{% set dis = 'disabled' if RO else '' %}
-{% set ro  = 'readonly' if RO else '' %}
+{# Вместо чистого is_posted мы теперь используем can_edit.
+   can_edit приходит из контроллера:
+   - True  => супер может править
+   - False => либо не супер, либо партия уже consumed
+#}
 
 {% if can_super %}
 <div class="card shadow-sm">
   <div class="card-header d-flex justify-content-between align-items-center py-2">
     <div class="d-flex flex-column">
       <strong class="small text-uppercase text-muted">Edit Batch</strong>
-      {% if is_posted %}
-        <span class="text-muted small">Batch is posted — Unpost to enable editing</span>
+
+      {% if not can_edit %}
+        <span class="text-muted small">
+          Quantities locked (batch posted and partially issued).
+        </span>
+      {% elif is_posted %}
+        <span class="text-muted small">
+          Batch is posted — Unpost to enable editing.
+        </span>
       {% else %}
-        <span class="text-muted small">Draft mode — you can edit and repost</span>
+        <span class="text-muted small">
+          Draft mode — you can edit and repost.
+        </span>
       {% endif %}
     </div>
     <span class="badge bg-light text-dark border">
@@ -145,28 +185,33 @@
         <div class="col-md-3">
           <label class="form-label small text-muted">Supplier</label>
           <input name="supplier_name" class="form-control form-control-sm"
-                 value="{{ batch|attr('supplier_name')|default('', true) }}" {{ ro }}>
+                 value="{{ batch|attr('supplier_name')|default('', true) }}"
+                 {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
         </div>
         <div class="col-md-3">
           <label class="form-label small text-muted">Invoice #</label>
           <input name="invoice_number" class="form-control form-control-sm"
-                 value="{{ batch|attr('invoice_number')|default('', true) }}" {{ ro }}>
+                 value="{{ batch|attr('invoice_number')|default('', true) }}"
+                 {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
         </div>
         <div class="col-md-3">
           <label class="form-label small text-muted">Invoice Date</label>
           <input type="date" name="invoice_date" class="form-control form-control-sm"
-                 value="{{ batch.invoice_date and batch.invoice_date.strftime('%Y-%m-%d') or '' }}" {{ dis }}>
+                 value="{{ batch.invoice_date and batch.invoice_date.strftime('%Y-%m-%d') or '' }}"
+                 {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
         </div>
         <div class="col-md-3">
           <label class="form-label small text-muted">Currency</label>
           <input name="currency" class="form-control form-control-sm"
-                 value="{{ curr }}" {{ ro }}>
+                 value="{{ batch|attr('currency')|default('USD', true) }}"
+                 {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
         </div>
       </div>
 
       <div class="mb-3">
         <label class="form-label small text-muted">Notes</label>
-        <textarea name="notes" class="form-control form-control-sm" rows="2" {{ ro }}>{{ batch|attr('notes')|default('', true) }}</textarea>
+        <textarea name="notes" class="form-control form-control-sm" rows="2"
+                  {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>{{ batch|attr('notes')|default('', true) }}</textarea>
       </div>
 
       <div class="table-responsive border rounded mb-3">
@@ -187,31 +232,31 @@
                 <input name="rows[{{ loop.index0 }}][part_number]"
                        class="form-control form-control-sm"
                        value="{{ (it|attr('part_number')|default('', true)) }}"
-                       {{ ro }}>
+                       {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
               </td>
               <td>
                 <input name="rows[{{ loop.index0 }}][part_name]"
                        class="form-control form-control-sm"
                        value="{{ (it|attr('part_name')|default('', true)) }}"
-                       {{ ro }}>
+                       {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
               </td>
               <td style="max-width:90px;">
                 <input name="rows[{{ loop.index0 }}][quantity]"
                        class="form-control form-control-sm text-end"
                        value="{{ (it|attr('quantity')|default(0, true)) }}"
-                       {{ ro }}>
+                       {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
               </td>
               <td style="max-width:120px;">
                 <input name="rows[{{ loop.index0 }}][unit_cost]"
                        class="form-control form-control-sm text-end"
                        value="{{ (it|attr('unit_cost')|default(0.0, true)) }}"
-                       {{ ro }}>
+                       {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
               </td>
               <td style="max-width:140px;">
                 <input name="rows[{{ loop.index0 }}][location]"
                        class="form-control form-control-sm"
                        value="{{ (it|attr('location')|default('', true)) }}"
-                       {{ ro }}>
+                       {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
               </td>
             </tr>
             {% endfor %}
@@ -221,7 +266,8 @@
 
       <div class="d-flex flex-wrap gap-2">
         <button class="btn btn-outline-primary btn-sm"
-                type="submit" name="action" value="save" {{ dis }}>
+                type="submit" name="action" value="save"
+                {% if not can_edit %}disabled{% endif %}>
           Save Draft
         </button>
 
