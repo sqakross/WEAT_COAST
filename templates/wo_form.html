@@ -3,39 +3,97 @@
 {% set IS_EDIT = wo is not none %}
 <h3>{{ 'Edit' if IS_EDIT else 'New' }} Work Order</h3>
 
-<form method="post" action="{{ url_for('inventory.wo_savex') }}" id="woForm">
-  {% if IS_EDIT %}<input type="hidden" name="wo_id" value="{{ wo.id }}">{% endif %}
+<form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm">
+  {% if IS_EDIT %}
+    <input type="hidden" name="wo_id" value="{{ wo.id }}">
+  {% endif %}
 
   <div class="row g-3 mb-3">
-    <div class="col-md-3"><label class="form-label">Technician</label>
-      <input name="technician_name" class="form-control" required value="{{ wo.technician_name if IS_EDIT else '' }}">
+    <div class="col-md-3">
+      <label class="form-label">Technician</label>
+      <input
+        name="technician_name"
+        class="form-control"
+        required
+        value="{{ wo.technician_name if IS_EDIT else '' }}"
+      >
     </div>
-    <div class="col-md-3"><label class="form-label">Job number(s) (comma separated)</label>
-      <input name="job_numbers" class="form-control" placeholder="98356, 98256" value="{{ wo.job_numbers if IS_EDIT else '' }}">
+
+    <div class="col-md-3">
+      <label class="form-label">Job number(s) (comma separated)</label>
+      <input
+        name="job_numbers"
+        class="form-control"
+        placeholder="98356, 98256"
+        required
+        value="{{ wo.job_numbers if IS_EDIT else '' }}"
+      >
     </div>
-    <div class="col-md-2"><label class="form-label">Brand</label>
-      <input name="brand" class="form-control" value="{{ wo.brand if IS_EDIT else '' }}">
+
+    <div class="col-md-2">
+      <label class="form-label">Brand</label>
+      <input
+        name="brand"
+        class="form-control"
+        value="{{ wo.brand if IS_EDIT else '' }}"
+      >
     </div>
-    <div class="col-md-2"><label class="form-label">Model #</label>
-      <input name="model" class="form-control" maxlength="25" value="{{ wo.model if IS_EDIT else '' }}">
+
+    <div class="col-md-2">
+      <label class="form-label">Model #</label>
+      <input
+        name="model"
+        class="form-control"
+        maxlength="25"
+        value="{{ wo.model if IS_EDIT else '' }}"
+      >
     </div>
-    <div class="col-md-2"><label class="form-label">Serial #</label>
-      <input name="serial" class="form-control" maxlength="25" value="{{ wo.serial if IS_EDIT else '' }}">
+
+    <div class="col-md-2">
+      <label class="form-label">Serial #</label>
+      <input
+        name="serial"
+        class="form-control"
+        maxlength="25"
+        value="{{ wo.serial if IS_EDIT else '' }}"
+      >
     </div>
-    <div class="col-md-2"><label class="form-label">Job type</label>
+
+    <div class="col-md-2">
+      <label class="form-label">Job type</label>
       {% set jt = (wo.job_type if IS_EDIT else 'BASE') %}
       <select name="job_type" class="form-select">
         <option value="BASE" {{ 'selected' if jt=='BASE' else '' }}>BASE</option>
         <option value="INSURANCE" {{ 'selected' if jt=='INSURANCE' else '' }}>INSURANCE</option>
       </select>
     </div>
-    <div class="col-md-2"><label class="form-label">Delivery fee ($)</label>
-      <input id="deliveryFee" type="number" step="0.01" name="delivery_fee" class="form-control" value="{{ '%.2f'|format(wo.delivery_fee) if IS_EDIT and wo.delivery_fee is not none else '0.00' }}">
+
+    <div class="col-md-2">
+      <label class="form-label">Delivery fee ($)</label>
+      <input
+        id="deliveryFee"
+        type="number"
+        step="0.01"
+        name="delivery_fee"
+        class="form-control"
+        value="{{ '%.2f'|format(wo.delivery_fee) if IS_EDIT and wo.delivery_fee is not none else '0.00' }}"
+      >
     </div>
-    <div class="col-md-2"><label class="form-label">Markup (%)</label>
-      <input id="markupPercent" type="number" step="0.01" name="markup_percent" class="form-control" value="{{ '%.2f'|format(wo.markup_percent) if IS_EDIT and wo.markup_percent is not none else '0.00' }}">
+
+    <div class="col-md-2">
+      <label class="form-label">Markup (%)</label>
+      <input
+        id="markupPercent"
+        type="number"
+        step="0.01"
+        name="markup_percent"
+        class="form-control"
+        value="{{ '%.2f'|format(wo.markup_percent) if IS_EDIT and wo.markup_percent is not none else '0.00' }}"
+      >
     </div>
-    <div class="col-md-2"><label class="form-label">Status</label>
+
+    <div class="col-md-2">
+      <label class="form-label">Status</label>
       {% set st = (wo.status if IS_EDIT else 'search_ordered') %}
       <select name="status" class="form-select">
         <option value="search_ordered" {{ 'selected' if st=='search_ordered' else '' }}>search_ordered</option>
@@ -68,7 +126,7 @@
           <th class="col-narrow">WH</th>
           <th class="col-narrow">Sup</th>
           <th class="text-center">B/O</th>
-          <th class="text-center ordered-col">Ord</th> <!-- NEW: checkbox only when status=ordered -->
+          <th class="text-center ordered-col">Ord</th>
           <th>Stock hint</th>
           <th class="text-center">Issue?</th>
           <th style="width:46px;"></th>
@@ -79,34 +137,95 @@
         {% set i = loop.index0 %}
         {% set issued_full = ((p.issued_qty or 0) >= (p.quantity or 0)) %}
         <tr data-row data-id="{{ p.id if IS_EDIT else '' }}" class="{{ 'issued-row' if issued_full else '' }}">
-          <td><input class="form-control pn" name="rows[{{ i }}][part_number]" value="{{ p.part_number or '' }}" maxlength="80"></td>
-          <td><input class="form-control" name="rows[{{ i }}][alt_pn]" value="{{ p.alt_numbers or '' }}"></td>
-          <td><input class="form-control part-name" name="rows[{{ i }}][part_name]" value="{{ p.part_name or '' }}" maxlength="120"></td>
-          <td><input class="form-control qty" name="rows[{{ i }}][quantity]" type="number" min="0" value="{{ p.quantity or 1 }}"></td>
-          <td><input class="form-control unit-cost" name="rows[{{ i }}][unit_cost]" type="number" step="0.01" min="0" value="{{ '%.2f'|format(p.unit_cost) if p.unit_cost is not none else '0.00' }}"></td>
-          <td><input class="form-control total" name="rows[{{ i }}][line_total]" type="number" step="0.01" readonly value="0.00"></td>
-          <td><input class="form-control wh-input" name="rows[{{ i }}][warehouse]" value="{{ p.warehouse or '' }}" maxlength="120"></td>
-          <td><input class="form-control supplier-input" list="suppliers_datalist" name="rows[{{ i }}][supplier]" value="{{ p.supplier or '' }}" maxlength="80"></td>
-          <td class="text-center"><input class="form-check-input" type="checkbox" name="rows[{{ i }}][backorder_flag]" {% if p.backorder_flag %}checked{% endif %}></td>
+          <td>
+            <input class="form-control pn"
+                   name="rows[{{ i }}][part_number]"
+                   value="{{ p.part_number or '' }}"
+                   maxlength="80">
+          </td>
+          <td>
+            <input class="form-control"
+                   name="rows[{{ i }}][alt_pn]"
+                   value="{{ p.alt_numbers or '' }}">
+          </td>
+          <td>
+            <input class="form-control part-name"
+                   name="rows[{{ i }}][part_name]"
+                   value="{{ p.part_name or '' }}"
+                   maxlength="120">
+          </td>
+          <td>
+            <input class="form-control qty"
+                   name="rows[{{ i }}][quantity]"
+                   type="number"
+                   min="0"
+                   value="{{ p.quantity or 1 }}">
+          </td>
+          <td>
+            <input class="form-control unit-cost"
+                   name="rows[{{ i }}][unit_cost]"
+                   type="number"
+                   step="0.01"
+                   min="0"
+                   value="{{ '%.2f'|format(p.unit_cost) if p.unit_cost is not none else '0.00' }}">
+          </td>
+          <td>
+            <input class="form-control total"
+                   name="rows[{{ i }}][line_total]"
+                   type="number"
+                   step="0.01"
+                   readonly
+                   value="0.00">
+          </td>
+          <td>
+            <input class="form-control wh-input"
+                   name="rows[{{ i }}][warehouse]"
+                   value="{{ p.warehouse or '' }}"
+                   maxlength="120">
+          </td>
+          <td>
+            <input class="form-control supplier-input"
+                   list="suppliers_datalist"
+                   name="rows[{{ i }}][supplier]"
+                   value="{{ p.supplier or '' }}"
+                   maxlength="80">
+          </td>
+          <td class="text-center">
+            <input class="form-check-input"
+                   type="checkbox"
+                   name="rows[{{ i }}][backorder_flag]"
+                   {% if p.backorder_flag %}checked{% endif %}>
+          </td>
 
-          <!-- NEW Ordered (visible only when status='ordered') -->
+          <!-- Ordered column (visible only when status='ordered') -->
           <td class="text-center ordered-col">
-            <input type="hidden" class="ordered-val" name="rows[{{ i }}][ordered_flag]" value="{{ 1 if p.ordered_flag else 0 }}">
-            <input type="checkbox" class="form-check-input ordered-check" {% if p.ordered_flag %}checked{% endif %}>
+            <input type="hidden"
+                   class="ordered-val"
+                   name="rows[{{ i }}][ordered_flag]"
+                   value="{{ 1 if p.ordered_flag else 0 }}">
+            <input type="checkbox"
+                   class="form-check-input ordered-check"
+                   {% if p.ordered_flag %}checked{% endif %}>
           </td>
 
           <td>
             <span class="hint">—</span>
-            <input type="hidden" class="hint-input" name="rows[{{ i }}][stock_hint]" value="">
-          </td>
-
-          <!-- keep only Issue? -->
-          <td class="text-center">
-            <input type="checkbox" class="form-check-input issue-check" name="rows[{{ i }}][issue_flag]" {% if not IS_EDIT or issued_full %}disabled{% endif %}>
+            <input type="hidden"
+                   class="hint-input"
+                   name="rows[{{ i }}][stock_hint]"
+                   value="">
           </td>
 
           <td class="text-center">
-            <button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>
+            <input type="checkbox"
+                   class="form-check-input issue-check"
+                   name="rows[{{ i }}][issue_flag]"
+                   {% if not IS_EDIT or issued_full %}disabled{% endif %}>
+          </td>
+
+          <td class="text-center">
+            <button type="button"
+                    class="btn btn-sm btn-outline-danger del-row">&times;</button>
           </td>
         </tr>
         {% endfor %}
@@ -115,19 +234,41 @@
   </div>
 
   <datalist id="suppliers_datalist">
-    {% for s in recent_suppliers or [] %}<option value="{{ s }}"></option>{% endfor %}
+    {% for s in recent_suppliers or [] %}
+      <option value="{{ s }}"></option>
+    {% endfor %}
   </datalist>
 
-  <div class="mb-3"><button type="button" class="btn btn-outline-secondary" id="addRow">+ Add part row</button></div>
+  <div class="mb-3">
+    <button type="button" class="btn btn-outline-secondary" id="addRow">+ Add part row</button>
+  </div>
 
   <div class="d-flex gap-2">
     <button type="submit" class="btn btn-primary">Save</button>
-    <button type="button" id="selectAllInStockBtn" class="btn btn-outline-secondary">Select all in-stock</button>
-    <button type="button" id="issueSelectedBtn" class="btn btn-success" {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>Issue selected</button>
+
+    <button type="button"
+            id="selectAllInStockBtn"
+            class="btn btn-outline-secondary">
+      Select all in-stock
+    </button>
+
+    <button type="button"
+            id="issueSelectedBtn"
+            class="btn btn-success"
+            {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>
+      Issue selected
+    </button>
+
     {% if IS_EDIT %}
-      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">Back</a>
+      <a class="btn btn-outline-secondary"
+         href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">
+        Back
+      </a>
     {% else %}
-      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Cancel</a>
+      <a class="btn btn-outline-secondary"
+         href="{{ url_for('inventory.wo_list') }}">
+        Cancel
+      </a>
     {% endif %}
   </div>
 </form>
@@ -164,11 +305,14 @@
     const show = statusSel && statusSel.value === 'ordered';
     document.querySelectorAll('#partsTable .ordered-col').forEach(td=>{
       td.style.display = show ? '' : 'none';
-      const cb = td.querySelector('.ordered-check');
+      const cb  = td.querySelector('.ordered-check');
       const hid = td.querySelector('.ordered-val');
       if (!cb || !hid) return;
       cb.disabled = !show;
-      if (!show) { cb.checked = false; hid.value = '0'; }
+      if (!show) {
+        cb.checked = false;
+        hid.value  = '0';
+      }
     });
   }
   statusSel?.addEventListener('change', toggleOrderedCol);
@@ -178,7 +322,9 @@
     if (e.target.classList.contains('ordered-check')){
       const td  = e.target.closest('td');
       const hid = td && td.querySelector('.ordered-val');
-      if (hid) hid.value = e.target.checked ? '1' : '0';
+      if (hid) {
+        hid.value = e.target.checked ? '1' : '0';
+      }
     }
   });
 
@@ -203,7 +349,8 @@
   <td><span class="hint">—</span><input type="hidden" class="hint-input" name="rows[${i}][stock_hint]" value=""></td>
   <td class="text-center"><input type="checkbox" class="form-check-input issue-check" name="rows[${i}][issue_flag]"></td>
   <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
-</tr>`;}
+</tr>`;
+  }
 
   function recalc(tr){
     const qty  = parseFloat(tr.querySelector('.qty')?.value||'0')||0;
@@ -218,17 +365,34 @@
     const status = raw.split('/')[0];
     const cb = tr.querySelector('.issue-check');
     if(!cb) return;
-    if (tr.classList.contains('issued-row')){ cb.checked=false; cb.disabled=true; return; }
-    if (status === 'STOCK'){ cb.disabled=false; cb.removeAttribute('disabled'); }
-    else { cb.checked=false; cb.disabled=true; cb.setAttribute('disabled','disabled'); }
+    if (tr.classList.contains('issued-row')){
+      cb.checked=false;
+      cb.disabled=true;
+      return;
+    }
+    if (status === 'STOCK'){
+      cb.disabled=false;
+      cb.removeAttribute('disabled');
+    } else {
+      cb.checked=false;
+      cb.disabled=true;
+      cb.setAttribute('disabled','disabled');
+    }
   }
 
   function extractAvailableCount(j){
     const keys=['qty_available','available_qty','available','on_hand','onhand','stock','in_stock','qty','count','quantity'];
-    for(const k of keys){ const v=j&&j[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v); }
+    for(const k of keys){
+      const v=j&&j[k];
+      if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
+    }
     for(const wrap of ['data','result']){
-      const o=j&&j[wrap]; if(o && typeof o==='object'){
-        for(const k of keys){ const v=o[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v); }
+      const o=j&&j[wrap];
+      if(o && typeof o==='object'){
+        for(const k of keys){
+          const v=o[k];
+          if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
+        }
       }
     }
     const sumArr=a=>Array.isArray(a)?a.reduce((s,x)=>s+(Number.isFinite(extractAvailableCount(x))?extractAvailableCount(x):0),0):0;
@@ -236,7 +400,11 @@
   }
 
   function pick(j, variants){
-    for(const k of variants){ if(j && j[k] !== undefined && j[k] !== null && String(j[k]).trim()!==""){ return j[k]; } }
+    for(const k of variants){
+      if(j && j[k] !== undefined && j[k] !== null && String(j[k]).trim()!==""){
+        return j[k];
+      }
+    }
     return undefined;
   }
 
@@ -246,13 +414,15 @@
     const span   = tr.querySelector('.hint');
     const hidden = tr.querySelector('.hint-input');
     if (!pn || req <= 0){
-      if (span)  span.textContent='—';
-      if (hidden) hidden.value='';
-      setIssueEnabled(tr,false);
-      return;
+        if (span)  span.textContent='—';
+        if (hidden) hidden.value='';
+        setIssueEnabled(tr,false);
+        return;
     }
     const whNow = (tr.querySelector('.wh-input')?.value||'').trim();
-    const url = API_STOCK + '?pn=' + encodeURIComponent(pn) + '&qty=' + req + (whNow?('&wh='+encodeURIComponent(whNow)):'');
+    const url = API_STOCK + '?pn=' + encodeURIComponent(pn) +
+                '&qty=' + req +
+                (whNow?('&wh='+encodeURIComponent(whNow)):'');
     fetch(url)
       .then(r=> r.ok ? r.json() : Promise.reject())
       .then(j=>{
@@ -273,15 +443,21 @@
         const costInp = tr.querySelector('.unit-cost');
         const whInp   = tr.querySelector('.wh-input');
 
-        if (nameInp && (!nameInp.value || !nameInp.value.trim()) && pName){ nameInp.value = String(pName).trim().slice(0,120); }
+        if (nameInp && (!nameInp.value || !nameInp.value.trim()) && pName){
+          nameInp.value = String(pName).trim().slice(0,120);
+        }
         if (costInp){
           const cur = parseFloat(costInp.value||'0')||0;
           if ((cur===0 || !costInp.value) && pCost!==undefined && !isNaN(Number(pCost))){
-            costInp.value = (Math.round((Number(pCost)+Number.EPSILON)*100)/100).toFixed(2);
+            costInp.value = (
+              Math.round((Number(pCost)+Number.EPSILON)*100)/100
+            ).toFixed(2);
             recalc(tr);
           }
         }
-        if (whInp && (!whInp.value || !whInp.value.trim()) && pWh){ whInp.value = String(pWh).trim().slice(0,120); }
+        if (whInp && (!whInp.value || !whInp.value.trim()) && pWh){
+          whInp.value = String(pWh).trim().slice(0,120);
+        }
       })
       .catch(()=>{
         if (span)  span.textContent='—';
@@ -296,17 +472,25 @@
     updateSupplierRequired();
     recalc(tbody.lastElementChild);
     fetchHint(tbody.lastElementChild);
-    toggleOrderedCol(); // new row respects current status
+    toggleOrderedCol();
   });
 
   tbody.addEventListener('input', (e)=>{
     const tr = e.target.closest('tr'); if(!tr) return;
-    if(e.target.classList.contains('qty')||e.target.classList.contains('unit-cost')) recalc(tr);
-    if(e.target.classList.contains('pn')||e.target.classList.contains('qty')||e.target.classList.contains('wh-input')) fetchHint(tr);
+    if(e.target.classList.contains('qty')||e.target.classList.contains('unit-cost')){
+      recalc(tr);
+    }
+    if(e.target.classList.contains('pn')||
+       e.target.classList.contains('qty')||
+       e.target.classList.contains('wh-input')){
+      fetchHint(tr);
+    }
   });
 
   tbody.addEventListener('click', (e)=>{
-    if(e.target.classList.contains('del-row')) e.target.closest('tr')?.remove();
+    if(e.target.classList.contains('del-row')){
+      e.target.closest('tr')?.remove();
+    }
   });
 
   /* toggle select all in-stock */
@@ -317,8 +501,11 @@
       const raw = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
       return cb && !cb.disabled && raw.split('/')[0] === 'STOCK';
     });
+
     const needCheck = rows.some(tr=> !tr.querySelector('.issue-check').checked);
-    rows.forEach(tr=> tr.querySelector('.issue-check').checked = needCheck);
+    rows.forEach(tr=>{
+      tr.querySelector('.issue-check').checked = needCheck;
+    });
   });
 
   document.getElementById('issueSelectedBtn')?.addEventListener('click', ()=>{
@@ -326,23 +513,37 @@
     document.querySelectorAll('#partsTable tbody tr[data-row]').forEach(tr=>{
       if (tr.classList.contains('issued-row')) return;
       const cb   = tr.querySelector('.issue-check');
-      const status = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase().split('/')[0];
+      const status = (tr.querySelector('.hint')?.textContent || '')
+        .trim()
+        .toUpperCase()
+        .split('/')[0];
       const id   = tr.getAttribute('data-id');
-      if (cb && cb.checked && status === 'STOCK' && id && /^\d+$/.test(id)){ ids.push(id); }
+      if (cb && cb.checked && status === 'STOCK' && id && /^\d+$/.test(id)){
+        ids.push(id);
+      }
     });
-    if(ids.length===0){ alert("Select at least one in-stock part (hint must be STOCK)"); return; }
+
+    if(ids.length===0){
+      alert("Select at least one in-stock part (hint must be STOCK)");
+      return;
+    }
+
     const statusSel = document.querySelector('select[name="status"]');
     if (statusSel) statusSel.value = 'done';
+
     document.getElementById('issue_set_status').value = 'done';
-    document.getElementById('issue_part_ids').value = ids.join(',');
+    document.getElementById('issue_part_ids').value   = ids.join(',');
     document.getElementById('issueForm').submit();
   });
 
-  /* init */
-  tbody.querySelectorAll('tr[data-row]').forEach(tr=>{ recalc(tr); fetchHint(tr); });
+  /* init on load */
+  tbody.querySelectorAll('tr[data-row]').forEach(tr=>{
+    recalc(tr);
+    fetchHint(tr);
+  });
+  updateSupplierRequired();
   toggleOrderedCol();
 })();
 </script>
 {% endblock %}
-
 

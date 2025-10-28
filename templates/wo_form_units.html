@@ -272,17 +272,19 @@
   statusSel?.addEventListener('change', updateSupplierRequired);
 
   function toggleOrderedCols(){
-    const show = statusSel && statusSel.value === 'ordered';
-    document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
-      cell.style.display = show ? 'table-cell' : 'none';
-      const cb  = cell.querySelector('.ordered-check');
-      const hid = cell.querySelector('.ordered-val');
-      if (!cb || !hid) return;
-      cb.disabled = !show || IS_RO;
-      if (!show){ cb.checked=false; hid.value='0'; }
-    });
-  }
-  statusSel?.addEventListener('change', toggleOrderedCols);
+  // New behavior:
+  // - всегда показываем колонку Ord
+  // - не вырубаем чекбокс, не сбрасываем hidden value
+  document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
+    cell.style.display = 'table-cell';
+    const cb  = cell.querySelector('.ordered-check');
+    if (cb && !IS_RO) {
+      cb.disabled = false;
+    }
+  });
+}
+statusSel?.addEventListener('change', toggleOrderedCols);
+
 
   form?.addEventListener('submit', ()=>{
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{

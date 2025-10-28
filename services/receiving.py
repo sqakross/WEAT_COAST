@@ -252,18 +252,18 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
 
     return batch
 
-
 # ---------- core: UNPOST (roll back stock & mark draft) ----------
 
 def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     """
-    Жёсткий откат прихода:
+    Безопасный откат прихода:
     - Только если батч сейчас posted.
     - Для каждой строки:
-        * минусуем qty из Part (не даём в минус)
+        * уменьшаем Part.on_hand, но не пытаемся забрать то, что уже ушло технику.
+          То есть вычитаем ТОЛЬКО доступную часть.
         * корректируем Part.location:
-            убираем токены из этой поставки, но оставляем старые
-            если остаток упал в ноль — можно вообще зачистить location
+            убираем токены из этой поставки, но оставляем старые.
+            если остаток стал 0 — location чистим.
     - batch.status='draft', posted_at=None, (unposted_by/unposted_at если есть)
     - commit()
     """
@@ -275,7 +275,7 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
 
     curr_status = (batch.status or "").strip().lower()
     if curr_status != "posted":
-        # Уже draft → считаем, что склад уже в нуле или ручками откатили.
+        # Уже draft → считаем, что склад уже откатан
         current_app.logger.info(
             "[RECEIVING_UNPOST] Batch %s not in 'posted' (status='%s'), skipping.",
             batch.id,
@@ -290,38 +290,51 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
 
     for it in (batch.items or []):
         pn = (it.part_number or "").strip().upper()
-        qty = int(it.quantity or 0)
-        if not pn or qty <= 0:
+        qty_from_this_batch = int(it.quantity or 0)
+        if not pn or qty_from_this_batch <= 0:
             continue
 
         part = Part.query.filter(func.upper(Part.part_number) == pn).first()
         if not part:
-            continue  # деталь уже удалили из каталога, окей
+            # деталь уже удалили из каталога — окей, просто пропускаем
+            continue
 
         before_qty = _get_part_on_hand(part)
-        after_qty = before_qty - qty
-        if after_qty < 0:
-            after_qty = 0
+
+        # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
+        # мы НЕ делаем after_qty = before_qty - qty_from_this_batch вслепую.
+        # мы снимаем ТОЛЬКО то, что реально ещё осталось на складе.
+        rollback_qty = qty_from_this_batch if qty_from_this_batch <= before_qty else before_qty
+        after_qty = before_qty - rollback_qty
+
         _set_part_on_hand(part, after_qty)
 
         # location cleanup
         if hasattr(part, "location"):
             incoming_loc = (it.location or "").strip().upper()
 
-            # если после отката остаток 0 → чистим location полностью
             if after_qty == 0:
+                # если после снятия остаток ноль — чистим всю локацию
                 part.location = ""
             else:
-                # иначе вырезаем только локации этой поставки
+                # иначе вырезаем только ту локацию, которая пришла с этой поставкой
                 if incoming_loc:
                     new_loc = _remove_locations(getattr(part, "location", ""), incoming_loc)
                     part.location = new_loc[:64]
 
-    # теперь ставим батч обратно в draft
+        current_app.logger.info(
+            "[RECEIVING_UNPOST] part %s: before=%s, rollback=%s, after=%s",
+            pn,
+            before_qty,
+            rollback_qty,
+            after_qty,
+        )
+
+    # батч теперь снова draft
     batch.status = "draft"
     batch.posted_at = None
 
-    # кто сделал unpost (если поля есть)
+    # кто сделал откат (если поля есть)
     if hasattr(batch, "unposted_by"):
         batch.unposted_by = current_user_id
     if hasattr(batch, "unposted_at"):
@@ -330,12 +343,11 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     db.session.commit()
 
     current_app.logger.info(
-        "[RECEIVING_UNPOST] Batch %s reverted to draft, stock rolled back.",
+        "[RECEIVING_UNPOST] Batch %s reverted to draft, stock rolled back safely.",
         batch.id,
     )
 
     return batch
-
 
 # ---------- cleanup helper (оставляем как у тебя) ----------
 

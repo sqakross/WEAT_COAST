@@ -9,7 +9,10 @@
       <a class="btn btn-outline-primary" href="{{ url_for('inventory.wo_edit', wo_id=wo.id) }}">✏️ Edit</a>
     {% endif %}
     {% if role_low == 'superadmin' %}
-      <form method="post" action="{{ url_for('inventory.wo_delete', wo_id=wo.id) }}" class="d-inline" onsubmit="return confirm('Delete Work Order #{{ wo.id }}? This cannot be undone.');">
+      <form method="post"
+            action="{{ url_for('inventory.wo_delete', wo_id=wo.id) }}"
+            class="d-inline"
+            onsubmit="return confirm('Delete Work Order #{{ wo.id }}? This cannot be undone.');">
         <button class="btn btn-outline-danger" type="submit">🗑️ Delete</button>
       </form>
     {% endif %}
@@ -18,47 +21,87 @@
 
 {% set u0 = (wo.units|first) %}
 <div class="row g-3 mb-3">
-  <div class="col-md-3"><strong>Technician:</strong> {{ wo.technician_username or wo.technician_name or '—' }}</div>
+  <div class="col-md-3">
+    <strong>Technician:</strong>
+    {{ wo.technician_username or wo.technician_name or '—' }}
+  </div>
+
   <div class="col-md-4">
     <strong>Job(s):</strong>
     <span id="wo-jobs">{{ wo.job_numbers or '' }}</span>
     <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="copyJobs">Copy</button>
-    <div class="text-muted small">primary: <code>{{ wo.canonical_job or '—' }}</code></div>
+    <div class="text-muted small">
+      primary: <code>{{ wo.canonical_job or '—' }}</code>
+    </div>
   </div>
-  <div class="col-md-3"><strong>Brand/Model:</strong> {{ ((u0 and u0.brand) or wo.brand or '') ~ ' ' ~ ((u0 and u0.model) or wo.model or '') }} </div>
-  <div class="col-md-2"><strong>Serial:</strong> {{ wo.serial or (u0 and u0.serial) or '—' }}</div>
+
+  <div class="col-md-3">
+    <strong>Brand/Model:</strong>
+    {{ ((u0 and u0.brand) or wo.brand or '') ~ ' ' ~ ((u0 and u0.model) or wo.model or '') }}
+  </div>
+
+  <div class="col-md-2">
+    <strong>Serial:</strong>
+    {{ wo.serial or (u0 and u0.serial) or '—' }}
+  </div>
+
   <div class="col-md-3">
     <strong>Type:</strong>
-    {% if wo.job_type == 'INSURANCE' %}<span class="badge bg-warning text-dark">INSURANCE</span>
-    {% else %}<span class="badge bg-secondary">BASE</span>{% endif %}
+    {% if wo.job_type == 'INSURANCE' %}
+      <span class="badge bg-warning text-dark">INSURANCE</span>
+    {% else %}
+      <span class="badge bg-secondary">BASE</span>
+    {% endif %}
   </div>
+
   <div class="col-md-3">
     <strong>Status:</strong>
-    {% if wo.status == 'done' %}<span class="badge bg-success">done</span>
-    {% elif wo.status == 'ordered' %}<span class="badge bg-info text-dark">ordered</span>
-    {% else %}<span class="badge bg-secondary">search_ordered</span>{% endif %}
+    {% if wo.status == 'done' %}
+      <span class="badge bg-success">done</span>
+    {% elif wo.status == 'ordered' %}
+      <span class="badge bg-info text-dark">ordered</span>
+    {% else %}
+      <span class="badge bg-secondary">search_ordered</span>
+    {% endif %}
   </div>
-  <div class="col-md-3"><strong>Delivery / Markup:</strong> ${{ '%.2f'|format(wo.delivery_fee or 0) }} / {{ (wo.markup_percent or 0)|round(2) }}%</div>
-  <div class="col-md-3"><strong>Created:</strong> {{ wo.created_at|local_date if wo.created_at else '—' }}</div>
+
+  <div class="col-md-3">
+    <strong>Delivery / Markup:</strong>
+    ${{ '%.2f'|format(wo.delivery_fee or 0) }}
+    /
+    {{ (wo.markup_percent or 0)|round(2) }}%
+  </div>
+
+  <div class="col-md-3">
+    <strong>Created:</strong>
+    {{ wo.created_at|local_date if wo.created_at else '—' }}
+  </div>
 </div>
 
-{# ===== Parts table (как было) ===== #}
+{# -------- PARTS TABLE -------- #}
+
+{# собрать все parts из всех units (multi appliance). fallback wo.parts если старая структура #}
 {% set ns = namespace(all_parts=[]) %}
 {% if wo.units and (wo.units|length) > 0 %}
   {% for u in wo.units %}
-    {% if u.parts %}{% set ns.all_parts = ns.all_parts + u.parts %}{% endif %}
+    {% if u.parts %}
+      {% set ns.all_parts = ns.all_parts + u.parts %}
+    {% endif %}
   {% endfor %}
 {% elif wo.parts %}
   {% set ns.all_parts = ns.all_parts + wo.parts %}
 {% endif %}
+
+{# список уже инвойснутых PN для зелёной подсветки (приходит из вьюхи) #}
 {% set invoiced_set = (invoiced_pns or []) %}
 
 {% if ns.all_parts and (ns.all_parts|length) > 0 %}
 <style>
-  .name-ordered  { color:#0d6efd; font-weight:600; }
-  .name-invoiced { color:#198754; font-weight:600; }
+  .name-ordered  { color:#0d6efd; font-weight:600; }   /* синий = ordered */
+  .name-invoiced { color:#198754; font-weight:600; }   /* зелёный = invoiced / already issued */
   .num { text-align:right; font-variant-numeric: tabular-nums; }
 </style>
+
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
     <thead class="table-light">
@@ -77,19 +120,36 @@
     </thead>
     <tbody>
       {% set grand = namespace(total=0.0) %}
+
       {% for p in ns.all_parts %}
-        {% set pn_str = (p.part_number or '')|string|trim|upper %}
-        {% set is_invoiced = pn_str in invoiced_set %}
-        {% set oflag = p.ordered_flag if p.ordered_flag is defined else None %}
-        {% set oflag_norm = (oflag not in (None, False, 0, '0', '', 'false', 'False')) %}
+        {# --- нормализуем состояние "ordered?" так же как в wo_save --- #}
+
+        {# ordered_flag может быть bool / int / строка. Считаем TRUE если не пусто и не "0"/False #}
+        {% set raw_oflag = p.ordered_flag if p.ordered_flag is defined else None %}
+        {% set ordered_flag_truthy = (
+              raw_oflag not in (None, False, 0, '0', '', 'false', 'False')
+        ) %}
+
+        {# строка считается "ordered" если:
+           - ordered_flag правдивый ИЛИ
+           - status == 'ordered' ИЛИ
+           - line_status == 'ordered'
+        #}
         {% set is_ordered =
-             oflag_norm
+             ordered_flag_truthy
              or ((p.status or '')|lower == 'ordered')
              or ((p.line_status or '')|lower == 'ordered') %}
-        {% set qty = p.quantity or 0 %}
-        {% set unit = (p.unit_cost if p.unit_cost is defined and p.unit_cost is not none else 0.0) %}
-        {% set total = (qty * unit) %}
+
+        {# был ли этот PN уже выдан/завёрнут в invoice -> зелёный #}
+        {% set pn_norm = (p.part_number or '')|string|trim|upper %}
+        {% set is_invoiced = pn_norm in invoiced_set %}
+
+        {# qty/unit/total #}
+        {% set qty   = p.quantity or 0 %}
+        {% set unit  = (p.unit_cost if (p.unit_cost is not none) else 0.0) %}
+        {% set total = qty * unit %}
         {% set grand.total = grand.total + total %}
+
         <tr>
           <td><code>{{ p.part_number }}</code></td>
           <td>{{ p.alt_part_numbers or '—' }}</td>
@@ -102,18 +162,33 @@
           <td class="num">{{ '%.2f'|format(unit) }}</td>
           <td class="num">{{ '%.2f'|format(total) }}</td>
           <td>{{ p.supplier or '' }}</td>
+
           <td class="text-center">
-            <input type="checkbox" class="form-check-input" disabled {% if is_ordered %}checked{% endif %}>
+            <input type="checkbox"
+                   class="form-check-input"
+                   disabled
+                   {% if is_ordered %}checked{% endif %}>
           </td>
+
           <td class="text-center">
-            {% if p.ordered_date %}{{ p.ordered_date|local_date }}{% else %}<span class="text-muted">—</span>{% endif %}
+            {% if p.ordered_date %}
+              {{ p.ordered_date|local_date }}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
           </td>
+
           <td>
-            {% if p.backorder_flag %}<span class="badge bg-warning text-dark">B/O</span>{% else %}<span class="text-muted">—</span>{% endif %}
+            {% if p.backorder_flag %}
+              <span class="badge bg-warning text-dark">B/O</span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
           </td>
         </tr>
       {% endfor %}
     </tbody>
+
     <tfoot>
       <tr class="table-light">
         <th colspan="5" class="text-end">Grand total (plan):</th>
@@ -127,13 +202,15 @@
 <p class="text-muted">No parts listed for this work order.</p>
 {% endif %}
 
-{# ===== Issued Items (this WO) ===== #}
+{# -------- ISSUED ITEMS (PER-WO HISTORY) -------- #}
+
 <h5 class="mt-4">Issued Items (this WO)</h5>
 <style>
-  .row-ret { background: #fff5f5; }
+  .row-ret   { background:#fff5f5; }
   .inv-badge { font-size:.75rem; }
-  .num { text-align:right; font-variant-numeric: tabular-nums; }
+  .num       { text-align:right; font-variant-numeric: tabular-nums; }
 </style>
+
 <div class="table-responsive">
   <table class="table table-sm table-bordered align-middle">
     <thead class="table-light">
@@ -152,33 +229,53 @@
           {% set is_ret = (r.quantity or 0) < 0 %}
           <tr class="{% if is_ret %}row-ret{% endif %}">
             <td>{{ r.issue_date|local_dt }}</td>
-            <td class="text-nowrap">{{ '%06d'|format(r.invoice_number) if r.invoice_number else '—' }}</td>
-            <td><code>{{ r.part.part_number if r.part else r.part_id }}</code></td>
+            <td class="text-nowrap">
+              {{ '%06d'|format(r.invoice_number) if r.invoice_number else '—' }}
+            </td>
+            <td>
+              <code>{{ r.part.part_number if r.part else r.part_id }}</code>
+            </td>
             <td>{{ r.part.name if r.part else '—' }}</td>
             <td class="num">{{ r.quantity }}</td>
             <td class="num">{{ '%.2f'|format(r.unit_cost_at_issue or 0) }}</td>
           </tr>
         {% endfor %}
       {% else %}
-        <tr><td colspan="6" class="text-muted">No issued items yet.</td></tr>
+        <tr>
+          <td colspan="6" class="text-muted">No issued items yet.</td>
+        </tr>
       {% endif %}
     </tbody>
   </table>
 </div>
 
-{# ===== Summary ===== #}
 <div class="mt-1">
-  <span class="me-3"><strong>Issued total:</strong> ${{ '%.2f'|format(issued_total or 0) }} <span class="text-muted">(qty {{ issued_qty or 0 }})</span></span>
-  <span class="me-3"><strong>Returned total:</strong> ${{ '%.2f'|format(returned_total or 0) }} <span class="text-muted">(qty {{ returned_qty or 0 }})</span></span>
-  <span><strong>Grand total (Issued − Returns):</strong> ${{ '%.2f'|format(net_total or 0) }} <span class="text-muted">(qty {{ net_qty or 0 }})</span></span>
+  <span class="me-3">
+    <strong>Issued total:</strong>
+    ${{ '%.2f'|format(issued_total or 0) }}
+    <span class="text-muted">(qty {{ issued_qty or 0 }})</span>
+  </span>
+
+  <span class="me-3">
+    <strong>Returned total:</strong>
+    ${{ '%.2f'|format(returned_total or 0) }}
+    <span class="text-muted">(qty {{ returned_qty or 0 }})</span>
+  </span>
+
+  <span>
+    <strong>Grand total (Issued − Returns):</strong>
+    ${{ '%.2f'|format(net_total or 0) }}
+    <span class="text-muted">(qty {{ net_qty or 0 }})</span>
+  </span>
 </div>
 
-{# ===== Issued Batches (Technician View) ===== #}
+{# -------- ISSUED BATCHES / TECHNICIAN VIEW -------- #}
+
 <h5 class="mt-4">Issued Batches (Technician View)</h5>
 <style>
-  .inv-return-row  { background: #fff5f5; }
-  .inv-item-neg    { color: #c92a2a; }
-  .inv-item        { line-height: 1.25; }
+  .inv-return-row  { background:#fff5f5; }
+  .inv-item-neg    { color:#c92a2a; }
+  .inv-item        { line-height:1.25; }
 </style>
 
 <div class="table-responsive">
@@ -197,109 +294,134 @@
         {% endif %}
       </tr>
     </thead>
+
     <tbody>
       {% for b in batches %}
-      {% set is_return = b.get('is_return') %}
-      <tr class="{% if is_return %}inv-return-row{% endif %}">
-        <td>
-          {{ b.get('issued_at') }}
-          {% if b.get('all_confirmed') %}
-            <div><span class="badge bg-success inv-badge">All confirmed</span></div>
-          {% elif b.get('any_confirmed') %}
-            <div><span class="badge bg-info text-dark inv-badge">Partly confirmed</span></div>
-          {% endif %}
-        </td>
-        <td>{{ b.get('technician') }}</td>
-        <td>{{ b.get('canonical_ref') }}</td>
-        <td>
-          {% set items = b.get('items') %}
-          {% if items and (items|length) > 0 %}
-            <ul class="mb-0 ps-3">
-              {% for it in items %}
-                <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
-                  <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
-                  {% if it.unit_price is not none %} (${{ '%.2f'|format(it.unit_price) }}){% endif %}
-
-                  {% if can_confirm_any %}
-                    <form method="post"
-                          action="{{ url_for('inventory.issued_confirm_toggle') }}"
-                          style="display:inline">
-                      <input type="hidden" name="record_id" value="{{ it.id }}">
-                      <input type="hidden" name="wo_id" value="{{ wo.id }}">
-                      <input type="hidden" name="return_to" value="{{ request.full_path }}">
-                      {# Если чекбокс отмечен — отправится state=1; если снят — параметр state не придёт #}
-                      <input type="checkbox"
-                             name="state"
-                             value="1"
-                             class="form-check-input ms-2"
-                             {% if it.confirmed %}checked{% endif %}
-                             onchange="this.form.submit()">
-                      <span class="small text-muted ms-1">
-                        {% if it.confirmed %}
-                          ✔ confirmed
-                          {% if it.confirmed_by %} by {{ it.confirmed_by }}{% endif %}
-                          {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
-                        {% else %}
-                          unchecked
-                        {% endif %}
-                      </span>
-                    </form>
-                  {% else %}
-                    {% if it.confirmed %}
-                      <span class="badge bg-success inv-badge ms-1">✔ confirmed</span>
-                      <span class="small text-muted ms-1">
-                        {% if it.confirmed_by %}by {{ it.confirmed_by }}{% endif %}
-                        {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
-                      </span>
-                    {% endif %}
-                  {% endif %}
-                </li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            <span class="text-muted">—</span>
-          {% endif %}
-        </td>
-
-        {% set total_value = b.get('total_value', 0.0) %}
-        <td class="text-end {% if total_value < 0 %}inv-item-neg{% endif %}">
-          ${{ '%.2f'|format(total_value) }}
-          {% if is_return %}<span class="badge bg-danger inv-badge">RETURN</span>{% else %}<span class="badge bg-success inv-badge">ISSUED</span>{% endif %}
-        </td>
-
-        <td class="text-nowrap">
-          {% if b.get('report_id') and can_view_docs %}
-            {% set tech = b.get('technician') or wo.technician_name or '' %}
-            {% set job  = b.get('reference_job') or wo.canonical_job or '' %}
-            <a class="btn btn-sm btn-outline-secondary"
-               href="{{ url_for('inventory.reports_grouped') }}?issued_to={{ tech|urlencode }}&technician={{ tech|urlencode }}&company={{ tech|urlencode }}&tech={{ tech|urlencode }}&reference_job={{ job|urlencode }}&ref_job={{ job|urlencode }}&ref={{ job|urlencode }}&job={{ job|urlencode }}&jobs={{ job|urlencode }}"
-               target="_blank" rel="noopener">Open Report</a>
-          {% else %}
-            <span class="text-muted">—</span>
-          {% endif %}
-        </td>
-
-        <td>
-          {% if b.get('report_id') and can_view_docs %}
-            <a class="btn btn-sm btn-outline-primary"
-               href="/invoice/pdf?invoice_number={{ b.get('report_id') }}&print=1"
-               target="_blank" rel="noopener">Print</a>
-          {% else %}
-            <span class="text-muted">—</span>
-          {% endif %}
-        </td>
-
-        {% if can_confirm_any %}
-          <td class="text-center align-middle">
-            {% if b.get('all_confirmed') %}✅
-            {% elif b.get('any_confirmed') %}☑️
-            {% else %}☐
+        {% set is_return = b.get('is_return') %}
+        <tr class="{% if is_return %}inv-return-row{% endif %}">
+          <td>
+            {{ b.get('issued_at') }}
+            {% if b.get('all_confirmed') %}
+              <div>
+                <span class="badge bg-success inv-badge">All confirmed</span>
+              </div>
+            {% elif b.get('any_confirmed') %}
+              <div>
+                <span class="badge bg-info text-dark inv-badge">Partly confirmed</span>
+              </div>
             {% endif %}
           </td>
-        {% endif %}
-      </tr>
+
+          <td>{{ b.get('technician') }}</td>
+          <td>{{ b.get('canonical_ref') }}</td>
+
+          <td>
+            {% set items = b.get('items') %}
+            {% if items and (items|length) > 0 %}
+              <ul class="mb-0 ps-3">
+                {% for it in items %}
+                  <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
+                    <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
+                    {% if it.unit_price is not none %}
+                      (${{ '%.2f'|format(it.unit_price) }})
+                    {% endif %}
+
+                    {% if can_confirm_any %}
+                      <form method="post"
+                            action="{{ url_for('inventory.issued_confirm_toggle') }}"
+                            style="display:inline">
+                        <input type="hidden" name="record_id" value="{{ it.id }}">
+                        <input type="hidden" name="wo_id" value="{{ wo.id }}">
+                        <input type="hidden" name="return_to" value="{{ request.full_path }}">
+
+                        <input type="checkbox"
+                               name="state"
+                               value="1"
+                               class="form-check-input ms-2"
+                               {% if it.confirmed %}checked{% endif %}
+                               onchange="this.form.submit()">
+
+                        <span class="small text-muted ms-1">
+                          {% if it.confirmed %}
+                            ✔ confirmed
+                            {% if it.confirmed_by %} by {{ it.confirmed_by }}{% endif %}
+                            {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
+                          {% else %}
+                            unchecked
+                          {% endif %}
+                        </span>
+                      </form>
+                    {% else %}
+                      {% if it.confirmed %}
+                        <span class="badge bg-success inv-badge ms-1">✔ confirmed</span>
+                        <span class="small text-muted ms-1">
+                          {% if it.confirmed_by %}by {{ it.confirmed_by }}{% endif %}
+                          {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
+                        </span>
+                      {% endif %}
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+
+          {% set total_value = b.get('total_value', 0.0) %}
+          <td class="text-end {% if total_value < 0 %}inv-item-neg{% endif %}">
+            ${{ '%.2f'|format(total_value) }}
+            {% if is_return %}
+              <span class="badge bg-danger inv-badge">RETURN</span>
+            {% else %}
+              <span class="badge bg-success inv-badge">ISSUED</span>
+            {% endif %}
+          </td>
+
+          <td class="text-nowrap">
+            {% if b.get('report_id') and can_view_docs %}
+              {% set tech = b.get('technician') or wo.technician_name or '' %}
+              {% set job  = b.get('reference_job') or wo.canonical_job or '' %}
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ url_for('inventory.reports_grouped') }}?issued_to={{ tech|urlencode }}&technician={{ tech|urlencode }}&company={{ tech|urlencode }}&tech={{ tech|urlencode }}&reference_job={{ job|urlencode }}&ref_job={{ job|urlencode }}&ref={{ job|urlencode }}&job={{ job|urlencode }}&jobs={{ job|urlencode }}"
+                 target="_blank"
+                 rel="noopener">
+                Open Report
+              </a>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+
+          <td>
+            {% if b.get('report_id') and can_view_docs %}
+              <a class="btn btn-sm btn-outline-primary"
+                 href="/invoice/pdf?invoice_number={{ b.get('report_id') }}&print=1"
+                 target="_blank"
+                 rel="noopener">
+                Print
+              </a>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+
+          {% if can_confirm_any %}
+            <td class="text-center align-middle">
+              {% if b.get('all_confirmed') %}
+                ✅
+              {% elif b.get('any_confirmed') %}
+                ☑️
+              {% else %}
+                ☐
+              {% endif %}
+            </td>
+          {% endif %}
+        </tr>
       {% else %}
-        <tr><td colspan="8" class="text-muted">No batches yet.</td></tr>
+        <tr>
+          <td colspan="8" class="text-muted">No batches yet.</td>
+        </tr>
       {% endfor %}
     </tbody>
   </table>
@@ -311,13 +433,19 @@
 (function () {
   const btnCopy = document.getElementById('copyJobs');
   btnCopy?.addEventListener('click', async () => {
-    const el = document.getElementById('wo-jobs');
+    const el  = document.getElementById('wo-jobs');
     const txt = (el?.textContent || '').trim();
     if (!txt) return;
-    try { await navigator.clipboard.writeText(txt); }
-    catch(e) {
-      const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
-      ta.select(); document.execCommand('copy'); ta.remove();
+    try {
+      await navigator.clipboard.writeText(txt);
+    } catch(e) {
+      // fallback for older browsers
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
     }
   });
 })();
