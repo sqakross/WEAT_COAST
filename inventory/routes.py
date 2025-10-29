@@ -499,7 +499,7 @@ def receiving_delete(batch_id: int):
                 batch_id
             )
     except Exception:
-        current_app.logger.warning(
+        current_app.logger.debug(
             "[DELETE RECEIVING] dedup cleanup failed for batch_id=%s",
             batch_id,
             exc_info=True
@@ -1437,9 +1437,17 @@ def _parse_units_form(form):
 @login_required
 def issued_confirm_toggle():
     """
-    Переключает подтверждение одной строки IssuedPartRecord.
-    Доступно только SUPERADMIN. Позволяет и поставить, и снять подтверждение.
+    superadmin / admin:
+        - могут ставить и убирать подтверждение.
+    technician / tech:
+        - могут только поставить подтверждение (one-way).
+    остальные:
+        - 403.
+
+    После действия ВСЕГДА возвращаем пользователя обратно на страницу этого же Work Order,
+    чтобы никого не выкидывало в общий список.
     """
+
     from flask import request, redirect, url_for, abort
     from datetime import datetime, timezone
     from flask_login import current_user
@@ -1447,51 +1455,71 @@ def issued_confirm_toggle():
     from models import IssuedPartRecord
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
-    if role != "superadmin":
+
+    # Разрешённые роли
+    if role not in ("superadmin", "admin", "technician", "tech"):
         abort(403)
 
+    # Параметры формы
     try:
         rec_id = int(request.form.get("record_id") or 0)
     except Exception:
         rec_id = 0
 
-    new_state = (request.form.get("state") == "1")
+    requested_state_is_checked = (request.form.get("state") == "1")
+
     wo_id = request.form.get("wo_id")
-    return_to = request.form.get("return_to")
 
-    if not rec_id:
-        # просто возвращаемся
-        if return_to:
-            return redirect(return_to)
-        if wo_id:
-            return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
-        return redirect(url_for("inventory.wo_list"))
+    # если нет wo_id, просто не рискуем и шлём 403 чтобы не гулять куда-то
+    if not wo_id:
+        abort(403)
 
-    rec = IssuedPartRecord.query.filter_by(id=rec_id).first()
+    # Достаём запись
+    rec = None
+    if rec_id:
+        rec = IssuedPartRecord.query.filter_by(id=rec_id).first()
+
     if not rec:
-        if return_to:
-            return redirect(return_to)
-        if wo_id:
-            return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
-        return redirect(url_for("inventory.wo_list"))
+        # даже если не нашли запись - просто вернём обратно на ту же карточку WO
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # Поля подтверждения: используем те же имена, что уже применяются в wo_detail/_extract
+    # текущее подтверждённое состояние в базе
+    currently_confirmed = bool(rec.confirmed_by_tech)
+
+    # Логика изменения в зависимости от роли
+    if role in ("superadmin", "admin"):
+        # полный контроль
+        new_state = requested_state_is_checked
+
+    elif role in ("technician", "tech"):
+        # техник может только зафиксировать подтверждение, не снять
+        if requested_state_is_checked:
+            new_state = True
+        else:
+            new_state = currently_confirmed
+    else:
+        # защитный fallback - не должен сработать, но пусть будет
+        abort(403)
+
+    # Записываем новое состояние
     rec.confirmed_by_tech = new_state
+
     if new_state:
-        rec.confirmed_by = getattr(current_user, "username", "") or getattr(current_user, "email", "")
+        # подтверждено
+        rec.confirmed_by = (
+            getattr(current_user, "username", "") or
+            getattr(current_user, "email", "")
+        )
         rec.confirmed_at = datetime.now(timezone.utc)
     else:
+        # только admin/superadmin сюда попадают (они могут снимать)
         rec.confirmed_by = None
         rec.confirmed_at = None
 
     db.session.commit()
 
-    if return_to:
-        return redirect(return_to)
-    if wo_id:
-        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
-    return redirect(url_for("inventory.wo_list"))
-
+    # ВАЖНО: ВСЕГДА назад на конкретный Work Order. Никаких списков.
+    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
 @inventory_bp.get("/debug/db_objects")
 def debug_db_objects():
@@ -1983,7 +2011,7 @@ def dataframe_from_pdf(path, try_ocr: bool = False):
 
     def log(msg: str):
         try:
-            current_app.logger.warning(msg)
+            current_app.logger.debug(msg)
         except Exception:
             pass
 
@@ -3001,7 +3029,7 @@ def wo_save():
 
     f = request.form
     log_keys = sorted(f.keys())
-    current_app.logger.warning("WO_SAVE keys (%s): %s", len(log_keys), log_keys[:200])
+    current_app.logger.debug("WO_SAVE keys (%s): %s", len(log_keys), log_keys[:200])
 
     # new vs edit
     wo_id  = (f.get("wo_id") or "").strip()
@@ -3137,7 +3165,7 @@ def wo_save():
             "rows":   rows_payload,
         })
 
-    current_app.logger.warning(
+    current_app.logger.debug(
         "WO_SAVE parsed units=%s rows_total=%s",
         len(units_payload),
         sum(len(u.get('rows') or []) for u in units_payload)
@@ -3156,9 +3184,9 @@ def wo_save():
                     "bo_raw": r_blk.get("backorder_flag"),
                     "status": r_blk.get("status"),
                 })
-        current_app.logger.warning("WO_SAVE DEBUG rows before validation: %s", dbg_rows)
+        current_app.logger.debug("WO_SAVE DEBUG rows before validation: %s", dbg_rows)
     except Exception as _e:
-        current_app.logger.warning("WO_SAVE DEBUG build dbg_rows failed: %r", _e)
+        current_app.logger.debug("WO_SAVE DEBUG build dbg_rows failed: %r", _e)
 
     # ---------- ререндер формы при ошибке ----------
     def _rerender_same_screen(msg_text: str):
@@ -3342,7 +3370,7 @@ def wo_save():
                 ord_date = None
                 ord_in   = False
 
-            current_app.logger.warning(
+            current_app.logger.debug(
                 "WO_SAVE DEBUG build part row pn=%s sup=%s ord_in_raw=%r -> ord_in=%r prev_was_ordered=%r prev_date=%r final_date=%r",
                 pn_upper, sup_norm, ord_in_raw, ord_in, prev_was_ordered, prev_date, ord_date
             )
@@ -4070,7 +4098,7 @@ def wo_delete(wo_id: int):
             db.session.delete(wo)
             db.session.commit()
         except Exception as model_err:
-            current_app.logger.warning("Model delete failed, fallback to SQL: %s", model_err)
+            current_app.logger.debug("Model delete failed, fallback to SQL: %s", model_err)
 
             # 2) Фоллбэк на SQL — удаляем дочерние записи, но только если таблицы существуют
             for t in ("issued_part_records", "work_order_parts", "issued_batches", "job_index"):
@@ -7545,7 +7573,7 @@ def _already_returned_qty_for_source(src) -> int:
 @login_required
 def receiving_list():
     from sqlalchemy import func
-    current_app.logger.warning("### DEBUG receiving_list USING MODEL %s FROM %s TABLENAME=%s", ReceivingBatch, __file__,
+    current_app.logger.debug("### DEBUG receiving_list USING MODEL %s FROM %s TABLENAME=%s", ReceivingBatch, __file__,
                                getattr(ReceivingBatch, "__tablename__", "?"))
 
     q = ReceivingBatch.query
@@ -7724,7 +7752,7 @@ def receiving_toggle(batch_id: int):
             # сначала проверка - было ли уже списание этим деталям?
             if _batch_consumed_forbid_unpost(batch):
                 # уже выдавали техникам -> запрещаем откат
-                current_app.logger.warning(
+                current_app.logger.debug(
                     "[RECEIVING_TOGGLE] Blocked UNPOST for batch %s: already consumed.",
                     batch.id,
                 )
@@ -8333,7 +8361,7 @@ def create_receiving_from_rows(
         fresh_draft = db.session.get(ReceivingBatch, batch.id)
         try:
             from flask import current_app
-            current_app.logger.warning(
+            current_app.logger.debug(
                 "### DEBUG create_receiving_from_rows draft return id=%s status=%s",
                 fresh_draft.id,
                 fresh_draft.status,
@@ -8352,7 +8380,7 @@ def create_receiving_from_rows(
 
     try:
         from flask import current_app
-        current_app.logger.warning(
+        current_app.logger.debug(
             "### DEBUG create_receiving_from_rows AFTER POST id=%s status=%s",
             posted_batch.id,
             posted_batch.status,
@@ -8367,7 +8395,7 @@ def create_receiving_from_rows(
 
     try:
         from flask import current_app
-        current_app.logger.warning(
+        current_app.logger.debug(
             "### DEBUG CFR (create_receiving_from_rows) RETURNING batch_id=%s status=%s auto_post=%s file=%s",
             gr.id,
             getattr(gr, "status", None),

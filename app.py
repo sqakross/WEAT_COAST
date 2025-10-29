@@ -37,9 +37,12 @@ os.makedirs(LOG_DIR, exist_ok=True)
 formatter = logging.Formatter('[%(asctime)s] %(levelname)s %(name)s: %(message)s')
 root = logging.getLogger()
 
-_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
-_level = getattr(logging, _level_name, logging.INFO)
-root.setLevel(_level)
+root.setLevel(logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
+logging.getLogger("app").setLevel(logging.INFO)
+logging.getLogger("inventory").setLevel(logging.INFO)
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
 
 fh = RotatingFileHandler(os.path.join(LOG_DIR, 'app.log'),
                          maxBytes=2_000_000, backupCount=3, encoding='utf-8')
