@@ -18,9 +18,29 @@
   .wo-form .unit-table td.issue-cell, .wo-form .unit-table td.issue-cell *{ pointer-events:auto!important; }
   tr.issued-row{ background:#f1f3f5; color:#6c757d; }
   .unit-table .ordered-col{ display:none; } /* hide “Ordered” col by default */
+
+  /* header layout for title + Copy WO */
+  .wo-header-line {
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:.75rem; /* расстояние между заголовком и кнопкой Copy WO */
+    margin-bottom: .5rem;
+  }
+  .wo-header-line h3 {
+    margin:0;
+  }
 </style>
 
-<h3>{{ RO and 'View' or (IS_EDIT and 'Edit' or 'New') }} Work Order (multi-appliance)</h3>
+<div class="wo-header-line">
+  <h3>{{ RO and 'View' or (IS_EDIT and 'Edit' or 'New') }} Work Order (multi-appliance)</h3>
+
+  <button type="button"
+          class="btn btn-sm btn-outline-primary"
+          id="btnCopyWO">
+    Copy WO
+  </button>
+</div>
 
 <form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm" class="wo-form">
   {% if IS_EDIT %}<input type="hidden" name="wo_id" value="{{ wo.id }}">{% endif %}
@@ -56,9 +76,13 @@
 
     <div class="col-md-3">
       <label class="form-label">Job number(s) (comma separated)</label>
-      <input name="job_numbers" class="form-control" placeholder="98356, 98256"
-             value="{{ IS_EDIT and wo.job_numbers or '' }}" {{ ro }} {{ dis }}>
+      <input name="job_numbers"
+             class="form-control"
+             placeholder="98356, 98256"
+             value="{{ IS_EDIT and wo.job_numbers or '' }}"
+             {{ ro }} {{ dis }}>
     </div>
+
     <div class="col-md-2">
       <label class="form-label">Job type</label>
       {% set jt = (IS_EDIT and wo.job_type or 'BASE') %}
@@ -67,16 +91,19 @@
         <option value="INSURANCE" {{ 'selected' if jt=='INSURANCE' else '' }}>INSURANCE</option>
       </select>
     </div>
+
     <div class="col-md-2">
       <label class="form-label">Delivery fee ($)</label>
       <input id="deliveryFee" type="number" step="0.01" name="delivery_fee" class="form-control"
              value="{{ IS_EDIT and wo.delivery_fee is not none and ('%.2f'|format(wo.delivery_fee)) or '0.00' }}" {{ ro }} {{ dis }}>
     </div>
+
     <div class="col-md-2">
       <label class="form-label">Markup (%)</label>
       <input id="markupPercent" type="number" step="0.01" name="markup_percent" class="form-control"
              value="{{ IS_EDIT and wo.markup_percent is not none and ('%.2f'|format(wo.markup_percent)) or '0.00' }}" {{ ro }} {{ dis }}>
     </div>
+
     <div class="col-md-2">
       <label class="form-label">Status</label>
       {% set st = (IS_EDIT and wo.status or 'search_ordered') %}
@@ -94,7 +121,9 @@
     <div class="card">
       <div class="card-header d-flex justify-content-between align-items-center">
         <strong>Appliance #{{ loop.index }}</strong>
-        {% if not RO %}<button type="button" class="btn btn-sm btn-outline-danger del-unit">&times;</button>{% endif %}
+        {% if not RO %}
+          <button type="button" class="btn btn-sm btn-outline-danger del-unit">&times;</button>
+        {% endif %}
       </div>
 
       <div class="card-body">
@@ -182,17 +211,39 @@
           </table>
         </div>
 
-        <div class="d-flex justify-content-between align-items-center">
-          {% if not RO %}<button type="button" class="btn btn-outline-secondary add-row">+ Add part row</button>{% else %}<span></span>{% endif %}
-          <div class="text-end"><strong>Unit subtotal:</strong> <span class="unit-subtotal">0.00</span></div>
+        <!-- footer of appliance card with Add row / Copy / Subtotal -->
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+          {% if not RO %}
+          <div class="d-flex flex-wrap gap-2">
+            <button type="button"
+                    class="btn btn-outline-secondary add-row">
+              + Add part row
+            </button>
+
+            <button type="button"
+                    class="btn btn-outline-primary btn-copy-appliance">
+              Copy
+            </button>
+          </div>
+          {% else %}
+          <span></span>
+          {% endif %}
+
+          <div class="text-end ms-auto">
+            <strong>Unit subtotal:</strong>
+            <span class="unit-subtotal">0.00</span>
+          </div>
         </div>
+
       </div>
     </div>
     {% endfor %}
   </div>
 
   {% if not RO %}
-  <div class="my-3"><button type="button" class="btn btn-outline-primary" id="addUnit">+ Add appliance</button></div>
+  <div class="my-3">
+    <button type="button" class="btn btn-outline-primary" id="addUnit">+ Add appliance</button>
+  </div>
   {% endif %}
 
   <div class="d-flex justify-content-between align-items-center my-2">
@@ -209,10 +260,17 @@
   <div class="d-flex gap-2">
     {% if not RO %}
       <button type="submit" class="btn btn-primary">Save</button>
-      <button type="button" id="selectAllInStockBtn" class="btn btn-outline-secondary">Select all in-stock</button>
-      <button type="button" id="issueSelectedBtn" class="btn btn-success" {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>Issue selected</button>
+
+      <button type="button" id="selectAllInStockBtn" class="btn btn-outline-secondary">
+        Select all in-stock
+      </button>
+
+      <button type="button" id="issueSelectedBtn" class="btn btn-success"
+              {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>
+        Issue selected
+      </button>
     {% endif %}
-    {# SAFE “Back”: use detail only if wo.id exists; otherwise go to list #}
+
     {% if IS_EDIT %}
       <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">Back</a>
     {% else %}
@@ -272,19 +330,16 @@
   statusSel?.addEventListener('change', updateSupplierRequired);
 
   function toggleOrderedCols(){
-  // New behavior:
-  // - всегда показываем колонку Ord
-  // - не вырубаем чекбокс, не сбрасываем hidden value
-  document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
-    cell.style.display = 'table-cell';
-    const cb  = cell.querySelector('.ordered-check');
-    if (cb && !IS_RO) {
-      cb.disabled = false;
-    }
-  });
-}
-statusSel?.addEventListener('change', toggleOrderedCols);
-
+    // всегда показываем колонку Ord, не скрываем чекбокс
+    document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
+      cell.style.display = 'table-cell';
+      const cb  = cell.querySelector('.ordered-check');
+      if (cb && !IS_RO) {
+        cb.disabled = false;
+      }
+    });
+  }
+  statusSel?.addEventListener('change', toggleOrderedCols);
 
   form?.addEventListener('submit', ()=>{
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
@@ -300,41 +355,78 @@ statusSel?.addEventListener('change', toggleOrderedCols);
     const markup   = parseFloat(markupEl?.value||'0')||0;
     const delivery = parseFloat(deliveryEl?.value||'0')||0;
     let unitSum = 0;
+
     card.querySelectorAll('tbody tr').forEach(tr=>{
       const q = parseFloat(tr.querySelector('.qty')?.value||'0')||0;
       const c = parseFloat(tr.querySelector('.unit-cost')?.value||'0')||0;
       const line = (q*c)*(1+markup/100) + delivery;
+
       const cell = tr.querySelector('.line-total');
-      if (cell){ const v = toMoney(line); cell.textContent=v; cell.dataset.value=v; }
+      if (cell){
+        const v = toMoney(line);
+        cell.textContent = v;
+        cell.dataset.value = v;
+      }
       unitSum += line;
     });
-    const us = card.querySelector('.unit-subtotal'); if (us) us.textContent = toMoney(unitSum);
+
+    const us = card.querySelector('.unit-subtotal');
+    if (us) us.textContent = toMoney(unitSum);
+
     recomputeGrandTotal();
   }
+
   function recomputeGrandTotal(){
-    let g=0; document.querySelectorAll('.unit-subtotal').forEach(x=> g += parseFloat(x.textContent||'0')||0);
+    let g = 0;
+    document.querySelectorAll('.unit-subtotal').forEach(x=>{
+      g += parseFloat(x.textContent||'0')||0;
+    });
     grandTotalEl.textContent = toMoney(g);
   }
+
   ['input','change'].forEach(ev=>{
-    deliveryEl?.addEventListener(ev, ()=>document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal));
-    markupEl?.addEventListener(ev,   ()=>document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal));
+    deliveryEl?.addEventListener(ev, ()=>{
+      document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
+    });
+    markupEl?.addEventListener(ev, ()=>{
+      document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
+    });
   });
 
   function setIssueEnabled(tr, enabled){
-    const cb = tr.querySelector('.issue-check'); if (!cb) return;
-    if (tr.classList.contains('issued-row')) {
-      cb.checked = false; cb.disabled = true; cb.setAttribute('disabled','disabled'); return;
+    const cb = tr.querySelector('.issue-check');
+    if (!cb) return;
+
+    if (tr.classList.contains('issued-row')){
+      cb.checked = false;
+      cb.disabled = true;
+      cb.setAttribute('disabled','disabled');
+      return;
     }
-    if (enabled){ cb.disabled = !IS_EDIT; cb.removeAttribute('disabled'); }
-    else { cb.checked=false; cb.disabled=true; cb.setAttribute('disabled','disabled'); }
+
+    if (enabled){
+      cb.disabled = !IS_EDIT;
+      cb.removeAttribute('disabled');
+    } else {
+      cb.checked=false;
+      cb.disabled=true;
+      cb.setAttribute('disabled','disabled');
+    }
   }
 
   function extractAvailableCount(j){
     const keys=['qty_available','available_qty','available','on_hand','onhand','stock','in_stock','qty','count','quantity'];
-    for(const k of keys){ const v=j&&j[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v); }
+    for(const k of keys){
+      const v=j&&j[k];
+      if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
+    }
     for(const wrap of ['data','result']){
-      const o=j&&j[wrap]; if(o && typeof o==='object'){
-        for(const k of keys){ const v=o[k]; if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v); }
+      const o=j&&j[wrap];
+      if(o && typeof o==='object'){
+        for(const k of keys){
+          const v=o[k];
+          if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
+        }
       }
     }
     const sumArr=a=>Array.isArray(a)?a.reduce((s,x)=>s+(Number.isFinite(extractAvailableCount(x))?extractAvailableCount(x):0),0):0;
@@ -342,18 +434,30 @@ statusSel?.addEventListener('change', toggleOrderedCols);
   }
 
   function pick(j, variants){
-    for(const k of variants){ if(j && j[k] !== undefined && j[k] !== null && String(j[k]).trim()!==""){ return j[k]; } }
+    for(const k of variants){
+      if(j && j[k] !== undefined && j[k] !== null && String(j[k]).trim()!==""){
+        return j[k];
+      }
+    }
     return undefined;
   }
 
   function fetchHint(tr){
     const pn  = (tr.querySelector('.pn')?.value||'').trim().toUpperCase();
-       const qty = parseInt(tr.querySelector('.qty')?.value||'0',10)||0;
+    const qty = parseInt(tr.querySelector('.qty')?.value||'0',10)||0;
     const hintEl = tr.querySelector('.hint');
-    if(!pn||qty<=0){ if(hintEl) hintEl.textContent='—'; setIssueEnabled(tr,false); return; }
-    const whNow = (tr.querySelector('.wh-input')?.value||'').trim();
 
-    const url = API_STOCK + '?pn=' + encodeURIComponent(pn) + '&qty=' + qty + (whNow?('&wh='+encodeURIComponent(whNow)):'');
+    if(!pn||qty<=0){
+      if(hintEl) hintEl.textContent='—';
+      setIssueEnabled(tr,false);
+      return;
+    }
+
+    const whNow = (tr.querySelector('.wh-input')?.value||'').trim();
+    const url = API_STOCK
+      + '?pn=' + encodeURIComponent(pn)
+      + '&qty=' + qty
+      + (whNow?('&wh='+encodeURIComponent(whNow)):'');
     fetch(url)
       .then(r=>r.ok ? r.json() : Promise.reject())
       .then(j=>{
@@ -361,29 +465,41 @@ statusSel?.addEventListener('change', toggleOrderedCols);
         const qa  = extractAvailableCount(j);
         const isStock = /\b(STOCK|IN[-\s]?STOCK|ON HAND|AVAILABLE)\b/.test(t) || (qa >= qty);
         const label   = isStock ? 'STOCK' : 'WAIT';
+
         if (hintEl) hintEl.textContent = label + '/' + qa;
         setIssueEnabled(tr, isStock);
 
         const nameInp = tr.querySelector('.part-name');
         const costInp = tr.querySelector('.unit-cost');
-        const whInp   = tr.querySelector('.wh-input');
+        theWh         = tr.querySelector('.wh-input');
 
         const jflat   = Object.assign({}, j, j?.data||{}, j?.result||{});
         const pName   = pick(jflat, ['part_name','name','title','description']);
         const pCost   = pick(jflat, ['unit_cost','price','unit_price','cost','last_price','avg_cost']);
         const pWh     = pick(jflat,  ['warehouse','location','wh']);
 
-        if (nameInp && (!nameInp.value || !nameInp.value.trim()) && pName){ nameInp.value = String(pName).trim().slice(0,120); }
+        if (nameInp && (!nameInp.value || !nameInp.value.trim()) && pName){
+          nameInp.value = String(pName).trim().slice(0,120);
+        }
+
         if (costInp){
           const cur = parseFloat(costInp.value||'0')||0;
           if ((cur===0 || !costInp.value) && pCost!==undefined && !isNaN(Number(pCost))){
-            costInp.value = (Math.round((Number(pCost)+Number.EPSILON)*100)/100).toFixed(2);
+            costInp.value = (
+              Math.round((Number(pCost)+Number.EPSILON)*100)/100
+            ).toFixed(2);
             recomputeUnitSubtotal(tr.closest('.card'));
           }
         }
-        if (whInp && (!whInp.value || !whInp.value.trim()) && pWh){ whInp.value = String(pWh).trim().slice(0,120); }
+
+        if (theWh && (!theWh.value || !theWh.value.trim()) && pWh){
+          theWh.value = String(pWh).trim().slice(0,120);
+        }
       })
-      .catch(()=>{ if(hintEl) hintEl.textContent='—'; setIssueEnabled(tr,false); });
+      .catch(()=>{
+        if(hintEl) hintEl.textContent='—';
+        setIssueEnabled(tr,false);
+      });
   }
 
   unitsWrap.addEventListener('change', (e)=>{
@@ -406,15 +522,27 @@ statusSel?.addEventListener('change', toggleOrderedCols);
   <td class="num"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${ro}></td>
   <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
   <td><input class="form-control wh-input" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
-  <td class="text-center"><div class="form-check d-flex justify-content-center m-0"><input class="form-check-input" type="checkbox" name="units[${ui}][rows][${ri}][backorder_flag]" ${thebo}></div></td>
+  <td class="text-center">
+    <div class="form-check d-flex justify-content-center m-0">
+      <input class="form-check-input" type="checkbox"
+             name="units[${ui}][rows][${ri}][backorder_flag]" ${thebo}>
+    </div>
+  </td>
   <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
   <td class="text-center ordered-col">
     <input type="hidden" class="ordered-val" name="units[${ui}][rows][${ri}][ordered_flag]" value="0">
     <input type="checkbox" class="form-check-input ordered-check" ${thebo}>
   </td>
   <td class="hint">—</td>
-  <td class="text-center issue-cell"><div class="form-check d-flex justify-content-center m-0"><input type="checkbox" class="form-check-input issue-check" name="issue_ids" value="${ui}_${ri}" ${IS_EDIT?'':'disabled'}></div></td>
-  <td class="text-center">${IS_RO?'':'<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>'}</td>
+  <td class="text-center issue-cell">
+    <div class="form-check d-flex justify-content-center m-0">
+      <input type="checkbox" class="form-check-input issue-check"
+             name="issue_ids" value="${ui}_${ri}" ${IS_EDIT?'':'disabled'}>
+    </div>
+  </td>
+  <td class="text-center">
+    ${IS_RO?'':'<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>'}
+  </td>
 </tr>`;
   }
 
@@ -466,29 +594,60 @@ statusSel?.addEventListener('change', toggleOrderedCols);
       </table>
     </div>
 
-    <div class="d-flex justify-content-between align-items-center">
-      ${IS_RO ? '<span></span>' : '<button type="button" class="btn btn-outline-secondary add-row">+ Add part row</button>'}
-      <div class="text-end"><strong>Unit subtotal:</strong> <span class="unit-subtotal">0.00</span></div>
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+      ${IS_RO ? '<span></span>' : `
+      <div class="d-flex flex-wrap gap-2">
+        <button type="button"
+                class="btn btn-outline-secondary add-row">
+          + Add part row
+        </button>
+
+        <button type="button"
+                class="btn btn-outline-primary btn-copy-appliance">
+          Copy
+        </button>
+      </div>`}
+      <div class="text-end ms-auto">
+        <strong>Unit subtotal:</strong>
+        <span class="unit-subtotal">0.00</span>
+      </div>
     </div>
   </div>
 </div>`;
   }
 
-  /* events */
+  /* dynamic events */
+
   unitsWrap.addEventListener('input', (e)=>{
-    const tr=e.target.closest('tr'); const card=e.target.closest('.card'); if(!card) return;
-    if(tr && (e.target.classList.contains('qty')||e.target.classList.contains('unit-cost'))) recomputeUnitSubtotal(card);
-    if(tr && (e.target.classList.contains('pn')||e.target.classList.contains('qty')||e.target.classList.contains('wh-input'))) fetchHint(tr);
+    const tr=e.target.closest('tr');
+    const card=e.target.closest('.card');
+    if(!card) return;
+
+    if(tr && (e.target.classList.contains('qty')||e.target.classList.contains('unit-cost'))){
+      recomputeUnitSubtotal(card);
+    }
+    if(tr && (
+      e.target.classList.contains('pn') ||
+      e.target.classList.contains('qty') ||
+      e.target.classList.contains('wh-input')
+    )){
+      fetchHint(tr);
+    }
   });
 
   unitsWrap.addEventListener('click', (e)=>{
-    const btn = e.target.closest('button'); if(!btn) return;
+    const btn = e.target.closest('button');
+    if(!btn) return;
 
     if(btn.classList.contains('del-unit')){
-      const card = btn.closest('.card'); card?.remove();
+      const card = btn.closest('.card');
+      card?.remove();
+
       document.querySelectorAll('#unitsWrap .card').forEach((c, idx)=>{
-        const strong=c.querySelector('.card-header strong'); if(strong) strong.textContent = `Appliance #${idx+1}`;
+        const strong=c.querySelector('.card-header strong');
+        if(strong) strong.textContent = `Appliance #${idx+1}`;
       });
+
       recomputeGrandTotal();
       return;
     }
@@ -498,6 +657,7 @@ statusSel?.addEventListener('change', toggleOrderedCols);
       const tbody = card.querySelector('tbody'); if(!tbody) return;
       const ui    = [...document.querySelectorAll('#unitsWrap .card')].indexOf(card);
       const ri    = tbody.querySelectorAll('tr').length;
+
       tbody.insertAdjacentHTML('beforeend', rowTemplate(ui, ri));
       updateSupplierRequired();
       recomputeUnitSubtotal(card);
@@ -507,8 +667,11 @@ statusSel?.addEventListener('change', toggleOrderedCols);
     }
 
     if(btn.classList.contains('del-row')){
-      const tr   = btn.closest('tr'); const card = btn.closest('.card');
-      tr?.remove(); recomputeUnitSubtotal(card); return;
+      const tr   = btn.closest('tr');
+      const card = btn.closest('.card');
+      tr?.remove();
+      recomputeUnitSubtotal(card);
+      return;
     }
   });
 
@@ -529,8 +692,11 @@ statusSel?.addEventListener('change', toggleOrderedCols);
       const raw = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
       return cb && !cb.disabled && raw.split('/')[0] === 'STOCK';
     });
+
     const needCheck = rows.some(tr=> !tr.querySelector('.issue-check').checked);
-    rows.forEach(tr=> tr.querySelector('.issue-check').checked = needCheck);
+    rows.forEach(tr=>{
+      tr.querySelector('.issue-check').checked = needCheck;
+    });
   });
 
   issueBtn?.addEventListener('click', ()=>{
@@ -540,12 +706,20 @@ statusSel?.addEventListener('change', toggleOrderedCols);
       const cb = tr.querySelector('.issue-check');
       const raw = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
       const status = raw.split('/')[0];
-      if (cb && cb.checked && status==='STOCK'){ selected.push(cb.value); }
+      if (cb && cb.checked && status==='STOCK'){
+        selected.push(cb.value);
+      }
     });
-    if (selected.length===0){ alert('Select at least one in-stock part (hint must be STOCK).'); return; }
+
+    if (selected.length===0){
+      alert('Select at least one in-stock part (hint must be STOCK).');
+      return;
+    }
+
     if (statusSel) statusSel.value = 'done';
+
     document.getElementById('issue_set_status').value = 'done';
-    document.getElementById('issue_part_ids').value = selected.join(',');
+    document.getElementById('issue_part_ids').value  = selected.join(',');
     document.getElementById('issueForm').submit();
   });
 
@@ -554,6 +728,119 @@ statusSel?.addEventListener('change', toggleOrderedCols);
   document.querySelectorAll('#unitsWrap tbody tr').forEach(fetchHint);
   updateSupplierRequired();
   toggleOrderedCols();
+})();
+</script>
+
+<!-- COPY BUTTON LOGIC + TOAST -->
+
+<script>
+// small toast helper for copy feedback
+function wccrToast(msg) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  Object.assign(t.style, {
+    position: 'fixed',
+    bottom: '20px',
+    right: '20px',
+    background: '#0d6efd',
+    color: '#fff',
+    padding: '6px 12px',
+    borderRadius: '8px',
+    fontSize: '.85rem',
+    boxShadow: '0 2px 8px rgba(0,0,0,.3)',
+    zIndex: 9999
+  });
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2000);
+}
+
+// Copy WO (technician + jobs)
+(function(){
+  const btnWO = document.getElementById('btnCopyWO');
+  if (!btnWO) return;
+
+  btnWO.addEventListener('click', async () => {
+    const techInput = document.querySelector('input[name="technician_name"]');
+    const jobsInput = document.querySelector('input[name="job_numbers"]');
+
+    const techVal = (techInput?.value || '').trim();
+    const jobsVal = (jobsInput?.value || '').trim();
+
+    // "985234, 1212112" -> "985234 1212112"
+    const jobsFlat = jobsVal
+      .replace(/[,;]/g,' ')
+      .replace(/\s+/g,' ')
+      .trim();
+
+    const finalText = `${techVal} ${jobsFlat}`.trim();
+    if (!finalText) return;
+
+    try {
+      await navigator.clipboard.writeText(finalText);
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = finalText;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+
+    wccrToast('Work order info copied');
+  });
+})();
+</script>
+
+<script>
+// Copy all parts from ONE appliance card (using Total $, not Unit $)
+(function(){
+  const unitsWrap = document.getElementById('unitsWrap');
+  if (!unitsWrap) return;
+
+  unitsWrap.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.btn-copy-appliance');
+    if (!btn) return;
+
+    const card = btn.closest('.card');
+    if (!card) return;
+
+    const rows = card.querySelectorAll('tbody tr');
+    let lines = [];
+
+    rows.forEach(tr => {
+      const pn   = tr.querySelector('.pn')?.value?.trim();
+      const name = tr.querySelector('.part-name')?.value?.trim();
+      const qty  = tr.querySelector('.qty')?.value?.trim();
+
+      // берем рассчитанный Total ($)
+      const totalSpan = tr.querySelector('.line-total');
+      const totalValRaw = totalSpan
+        ? (totalSpan.getAttribute('data-value') || totalSpan.textContent || '').trim()
+        : '';
+
+      if (pn || name) {
+        const q        = qty || '1';
+        const totalVal = totalValRaw || '0.00';
+        lines.push(`${pn || ''} ${name || ''} x${q} $${totalVal}`.trim());
+      }
+    });
+
+    const finalBlock = lines.join('\n');
+    if (!finalBlock) return;
+
+    try {
+      await navigator.clipboard.writeText(finalBlock);
+    } catch (e2) {
+      const ta = document.createElement('textarea');
+      ta.value = finalBlock;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+
+    wccrToast('Appliance parts copied');
+  });
 })();
 </script>
 {% endblock %}

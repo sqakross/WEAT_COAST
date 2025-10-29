@@ -2519,23 +2519,27 @@ def wo_toggle_ordered(wo_id: int, wop_id: int):
 
     return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
+
 # --- Work Order details ---
 @inventory_bp.get("/work_orders/<int:wo_id>", endpoint="wo_detail")
 @login_required
 def wo_detail(wo_id):
-    from flask import current_app, render_template, flash, redirect, url_for
+    from flask import render_template, flash, redirect, url_for
     from sqlalchemy import func, or_, case
     from sqlalchemy.orm import selectinload, joinedload
     from flask_login import current_user
     from extensions import db
-    from models import WorkOrder, WorkUnit, WorkOrderPart, Part
+    from models import WorkOrder, WorkUnit, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch
+    from collections import defaultdict, defaultdict as _dd
 
-    # 1) Load Work Order with parts/units
+    # 1) загрузка WO со всеми строками
     wo = (
         db.session.query(WorkOrder)
         .options(
             selectinload(WorkOrder.parts),
-            selectinload(WorkOrder.units).selectinload(WorkUnit.parts),
+            selectinload(WorkOrder.units).options(
+                selectinload(WorkUnit.parts),
+            ),
         )
         .get(wo_id)
     )
@@ -2543,31 +2547,30 @@ def wo_detail(wo_id):
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # 2) Permissions
+    # 2) доступы
     role = (getattr(current_user, "role", "") or "").strip().lower()
     me_id = getattr(current_user, "id", None)
     me_name = (getattr(current_user, "username", "") or "").strip().lower()
+
     wo_tech_id = getattr(wo, "technician_id", None)
     wo_tech_name = (wo.technician_username or wo.technician_name or "").strip().lower()
 
     is_admin_like = role in ("admin", "superadmin")
     is_technician = role == "technician"
+
     is_my_wo = (
         (wo_tech_id and me_id and wo_tech_id == me_id)
         or (me_name and wo_tech_name and me_name == wo_tech_name)
     )
 
-    # Technician can only see their own WO
     if is_technician and not is_my_wo:
         flash("You don't have access to this Work Order.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # Only superadmin can confirm batches
     can_confirm_any = (role == "superadmin")
-    # Docs (Report/Print) visible to admin/superadmin/owner
     can_view_docs = (is_admin_like or is_my_wo)
 
-    # 3) Suppliers list for this WO (unique, cleaned)
+    # 3) suppliers (оставляем как было)
     suppliers = [
         r[0]
         for r in (
@@ -2583,10 +2586,7 @@ def wo_detail(wo_id):
         )
     ]
 
-    # 4) Issued / Batches information
-    from models import IssuedPartRecord, IssuedBatch  # noqa: E402
-    from collections import defaultdict
-
+    # 4) Issued / Batches (как было в последней рабочей версии)
     canon = (wo.canonical_job or "").strip()
 
     base_q = (
@@ -2607,7 +2607,6 @@ def wo_detail(wo_id):
         IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()
     ).all()
 
-    # aggregates for Issued Items summary
     money_issued = func.coalesce(
         func.sum(
             case(
@@ -2650,6 +2649,7 @@ def wo_detail(wo_id):
         ),
         0,
     )
+
     agg = (
         db.session.query(money_issued, money_returned, qty_issued, qty_returned)
         .select_from(IssuedPartRecord)
@@ -2665,7 +2665,6 @@ def wo_detail(wo_id):
     returned_qty = int(agg[3] or 0)
     net_qty = issued_qty - returned_qty
 
-    # group issued items into "batches" for technician view
     def _fmt(dt):
         return dt.strftime("%Y-%m-%d %H:%M") if dt else "—"
 
@@ -2694,7 +2693,6 @@ def wo_detail(wo_id):
             )
         grouped[key].append(r)
 
-    from collections import defaultdict as _dd
     net_by_pn = _dd(int)
     batches = []
     for _, recs in grouped.items():
@@ -2714,8 +2712,10 @@ def wo_detail(wo_id):
 
         for rec in recs:
             rid, pn, name, qty, price, confirmed, who, when_s = _extract(rec)
+
             if not pn or qty == 0:
                 continue
+
             line_total = qty * price
             total_value_raw += line_total
 
@@ -2764,17 +2764,18 @@ def wo_detail(wo_id):
 
     invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
 
-    # 5) Build blended pricing for PARTS TABLE (plan)
-    # Gather all WorkOrderPart rows in display order
-    all_parts = []
+    # 5) BLENDED PRICING with fallback
+
+    # соберём все строки деталей, как раньше
+    all_rows = []
     if wo.units:
         for u in wo.units:
-            if u.parts:
-                all_parts.extend(u.parts)
-    if (not all_parts) and wo.parts:
-        all_parts.extend(wo.parts)
+            if getattr(u, "parts", None):
+                all_rows.extend(u.parts)
+    if (not all_rows) and getattr(wo, "parts", None):
+        all_rows.extend(wo.parts)
 
-    # Map issued info by PN (sum qty & value with cost at issue)
+    # сколько реально выдали по каждому PN и по какой цене
     issued_info_by_pn = {}
     for rec in issued_items:
         pn = (getattr(rec.part, "part_number", "") or "").strip().upper()
@@ -2782,7 +2783,6 @@ def wo_detail(wo_id):
             continue
         q = int(rec.quantity or 0)
         cost_at_issue = float(rec.unit_cost_at_issue or 0.0)
-        # contribution to value is q * that cost (can be negative for returns)
         val = q * cost_at_issue
 
         info = issued_info_by_pn.get(pn)
@@ -2792,52 +2792,52 @@ def wo_detail(wo_id):
         info["qty"] += q
         info["value"] += val
 
-    # Fetch current inventory cost for all part_numbers in this WO
+    # узнаём текущую цену из инвентаря Part.unit_cost
     pn_list = []
-    for p in all_parts:
-        pn = (p.part_number or "").strip().upper()
+    for r in all_rows:
+        pn = (getattr(r, "part_number", "") or "").strip().upper()
         if pn and pn not in pn_list:
             pn_list.append(pn)
 
     inv_cost_map = {}
     if pn_list:
-        parts_rows = (
+        part_rows = (
             db.session.query(Part)
             .filter(func.upper(Part.part_number).in_(pn_list))
             .all()
         )
-        for pr in parts_rows:
+        for pr in part_rows:
             key = (pr.part_number or "").strip().upper()
             inv_cost_map[key] = float(pr.unit_cost or 0.0)
 
-    # Build final display rows
     display_parts = []
     grand_total_display = 0.0
 
-    for p in all_parts:
-        pn = (p.part_number or "").strip().upper()
-        qty_planned = int(p.quantity or 0)
+    for r in all_rows:
+        pn = (getattr(r, "part_number", "") or "").strip().upper()
+        qty_planned = int(getattr(r, "quantity", 0) or 0)
 
-        # issued side
-        issued_qty_raw = 0
-        issued_val_raw = 0.0
+        # 1) что уже выдано
         ii = issued_info_by_pn.get(pn)
-        if ii:
-            issued_qty_raw = int(ii["qty"] or 0)
-            issued_val_raw = float(ii["value"] or 0.0)
+        issued_qty_raw = int(ii["qty"] or 0) if ii else 0
+        issued_val_raw = float(ii["value"] or 0.0) if ii else 0.0
 
-        # We only "count" issued if net qty > 0 after returns
-        # If net <= 0, treat as 0 (everything returned)
+        # если после возвратов <=0, считаем что фактически нет выдачи
         issued_qty_eff = issued_qty_raw if issued_qty_raw > 0 else 0
         issued_val_eff = issued_val_raw if issued_qty_raw > 0 else 0.0
 
-        # remaining side
+        # 2) какая цена на оставшиеся штуки
+        inv_cost = inv_cost_map.get(pn, 0.0)
+
+        # fallback: если детали ещё нет в инвентаре (inv_cost == 0),
+        # то используем ту цену, которая введена в самой строке WO
+        if inv_cost == 0.0:
+            inv_cost = float(getattr(r, "unit_cost", 0.0) or 0.0)
+
         not_issued_qty = qty_planned - issued_qty_eff
         if not_issued_qty < 0:
             not_issued_qty = 0
-
-        current_inv_cost = inv_cost_map.get(pn, 0.0)
-        not_issued_val = not_issued_qty * current_inv_cost
+        not_issued_val = not_issued_qty * inv_cost
 
         blended_total_val = issued_val_eff + not_issued_val
 
@@ -2848,43 +2848,45 @@ def wo_detail(wo_id):
 
         grand_total_display += blended_total_val
 
-        # status flags for styling
-        raw_oflag = getattr(p, "ordered_flag", None)
+        # 3) флаги для подсветки
+        raw_oflag = getattr(r, "ordered_flag", None)
         ordered_flag_truthy = raw_oflag not in (None, False, 0, "0", "", "false", "False")
         is_ordered = (
             ordered_flag_truthy
-            or (str(getattr(p, "status", "")).strip().lower() == "ordered")
-            or (str(getattr(p, "line_status", "")).strip().lower() == "ordered")
+            or (str(getattr(r, "status", "")).strip().lower() == "ordered")
+            or (str(getattr(r, "line_status", "")).strip().lower() == "ordered")
         )
         is_invoiced = pn in invoiced_pns
 
         display_parts.append(
             {
-                "part_number": p.part_number,
-                "alt_part_numbers": getattr(p, "alt_part_numbers", "") or getattr(p, "alt_numbers", "") or "",
-                "part_name": p.part_name or "—",
+                "part_number": getattr(r, "part_number", "") or "",
+                "alt_part_numbers": (
+                    getattr(r, "alt_part_numbers", "") or
+                    getattr(r, "alt_numbers", "") or
+                    getattr(r, "alt_pn", "") or
+                    ""
+                ),
+                "part_name": getattr(r, "part_name", "") or getattr(r, "name", "") or "—",
                 "qty": qty_planned,
                 "unit_price_display": blended_unit_price,
                 "total_display": blended_total_val,
-                "supplier": getattr(p, "supplier", "") or "",
+                "supplier": getattr(r, "supplier", "") or "",
                 "is_ordered": is_ordered,
-                "ordered_date": getattr(p, "ordered_date", None),
-                "backorder_flag": bool(getattr(p, "backorder_flag", False)),
+                "ordered_date": getattr(r, "ordered_date", None) or getattr(r, "ordered_on", None),
+                "backorder_flag": bool(getattr(r, "backorder_flag", False)),
                 "is_invoiced": is_invoiced,
             }
         )
 
+    # 6) отдаём в шаблон
     return render_template(
         "wo_detail.html",
         wo=wo,
-        # blended view data for PARTS TABLE
+
         display_parts=display_parts,
         grand_total_display=grand_total_display,
 
-        # for lower sections
-        batches=batches,
-        suppliers=suppliers,
-        invoiced_pns=invoiced_pns,
         issued_items=issued_items,
         issued_total=issued_total,
         returned_total=returned_total,
@@ -2893,11 +2895,15 @@ def wo_detail(wo_id):
         returned_qty=returned_qty,
         net_qty=net_qty,
 
-        # perms
+        batches=batches,
+        suppliers=suppliers,
+        invoiced_pns=invoiced_pns,
+
         is_my_wo=is_my_wo,
-        can_confirm=can_confirm_any,       # legacy var
-        can_confirm_any=can_confirm_any,   # superadmin only
+        can_confirm=can_confirm_any,
+        can_confirm_any=can_confirm_any,
         can_view_docs=can_view_docs,
+        current_user=current_user,
     )
 
 @inventory_bp.post("/work_orders/new", endpoint="wo_create")
