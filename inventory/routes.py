@@ -2528,9 +2528,9 @@ def wo_detail(wo_id):
     from sqlalchemy.orm import selectinload, joinedload
     from flask_login import current_user
     from extensions import db
-    from models import WorkOrder, WorkUnit, WorkOrderPart
+    from models import WorkOrder, WorkUnit, WorkOrderPart, Part
 
-    # 1) WO
+    # 1) Load Work Order with parts/units
     wo = (
         db.session.query(WorkOrder)
         .options(
@@ -2543,7 +2543,7 @@ def wo_detail(wo_id):
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # 2) Права
+    # 2) Permissions
     role = (getattr(current_user, "role", "") or "").strip().lower()
     me_id = getattr(current_user, "id", None)
     me_name = (getattr(current_user, "username", "") or "").strip().lower()
@@ -2557,16 +2557,17 @@ def wo_detail(wo_id):
         or (me_name and wo_tech_name and me_name == wo_tech_name)
     )
 
-    # техник видит только свои WO
+    # Technician can only see their own WO
     if is_technician and not is_my_wo:
         flash("You don't have access to this Work Order.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # ⬇⬇⬇ ИЗМЕНЕНО: подтверждать/снимать подтверждение теперь МОЖЕТ ТОЛЬКО SUPERADMIN
+    # Only superadmin can confirm batches
     can_confirm_any = (role == "superadmin")
+    # Docs (Report/Print) visible to admin/superadmin/owner
     can_view_docs = (is_admin_like or is_my_wo)
 
-    # 3) Поставщики
+    # 3) Suppliers list for this WO (unique, cleaned)
     suppliers = [
         r[0]
         for r in (
@@ -2582,7 +2583,7 @@ def wo_detail(wo_id):
         )
     ]
 
-    # 4) Партии/журнал
+    # 4) Issued / Batches information
     from models import IssuedPartRecord, IssuedBatch  # noqa: E402
     from collections import defaultdict
 
@@ -2606,12 +2607,14 @@ def wo_detail(wo_id):
         IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()
     ).all()
 
-    # агрегаты
+    # aggregates for Issued Items summary
     money_issued = func.coalesce(
         func.sum(
             case(
-                (IssuedPartRecord.quantity > 0,
-                 IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
+                (
+                    IssuedPartRecord.quantity > 0,
+                    IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue,
+                ),
                 else_=0,
             )
         ),
@@ -2620,18 +2623,32 @@ def wo_detail(wo_id):
     money_returned = func.coalesce(
         func.sum(
             case(
-                (IssuedPartRecord.quantity < 0,
-                 -IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue),
+                (
+                    IssuedPartRecord.quantity < 0,
+                    -IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue,
+                ),
                 else_=0,
             )
         ),
         0.0,
     )
     qty_issued = func.coalesce(
-        func.sum(case((IssuedPartRecord.quantity > 0, IssuedPartRecord.quantity), else_=0)), 0
+        func.sum(
+            case(
+                (IssuedPartRecord.quantity > 0, IssuedPartRecord.quantity),
+                else_=0,
+            )
+        ),
+        0,
     )
     qty_returned = func.coalesce(
-        func.sum(case((IssuedPartRecord.quantity < 0, -IssuedPartRecord.quantity), else_=0)), 0
+        func.sum(
+            case(
+                (IssuedPartRecord.quantity < 0, -IssuedPartRecord.quantity),
+                else_=0,
+            )
+        ),
+        0,
     )
     agg = (
         db.session.query(money_issued, money_returned, qty_issued, qty_returned)
@@ -2641,24 +2658,14 @@ def wo_detail(wo_id):
         .one()
     )
 
-    issued_total   = float(agg[0] or 0.0)
+    issued_total = float(agg[0] or 0.0)
     returned_total = float(agg[1] or 0.0)
-    net_total      = issued_total - returned_total
-    issued_qty     = int(agg[2] or 0)
-    returned_qty   = int(agg[3] or 0)
-    net_qty        = issued_qty - returned_qty
+    net_total = issued_total - returned_total
+    issued_qty = int(agg[2] or 0)
+    returned_qty = int(agg[3] or 0)
+    net_qty = issued_qty - returned_qty
 
-    # группировка
-    grouped = defaultdict(list)
-    for r in issued_items:
-        if getattr(r, "batch_id", None):
-            key = ("batch", r.batch_id)
-        elif getattr(r, "invoice_number", None):
-            key = ("inv", r.invoice_number)
-        else:
-            key = ("ungrouped", f"{r.issue_date:%Y%m%d%H%M%S}-{r.issued_to}-{r.reference_job or ''}")
-        grouped[key].append(r)
-
+    # group issued items into "batches" for technician view
     def _fmt(dt):
         return dt.strftime("%Y-%m-%d %H:%M") if dt else "—"
 
@@ -2674,6 +2681,19 @@ def wo_detail(wo_id):
             _fmt(getattr(rec, "confirmed_at", None)),
         )
 
+    grouped = defaultdict(list)
+    for r in issued_items:
+        if getattr(r, "batch_id", None):
+            key = ("batch", r.batch_id)
+        elif getattr(r, "invoice_number", None):
+            key = ("inv", r.invoice_number)
+        else:
+            key = (
+                "ungrouped",
+                f"{r.issue_date:%Y%m%d%H%M%S}-{r.issued_to}-{r.reference_job or ''}",
+            )
+        grouped[key].append(r)
+
     from collections import defaultdict as _dd
     net_by_pn = _dd(int)
     batches = []
@@ -2682,11 +2702,12 @@ def wo_detail(wo_id):
         issued_at = (b.issue_date if b else recs[0].issue_date)
         issued_at_str = _fmt(issued_at)
         tech = recs[0].issued_to
-        ref  = (b.reference_job if b else (recs[0].reference_job or "")) or ""
+        ref = (b.reference_job if b else (recs[0].reference_job or "")) or ""
         report_id = (b.invoice_number if b else recs[0].invoice_number)
-        location  = getattr(b, "location", None)
+        location = getattr(b, "location", None)
 
         ref_is_return = "RETURN" in ref.upper()
+
         items = []
         total_value_raw = 0.0
         unconfirmed_count = 0
@@ -2697,49 +2718,170 @@ def wo_detail(wo_id):
                 continue
             line_total = qty * price
             total_value_raw += line_total
+
             is_item_return = ref_is_return or (qty < 0)
             eff_sign = -1 if is_item_return else 1
             net_by_pn[pn] += eff_sign * abs(qty)
+
             if (not confirmed) and qty > 0:
                 unconfirmed_count += 1
-            items.append({
-                "id": rid,
-                "pn": pn,
-                "name": name or "—",
-                "qty": abs(qty),
-                "unit_price": price,
-                "negative": (line_total < 0) or is_item_return,
-                "confirmed": confirmed,
-                "confirmed_by": who,
-                "confirmed_at": when_s,
-            })
+
+            items.append(
+                {
+                    "id": rid,
+                    "pn": pn,
+                    "name": name or "—",
+                    "qty": abs(qty),
+                    "unit_price": price,
+                    "negative": (line_total < 0) or is_item_return,
+                    "confirmed": confirmed,
+                    "confirmed_by": who,
+                    "confirmed_at": when_s,
+                }
+            )
 
         is_group_return = (total_value_raw < 0) or ref_is_return
         all_conf = (unconfirmed_count == 0) and bool(items)
         any_conf = any(it.get("confirmed") for it in items) if items else False
 
-        batches.append({
-            "issued_at": issued_at_str,
-            "technician": tech,
-            "canonical_ref": canon,
-            "reference_job": ref,
-            "location": location,
-            "report_id": report_id,
-            "invoice_number": report_id,
-            "is_return": is_group_return,
-            "total_value": total_value_raw,
-            "items": items,
-            "all_confirmed": all_conf,
-            "any_confirmed": any_conf,
-            "unconfirmed_count": unconfirmed_count,
-        })
+        batches.append(
+            {
+                "issued_at": issued_at_str,
+                "technician": tech,
+                "canonical_ref": canon,
+                "reference_job": ref,
+                "location": location,
+                "report_id": report_id,
+                "invoice_number": report_id,
+                "is_return": is_group_return,
+                "total_value": total_value_raw,
+                "items": items,
+                "all_confirmed": all_conf,
+                "any_confirmed": any_conf,
+                "unconfirmed_count": unconfirmed_count,
+            }
+        )
 
     invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
+
+    # 5) Build blended pricing for PARTS TABLE (plan)
+    # Gather all WorkOrderPart rows in display order
+    all_parts = []
+    if wo.units:
+        for u in wo.units:
+            if u.parts:
+                all_parts.extend(u.parts)
+    if (not all_parts) and wo.parts:
+        all_parts.extend(wo.parts)
+
+    # Map issued info by PN (sum qty & value with cost at issue)
+    issued_info_by_pn = {}
+    for rec in issued_items:
+        pn = (getattr(rec.part, "part_number", "") or "").strip().upper()
+        if not pn:
+            continue
+        q = int(rec.quantity or 0)
+        cost_at_issue = float(rec.unit_cost_at_issue or 0.0)
+        # contribution to value is q * that cost (can be negative for returns)
+        val = q * cost_at_issue
+
+        info = issued_info_by_pn.get(pn)
+        if not info:
+            info = {"qty": 0, "value": 0.0}
+            issued_info_by_pn[pn] = info
+        info["qty"] += q
+        info["value"] += val
+
+    # Fetch current inventory cost for all part_numbers in this WO
+    pn_list = []
+    for p in all_parts:
+        pn = (p.part_number or "").strip().upper()
+        if pn and pn not in pn_list:
+            pn_list.append(pn)
+
+    inv_cost_map = {}
+    if pn_list:
+        parts_rows = (
+            db.session.query(Part)
+            .filter(func.upper(Part.part_number).in_(pn_list))
+            .all()
+        )
+        for pr in parts_rows:
+            key = (pr.part_number or "").strip().upper()
+            inv_cost_map[key] = float(pr.unit_cost or 0.0)
+
+    # Build final display rows
+    display_parts = []
+    grand_total_display = 0.0
+
+    for p in all_parts:
+        pn = (p.part_number or "").strip().upper()
+        qty_planned = int(p.quantity or 0)
+
+        # issued side
+        issued_qty_raw = 0
+        issued_val_raw = 0.0
+        ii = issued_info_by_pn.get(pn)
+        if ii:
+            issued_qty_raw = int(ii["qty"] or 0)
+            issued_val_raw = float(ii["value"] or 0.0)
+
+        # We only "count" issued if net qty > 0 after returns
+        # If net <= 0, treat as 0 (everything returned)
+        issued_qty_eff = issued_qty_raw if issued_qty_raw > 0 else 0
+        issued_val_eff = issued_val_raw if issued_qty_raw > 0 else 0.0
+
+        # remaining side
+        not_issued_qty = qty_planned - issued_qty_eff
+        if not_issued_qty < 0:
+            not_issued_qty = 0
+
+        current_inv_cost = inv_cost_map.get(pn, 0.0)
+        not_issued_val = not_issued_qty * current_inv_cost
+
+        blended_total_val = issued_val_eff + not_issued_val
+
+        if qty_planned > 0:
+            blended_unit_price = blended_total_val / qty_planned
+        else:
+            blended_unit_price = 0.0
+
+        grand_total_display += blended_total_val
+
+        # status flags for styling
+        raw_oflag = getattr(p, "ordered_flag", None)
+        ordered_flag_truthy = raw_oflag not in (None, False, 0, "0", "", "false", "False")
+        is_ordered = (
+            ordered_flag_truthy
+            or (str(getattr(p, "status", "")).strip().lower() == "ordered")
+            or (str(getattr(p, "line_status", "")).strip().lower() == "ordered")
+        )
+        is_invoiced = pn in invoiced_pns
+
+        display_parts.append(
+            {
+                "part_number": p.part_number,
+                "alt_part_numbers": getattr(p, "alt_part_numbers", "") or getattr(p, "alt_numbers", "") or "",
+                "part_name": p.part_name or "—",
+                "qty": qty_planned,
+                "unit_price_display": blended_unit_price,
+                "total_display": blended_total_val,
+                "supplier": getattr(p, "supplier", "") or "",
+                "is_ordered": is_ordered,
+                "ordered_date": getattr(p, "ordered_date", None),
+                "backorder_flag": bool(getattr(p, "backorder_flag", False)),
+                "is_invoiced": is_invoiced,
+            }
+        )
 
     return render_template(
         "wo_detail.html",
         wo=wo,
-        avail=[],
+        # blended view data for PARTS TABLE
+        display_parts=display_parts,
+        grand_total_display=grand_total_display,
+
+        # for lower sections
         batches=batches,
         suppliers=suppliers,
         invoiced_pns=invoiced_pns,
@@ -2750,9 +2892,11 @@ def wo_detail(wo_id):
         issued_qty=issued_qty,
         returned_qty=returned_qty,
         net_qty=net_qty,
+
+        # perms
         is_my_wo=is_my_wo,
-        can_confirm=can_confirm_any,       # оставлено для обратной совместимости
-        can_confirm_any=can_confirm_any,   # теперь True только у SUPERADMIN
+        can_confirm=can_confirm_any,       # legacy var
+        can_confirm_any=can_confirm_any,   # superadmin only
         can_view_docs=can_view_docs,
     )
 

@@ -32,11 +32,7 @@
 
 {# ---------- permissions (safe defaults) ---------- #}
 {% set role_low = (current_user.role or '')|lower %}
-
-{# ALWAYS show Report # and Print for all roles #}
 {% set can_view_docs = true %}
-
-{# Confirm column in summary row (✅ / ☑️ / ☐) stays admin/superadmin only #}
 {% set can_confirm_any = role_low in ['admin','superadmin'] %}
 
 {# ---------- main WO info ---------- #}
@@ -120,23 +116,11 @@
 </div>
 
 {# =========================================================
-   PARTS TABLE (plan)
+   PARTS TABLE (plan) - blended pricing
    ========================================================= #}
 
-{% set ns = namespace(all_parts=[]) %}
-{% if wo.units and (wo.units|length) > 0 %}
-  {% for u in wo.units %}
-    {% if u.parts %}
-      {% set ns.all_parts = ns.all_parts + u.parts %}
-    {% endif %}
-  {% endfor %}
-{% elif wo.parts %}
-  {% set ns.all_parts = ns.all_parts + wo.parts %}
-{% endif %}
+{% if display_parts and (display_parts|length) > 0 %}
 
-{% set invoiced_set = (invoiced_pns or []) %}
-
-{% if ns.all_parts and (ns.all_parts|length) > 0 %}
 <style>
   .num { text-align:right; font-variant-numeric: tabular-nums; }
   .name-ordered  { color:#0d6efd; font-weight:600; }
@@ -159,55 +143,48 @@
         <th title="Backorder">B/O</th>
       </tr>
     </thead>
+
     <tbody>
-      {% set grand = namespace(total=0.0) %}
-
-      {% for p in ns.all_parts %}
-        {% set pn_str = (p.part_number or '')|string|trim|upper %}
-        {% set is_invoiced = pn_str in invoiced_set %}
-
-        {% set raw_oflag = p.ordered_flag if p.ordered_flag is defined else None %}
-        {% set ordered_flag_truthy = (raw_oflag not in (None, False, 0, '0', '', 'false', 'False')) %}
-        {% set is_ordered =
-             ordered_flag_truthy
-             or ((p.status or '')|lower == 'ordered')
-             or ((p.line_status or '')|lower == 'ordered') %}
-
-        {% set qty   = p.quantity or 0 %}
-        {% set unit  = (p.unit_cost if (p.unit_cost is defined and p.unit_cost is not none) else 0.0) %}
-        {% set total = qty * unit %}
-        {% set grand.total = grand.total + total %}
-
+      {% for row in display_parts %}
         <tr>
-          <td><code>{{ p.part_number }}</code></td>
-          <td>{{ p.alt_part_numbers or '—' }}</td>
+          <td><code>{{ row.part_number or '' }}</code></td>
+          <td>{{ row.alt_part_numbers or '—' }}</td>
+
           <td>
-            <span class="{% if is_invoiced %}name-invoiced{% elif is_ordered %}name-ordered{% endif %}">
-              {{ p.part_name or '—' }}
+            <span class="{% if row.is_invoiced %}name-invoiced{% elif row.is_ordered %}name-ordered{% endif %}">
+              {{ row.part_name or '—' }}
             </span>
           </td>
-          <td class="num">{{ qty }}</td>
-          <td class="num">{{ '%.2f'|format(unit) }}</td>
-          <td class="num">{{ '%.2f'|format(total) }}</td>
-          <td>{{ p.supplier or '' }}</td>
+
+          <td class="num">{{ row.qty or 0 }}</td>
+
+          <td class="num">
+            {{ '%.2f'|format(row.unit_price_display or 0) }}
+          </td>
+
+          <td class="num">
+            {{ '%.2f'|format(row.total_display or 0) }}
+          </td>
+
+          <td>{{ row.supplier or '' }}</td>
 
           <td class="text-center">
             <input type="checkbox"
                    class="form-check-input"
                    disabled
-                   {% if is_ordered %}checked{% endif %}>
+                   {% if row.is_ordered %}checked{% endif %}>
           </td>
 
           <td class="text-center">
-            {% if p.ordered_date %}
-              {{ p.ordered_date|local_date }}
+            {% if row.ordered_date %}
+              {{ row.ordered_date|local_date }}
             {% else %}
               <span class="text-muted">—</span>
             {% endif %}
           </td>
 
           <td class="text-center">
-            {% if p.backorder_flag %}
+            {% if row.backorder_flag %}
               <span class="badge bg-warning text-dark">B/O</span>
             {% else %}
               <span class="text-muted">—</span>
@@ -220,14 +197,15 @@
     <tfoot>
       <tr class="table-light">
         <th colspan="5" class="text-end">Grand total (plan):</th>
-        <th class="num">{{ '%.2f'|format(grand.total) }}</th>
+        <th class="num">{{ '%.2f'|format(grand_total_display or 0) }}</th>
         <th colspan="4"></th>
       </tr>
     </tfoot>
   </table>
 </div>
+
 {% else %}
-<p class="text-muted">No parts listed for this work order.</p>
+  <p class="text-muted">No parts listed for this work order.</p>
 {% endif %}
 
 {# =========================================================
@@ -235,6 +213,7 @@
    ========================================================= #}
 
 <h5 class="mt-4">Issued Items (this WO)</h5>
+
 <style>
   .row-ret   { background:#fff5f5; }
   .inv-badge { font-size:.75rem; }
@@ -375,7 +354,7 @@
                         (${{ '%.2f'|format(it.unit_price) }})
                       {% endif %}
 
-                      {# 1. ADMIN/SUPERADMIN: полный контроль чекбокса #}
+                      {# ADMIN/SUPERADMIN: can toggle both ways #}
                       {% if is_adminlike %}
                         <form method="post"
                               action="{{ url_for('inventory.issued_confirm_toggle') }}"
@@ -402,10 +381,9 @@
                           </span>
                         </form>
 
-                      {# 2. TECHNICIAN: может только подтвердить (one-way) #}
+                      {# TECHNICIAN: can only confirm once (one-way) #}
                       {% elif is_tech %}
                         {% if it.confirmed %}
-                          {# уже подтверждено -> показать checked disabled, нельзя снимать #}
                           <span class="ms-2">
                             <input type="checkbox"
                                    class="form-check-input"
@@ -418,7 +396,6 @@
                             </span>
                           </span>
                         {% else %}
-                          {# ещё не подтверждено -> дать форму только чтобы поставить галку #}
                           <form method="post"
                                 action="{{ url_for('inventory.issued_confirm_toggle') }}"
                                 style="display:inline">
@@ -426,9 +403,6 @@
                             <input type="hidden" name="wo_id" value="{{ wo.id }}">
                             <input type="hidden" name="return_to" value="{{ request.full_path }}">
 
-                            {# чекбокс не отмечен, техник может отметить.
-                               После сабмита сервер должен засетить confirmed=True.
-                               Мы НЕ даём ему опцию снять, потому что checked -> disabled ветка выше #}
                             <input type="checkbox"
                                    name="state"
                                    value="1"
@@ -441,7 +415,7 @@
                           </form>
                         {% endif %}
 
-                      {# 3. Остальные роли: только статус, без чекбокса #}
+                      {# READ-ONLY roles #}
                       {% else %}
                         <span class="small text-muted ms-2">
                           {% if it.confirmed %}
