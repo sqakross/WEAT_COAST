@@ -3799,7 +3799,6 @@ def wo_issue_instock(wo_id):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # базовые импорты, которые используются ниже
     from urllib.parse import urlencode
     from markupsafe import Markup
     from sqlalchemy import func
@@ -3811,7 +3810,7 @@ def wo_issue_instock(wo_id):
 
     wo = WorkOrder.query.get_or_404(wo_id)
 
-    # ===== прочитаем флаг автосмены статуса =====
+    # ===== флаг автосмены статуса (done или нет) =====
     set_status = (request.form.get("set_status") or "").strip().lower()
 
     # === 1) расчёт доступности (для greedy-проверки) ===
@@ -3820,8 +3819,8 @@ def wo_issue_instock(wo_id):
     except Exception:
         avail_rows = []
 
-    stock_map = {}  # PN -> on_hand
-    hint_map  = {}  # PN -> hint
+    stock_map = {}  # PN -> on_hand (по расчёту)
+    hint_map  = {}  # PN -> hint/status
     for r in avail_rows:
         pn = (r.get("part_number") or "").strip().upper()
         if not pn:
@@ -3840,7 +3839,7 @@ def wo_issue_instock(wo_id):
             return True
         return False
 
-    # === 2) Режим “выбрано” — читаем реальные ID строк ===
+    # === 2) Режим “выбрано” — выдаём конкретные строки по их ID ===
     raw_ids = (request.form.get("part_ids") or "").strip()
     items_to_issue = []
     issued_row_ids = []
@@ -3854,8 +3853,10 @@ def wo_issue_instock(wo_id):
 
         wops: list[WorkOrderPart] = (
             WorkOrderPart.query
-            .filter(WorkOrderPart.work_order_id == wo_id,
-                    WorkOrderPart.id.in_(ids))
+            .filter(
+                WorkOrderPart.work_order_id == wo_id,
+                WorkOrderPart.id.in_(ids)
+            )
             .all()
         )
         if not wops:
@@ -3870,7 +3871,7 @@ def wo_issue_instock(wo_id):
             if not pn or qty_req <= 0:
                 continue
 
-            # Найдём складскую запись (location-специфично, если есть)
+            # найдём конкретный складской Part
             q_base = Part.query.filter(func.upper(Part.part_number) == pn)
             part = None
             if part_has_location and getattr(line, "warehouse", None):
@@ -3882,7 +3883,8 @@ def wo_issue_instock(wo_id):
 
             ok = can_issue(pn, qty_req)
 
-            # Фоллбэк: если greedy «нет», но реально хватает — разрешим
+            # доп. проверка: если greedy сказал "нет",
+            # но фактически по складу qty хватает — разрешаем
             if not ok and part:
                 try:
                     real_left = int(getattr(part, "quantity", 0) or 0)
@@ -3901,6 +3903,7 @@ def wo_issue_instock(wo_id):
                     pass
 
             if not part or not ok:
+                # не смогли выдать эту строку
                 skipped_rows.append({
                     "id": line.id,
                     "pn": pn,
@@ -3910,17 +3913,17 @@ def wo_issue_instock(wo_id):
                 })
                 continue
 
-            unit_price = None
-            if getattr(line, "unit_cost", None) is not None:
-                try:
-                    unit_price = float(line.unit_cost)
-                except Exception:
-                    unit_price = None
+            # ✅ ВАЖНО:
+            # Фиксируем ЦЕНУ ДЛЯ ИНВОЙСА с реального склада, а не из WorkOrderPart.
+            try:
+                real_cost = float(part.unit_cost or 0.0)
+            except Exception:
+                real_cost = 0.0
 
             items_to_issue.append({
                 "part_id": part.id,
                 "qty": qty_req,
-                "unit_price": unit_price
+                "unit_price": real_cost,   # <-- вот это уйдёт в unit_cost_at_issue
             })
             issued_row_ids.append(line.id)
 
@@ -3939,7 +3942,7 @@ def wo_issue_instock(wo_id):
             items=items_to_issue
         )
 
-        # Поддержка двух сигнатур: (dt, records) ИЛИ (dt, created_bool)
+        # поддержка обеих сигнатур: (dt, records) ИЛИ (dt, created_bool)
         issue_date = None
         new_records = None
         try:
@@ -3947,10 +3950,9 @@ def wo_issue_instock(wo_id):
         except Exception:
             issue_date, _created = issue_result     # старая сигнатура
 
-        # отметим выбранные строки (issued_qty + статус при закрытии)
+        # отметим, сколько реально выдали в WorkOrderPart
         now = datetime.utcnow()
         for line in WorkOrderPart.query.filter(WorkOrderPart.id.in_(issued_row_ids)).all():
-            # сколько было и сколько надо
             qty_needed = int(line.quantity or 0)
             issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
             issue_now = max(qty_needed - issued_so_far, 0)
@@ -3969,7 +3971,7 @@ def wo_issue_instock(wo_id):
             db.session.add(line)
         db.session.commit()
 
-        # === ВАЖНО: меняем статус WO, если попросили ===
+        # автосмена статуса WO -> done (если попросили)
         if set_status == "done":
             try:
                 wo.status = "done"
@@ -3977,7 +3979,7 @@ def wo_issue_instock(wo_id):
             except Exception:
                 db.session.rollback()
 
-        # --- Если есть записи — сразу делаем инвойс и редиректим на него ---
+        # --- если есть новые записи - делаем инвойс и редиректим на него ---
         if new_records:
             try:
                 batch = _ensure_invoice_number_for_records(
@@ -3992,7 +3994,7 @@ def wo_issue_instock(wo_id):
                 return redirect(f"/reports/{batch.invoice_number}", code=303)
             except Exception:
                 db.session.rollback()
-                # упадёт — ниже дадим ссылку на grouped
+                # если не удалось - пойдём в общий отчёт ниже
 
         # --- fallback: сгруппированный отчёт за день ---
         d = (issue_date or datetime.utcnow()).date().isoformat()
@@ -4012,30 +4014,42 @@ def wo_issue_instock(wo_id):
             f'<a href="{link}" target="_blank" rel="noopener">Open invoice group</a> to print.'
         ), "success")
 
-        return redirect(url_for("inventory.wo_detail",
-                                wo_id=wo.id,
-                                issued_ids=",".join(map(str, issued_row_ids))))
+        return redirect(url_for(
+            "inventory.wo_detail",
+            wo_id=wo.id,
+            issued_ids=",".join(map(str, issued_row_ids))
+        ))
 
-    # === 3) «ничего не выбрано» — прежний поток (по avail_rows) ===
-    # подготовим словарь PN -> сколько выдаём сейчас (issue_now)
+    # === 3) Режим “ничего не выбрано” — массовая выдача in-stock ===
+    # строим pn_issue_map и items_to_issue на основе avail_rows
     pn_issue_map = {}
     items_to_issue.clear()
+
     for r in avail_rows:
         issue_now = int(r.get("issue_now") or 0)
         if issue_now <= 0:
             continue
+
         pn = (r.get("part_number") or "").strip().upper()
         if not pn:
             continue
+
         pn_issue_map[pn] = pn_issue_map.get(pn, 0) + issue_now
 
         part = Part.query.filter(func.upper(Part.part_number) == pn).first()
         if not part:
             continue
+
+        # ✅ тоже фиксируем реальную себестоимость склада
+        try:
+            real_cost = float(part.unit_cost or 0.0)
+        except Exception:
+            real_cost = 0.0
+
         items_to_issue.append({
             "part_id": part.id,
             "qty": issue_now,
-            "unit_price": None
+            "unit_price": real_cost,  # фиксируем правильную цену
         })
 
     if not items_to_issue:
@@ -4048,22 +4062,26 @@ def wo_issue_instock(wo_id):
         items=items_to_issue
     )
 
-    # === РАСПРЕДЕЛЯЕМ выдачу по строкам WO по PN ===
-    # для каждого PN — идём по строкам этой WO с тем же PN и увеличиваем issued_qty, пока не исчерпаем выдачу
+    # распределяем выданное количество по строкам этого WO (issued_qty / status / last_issued_at)
     now = datetime.utcnow()
     for pn, need_to_apply in pn_issue_map.items():
         if need_to_apply <= 0:
             continue
+
         rows = (
             WorkOrderPart.query
-            .filter(WorkOrderPart.work_order_id == wo.id,
-                    func.upper(WorkOrderPart.part_number) == pn)
+            .filter(
+                WorkOrderPart.work_order_id == wo.id,
+                func.upper(WorkOrderPart.part_number) == pn
+            )
             .order_by(WorkOrderPart.id.asc())
             .all()
         )
+
         for line in rows:
             if need_to_apply <= 0:
                 break
+
             qty_needed = int(line.quantity or 0)
             issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
             remaining = max(qty_needed - issued_so_far, 0)
@@ -4072,20 +4090,22 @@ def wo_issue_instock(wo_id):
 
             delta = min(remaining, need_to_apply)
             line.issued_qty = issued_so_far + delta
+
             if line.issued_qty >= qty_needed:
                 try:
                     line.status = "done"
                 except Exception:
                     pass
+
             if hasattr(line, "last_issued_at"):
                 line.last_issued_at = now
+
             db.session.add(line)
             need_to_apply -= delta
-        # если остался хвост — это значит на строках уже всё закрыто; пропускаем
 
     db.session.commit()
 
-    # если явно попросили — ставим done
+    # статус WO -> done, если попросили
     if set_status == "done":
         try:
             wo.status = "done"
@@ -4093,7 +4113,7 @@ def wo_issue_instock(wo_id):
         except Exception:
             db.session.rollback()
     else:
-        # иначе — по факту остатка
+        # иначе попробуем автоматически закрыть если ничего не ждём
         try:
             still_wait = any(
                 (row.get("on_hand", 0) < row.get("requested", 0))
@@ -4101,6 +4121,7 @@ def wo_issue_instock(wo_id):
             )
         except Exception:
             still_wait = True
+
         if not still_wait:
             try:
                 wo.status = "done"
@@ -4108,7 +4129,7 @@ def wo_issue_instock(wo_id):
             except Exception:
                 db.session.rollback()
 
-    # grouped отчёт
+    # сгруппированный отчёт за день
     d = (issue_date or datetime.utcnow()).date().isoformat()
     params = urlencode({
         "start_date": d,
@@ -4117,9 +4138,13 @@ def wo_issue_instock(wo_id):
         "reference_job": wo.canonical_job
     })
     link = f"/reports_grouped?{params}"
-    flash(Markup(f'Issued in-stock items. <a href="{link}" target="_blank" rel="noopener">Open invoice group</a> to print.'), "success")
-    return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
+    flash(Markup(
+        f'Issued in-stock items. '
+        f'<a href="{link}" target="_blank" rel="noopener">Open invoice group</a> to print.'
+    ), "success")
+
+    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
 @login_required
@@ -4474,10 +4499,22 @@ def wo_issue_instock_unit(wo_id, unit_id):
             pn = (r.get("part_number") or "").strip().upper()
             if not pn:
                 continue
+
             part = Part.query.filter_by(part_number=pn).first()
             if not part:
                 continue
-            items.append({"part_id": part.id, "qty": int(r["issue_now"]), "unit_price": None})
+
+            # ✅ фиксируем себестоимость склада в момент выдачи
+            try:
+                real_cost = float(part.unit_cost or 0.0)
+            except Exception:
+                real_cost = 0.0
+
+            items.append({
+                "part_id": part.id,
+                "qty": int(r["issue_now"]),
+                "unit_price": real_cost,   # пробрасываем стоимость склада
+            })
 
     if not items:
         flash("Nothing available to issue for this unit.", "warning")
@@ -4490,11 +4527,11 @@ def wo_issue_instock_unit(wo_id, unit_id):
         items=items
     )
 
-    # поддержка обоих вариантов возврата
+    # поддержка обоих вариантов возврата (_issue_records_bulk может вернуть count)
     if isinstance(maybe_records, (list, tuple)) and maybe_records and hasattr(maybe_records[0], "id"):
         new_records = list(maybe_records)
     else:
-        # подбираем только что созданные строки окном по времени
+        # fallback: собрать только что созданные строки по окну +/-2 минуты
         t0 = issue_date - timedelta(minutes=2)
         t1 = issue_date + timedelta(minutes=2)
         new_records = IssuedPartRecord.query.filter(
@@ -4508,7 +4545,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         ).all()
 
     if not new_records:
-        # даже если не собрали записи — статус всё равно поменяем, если просили
+        # даже если не нашли "new_records" (крайне редко), мы всё равно можем завершить
         if set_status == "done":
             try:
                 wo.status = "done"
@@ -4540,7 +4577,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         flash(f"Error creating invoice batch: {e}", "danger")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # --- обновим статус WO ---
+    # --- обновляем статус WO ---
     if set_status == "done":
         try:
             wo.status = "done"
@@ -4550,14 +4587,17 @@ def wo_issue_instock_unit(wo_id, unit_id):
     else:
         try:
             avail_all = compute_availability_multi(wo)
-            still_wait = any(int(x.get("on_hand", 0)) < int(x.get("requested", 0)) for x in avail_all)
+            still_wait = any(
+                int(x.get("on_hand", 0)) < int(x.get("requested", 0))
+                for x in avail_all
+            )
             if not still_wait:
                 wo.status = "done"
                 db.session.commit()
         except Exception:
             db.session.rollback()
 
-    # --- редирект прямо на отчёт ---
+    # --- редирект прямо на отчёт по инвойсу ---
     return redirect(f"/reports/{batch.invoice_number}", code=303)
 
 @inventory_bp.post("/work_orders/<int:wo_id>/status")
