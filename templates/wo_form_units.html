@@ -17,19 +17,16 @@
   .wo-form .unit-table .issue-check{position:relative; z-index:3; pointer-events:auto!important; opacity:1!important; cursor:pointer;}
   .wo-form .unit-table td.issue-cell, .wo-form .unit-table td.issue-cell *{ pointer-events:auto!important; }
   tr.issued-row{ background:#f1f3f5; color:#6c757d; }
-  .unit-table .ordered-col{ display:none; } /* hide “Ordered” col by default */
+  .unit-table .ordered-col{ display:none; }
 
-  /* header layout for title + Copy WO */
   .wo-header-line {
     display:flex;
     flex-wrap:wrap;
     align-items:center;
-    gap:.75rem; /* расстояние между заголовком и кнопкой Copy WO */
-    margin-bottom: .5rem;
+    gap:.75rem;
+    margin-bottom:.5rem;
   }
-  .wo-header-line h3 {
-    margin:0;
-  }
+  .wo-header-line h3 { margin:0; }
 </style>
 
 <div class="wo-header-line">
@@ -43,7 +40,9 @@
 </div>
 
 <form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm" class="wo-form">
-  {% if IS_EDIT %}<input type="hidden" name="wo_id" value="{{ wo.id }}">{% endif %}
+  {% if IS_EDIT %}
+    <input type="hidden" name="wo_id" value="{{ wo.id }}">
+  {% endif %}
 
   <div class="row g-3 mb-3">
     <div class="col-md-3">
@@ -204,14 +203,17 @@
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
-                <td class="text-center">{% if not RO %}<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>{% endif %}</td>
+                <td class="text-center">
+                  {% if not RO %}
+                    <button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>
+                  {% endif %}
+                </td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
 
-        <!-- footer of appliance card with Add row / Copy / Subtotal -->
         <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
           {% if not RO %}
           <div class="d-flex flex-wrap gap-2">
@@ -289,7 +291,6 @@
 
 {% block extra_js %}
 <script>
-/* Keep hidden technician_name synced with the selected technician_id */
 (function(){
   const sel  = document.querySelector('select[name="technician_id"]');
   const hidN = document.querySelector('input[name="technician_name"]');
@@ -330,7 +331,6 @@
   statusSel?.addEventListener('change', updateSupplierRequired);
 
   function toggleOrderedCols(){
-    // всегда показываем колонку Ord, не скрываем чекбокс
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
       cell.style.display = 'table-cell';
       const cb  = cell.querySelector('.ordered-check');
@@ -414,90 +414,120 @@
     }
   }
 
-  function extractAvailableCount(j){
-    const keys=['qty_available','available_qty','available','on_hand','onhand','stock','in_stock','qty','count','quantity'];
-    for(const k of keys){
-      const v=j&&j[k];
-      if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
-    }
-    for(const wrap of ['data','result']){
-      const o=j&&j[wrap];
-      if(o && typeof o==='object'){
-        for(const k of keys){
-          const v=o[k];
-          if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
-        }
+  function extractQtySmart(flat){
+    const keys = [
+      'qty_available','available_qty','available','on_hand','onhand',
+      'stock','in_stock','qty','count','quantity'
+    ];
+    for (const k of keys){
+      const v = flat[k];
+      if (v !== undefined && v !== null && !isNaN(Number(v))) {
+        return Number(v);
       }
     }
-    const sumArr=a=>Array.isArray(a)?a.reduce((s,x)=>s+(Number.isFinite(extractAvailableCount(x))?extractAvailableCount(x):0),0):0;
-    return sumArr(j) || sumArr(j?.rows) || sumArr(j?.items) || sumArr(j?.data?.rows) || 0;
+
+    function sumObj(o){
+      if (!o) return 0;
+      if (Array.isArray(o)){
+        return o.reduce((s,x)=>s+sumObj(x),0);
+      }
+      if (typeof o === 'object'){
+        let total=0;
+        for (const kk in o){
+          const vv = o[kk];
+          if (!isNaN(Number(vv))) total += Number(vv);
+        }
+        return total;
+      }
+      return 0;
+    }
+
+    return (
+      sumObj(flat.rows) ||
+      sumObj(flat.items) ||
+      sumObj(flat.data && flat.data.rows)
+    );
   }
 
-  function pick(j, variants){
+  function pick(flat, variants){
     for(const k of variants){
-      if(j && j[k] !== undefined && j[k] !== null && String(j[k]).trim()!==""){
-        return j[k];
+      if(flat && flat[k] !== undefined && flat[k] !== null && String(flat[k]).trim()!==""){
+        return flat[k];
       }
     }
     return undefined;
   }
 
   function fetchHint(tr){
-    const pn  = (tr.querySelector('.pn')?.value||'').trim().toUpperCase();
-    const qty = parseInt(tr.querySelector('.qty')?.value||'0',10)||0;
-    const hintEl = tr.querySelector('.hint');
+    const pnInput  = tr.querySelector('.pn');
+    const qtyInput = tr.querySelector('.qty');
+    const whInput  = tr.querySelector('.wh-input');
+    const nameInp  = tr.querySelector('.part-name');
+    const costInp  = tr.querySelector('.unit-cost');
+    const hintEl   = tr.querySelector('.hint');
 
-    if(!pn||qty<=0){
-      if(hintEl) hintEl.textContent='—';
-      setIssueEnabled(tr,false);
+    const pn  = (pnInput?.value || '').trim().toUpperCase();
+    const qty = parseInt(qtyInput?.value || '0', 10) || 0;
+
+    if (!pn || qty <= 0) {
+      if (hintEl) hintEl.textContent = '—';
+      setIssueEnabled(tr, false);
       return;
     }
 
-    const whNow = (tr.querySelector('.wh-input')?.value||'').trim();
+    const whNow = (whInput?.value || '').trim();
     const url = API_STOCK
       + '?pn=' + encodeURIComponent(pn)
       + '&qty=' + qty
-      + (whNow?('&wh='+encodeURIComponent(whNow)):'');
+      + (whNow ? ('&wh=' + encodeURIComponent(whNow)) : '');
+
     fetch(url)
-      .then(r=>r.ok ? r.json() : Promise.reject())
-      .then(j=>{
-        const t   = String(j?.hint || j?.status || '').toUpperCase();
-        const qa  = extractAvailableCount(j);
-        const isStock = /\b(STOCK|IN[-\s]?STOCK|ON HAND|AVAILABLE)\b/.test(t) || (qa >= qty);
-        const label   = isStock ? 'STOCK' : 'WAIT';
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(j => {
+        const flat = Object.assign({}, j, j?.data || {}, j?.result || {});
+        const qa = extractQtySmart(flat) || 0;
 
-        if (hintEl) hintEl.textContent = label + '/' + qa;
-        setIssueEnabled(tr, isStock);
+        const tRaw = String(flat.hint || flat.status || '').toUpperCase();
+        let isStock = /\b(STOCK|IN[-\s]?STOCK|ON HAND|AVAILABLE)\b/.test(tRaw);
 
-        const nameInp = tr.querySelector('.part-name');
-        const costInp = tr.querySelector('.unit-cost');
-        theWh         = tr.querySelector('.wh-input');
-
-        const jflat   = Object.assign({}, j, j?.data||{}, j?.result||{});
-        const pName   = pick(jflat, ['part_name','name','title','description']);
-        const pCost   = pick(jflat, ['unit_cost','price','unit_price','cost','last_price','avg_cost']);
-        const pWh     = pick(jflat,  ['warehouse','location','wh']);
-
-        if (nameInp && (!nameInp.value || !nameInp.value.trim()) && pName){
-          nameInp.value = String(pName).trim().slice(0,120);
+        if (!isStock && qa >= qty) {
+          isStock = true;
         }
 
+        const label = isStock ? 'STOCK' : 'WAIT';
+        if (hintEl) {
+          hintEl.textContent = label + '/' + qa;
+        }
+
+        setIssueEnabled(tr, isStock);
+
+        const nameGuess = pick(flat, ['part_name','name','title','description']);
+        if (nameInp && (!nameInp.value || !nameInp.value.trim()) && nameGuess){
+          nameInp.value = String(nameGuess).trim().slice(0,120);
+        }
+
+        const curCost = parseFloat(costInp?.value || '0') || 0;
+        const costGuess = pick(flat, ['unit_cost','price','unit_price','cost','last_price','avg_cost']);
         if (costInp){
-          const cur = parseFloat(costInp.value||'0')||0;
-          if ((cur===0 || !costInp.value) && pCost!==undefined && !isNaN(Number(pCost))){
-            costInp.value = (
-              Math.round((Number(pCost)+Number.EPSILON)*100)/100
+          if ((curCost === 0 || !costInp.value) && costGuess !== undefined && !isNaN(Number(costGuess))){
+            const newCost = (
+              Math.round((Number(costGuess)+Number.EPSILON)*100)/100
             ).toFixed(2);
-            recomputeUnitSubtotal(tr.closest('.card'));
+            costInp.value = newCost;
+            const card = tr.closest('.card');
+            if (card) {
+              recomputeUnitSubtotal(card);
+            }
           }
         }
 
-        if (theWh && (!theWh.value || !theWh.value.trim()) && pWh){
-          theWh.value = String(pWh).trim().slice(0,120);
+        const whGuess = pick(flat, ['warehouse','location','wh']);
+        if (whInput && (!whInput.value || !whInput.value.trim()) && whGuess){
+          whInput.value = String(whGuess).trim().slice(0,120);
         }
       })
       .catch(()=>{
-        if(hintEl) hintEl.textContent='—';
+        if (hintEl) hintEl.textContent='—';
         setIssueEnabled(tr,false);
       });
   }
@@ -616,8 +646,6 @@
 </div>`;
   }
 
-  /* dynamic events */
-
   unitsWrap.addEventListener('input', (e)=>{
     const tr=e.target.closest('tr');
     const card=e.target.closest('.card');
@@ -684,7 +712,6 @@
     toggleOrderedCols();
   });
 
-  /* Select all in-stock — toggle */
   selectAllBtn?.addEventListener('click', ()=>{
     const rows = [...document.querySelectorAll('#unitsWrap tbody tr')].filter(tr=>{
       if (tr.classList.contains('issued-row')) return false;
@@ -723,7 +750,6 @@
     document.getElementById('issueForm').submit();
   });
 
-  /* init */
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
   document.querySelectorAll('#unitsWrap tbody tr').forEach(fetchHint);
   updateSupplierRequired();
@@ -731,10 +757,7 @@
 })();
 </script>
 
-<!-- COPY BUTTON LOGIC + TOAST -->
-
 <script>
-// small toast helper for copy feedback
 function wccrToast(msg) {
   const t = document.createElement('div');
   t.textContent = msg;
@@ -754,7 +777,6 @@ function wccrToast(msg) {
   setTimeout(() => t.remove(), 2000);
 }
 
-// Copy WO (technician + jobs)
 (function(){
   const btnWO = document.getElementById('btnCopyWO');
   if (!btnWO) return;
@@ -766,7 +788,6 @@ function wccrToast(msg) {
     const techVal = (techInput?.value || '').trim();
     const jobsVal = (jobsInput?.value || '').trim();
 
-    // "985234, 1212112" -> "985234 1212112"
     const jobsFlat = jobsVal
       .replace(/[,;]/g,' ')
       .replace(/\s+/g,' ')
@@ -792,7 +813,6 @@ function wccrToast(msg) {
 </script>
 
 <script>
-// Copy all parts from ONE appliance card (using Total $, not Unit $)
 (function(){
   const unitsWrap = document.getElementById('unitsWrap');
   if (!unitsWrap) return;
@@ -812,7 +832,6 @@ function wccrToast(msg) {
       const name = tr.querySelector('.part-name')?.value?.trim();
       const qty  = tr.querySelector('.qty')?.value?.trim();
 
-      // берем рассчитанный Total ($)
       const totalSpan = tr.querySelector('.line-total');
       const totalValRaw = totalSpan
         ? (totalSpan.getAttribute('data-value') || totalSpan.textContent || '').trim()

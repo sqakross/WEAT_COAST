@@ -126,12 +126,15 @@
                           ✏️ Edit
                         </a>
 
-                        <!-- Change Password -->
-                        <a class="btn btn-primary btn-sm shadow-sm"
-                           style="font-weight:500; line-height:1.2; border-radius:.6rem; min-width:120px; box-shadow:0 .3rem .6rem rgba(13,110,253,.25)!important;"
-                           href="{{ url_for('inventory.change_password', user_id=u.id) }}">
+                        <!-- Change Password (open modal) -->
+                        <button class="btn btn-primary btn-sm shadow-sm"
+                                style="font-weight:500; line-height:1.2; border-radius:.6rem; min-width:120px; box-shadow:0 .3rem .6rem rgba(13,110,253,.25)!important;"
+                                data-user-id="{{ u.id }}"
+                                data-username="{{ u.username }}"
+                                data-need-current="{% if (current_user.role or '')|lower != 'superadmin' and current_user.id == u.id %}1{% else %}0{% endif %}"
+                                onclick="openPasswordModal(this)">
                           🔐 Change
-                        </a>
+                        </button>
 
                         {% if (current_user.role or '')|lower == 'superadmin' and u.id != current_user.id %}
                         <!-- Delete -->
@@ -261,6 +264,97 @@
 
   </div>
 </div>
+
+<!-- PASSWORD CHANGE MODAL -->
+<div class="modal fade" id="pwModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:400px;">
+    <div class="modal-content" style="border-radius:1rem;">
+      <div class="modal-header">
+        <h5 class="modal-title" id="pwModalTitle" style="font-weight:600; font-size:1rem;">
+          Change Password
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <form id="pwForm">
+        <div class="modal-body">
+
+          <input type="hidden" name="__user_id" id="pwUserId">
+          <div class="mb-2">
+            <label class="form-label fw-semibold mb-1" style="font-size:.8rem;">
+              User
+            </label>
+            <input class="form-control form-control-sm"
+                   id="pwUsernameDisplay"
+                   disabled
+                   style="border-radius:.6rem; font-size:.9rem;">
+          </div>
+
+          <div class="mb-2" id="pwCurrentWrap">
+            <label class="form-label fw-semibold mb-1" style="font-size:.8rem;">
+              Current Password
+            </label>
+            <input class="form-control form-control-sm"
+                   type="password"
+                   name="current_password"
+                   style="border-radius:.6rem; font-size:.9rem;">
+            <div class="form-text" style="font-size:.7rem; line-height:1.2;">
+              Required if you're changing your own password (non-superadmin).
+            </div>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label fw-semibold mb-1" style="font-size:.8rem;">
+              New Password
+            </label>
+            <input class="form-control form-control-sm"
+                   type="password"
+                   name="password"
+                   required
+                   style="border-radius:.6rem; font-size:.9rem;">
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label fw-semibold mb-1" style="font-size:.8rem;">
+              Confirm New Password
+            </label>
+            <input class="form-control form-control-sm"
+                   type="password"
+                   name="confirm_password"
+                   required
+                   style="border-radius:.6rem; font-size:.9rem;">
+          </div>
+
+          <div id="pwAlert" class="alert p-2 mt-3 d-none"
+               style="font-size:.8rem; border-radius:.6rem;"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button"
+                  class="btn btn-outline-secondary btn-sm"
+                  data-bs-dismiss="modal"
+                  style="border-radius:.6rem;">
+            Cancel
+          </button>
+          <button type="submit"
+                  class="btn btn-primary btn-sm"
+                  style="border-radius:.6rem; font-weight:600;">
+            Save
+          </button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+</div>
+
+<!-- floating toast / inline success -->
+<div id="pwToast"
+     class="alert alert-success shadow-sm position-fixed d-none"
+     style="right:1rem; bottom:1rem; min-width:220px; max-width:280px; font-size:.8rem; line-height:1.3; border-radius:.6rem; z-index:9999;">
+  Password updated
+</div>
+
 {% endblock %}
 
 
@@ -279,5 +373,108 @@
       });
     });
   })();
+
+  let pwModal;
+  document.addEventListener('DOMContentLoaded', () => {
+    const el = document.getElementById('pwModal');
+    if (window.bootstrap && bootstrap.Modal) {
+      pwModal = new bootstrap.Modal(el);
+    }
+  });
+
+  // open modal, fill fields
+  function openPasswordModal(btn) {
+    const userId   = btn.getAttribute('data-user-id');
+    const username = btn.getAttribute('data-username');
+    const needCur  = btn.getAttribute('data-need-current') === '1';
+
+    document.getElementById('pwUserId').value = userId;
+    document.getElementById('pwUsernameDisplay').value = username;
+
+    const curWrap = document.getElementById('pwCurrentWrap');
+    if (needCur) {
+      curWrap.classList.remove('d-none');
+    } else {
+      curWrap.classList.add('d-none');
+    }
+
+    // clear inputs each open
+    const form = document.getElementById('pwForm');
+    form.current_password && (form.current_password.value = '');
+    form.password.value = '';
+    form.confirm_password.value = '';
+    clearPwAlert();
+
+    pwModal && pwModal.show();
+  }
+  window.openPasswordModal = openPasswordModal;
+
+  function showPwAlert(msg, isError) {
+    const box = document.getElementById('pwAlert');
+    box.classList.remove('d-none','alert-danger','alert-success');
+    box.classList.add(isError ? 'alert-danger':'alert-success');
+    box.textContent = msg;
+  }
+
+  function clearPwAlert() {
+    const box = document.getElementById('pwAlert');
+    box.classList.add('d-none');
+    box.textContent = '';
+    box.classList.remove('alert-danger','alert-success');
+  }
+
+  function showToast(msg) {
+    const toast = document.getElementById('pwToast');
+    toast.textContent = msg || 'Password updated';
+    toast.classList.remove('d-none');
+    setTimeout(()=> {
+      toast.classList.add('d-none');
+    }, 4000);
+  }
+
+  // submit password change via fetch
+  document.getElementById('pwForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+
+    clearPwAlert();
+
+    const formEl  = e.target;
+    const userId  = document.getElementById('pwUserId').value;
+
+    const fd = new FormData();
+    // include current_password only if field visible
+    const curWrapHidden = document.getElementById('pwCurrentWrap').classList.contains('d-none');
+    if (!curWrapHidden) {
+      fd.append('current_password', formEl.current_password.value || '');
+    }
+    fd.append('password',          formEl.password.value || '');
+    fd.append('confirm_password',  formEl.confirm_password.value || '');
+
+    try {
+      const resp = await fetch(`/users/change_password/${userId}`, {
+        method: 'POST',
+        headers: {
+            'X-Requested-With': 'fetch'
+        },
+        body: fd
+      });
+
+
+      const data = await resp.json().catch(()=>null);
+
+      if (!resp.ok || !data || !data.ok) {
+        const msg = (data && data.error) ? data.error : 'Error updating password';
+        showPwAlert(msg, true);
+        return;
+      }
+
+      // success
+      pwModal && pwModal.hide();
+      showToast('Password updated for ' + document.getElementById('pwUsernameDisplay').value);
+
+    } catch(err) {
+      showPwAlert('Network / server error', true);
+    }
+  });
 </script>
 {% endblock %}

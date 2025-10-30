@@ -3639,20 +3639,15 @@ def api_stock_hint():
                     return s
         return None
 
-    # --- поиск Part по PN (+опционально по складу) ---
-    q = Part.query.filter(func.upper(Part.part_number) == pn)
+    # ----------------------------------------------------------------------
+    # 1. Собираем ВСЕ записи Part с таким PN (без фильтра по wh),
+    #    чтобы посчитать общий остаток по компании.
+    # ----------------------------------------------------------------------
+    all_parts_q = Part.query.filter(func.upper(Part.part_number) == pn)
+    all_parts = all_parts_q.all()
 
-    if wh and any(hasattr(Part, n) for n in ("location", "warehouse", "wh")):
-        if hasattr(Part, "location"):
-            q = q.filter(Part.location == wh)
-        elif hasattr(Part, "warehouse"):
-            q = q.filter(Part.warehouse == wh)
-        elif hasattr(Part, "wh"):
-            q = q.filter(Part.wh == wh)
-
-    part = q.first()
-    if not part:
-        # отдадим минимально полезный ответ, фронт покажет WAIT и не будет автозаполнять
+    if not all_parts:
+        # ничего вообще не нашли по PN
         return jsonify({
             "hint": "WAIT: unknown PN",
             "available_qty": 0,
@@ -3665,45 +3660,115 @@ def api_stock_hint():
             "requested_qty": qty
         })
 
-    # --- запасы/заказы/ETA ---
-    on_hand = pick_int(part, ("on_hand", "quantity", "qty_on_hand", "stock", "in_stock"), default=0)
-    ordered = pick_int(part, ("ordered_qty", "on_order", "ordered", "po_qty"), default=0)
-    eta_val = None
-    for n in ("eta", "expected_date", "arrival_date", "due_date"):
-        if hasattr(part, n):
-            eta_val = getattr(part, n)
-            break
+    # просуммируем on_hand по всем записям
+    total_on_hand = 0
+    total_ordered = 0
 
-    # --- автозаполнение: имя, цена, склад ---
-    part_name = pick_str(part, ("part_name", "name", "title", "description")) or ""
-    unit_cost = pick_num(part, ("unit_cost", "price", "unit_price", "cost", "last_price", "avg_cost"))
-    if unit_cost is not None:
-        unit_cost = round(unit_cost, 2)
-    warehouse = pick_str(part, ("warehouse", "location", "wh")) or (wh or "")
+    # заодно возьмём "эталонную" запись part_for_details
+    # (чтобы вытащить имя, цену, локацию и т.д.)
+    # приоритет:
+    #   1) запись с тем WH, который пользователь указал в форме
+    #   2) иначе просто первая запись
+    part_for_details = None
 
-    # --- хинт ---
-    if on_hand >= qty:
+    for p in all_parts:
+        # суммируем остаток
+        total_on_hand += pick_int(
+            p,
+            ("on_hand", "quantity", "qty_on_hand", "stock", "in_stock"),
+            default=0
+        )
+        total_ordered += pick_int(
+            p,
+            ("ordered_qty", "on_order", "ordered", "po_qty"),
+            default=0
+        )
+
+        # выбираем "лучшую" запись для данных
+        if part_for_details is None:
+            part_for_details = p
+
+        # если склад совпадает с wh — используем её как приоритетную
+        if wh:
+            # попробуем сравнить wh с тем, что хранится в p
+            cand_loc = None
+            if hasattr(p, "location") and getattr(p, "location"):
+                cand_loc = str(getattr(p, "location")).strip()
+            elif hasattr(p, "warehouse") and getattr(p, "warehouse"):
+                cand_loc = str(getattr(p, "warehouse")).strip()
+            elif hasattr(p, "wh") and getattr(p, "wh"):
+                cand_loc = str(getattr(p, "wh")).strip()
+
+            if cand_loc and cand_loc == wh:
+                part_for_details = p
+
+    # ----------------------------------------------------------------------
+    # 2. Теперь у нас есть total_on_hand по ВСЕМ складам.
+    #    Определяем hint на основе total_on_hand, НЕ только по конкретному складу.
+    # ----------------------------------------------------------------------
+    if total_on_hand >= qty:
         hint = "STOCK"
     else:
         hint = "WAIT"
 
-    # --- ответ фронту (важно: ключи available_qty, part_name, unit_cost, warehouse) ---
+    # ----------------------------------------------------------------------
+    # 3. Достаём красивые поля (имя, цена, склад и т.д.) из part_for_details.
+    #    Это важно для автозаполнения формы во фронте.
+    # ----------------------------------------------------------------------
+    p = part_for_details
+
+    eta_val = None
+    for n in ("eta", "expected_date", "arrival_date", "due_date"):
+        if hasattr(p, n):
+            eta_val = getattr(p, n)
+            if eta_val:
+                break
+
+    part_name = pick_str(
+        p,
+        ("part_name", "name", "title", "description")
+    ) or ""
+
+    unit_cost = pick_num(
+        p,
+        ("unit_cost", "price", "unit_price", "cost", "last_price", "avg_cost")
+    )
+    if unit_cost is not None:
+        unit_cost = round(unit_cost, 2)
+
+    warehouse_guess = pick_str(
+        p,
+        ("warehouse", "location", "wh")
+    ) or (wh or "")
+
+    # ----------------------------------------------------------------------
+    # 4. Возвращаем ответ.
+    #    ВАЖНО: оставляем те же ключи, которые фронт уже ждёт:
+    #    - "available_qty": теперь это ОБЩИЙ остаток total_on_hand
+    #    - "on_hand": тоже можно отдать общий остаток
+    # ----------------------------------------------------------------------
     payload = {
         "hint": hint,
-        "available_qty": on_hand,   # фронт читает это поле
-        "on_hand": on_hand,
-        "ordered": ordered,
-        "eta": (eta_val.isoformat() if hasattr(eta_val, "isoformat") else (str(eta_val).strip() if eta_val else None)),
-        "location": warehouse or None,
+        "available_qty": total_on_hand,   # раньше было on_hand конкретной записи
+        "on_hand": total_on_hand,         # тоже общий запас
+        "ordered": total_ordered,         # просто суммарно по всем Part
+        "eta": (
+            eta_val.isoformat()
+            if hasattr(eta_val, "isoformat")
+            else (str(eta_val).strip() if eta_val else None)
+        ),
 
-        # ключевое для автоподстановки:
+        # Это то, что фронт может использовать чтобы автозаполнить поля
+        "location": warehouse_guess or None,
+        "warehouse": warehouse_guess,
         "part_name": part_name,
         "unit_cost": unit_cost,
-        "warehouse": warehouse,
 
+        # инфо запроса
         "pn": pn,
         "requested_qty": qty,
     }
+
     return jsonify(payload)
 
 @inventory_bp.get("/work_orders")
@@ -6520,7 +6585,7 @@ def edit_user(user_id):
 @inventory_bp.route('/users/change_password/<int:user_id>', methods=['GET', 'POST'])
 @login_required
 def change_password(user_id):
-    from flask import request, flash, redirect, url_for, render_template
+    from flask import request, flash, redirect, url_for, render_template, jsonify
     from flask_login import current_user
     from werkzeug.security import generate_password_hash
     from extensions import db
@@ -6531,19 +6596,30 @@ def change_password(user_id):
     role = (current_user.role or '').lower()
     is_self = current_user.id == user_id
 
-    # superadmin → любой; admin → только user и свой; остальные (в т.ч. technician) → только себе
+    # superadmin → любой
+    # admin → только user и себя
+    # остальные → только себя
     if role == 'admin':
         if (user.role or '').lower() != 'user' and not is_self:
+            # not allowed
+            if request.headers.get('X-Requested-With') == 'fetch':
+                return jsonify({"ok": False, "error": "Access denied"}), 403
             flash("Admins can only change passwords for users with role 'user' or themselves.", "danger")
             return redirect(url_for('inventory.dashboard'))
+
     elif role != 'superadmin' and not is_self:
+        if request.headers.get('X-Requested-With') == 'fetch':
+            return jsonify({"ok": False, "error": "Access denied"}), 403
         flash("Access denied", "danger")
         return redirect(url_for('inventory.dashboard'))
 
     if request.method == 'POST':
+        # security check for self-change (non-superadmin must enter current password)
         if is_self and role != 'superadmin':
             current_password = (request.form.get('current_password') or '').strip()
             if not current_password or not user.check_password(current_password):
+                if request.headers.get('X-Requested-With') == 'fetch':
+                    return jsonify({"ok": False, "error": "Current password is incorrect."}), 400
                 flash("Current password is incorrect.", "danger")
                 return redirect(url_for('inventory.change_password', user_id=user_id))
 
@@ -6551,19 +6627,32 @@ def change_password(user_id):
         confirm_password = (request.form.get('confirm_password') or '').strip()
 
         if not new_password:
+            if request.headers.get('X-Requested-With') == 'fetch':
+                return jsonify({"ok": False, "error": "New password cannot be empty."}), 400
             flash("New password cannot be empty.", "danger")
             return redirect(url_for('inventory.change_password', user_id=user_id))
 
         if new_password != confirm_password:
+            if request.headers.get('X-Requested-With') == 'fetch':
+                return jsonify({"ok": False, "error": "Passwords do not match."}), 400
             flash("Passwords do not match.", "danger")
             return redirect(url_for('inventory.change_password', user_id=user_id))
 
         user.password_hash = generate_password_hash(new_password)
         db.session.commit()
+
+        # если это fetch-запрос из модалки -> вернём json (без redirect)
+        if request.headers.get('X-Requested-With') == 'fetch':
+            return jsonify({"ok": True})
+
+        # обычный сценарий (юзер сам зашёл на страницу смены пароля)
         flash("Password changed successfully", "success")
+        if role == 'superadmin':
+            return redirect(url_for('inventory.users'))
+        else:
+            return redirect(url_for('inventory.dashboard'))
 
-        return redirect(url_for('inventory.users' if role == 'superadmin' else 'inventory.dashboard'))
-
+    # GET (обычный режим, не через модалку)
     need_current = is_self and role != 'superadmin'
     return render_template('change_password.html', user=user, need_current=need_current)
 
