@@ -30,10 +30,14 @@
   </div>
 </div>
 
-{# ---------- permissions (safe defaults) ---------- #}
+{# ---------- permissions / role helpers ---------- #}
 {% set role_low = (current_user.role or '')|lower %}
-{% set can_view_docs = true %}
-{% set can_confirm_any = role_low in ['admin','superadmin'] %}
+{% set is_adminlike = role_low in ['admin','superadmin'] %}
+{% set is_tech      = role_low in ['technician','tech'] %}
+{# these two come from routes.py context: #}
+{% set can_view_docs   = can_view_docs %}
+{% set can_confirm_any = can_confirm_any %}
+{# is_my_wo also passed from routes.py #}
 
 {# ---------- main WO info ---------- #}
 {% set u0 = (wo.units|first) %}
@@ -313,111 +317,59 @@
     </thead>
 
     <tbody class="small">
-      {% if batches and (batches|length) > 0 %}
-        {% for b in batches %}
-          {% set is_return = b.get('is_return') %}
+    {% if batches and (batches|length) > 0 %}
+      {% for b in batches %}
+        {% set is_return        = b.get('is_return') %}
+        {% set items            = b.get('items') %}
+        {% set total_value      = b.get('total_value', 0.0) %}
+        {% set tech_for_links   = b.get('technician') or wo.technician_name or '' %}
+        {% set job_for_links    = b.get('reference_job') or wo.canonical_job or '' %}
+        {% set dt_for_links     = b.get('issued_at') or '' %}
+        {% set who_for_links    = current_user.username or current_user.name or current_user.id or '' %}
+        {% set report_id_val    = b.get('report_id') or b.get('invoice_number') %}
 
-          {# подготовим параметры для Report/Print #}
-          {% set tech_for_links = b.get('technician') or wo.technician_name or '' %}
-          {% set job_for_links  = b.get('reference_job') or wo.canonical_job or '' %}
-          {% set dt_for_links   = b.get('issued_at') or '' %}
-          {% set who_for_links  = current_user.username or current_user.name or current_user.id or '' %}
-
-          <tr class="{% if is_return %}inv-return-row{% endif %}">
-            <td>
-              {{ b.get('issued_at') }}
+        <tr class="{% if is_return %}inv-return-row{% endif %}">
+          <td class="batch-issued-at">
+            <span class="issued-at-text">{{ b.get('issued_at') }}</span>
+            <span class="batch-badge-holder ms-2">
               {% if b.get('all_confirmed') %}
-                <div>
-                  <span class="badge bg-success inv-badge">All confirmed</span>
-                </div>
+                <span class="badge bg-success inv-badge">All confirmed</span>
               {% elif b.get('any_confirmed') %}
-                <div>
-                  <span class="badge bg-info text-dark inv-badge">Partly confirmed</span>
-                </div>
+                <span class="badge bg-info text-dark inv-badge">Partly confirmed</span>
               {% endif %}
-            </td>
+            </span>
+          </td>
 
-            <td>{{ b.get('technician') }}</td>
-            <td>{{ b.get('canonical_ref') }}</td>
+          <td>{{ b.get('technician') }}</td>
+          <td>{{ b.get('canonical_ref') }}</td>
 
-            <td>
-              {% set items = b.get('items') %}
-              {% if items and (items|length) > 0 %}
-                <ul class="mb-0 ps-3">
-                  {% for it in items %}
-                    {% set is_adminlike = role_low in ['admin','superadmin'] %}
-                    {% set is_tech      = role_low in ['technician','tech'] %}
+          <td>
+            {% if items and (items|length) > 0 %}
+              <ul class="mb-0 ps-3">
+                {% for it in items %}
+                  <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}"
+                      data-item-id="{{ it.id }}">
+                    <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
+                    {% if it.unit_price is not none %}
+                      (${{ '%.2f'|format(it.unit_price) }})
+                    {% endif %}
 
-                    <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}">
-                      <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
-                      {% if it.unit_price is not none %}
-                        (${{ '%.2f'|format(it.unit_price) }})
-                      {% endif %}
+                    {# ==== ADMIN / SUPERADMIN: двунаправленно (check/uncheck) ==== #}
+                    {% if is_adminlike %}
+                      <form method="post"
+                            action="{{ url_for('inventory.issued_confirm_toggle') }}"
+                            style="display:inline">
+                        <input type="hidden" name="record_id" value="{{ it.id }}">
+                        <input type="hidden" name="wo_id" value="{{ wo.id }}">
 
-                      {# ADMIN/SUPERADMIN: can toggle both ways #}
-                      {% if is_adminlike %}
-                        <form method="post"
-                              action="{{ url_for('inventory.issued_confirm_toggle') }}"
-                              style="display:inline">
-                          <input type="hidden" name="record_id" value="{{ it.id }}">
-                          <input type="hidden" name="wo_id" value="{{ wo.id }}">
-                          <input type="hidden" name="return_to" value="{{ request.full_path }}">
+                        <input type="checkbox"
+                               name="state"
+                               value="1"
+                               class="form-check-input ms-2"
+                               {% if it.confirmed %}checked{% endif %}
+                               onchange="this.form.submit()">
 
-                          <input type="checkbox"
-                                 name="state"
-                                 value="1"
-                                 class="form-check-input ms-2"
-                                 {% if it.confirmed %}checked{% endif %}
-                                 onchange="this.form.submit()">
-
-                          <span class="small text-muted ms-1">
-                            {% if it.confirmed %}
-                              ✔ confirmed
-                              {% if it.confirmed_by %} by {{ it.confirmed_by }}{% endif %}
-                              {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
-                            {% else %}
-                              unchecked
-                            {% endif %}
-                          </span>
-                        </form>
-
-                      {# TECHNICIAN: can only confirm once (one-way) #}
-                      {% elif is_tech %}
-                        {% if it.confirmed %}
-                          <span class="ms-2">
-                            <input type="checkbox"
-                                   class="form-check-input"
-                                   checked
-                                   disabled>
-                            <span class="small text-muted ms-1">
-                              ✔ confirmed
-                              {% if it.confirmed_by %} by {{ it.confirmed_by }}{% endif %}
-                              {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
-                            </span>
-                          </span>
-                        {% else %}
-                          <form method="post"
-                                action="{{ url_for('inventory.issued_confirm_toggle') }}"
-                                style="display:inline">
-                            <input type="hidden" name="record_id" value="{{ it.id }}">
-                            <input type="hidden" name="wo_id" value="{{ wo.id }}">
-                            <input type="hidden" name="return_to" value="{{ request.full_path }}">
-
-                            <input type="checkbox"
-                                   name="state"
-                                   value="1"
-                                   class="form-check-input ms-2"
-                                   onchange="this.form.submit()">
-
-                            <span class="small text-muted ms-1">
-                              unchecked
-                            </span>
-                          </form>
-                        {% endif %}
-
-                      {# READ-ONLY roles #}
-                      {% else %}
-                        <span class="small text-muted ms-2">
+                        <span class="small text-muted ms-1 confirm-meta">
                           {% if it.confirmed %}
                             ✔ confirmed
                             {% if it.confirmed_by %} by {{ it.confirmed_by }}{% endif %}
@@ -426,65 +378,105 @@
                             unchecked
                           {% endif %}
                         </span>
-                      {% endif %}
-                    </li>
-                  {% endfor %}
-                </ul>
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
+                      </form>
 
-            {% set total_value = b.get('total_value', 0.0) %}
-            <td class="text-end {% if total_value < 0 %}inv-item-neg{% endif %}">
-              ${{ '%.2f'|format(total_value) }}
-              {% if is_return %}
-                <span class="badge bg-danger inv-badge">RETURN</span>
-              {% else %}
-                <span class="badge bg-success inv-badge">ISSUED</span>
-              {% endif %}
-            </td>
+                    {# ==== TECHNICIAN (только свой WO): только поставить, не снимать ==== #}
+                    {% elif is_tech and is_my_wo %}
+                      <span class="ms-2 tech-confirm-wrapper">
+                        <input type="checkbox"
+                               class="form-check-input ms-2 tech-confirm"
+                               data-record-id="{{ it.id }}"
+                               data-woid="{{ wo.id }}"
+                               {% if it.confirmed %}checked disabled{% endif %}>
 
-            {% if can_view_docs %}
-              <td class="text-nowrap">
+                        <span class="small text-muted ms-1 confirm-meta">
+                          {% if it.confirmed %}
+                            ✔ confirmed
+                            {% if it.confirmed_by %} by {{ it.confirmed_by }}{% endif %}
+                            {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
+                          {% else %}
+                            unchecked
+                          {% endif %}
+                        </span>
+                      </span>
+
+                    {# ==== READ ONLY ==== #}
+                    {% else %}
+                      <span class="small text-muted ms-2 confirm-meta">
+                        {% if it.confirmed %}
+                          ✔ confirmed
+                          {% if it.confirmed_by %} by {{ it.confirmed_by }}{% endif %}
+                          {% if it.confirmed_at %} • {{ it.confirmed_at }}{% endif %}
+                        {% else %}
+                          unchecked
+                        {% endif %}
+                      </span>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+
+          <td class="text-end {% if total_value < 0 %}inv-item-neg{% endif %}">
+            ${{ '%.2f'|format(total_value) }}
+            {% if is_return %}
+              <span class="badge bg-danger inv-badge">RETURN</span>
+            {% else %}
+              <span class="badge bg-success inv-badge">ISSUED</span>
+            {% endif %}
+          </td>
+
+          {% if can_view_docs %}
+            <td class="text-nowrap">
+              {% if report_id_val %}
                 <a class="btn btn-sm btn-outline-secondary"
                    href="{{ url_for('inventory.reports_grouped') }}?issued_to={{ tech_for_links|urlencode }}&technician={{ tech_for_links|urlencode }}&company={{ tech_for_links|urlencode }}&tech={{ tech_for_links|urlencode }}&reference_job={{ job_for_links|urlencode }}&ref_job={{ job_for_links|urlencode }}&ref={{ job_for_links|urlencode }}&job={{ job_for_links|urlencode }}&jobs={{ job_for_links|urlencode }}"
                    target="_blank"
                    rel="noopener">
                   Open Report
                 </a>
-              </td>
+              {% else %}
+                —
+              {% endif %}
+            </td>
 
-              <td>
+            <td>
+              {% if report_id_val %}
                 <a class="btn btn-sm btn-outline-primary"
-                   href="/invoice/pdf?issued_to={{ tech_for_links|urlencode }}&reference_job={{ job_for_links|urlencode }}&issued_by={{ who_for_links|urlencode }}&issue_date={{ dt_for_links|urlencode }}&print=1"
+                   href="{{ url_for('inventory.view_invoice_pdf') }}?invoice_number={{ report_id_val }}"
                    target="_blank"
                    rel="noopener">
                   Print
                 </a>
-              </td>
-            {% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          {% endif %}
 
-            {% if can_confirm_any %}
-              <td class="text-center align-middle">
-                {% if b.get('all_confirmed') %}
-                  ✅
-                {% elif b.get('any_confirmed') %}
-                  ☑️
-                {% else %}
-                  ☐
-                {% endif %}
-              </td>
-            {% endif %}
-          </tr>
-        {% endfor %}
-      {% else %}
-        <tr>
-          <td colspan="{{ col_count }}" class="text-muted text-center">
-            No batches yet.
-          </td>
+          {% if can_confirm_any %}
+            <td class="text-center align-middle batch-status-col">
+              {% if b.get('all_confirmed') %}
+                ✅
+              {% elif b.get('any_confirmed') %}
+                ☑️
+              {% else %}
+                ☐
+              {% endif %}
+            </td>
+          {% endif %}
         </tr>
-      {% endif %}
+      {% endfor %}
+    {% else %}
+      <tr>
+        <td colspan="{{ col_count }}" class="text-muted text-center">
+          No batches yet.
+        </td>
+      </tr>
+    {% endif %}
     </tbody>
   </table>
 </div>
@@ -493,24 +485,122 @@
 
 {% block extra_js %}
 <script>
-(function () {
-  const btnCopy = document.getElementById('copyJobs');
-  btnCopy?.addEventListener('click', async () => {
-    const el = document.getElementById('wo-jobs');
-    const txt = (el?.textContent || '').trim();
-    if (!txt) return;
-    try {
-      await navigator.clipboard.writeText(txt);
-    } catch(e) {
-      // fallback for older browsers
-      const ta=document.createElement('textarea');
-      ta.value=txt;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-    }
+// technician one-way confirm without page redirect, + live badge update
+async function confirmIssuedPart(checkbox) {
+  // deprecated old hook - we replaced it with the new listener below
+  // left here just in case something still calls it
+  console.log("[confirmIssuedPart] legacy call");
+}
+
+// NEW listener that supports:
+// 1) POST via fetch
+// 2) disable checkbox after success
+// 3) live update 'Partly confirmed' / 'All confirmed' badge
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll(".tech-confirm").forEach(cb => {
+    cb.addEventListener("change", async (e) => {
+      const box  = e.target;
+      const recId = box.dataset.recordId;
+      const woId  = box.dataset.woid;
+
+      // technician can only SET true. If they uncheck manually (shouldn't happen),
+      // we just bail.
+      if (!box.checked) {
+        return;
+      }
+
+      const params = new URLSearchParams();
+      params.set("record_id", recId);
+      params.set("wo_id",    woId);
+      params.set("state",    "1");
+
+      try {
+        const resp = await fetch("{{ url_for('inventory.issued_confirm_toggle') }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString(),
+          credentials: "same-origin"
+        });
+
+        if (!resp.ok) {
+          alert("Error saving confirmation: HTTP " + resp.status);
+          box.checked = false;
+          return;
+        }
+
+        // lock checkbox (can't undo)
+        box.disabled = true;
+
+        // update text next to this item
+        const li = box.closest("li[data-item-id]");
+        if (li) {
+          // remove any 'unchecked' muted text
+          li.querySelectorAll(".confirm-meta").forEach(metaEl => {
+            metaEl.innerHTML = "✔ confirmed";
+          });
+        }
+
+        // Now recalc batch badge (per-row)
+        const tr = box.closest("tr");
+        if (tr) {
+          const batchBadgeHolder = tr.querySelector(".batch-badge-holder");
+          const batchStatusCol   = tr.querySelector(".batch-status-col");
+
+          const techBoxes = tr.querySelectorAll(".tech-confirm");
+          const confirmedCount = Array.from(techBoxes).filter(el => el.checked).length;
+          const totalCount     = techBoxes.length;
+
+          // wipe old badges in the header cell
+          if (batchBadgeHolder) {
+            batchBadgeHolder.innerHTML = "";
+            if (totalCount > 0 && confirmedCount === totalCount) {
+              batchBadgeHolder.innerHTML =
+                '<span class="badge bg-success inv-badge">All confirmed</span>';
+            } else if (confirmedCount > 0) {
+              batchBadgeHolder.innerHTML =
+                '<span class="badge bg-info text-dark inv-badge">Partly confirmed</span>';
+            }
+          }
+
+          // also update rightmost status column (✅ / ☑️ / ☐)
+          if (batchStatusCol) {
+            if (totalCount > 0 && confirmedCount === totalCount) {
+              batchStatusCol.textContent = "✅";
+            } else if (confirmedCount > 0) {
+              batchStatusCol.textContent = "☑️";
+            } else {
+              batchStatusCol.textContent = "☐";
+            }
+          }
+        }
+
+      } catch (err) {
+        console.error("Network error while confirming part.", err);
+        alert("Network error while confirming part.");
+        box.checked = false;
+      }
+    });
   });
-})();
+
+  // Copy job numbers
+  const btnCopy = document.getElementById('copyJobs');
+  if (btnCopy) {
+    btnCopy.addEventListener('click', async () => {
+      const el = document.getElementById('wo-jobs');
+      const txt = (el?.textContent || '').trim();
+      if (!txt) return;
+      try {
+        await navigator.clipboard.writeText(txt);
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = txt;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+    });
+  }
+});
 </script>
 {% endblock %}

@@ -203,10 +203,9 @@ ALLOWED_TECH_ENDPOINTS = {
     "inventory.wo_list",
     "inventory.wo_detail",
 
-    # подтверждения / печать (если реально существуют)
+    # подтверждения / печать
     "inventory.wo_confirm_lines",
-    # "inventory.batch_confirm",
-    # "inventory.print_report",
+    "inventory.issued_confirm_toggle",  # ← ДОБАВИТЬ ЭТО
 
     # отчёты
     "inventory.reports_grouped",
@@ -219,6 +218,7 @@ ALLOWED_TECH_ENDPOINTS = {
     "auth.login",
     "static",
 }
+
 
 ALLOWED_VIEWER_ENDPOINTS = {
     "inventory.wo_list",

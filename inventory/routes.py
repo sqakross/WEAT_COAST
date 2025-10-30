@@ -1436,90 +1436,93 @@ def _parse_units_form(form):
 @inventory_bp.post("/api/issued/confirm_toggle", endpoint="issued_confirm_toggle")
 @login_required
 def issued_confirm_toggle():
-    """
-    superadmin / admin:
-        - могут ставить и убирать подтверждение.
-    technician / tech:
-        - могут только поставить подтверждение (one-way).
-    остальные:
-        - 403.
-
-    После действия ВСЕГДА возвращаем пользователя обратно на страницу этого же Work Order,
-    чтобы никого не выкидывало в общий список.
-    """
-
-    from flask import request, redirect, url_for, abort
+    """Техник ставит подтверждение через fetch (one-way), админ может ставить/снимать через форму."""
+    from flask import request, redirect, url_for
     from datetime import datetime, timezone
     from flask_login import current_user
     from extensions import db
-    from models import IssuedPartRecord
+    from models import IssuedPartRecord, WorkOrder
 
-    role = (getattr(current_user, "role", "") or "").strip().lower()
+    rec_id_raw = request.form.get("record_id")
+    wo_id_raw = request.form.get("wo_id")
+    state_raw = request.form.get("state")
 
-    # Разрешённые роли
-    if role not in ("superadmin", "admin", "technician", "tech"):
-        abort(403)
-
-    # Параметры формы
     try:
-        rec_id = int(request.form.get("record_id") or 0)
+        rec_id = int(rec_id_raw or 0)
     except Exception:
         rec_id = 0
 
-    requested_state_is_checked = (request.form.get("state") == "1")
+    requested_checked = (state_raw == "1")
 
-    wo_id = request.form.get("wo_id")
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    user_id = getattr(current_user, "id", None)
+    username = (
+        getattr(current_user, "username", "")
+        or getattr(current_user, "email", "")
+        or getattr(current_user, "name", "")
+        or str(user_id)
+    )
 
-    # если нет wo_id, просто не рискуем и шлём 403 чтобы не гулять куда-то
-    if not wo_id:
-        abort(403)
+    if not wo_id_raw or not rec_id:
+        if role in ("admin", "superadmin"):
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw or 0))
+        return ("", 204)
 
-    # Достаём запись
-    rec = None
-    if rec_id:
-        rec = IssuedPartRecord.query.filter_by(id=rec_id).first()
+    wo = WorkOrder.query.get(int(wo_id_raw))
+    if not wo:
+        if role in ("admin", "superadmin"):
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
+        return ("", 204)
 
+    wo_tech_id = getattr(wo, "technician_id", None)
+    wo_tech_name = (wo.technician_username or wo.technician_name or "").strip().lower()
+    me_name = (
+        (getattr(current_user, "username", "") or getattr(current_user, "name", "") or "")
+        .strip()
+        .lower()
+    )
+
+    is_my_wo = (
+        (wo_tech_id and user_id and wo_tech_id == user_id)
+        or (wo_tech_name and me_name and wo_tech_name == me_name)
+    )
+
+    is_adminlike = role in ("admin", "superadmin")
+    is_techlike = role in ("technician", "tech") and is_my_wo
+
+    rec = IssuedPartRecord.query.filter_by(id=rec_id).first()
     if not rec:
-        # даже если не нашли запись - просто вернём обратно на ту же карточку WO
-        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+        if is_adminlike:
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
+        return ("", 204)
 
-    # текущее подтверждённое состояние в базе
     currently_confirmed = bool(rec.confirmed_by_tech)
 
-    # Логика изменения в зависимости от роли
-    if role in ("superadmin", "admin"):
-        # полный контроль
-        new_state = requested_state_is_checked
-
-    elif role in ("technician", "tech"):
-        # техник может только зафиксировать подтверждение, не снять
-        if requested_state_is_checked:
-            new_state = True
-        else:
-            new_state = currently_confirmed
+    if is_adminlike:
+        new_state = bool(requested_checked)
+    elif is_techlike:
+        new_state = True if requested_checked else currently_confirmed
     else:
-        # защитный fallback - не должен сработать, но пусть будет
-        abort(403)
+        return ("", 204)
 
-    # Записываем новое состояние
+    if new_state == currently_confirmed:
+        if is_adminlike:
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
+        return ("", 204)
+
     rec.confirmed_by_tech = new_state
-
     if new_state:
-        # подтверждено
-        rec.confirmed_by = (
-            getattr(current_user, "username", "") or
-            getattr(current_user, "email", "")
-        )
+        rec.confirmed_by = username or "tech"
         rec.confirmed_at = datetime.now(timezone.utc)
     else:
-        # только admin/superadmin сюда попадают (они могут снимать)
         rec.confirmed_by = None
         rec.confirmed_at = None
 
     db.session.commit()
 
-    # ВАЖНО: ВСЕГДА назад на конкретный Work Order. Никаких списков.
-    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+    if is_adminlike:
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
+    return ("", 204)
 
 @inventory_bp.get("/debug/db_objects")
 def debug_db_objects():
@@ -2547,30 +2550,42 @@ def wo_detail(wo_id):
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # 2) доступы
-    role = (getattr(current_user, "role", "") or "").strip().lower()
+    # print("DEBUG CHECK", {
+    #     "user_id": current_user.id,
+    #     "wo_tech_id": wo.technician_id,
+    #     "user_role": current_user.role,
+    #     "user_name": current_user.username,
+    #     "wo_tech_name": wo.technician_username or wo.technician_name,
+    # })
+
+    # 2) доступы (улучшенная логика)
+    role_raw = (getattr(current_user, "role", "") or "").strip().lower()
     me_id = getattr(current_user, "id", None)
     me_name = (getattr(current_user, "username", "") or "").strip().lower()
 
     wo_tech_id = getattr(wo, "technician_id", None)
     wo_tech_name = (wo.technician_username or wo.technician_name or "").strip().lower()
 
-    is_admin_like = role in ("admin", "superadmin")
-    is_technician = role == "technician"
+    # нормализованные роли
+    is_admin_like = role_raw in ("admin", "superadmin")
+    is_technician = role_raw in ("technician", "tech")
 
-    is_my_wo = (
-        (wo_tech_id and me_id and wo_tech_id == me_id)
-        or (me_name and wo_tech_name and me_name == wo_tech_name)
-    )
+    # проверка принадлежности Work Order
+    is_my_wo = False
+    if wo_tech_id and me_id and (wo_tech_id == me_id):
+        is_my_wo = True
+    elif wo_tech_name and me_name and (wo_tech_name == me_name):
+        is_my_wo = True
 
+    # доступы
     if is_technician and not is_my_wo:
         flash("You don't have access to this Work Order.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    can_confirm_any = (role == "superadmin")
+    can_confirm_any = (role_raw == "superadmin")
     can_view_docs = (is_admin_like or is_my_wo)
 
-    # 3) suppliers (оставляем как было)
+    # 3) suppliers
     suppliers = [
         r[0]
         for r in (
@@ -2586,7 +2601,7 @@ def wo_detail(wo_id):
         )
     ]
 
-    # 4) Issued / Batches (как было в последней рабочей версии)
+    # 4) Issued / Batches
     canon = (wo.canonical_job or "").strip()
 
     base_q = (
@@ -2712,10 +2727,8 @@ def wo_detail(wo_id):
 
         for rec in recs:
             rid, pn, name, qty, price, confirmed, who, when_s = _extract(rec)
-
             if not pn or qty == 0:
                 continue
-
             line_total = qty * price
             total_value_raw += line_total
 
@@ -2765,8 +2778,6 @@ def wo_detail(wo_id):
     invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
 
     # 5) BLENDED PRICING with fallback
-
-    # соберём все строки деталей, как раньше
     all_rows = []
     if wo.units:
         for u in wo.units:
@@ -2775,7 +2786,6 @@ def wo_detail(wo_id):
     if (not all_rows) and getattr(wo, "parts", None):
         all_rows.extend(wo.parts)
 
-    # сколько реально выдали по каждому PN и по какой цене
     issued_info_by_pn = {}
     for rec in issued_items:
         pn = (getattr(rec.part, "part_number", "") or "").strip().upper()
@@ -2792,7 +2802,6 @@ def wo_detail(wo_id):
         info["qty"] += q
         info["value"] += val
 
-    # узнаём текущую цену из инвентаря Part.unit_cost
     pn_list = []
     for r in all_rows:
         pn = (getattr(r, "part_number", "") or "").strip().upper()
@@ -2817,38 +2826,26 @@ def wo_detail(wo_id):
         pn = (getattr(r, "part_number", "") or "").strip().upper()
         qty_planned = int(getattr(r, "quantity", 0) or 0)
 
-        # 1) что уже выдано
         ii = issued_info_by_pn.get(pn)
         issued_qty_raw = int(ii["qty"] or 0) if ii else 0
         issued_val_raw = float(ii["value"] or 0.0) if ii else 0.0
 
-        # если после возвратов <=0, считаем что фактически нет выдачи
         issued_qty_eff = issued_qty_raw if issued_qty_raw > 0 else 0
         issued_val_eff = issued_val_raw if issued_qty_raw > 0 else 0.0
 
-        # 2) какая цена на оставшиеся штуки
         inv_cost = inv_cost_map.get(pn, 0.0)
-
-        # fallback: если детали ещё нет в инвентаре (inv_cost == 0),
-        # то используем ту цену, которая введена в самой строке WO
         if inv_cost == 0.0:
             inv_cost = float(getattr(r, "unit_cost", 0.0) or 0.0)
 
-        not_issued_qty = qty_planned - issued_qty_eff
-        if not_issued_qty < 0:
-            not_issued_qty = 0
+        not_issued_qty = max(0, qty_planned - issued_qty_eff)
         not_issued_val = not_issued_qty * inv_cost
-
         blended_total_val = issued_val_eff + not_issued_val
-
-        if qty_planned > 0:
-            blended_unit_price = blended_total_val / qty_planned
-        else:
-            blended_unit_price = 0.0
+        blended_unit_price = (
+            blended_total_val / qty_planned if qty_planned > 0 else 0.0
+        )
 
         grand_total_display += blended_total_val
 
-        # 3) флаги для подсветки
         raw_oflag = getattr(r, "ordered_flag", None)
         ordered_flag_truthy = raw_oflag not in (None, False, 0, "0", "", "false", "False")
         is_ordered = (
@@ -2883,10 +2880,8 @@ def wo_detail(wo_id):
     return render_template(
         "wo_detail.html",
         wo=wo,
-
         display_parts=display_parts,
         grand_total_display=grand_total_display,
-
         issued_items=issued_items,
         issued_total=issued_total,
         returned_total=returned_total,
@@ -2894,11 +2889,9 @@ def wo_detail(wo_id):
         issued_qty=issued_qty,
         returned_qty=returned_qty,
         net_qty=net_qty,
-
         batches=batches,
         suppliers=suppliers,
         invoiced_pns=invoiced_pns,
-
         is_my_wo=is_my_wo,
         can_confirm=can_confirm_any,
         can_confirm_any=can_confirm_any,
@@ -5395,27 +5388,46 @@ def reports_grouped():
 def view_invoice_pdf():
     """
     Печать инвойса.
+
+    Техник/tech:
+      - может видеть ТОЛЬКО свои строки (issued_to == его имя).
+        Если в инвойс попали legacy-строки других людей (склейка без номера),
+        мы их просто вырезаем, а не падаем с 403.
+        Если после фильтрации ничего не осталось — редирект в grouped.
+    Admin/superadmin:
+      - полный доступ.
+
     Если у группы ещё НЕТ invoice_number и пришли "legacy"-ключи,
     перед печатью аккуратно присваиваем новый номер (через batch),
     коммитим и печатаем уже с этим номером.
     """
+
     from extensions import db
     from models import IssuedPartRecord, IssuedBatch
     from datetime import datetime, time as _time
     from sqlalchemy import func, or_
-    from flask import request, make_response, flash, redirect, url_for
+    from flask import request, make_response, flash, redirect, url_for, abort
+    from flask_login import current_user
 
-    # ---- вспомогалки ----
+    # ---- helper: роль и текущий пользователь ----
+    role_raw = (getattr(current_user, "role", "") or "").strip().lower()
+    is_admin_like = role_raw in ("admin", "superadmin")
+    is_technician = role_raw in ("technician", "tech")
+
+    # нормализованное имя техника (для сравнения с issued_to)
+    my_name_norm = (getattr(current_user, "username", "") or "").strip().lower()
+
     def _next_invoice_number():
         mb = db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0)).scalar() or 0
         ml = db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)).scalar() or 0
         return max(int(mb), int(ml)) + 1
 
     def _ensure_invoice_number_for_records(records, issued_to, issued_by, reference_job, issue_date, location):
-        # уже есть — выходим
+        # Если хотя бы у одной строки уже есть invoice_number — ничего не делаем.
         if any(getattr(r, "invoice_number", None) for r in records):
             return getattr(records[0], "invoice_number", None)
-        # пробуем твой хелпер (если есть)
+
+        # Сначала пробуем создать нормальный IssuedBatch (это твой хелпер)
         try:
             batch = _create_batch_for_records(
                 records=records,
@@ -5429,13 +5441,13 @@ def view_invoice_pdf():
         except Exception:
             db.session.rollback()
 
-        # fallback — резервируем номер вручную
+        # fallback — вручную резервируем новый номер
         for _ in range(5):
-            inv_no = _next_invoice_number()
+            inv_no_try = _next_invoice_number()
             try:
                 with db.session.begin_nested():
                     batch = IssuedBatch(
-                        invoice_number=inv_no,
+                        invoice_number=inv_no_try,
                         issued_to=issued_to,
                         issued_by=issued_by or "system",
                         reference_job=reference_job,
@@ -5444,14 +5456,18 @@ def view_invoice_pdf():
                     )
                     db.session.add(batch)
                     db.session.flush()
+
                     for r in records:
                         r.batch_id = batch.id
-                        r.invoice_number = inv_no
+                        r.invoice_number = inv_no_try
+
                     db.session.flush()
-                return inv_no
+
+                return inv_no_try
             except Exception:
                 db.session.rollback()
                 continue
+
         raise RuntimeError("Failed to reserve invoice number")
 
     def _parse_dt_flex(s: str | None):
@@ -5464,38 +5480,53 @@ def view_invoice_pdf():
                 pass
         return None
 
-    # ---- входные параметры ----
-    inv_s        = (request.args.get("invoice_number") or "").strip()
-    issued_to    = (request.args.get("issued_to") or "").strip()
-    reference_job= (request.args.get("reference_job") or "").strip() or None
-    issued_by    = (request.args.get("issued_by") or "").strip()
-    issue_date_s = (request.args.get("issue_date") or "").strip()
+    # ---- входные параметры (query string) ----
+    inv_s         = (request.args.get("invoice_number") or "").strip()
+    issued_to_in  = (request.args.get("issued_to") or "").strip()
+    reference_job = (request.args.get("reference_job") or "").strip() or None
+    issued_by     = (request.args.get("issued_by") or "").strip()
+    issue_date_s  = (request.args.get("issue_date") or "").strip()
 
     inv_no = int(inv_s) if inv_s.isdigit() else None
 
-    # ---- загрузка строк группы ----
+    # ---- загружаем строки (recs) и заголовок (hdr) ----
     recs = []
     hdr  = None
 
     if inv_no is not None:
-        # 1) найдём батчи с таким номером
-        batch_ids = [bid for (bid,) in db.session.query(IssuedBatch.id)
-                     .filter(IssuedBatch.invoice_number == inv_no).all()]
+        # 1) Найдём batch_ids с таким invoice_number
+        batch_ids = [
+            bid for (bid,) in
+            db.session.query(IssuedBatch.id)
+            .filter(IssuedBatch.invoice_number == inv_no)
+            .all()
+        ]
 
-        # 2) строки с этим номером + строки из найденных батчей
+        # 2) Берём строки IssuedPartRecord, связанные с этим invoice_number
         q = IssuedPartRecord.query
         if batch_ids:
-            recs = (q.filter(or_(IssuedPartRecord.invoice_number == inv_no,
-                                 IssuedPartRecord.batch_id.in_(batch_ids)))
-                    .order_by(IssuedPartRecord.id.asc()).all())
+            recs = (
+                q.filter(
+                    or_(
+                        IssuedPartRecord.invoice_number == inv_no,
+                        IssuedPartRecord.batch_id.in_(batch_ids),
+                    )
+                )
+                .order_by(IssuedPartRecord.id.asc())
+                .all()
+            )
         else:
-            recs = q.filter_by(invoice_number=inv_no).order_by(IssuedPartRecord.id.asc()).all()
+            recs = (
+                q.filter_by(invoice_number=inv_no)
+                 .order_by(IssuedPartRecord.id.asc())
+                 .all()
+            )
 
         if not recs:
             flash(f"Invoice #{inv_no} not found.", "warning")
             return redirect(url_for('inventory.reports_grouped'))
 
-        # 3) заголовок — сначала из батча (если есть), иначе из первой строки
+        # 3) Построим hdr
         if batch_ids:
             b = db.session.get(IssuedBatch, batch_ids[0])
             hdr = {
@@ -5517,52 +5548,90 @@ def view_invoice_pdf():
                 "location": first.location,
             }
 
-        # 4) ДОП. СЛИЯНИЕ legacy-строк без номера и без batch_id в те же сутки/ключи
+        # 4) Добираем legacy-строки за тот же день без номера (старые строки)
         day = hdr["issue_date"].date() if hdr.get("issue_date") else None
         if day:
-            extra = (IssuedPartRecord.query
-                     .filter(
-                         func.trim(IssuedPartRecord.issued_to) == (hdr["issued_to"] or ""),
-                         func.trim(IssuedPartRecord.issued_by) == (hdr["issued_by"] or ""),
-                         func.trim(IssuedPartRecord.reference_job) == (hdr["reference_job"] or ""),
-                         func.date(IssuedPartRecord.issue_date) == day,
-                         or_(IssuedPartRecord.invoice_number.is_(None),
-                             IssuedPartRecord.invoice_number == 0),
-                         IssuedPartRecord.batch_id.is_(None),
-                     )
-                     .order_by(IssuedPartRecord.id.asc())
-                     .all())
+            extra = (
+                IssuedPartRecord.query
+                .filter(
+                    func.trim(IssuedPartRecord.issued_to) == (hdr["issued_to"] or ""),
+                    func.trim(IssuedPartRecord.issued_by) == (hdr["issued_by"] or ""),
+                    func.trim(IssuedPartRecord.reference_job) == (hdr["reference_job"] or ""),
+                    func.date(IssuedPartRecord.issue_date) == day,
+                    or_(
+                        IssuedPartRecord.invoice_number.is_(None),
+                        IssuedPartRecord.invoice_number == 0
+                    ),
+                    IssuedPartRecord.batch_id.is_(None),
+                )
+                .order_by(IssuedPartRecord.id.asc())
+                .all()
+            )
+
             if extra:
                 have_ids = {r.id for r in recs}
-                recs.extend([r for r in extra if r.id not in have_ids])
+                for r in extra:
+                    if r.id not in have_ids:
+                        recs.append(r)
 
-        # финальная сортировка
+        # 5) Сортируем окончательную подборку строк
         recs.sort(key=lambda r: r.id)
 
     else:
-        # legacy-поиск по ключам за сутки
-        if issued_to and issued_by and issue_date_s:
+        # legacy режим: инвойс без номера, ищем по issued_to / issued_by / reference_job / дате
+        if issued_to_in and issued_by and issue_date_s:
             dt = _parse_dt_flex(issue_date_s) or datetime.utcnow()
+
             start = datetime.combine(dt.date(), _time.min)
             end   = datetime.combine(dt.date(), _time.max)
-            recs = (IssuedPartRecord.query
-                    .filter(IssuedPartRecord.issued_to == issued_to,
-                            IssuedPartRecord.issued_by == issued_by,
-                            IssuedPartRecord.reference_job == reference_job,
-                            IssuedPartRecord.issue_date.between(start, end))
-                    .order_by(IssuedPartRecord.id.asc()).all())
 
+            recs = (
+                IssuedPartRecord.query
+                .filter(
+                    IssuedPartRecord.issued_to == issued_to_in,
+                    IssuedPartRecord.issued_by == issued_by,
+                    IssuedPartRecord.reference_job == reference_job,
+                    IssuedPartRecord.issue_date.between(start, end),
+                )
+                .order_by(IssuedPartRecord.id.asc())
+                .all()
+            )
+
+    # Если вообще ничего не нашли — назад.
     if not recs:
         flash("Invoice lines not found.", "warning")
         return redirect(url_for('inventory.reports_grouped'))
 
-    # если у группы ещё нет номера — назначим перед печатью (как было)
+    # =========================================================
+    # ДОСТУП ТЕХНИКА К PDF (обновлённый блок)
+    # Техник должен видеть только СВОИ строки.
+    # Вместо abort(403) мы теперь фильтруем чужие строки.
+    # =========================================================
+    if is_technician and (not is_admin_like):
+        allowed_name = my_name_norm  # нормализованное имя техника
+
+        safe_recs = []
+        for r in recs:
+            rec_issued_to_norm = (getattr(r, "issued_to", "") or "").strip().lower()
+            if rec_issued_to_norm == allowed_name:
+                safe_recs.append(r)
+
+        recs = safe_recs
+
+        # Если после фильтрации нет строк — просто вернём техника в его grouped отчет
+        if not recs:
+            flash("Access denied for this invoice.", "warning")
+            return redirect(url_for('inventory.reports_grouped'))
+
+    # =========================================================
+    # Присваиваем invoice_number, если его ещё нет (legacy)
+    # =========================================================
     if inv_no is None and all(getattr(r, "invoice_number", None) is None for r in recs):
         base = recs[0]
         try:
             new_no = _ensure_invoice_number_for_records(
                 records=recs,
-                issued_to=getattr(base, "issued_to", issued_to),
+                issued_to=getattr(base, "issued_to", issued_to_in),
                 issued_by=getattr(base, "issued_by", issued_by),
                 reference_job=getattr(base, "reference_job", reference_job),
                 issue_date=getattr(base, "issue_date", _parse_dt_flex(issue_date_s) or datetime.utcnow()),
@@ -5572,12 +5641,20 @@ def view_invoice_pdf():
             inv_no = new_no
         except Exception:
             db.session.rollback()
-            inv_no = None  # печатаем как есть
+            inv_no = None
 
-    # ---- генерим PDF ----
+    # =========================================================
+    # Генерация PDF
+    # =========================================================
     pdf_bytes = generate_invoice_pdf(recs, invoice_number=inv_no)
+
     resp = make_response(pdf_bytes)
-    fname = f"INVOICE_{(inv_no or getattr(recs[0],'id', 'NO_NUM')):06d}.pdf" if inv_no is not None else "INVOICE.pdf"
+    fname_base = inv_no or getattr(recs[0], 'id', 'NO_NUM')
+    if isinstance(fname_base, int):
+        fname = f"INVOICE_{int(fname_base):06d}.pdf"
+    else:
+        fname = "INVOICE.pdf"
+
     resp.headers["Content-Type"] = "application/pdf"
     resp.headers["Content-Disposition"] = f'inline; filename="{fname}"'
     return resp
