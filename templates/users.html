@@ -128,7 +128,8 @@
 
                         <!-- Change Password -->
                         <a class="btn btn-primary btn-sm shadow-sm"
-                           style="font-weight:500; line-height:1.2; border-radius:.6rem; min-width:120px; box-shadow:0 .3rem .6rem rgba(13,110,253,.25)!important;">
+                           style="font-weight:500; line-height:1.2; border-radius:.6rem; min-width:120px; box-shadow:0 .3rem .6rem rgba(13,110,253,.25)!important;"
+                           href="{{ url_for('inventory.change_password', user_id=u.id) }}">
                           🔐 Change
                         </a>
 

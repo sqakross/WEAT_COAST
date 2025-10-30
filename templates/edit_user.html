@@ -3,12 +3,16 @@
 
 <div class="container-sm" style="max-width: 680px;">
   <div class="d-flex align-items-center justify-content-between mb-3">
-    <h3 class="mb-0">Edit User <span class="text-uppercase">{{ user.username }}</span></h3>
+    <h3 class="mb-0">
+      Edit User
+      <span class="text-uppercase">{{ user.username }}</span>
+    </h3>
   </div>
 
   <div class="card shadow-sm border-0">
     <div class="card-body p-4">
       <form method="POST" novalidate>
+
         <div class="mb-3">
           <label class="form-label fw-semibold">Username</label>
           <input type="text"
@@ -23,22 +27,28 @@
           <label class="form-label fw-semibold">Role</label>
           <select name="role" class="form-select" required>
             {% for value, caption in role_options %}
-              <option value="{{ value }}" {% if (user.role or '')|lower == value %}selected{% endif %}>
+              <option value="{{ value }}"
+                {% if (user.role or '')|lower == value %}selected{% endif %}>
                 {{ caption }}
               </option>
             {% endfor %}
           </select>
-          <div class="form-text">Default shop role: <code>Technician</code>.</div>
+          <div class="form-text">
+            Default shop role: <code>Technician</code>.
+          </div>
         </div>
 
         <div class="d-flex gap-2">
           <button type="submit" class="btn btn-primary px-4">
             <i class="bi bi-check2-circle me-1"></i> Save
           </button>
-          <a href="{{ url_for('inventory.users') }}" class="btn btn-outline-secondary px-4">
+
+          <a href="{{ url_for('inventory.users') }}"
+             class="btn btn-outline-secondary px-4">
             Back
           </a>
         </div>
+
       </form>
     </div>
   </div>

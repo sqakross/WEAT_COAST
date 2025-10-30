@@ -324,9 +324,7 @@
         {% set total_value      = b.get('total_value', 0.0) %}
         {% set tech_for_links   = b.get('technician') or wo.technician_name or '' %}
         {% set job_for_links    = b.get('reference_job') or wo.canonical_job or '' %}
-        {% set dt_for_links     = b.get('issued_at') or '' %}
-        {% set who_for_links    = current_user.username or current_user.name or current_user.id or '' %}
-        {% set report_id_val    = b.get('report_id') or b.get('invoice_number') %}
+        {% set invoice_num      = b.get('invoice_number') %}
 
         <tr class="{% if is_return %}inv-return-row{% endif %}">
           <td class="batch-issued-at">
@@ -431,7 +429,7 @@
 
           {% if can_view_docs %}
             <td class="text-nowrap">
-              {% if report_id_val %}
+              {% if invoice_num %}
                 <a class="btn btn-sm btn-outline-secondary"
                    href="{{ url_for('inventory.reports_grouped') }}?issued_to={{ tech_for_links|urlencode }}&technician={{ tech_for_links|urlencode }}&company={{ tech_for_links|urlencode }}&tech={{ tech_for_links|urlencode }}&reference_job={{ job_for_links|urlencode }}&ref_job={{ job_for_links|urlencode }}&ref={{ job_for_links|urlencode }}&job={{ job_for_links|urlencode }}&jobs={{ job_for_links|urlencode }}"
                    target="_blank"
@@ -444,9 +442,9 @@
             </td>
 
             <td>
-              {% if report_id_val %}
+              {% if invoice_num %}
                 <a class="btn btn-sm btn-outline-primary"
-                   href="{{ url_for('inventory.view_invoice_pdf') }}?invoice_number={{ report_id_val }}"
+                   href="{{ url_for('inventory.view_invoice_pdf') }}?invoice_number={{ invoice_num }}"
                    target="_blank"
                    rel="noopener">
                   Print
@@ -534,7 +532,6 @@ document.addEventListener("DOMContentLoaded", () => {
         // update text next to this item
         const li = box.closest("li[data-item-id]");
         if (li) {
-          // remove any 'unchecked' muted text
           li.querySelectorAll(".confirm-meta").forEach(metaEl => {
             metaEl.innerHTML = "✔ confirmed";
           });
