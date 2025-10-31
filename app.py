@@ -203,12 +203,15 @@ ALLOWED_TECH_ENDPOINTS = {
     "inventory.wo_list",
     "inventory.wo_detail",
 
-    # подтверждения / печать
+    # подтверждения / чекбоксы
     "inventory.wo_confirm_lines",
-    "inventory.issued_confirm_toggle",  # ← ДОБАВИТЬ ЭТО
+    "inventory.issued_confirm_toggle",
 
-    # отчёты
+    # отчёты / документы
     "inventory.reports_grouped",
+
+    # >>> НОВОЕ: печать PDF инвойса <<<
+    "inventory.view_invoice_pdf",
 
     # профиль
     "inventory.change_password",
@@ -235,32 +238,32 @@ def _is_allowed_for_tech(endpoint: str) -> bool:
     if not endpoint:
         return False
 
-    # Статика всегда нужна
+    # статика
     if endpoint == "static":
         return True
 
-    # Work Orders (список, детали, подтверждение)
+    # любые Work Order эндпоинты (список, детали, confirm и т.д.)
     if endpoint.startswith("inventory.wo_"):
         return True
 
-    # Отчёты технику
+    # отчёты (grouped и т.п.)
     if endpoint.startswith("inventory.reports_"):
         return True
 
-    # Печать PDF и т.п.
+    # >>> НОВОЕ: явно разрешаем печать инвойса для техника <<<
     if endpoint in {
-        "inventory.invoice_pdf",
+        "inventory.view_invoice_pdf",  # наш основной PDF
+        "inventory.invoice_pdf",       # если у тебя было старое имя
         "inventory.print_invoice",
         "inventory.print_report",
     }:
         return True
 
-    # Смена пароля и выход
-    if endpoint in {"inventory.change_password", "auth.logout"}:
+    # профиль / выход
+    if endpoint in {"inventory.change_password", "auth.logout", "auth.login"}:
         return True
 
     return False
-
 
 @app.before_request
 def restrict_role_routes():

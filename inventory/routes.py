@@ -714,111 +714,7 @@ def _coerce_norm_df(obj) -> pd.DataFrame:
         return pd.DataFrame([obj])
     return pd.DataFrame([])
 
-# def _ensure_norm_columns(df, default_loc: str, saved_path: str):
-#     """
-#     Гарантирует обязательные колонки и аккуратно заполняет только ПУСТЫЕ значения.
-#     НИЧЕГО не перезаписывает, если пользователь уже отредактировал ячейку.
-#     """
-#     import pandas as pd
-#     import os
 #
-#     if df is None:
-#         cols = [
-#             "part_number","part_name","qty","quantity","unit_cost",
-#             "location","row_key","source_file","supplier",
-#             "order_no","invoice_no","date"
-#         ]
-#         return pd.DataFrame(columns=cols)
-#
-#     df = df.copy()
-#
-#     need_cols = [
-#         "part_number","part_name","qty","quantity","unit_cost","location",
-#         "row_key","source_file","supplier","order_no","invoice_no","date"
-#     ]
-#     for c in need_cols:
-#         if c not in df.columns:
-#             df[c] = None
-#
-#     # qty / quantity — синхронизация и мягкая типизация
-#     qty = pd.to_numeric(df["qty"], errors="coerce")
-#     quantity = pd.to_numeric(df["quantity"], errors="coerce")
-#
-#     df.loc[qty.isna() & quantity.notna(), "qty"] = quantity
-#     df.loc[quantity.isna() & qty.notna(), "quantity"] = qty
-#
-#     df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
-#     df.loc[df["qty"] < 0, "qty"] = 0
-#     df["quantity"] = df["qty"].astype(int)
-#
-#     # unit_cost — float (пустые оставляем NaN)
-#     df["unit_cost"] = pd.to_numeric(df["unit_cost"], errors="coerce")
-#
-#     # source_file — только пустые
-#     sf_empty = df["source_file"].isna() | (df["source_file"].astype(str).str.strip() == "")
-#     df.loc[sf_empty, "source_file"] = saved_path
-#
-#     # location — только пустые; верхний регистр
-#     loc_empty = df["location"].isna() | (df["location"].astype(str).str.strip() == "")
-#     df.loc[loc_empty, "location"] = (default_loc or "MAIN")
-#
-#     df["location"] = (
-#         df["location"]
-#         .astype(str)
-#         .str.strip()
-#         .str.upper()
-#     )
-#
-#     # строковые служебные
-#     for col in ("part_number", "part_name", "supplier", "order_no", "invoice_no", "row_key", "source_file"):
-#         df[col] = (
-#             df[col]
-#             .astype(str)
-#             .replace({"None": ""})
-#             .fillna("")
-#             .str.strip()
-#         )
-#
-#     # row_key — только где пусто (делаем устойчиво-уникальным на строку файла)
-#     rk_empty = df["row_key"].isna() | (df["row_key"].astype(str).str.strip() == "")
-#     if rk_empty.any():
-#         df = df.reset_index(drop=False).rename(columns={"index": "__row_i"})
-#         file_id = os.path.basename(str(saved_path or ""))
-#
-#         def _mk_key(row):
-#             pn   = str(row.get("part_number", "")).strip().upper()
-#             loc  = str(row.get("location", "")).strip().upper()
-#             try:
-#                 qty_local = int(pd.to_numeric(row.get("qty", 0), errors="coerce") or 0)
-#             except Exception:
-#                 qty_local = 0
-#             cost = row.get("unit_cost", None)
-#             if pd.isna(cost):
-#                 cost = "NA"
-#             else:
-#                 try:
-#                     cost = float(cost)
-#                 except Exception:
-#                     cost = "NA"
-#             i = int(row.get("__row_i", 0) or 0)
-#             return f"{file_id}|{i}|{pn}|{loc}|{qty_local}|{cost}"
-#
-#         df.loc[rk_empty, "row_key"] = df[rk_empty].apply(_mk_key, axis=1)
-#         if "__row_i" in df.columns:
-#             del df["__row_i"]
-#
-#     # подчистить полностью пустые строки
-#     drop_mask = (
-#         (df["part_number"].astype(str).str.strip() == "") &
-#         (df["part_name"].astype(str).str.strip() == "") &
-#         (df["qty"] == 0) &
-#         (df["unit_cost"].fillna(0) == 0)
-#     )
-#     if drop_mask.any():
-#         df = df[~drop_mask].copy()
-#
-#     return df
-
 def parse_preview_rows_relaxed(form):
     buckets = defaultdict(dict)
 
@@ -5454,32 +5350,32 @@ def view_invoice_pdf():
     """
     Печать инвойса.
 
-    Техник/tech:
-      - может видеть ТОЛЬКО свои строки (issued_to == его имя).
-        Если в инвойс попали legacy-строки других людей (склейка без номера),
-        мы их просто вырезаем, а не падаем с 403.
-        Если после фильтрации ничего не осталось — редирект в grouped.
-    Admin/superadmin:
-      - полный доступ.
+    Доступ:
+    - admin/superadmin: полный доступ.
+    - technician/tech: доступ разрешён, если среди строк инвойса
+      есть хотя бы одна строка, где issued_to == его username (нормализованно).
+      Если таких строк нет — редирект.
 
-    Если у группы ещё НЕТ invoice_number и пришли "legacy"-ключи,
-    перед печатью аккуратно присваиваем новый номер (через batch),
-    коммитим и печатаем уже с этим номером.
+    ВАЖНО:
+    Мы больше не требуем точного совпадения job/canonical_job
+    и не режем строки "не его". То есть техник может распечатать PDF
+    для батча, в котором он фигурирует хотя бы одной строкой.
+    Это соответствует тому, что он уже видит в Issued Batches и через Report.
     """
 
     from extensions import db
     from models import IssuedPartRecord, IssuedBatch
     from datetime import datetime, time as _time
     from sqlalchemy import func, or_
-    from flask import request, make_response, flash, redirect, url_for, abort
+    from flask import request, make_response, flash, redirect, url_for
     from flask_login import current_user
 
-    # ---- helper: роль и текущий пользователь ----
+    # ---- роль текущего пользователя ----
     role_raw = (getattr(current_user, "role", "") or "").strip().lower()
     is_admin_like = role_raw in ("admin", "superadmin")
     is_technician = role_raw in ("technician", "tech")
 
-    # нормализованное имя техника (для сравнения с issued_to)
+    # нормализованное имя техника для сравнения
     my_name_norm = (getattr(current_user, "username", "") or "").strip().lower()
 
     def _next_invoice_number():
@@ -5492,7 +5388,7 @@ def view_invoice_pdf():
         if any(getattr(r, "invoice_number", None) for r in records):
             return getattr(records[0], "invoice_number", None)
 
-        # Сначала пробуем создать нормальный IssuedBatch (это твой хелпер)
+        # Сначала пробуем создать нормальный IssuedBatch (твой хелпер)
         try:
             batch = _create_batch_for_records(
                 records=records,
@@ -5506,7 +5402,7 @@ def view_invoice_pdf():
         except Exception:
             db.session.rollback()
 
-        # fallback — вручную резервируем новый номер
+        # fallback — вручную резервируем номер
         for _ in range(5):
             inv_no_try = _next_invoice_number()
             try:
@@ -5554,12 +5450,11 @@ def view_invoice_pdf():
 
     inv_no = int(inv_s) if inv_s.isdigit() else None
 
-    # ---- загружаем строки (recs) и заголовок (hdr) ----
     recs = []
     hdr  = None
 
     if inv_no is not None:
-        # 1) Найдём batch_ids с таким invoice_number
+        # 1) Найти все batch_ids с таким invoice_number
         batch_ids = [
             bid for (bid,) in
             db.session.query(IssuedBatch.id)
@@ -5567,7 +5462,7 @@ def view_invoice_pdf():
             .all()
         ]
 
-        # 2) Берём строки IssuedPartRecord, связанные с этим invoice_number
+        # 2) Все строки IssuedPartRecord по этому номеру (или batch_id)
         q = IssuedPartRecord.query
         if batch_ids:
             recs = (
@@ -5591,7 +5486,7 @@ def view_invoice_pdf():
             flash(f"Invoice #{inv_no} not found.", "warning")
             return redirect(url_for('inventory.reports_grouped'))
 
-        # 3) Построим hdr
+        # 3) Заголовок hdr
         if batch_ids:
             b = db.session.get(IssuedBatch, batch_ids[0])
             hdr = {
@@ -5613,7 +5508,7 @@ def view_invoice_pdf():
                 "location": first.location,
             }
 
-        # 4) Добираем legacy-строки за тот же день без номера (старые строки)
+        # 4) Legacy-добавка строк без номера с тем же паттерном
         day = hdr["issue_date"].date() if hdr.get("issue_date") else None
         if day:
             extra = (
@@ -5639,11 +5534,11 @@ def view_invoice_pdf():
                     if r.id not in have_ids:
                         recs.append(r)
 
-        # 5) Сортируем окончательную подборку строк
+        # 5) Сортировка
         recs.sort(key=lambda r: r.id)
 
     else:
-        # legacy режим: инвойс без номера, ищем по issued_to / issued_by / reference_job / дате
+        # режим без invoice_number (legacy)
         if issued_to_in and issued_by and issue_date_s:
             dt = _parse_dt_flex(issue_date_s) or datetime.utcnow()
 
@@ -5662,34 +5557,44 @@ def view_invoice_pdf():
                 .all()
             )
 
+            if recs:
+                first = recs[0]
+                hdr = {
+                    "issued_to": first.issued_to,
+                    "reference_job": first.reference_job,
+                    "issued_by": first.issued_by,
+                    "issue_date": first.issue_date,
+                    "invoice_number": getattr(first, "invoice_number", None),
+                    "location": first.location,
+                }
+
     # Если вообще ничего не нашли — назад.
     if not recs:
         flash("Invoice lines not found.", "warning")
         return redirect(url_for('inventory.reports_grouped'))
 
     # =========================================================
-    # ДОСТУП ТЕХНИКА К PDF (обновлённый блок)
-    # Техник должен видеть только СВОИ строки.
-    # Вместо abort(403) мы теперь фильтруем чужие строки.
+    # ДОСТУП ТЕХНИКА:
+    # Техник может видеть PDF, если он фигурирует хотя бы в ОДНОЙ строке.
     # =========================================================
     if is_technician and (not is_admin_like):
-        allowed_name = my_name_norm  # нормализованное имя техника
-
-        safe_recs = []
+        appears_in_invoice = False
         for r in recs:
             rec_issued_to_norm = (getattr(r, "issued_to", "") or "").strip().lower()
-            if rec_issued_to_norm == allowed_name:
-                safe_recs.append(r)
+            if rec_issued_to_norm == my_name_norm:
+                appears_in_invoice = True
+                break
 
-        recs = safe_recs
-
-        # Если после фильтрации нет строк — просто вернём техника в его grouped отчет
-        if not recs:
+        if not appears_in_invoice:
             flash("Access denied for this invoice.", "warning")
             return redirect(url_for('inventory.reports_grouped'))
 
+        # если appears_in_invoice == True:
+        # мы не вырезаем чужие строки, потому что техник уже видит
+        # весь этот батч в Issued Batches и через Report.
+
     # =========================================================
-    # Присваиваем invoice_number, если его ещё нет (legacy)
+    # Присвоение номера (legacy)
     # =========================================================
     if inv_no is None and all(getattr(r, "invoice_number", None) is None for r in recs):
         base = recs[0]
@@ -5723,6 +5628,7 @@ def view_invoice_pdf():
     resp.headers["Content-Type"] = "application/pdf"
     resp.headers["Content-Disposition"] = f'inline; filename="{fname}"'
     return resp
+
 
 @inventory_bp.route('/reports/update_record/<int:record_id>', methods=['POST'])
 @login_required

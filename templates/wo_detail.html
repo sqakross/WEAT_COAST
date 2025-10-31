@@ -444,7 +444,7 @@
             <td>
               {% if invoice_num %}
                 <a class="btn btn-sm btn-outline-primary"
-                   href="{{ url_for('inventory.view_invoice_pdf') }}?invoice_number={{ invoice_num }}"
+                   href="{{ url_for('inventory.view_invoice_pdf') }}?invoice_number={{ invoice_num }}&ref_job={{ b.get('reference_job') or wo.canonical_job }}"
                    target="_blank"
                    rel="noopener">
                   Print
@@ -501,7 +501,7 @@
 
   {% if first_invoice %}
     <a class="btn-tech-action"
-       href="{{ url_for('inventory.view_invoice_pdf') }}?invoice_number={{ first_invoice }}"
+       href="{{ url_for('inventory.view_invoice_pdf') }}?invoice_number={{ first_invoice }}&ref_job={{ wo.canonical_job }}"
        target="_blank"
        rel="noopener">
       Print
