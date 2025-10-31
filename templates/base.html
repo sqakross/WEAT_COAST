@@ -241,12 +241,57 @@
       letter-spacing:.03em;
       font-size:.7rem;
     }
+
+    /* --------------------------
+       TECH TOOLBAR (tablet tech mode)
+       hidden by default, revealed w/ CSS later
+       -------------------------- */
+    .tech-toolbar {
+      display: none; /* we'll override in CSS for technician tablet */
+      background: #0a1a2d;
+      color: #fff;
+      border-bottom: 2px solid #222;
+      box-shadow:
+        0 2px 4px rgba(0,0,0,.7),
+        0 8px 24px rgba(0,0,0,.6),
+        inset 0 1px 0 rgba(255,255,255,.08);
+    }
+    .tech-toolbar-inner {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-around;
+      align-items: center;
+      gap: .75rem;
+      padding: .75rem .75rem;
+    }
+    .tech-toolbar-inner .btn-tech-nav {
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1.2;
+      background: #fff;
+      color: #0a1a2d;
+      border: 1px solid rgba(0,0,0,.6);
+      border-radius: .8rem;
+      padding: .9rem 1rem;
+      min-width: 30%;
+      text-align: center;
+      text-decoration: none;
+      box-shadow:
+        0 2px 4px rgba(0,0,0,.8),
+        0 6px 16px rgba(0,0,0,.8),
+        inset 0 1px 0 rgba(255,255,255,.9);
+    }
+    .tech-toolbar-inner .btn-tech-nav:active {
+      filter: brightness(1.05);
+    }
   </style>
 
   {% block extra_head %}{% endblock %}
 </head>
-<body>
-  <nav class="navbar navbar-expand-lg fixed-top wccr-navbar">
+
+<body class="role-{{ (current_user.role or '')|lower }}">
+  <!-- MAIN NAVBAR (desktop / admin view) -->
+  <nav class="navbar navbar-expand-lg fixed-top wccr-navbar main-navbar">
     <div class="container-fluid py-2">
 
       <!-- BRAND / LOGO -->
@@ -387,6 +432,25 @@
       </div><!-- /.navbar-collapse -->
     </div><!-- /.container-fluid -->
   </nav>
+
+  {# TECH TOOLBAR (simplified nav for technician tablet mode).
+     Hidden by default via CSS. We'll reveal it only when:
+     - body has class role-technician
+     - screen is tablet-size (CSS we'll add in style.css next step)
+  #}
+  <div class="tech-toolbar">
+    <div class="tech-toolbar-inner container-fluid">
+      <a class="btn-tech-nav"
+         href="{{ url_for('inventory.wo_list') }}">
+        Work Orders
+      </a>
+
+      <a class="btn-tech-nav"
+         href="{{ url_for('auth.logout') }}">
+        Logout
+      </a>
+    </div>
+  </div>
 
   <!-- MAIN CONTENT AREA -->
   <main class="container main-wrapper">

@@ -479,6 +479,41 @@
   </table>
 </div>
 
+{# =========================================================
+   TECH STICKY FOOTER (BIG ACTION BAR FOR TABLET TECHNICIAN)
+   ========================================================= #}
+
+{# найдём первый invoice_number среди batches, чтобы дать Print #}
+{% set first_invoice = None %}
+{% if batches and (batches|length) > 0 %}
+  {% for bb in batches %}
+    {% if bb.get('invoice_number') and not first_invoice %}
+      {% set first_invoice = bb.get('invoice_number') %}
+    {% endif %}
+  {% endfor %}
+{% endif %}
+
+<div class="tech-sticky-footer d-none d-md-flex">
+  <a class="btn-tech-action"
+     href="{{ url_for('inventory.wo_list') }}">
+    ← Back to Work Orders
+  </a>
+
+  {% if first_invoice %}
+    <a class="btn-tech-action"
+       href="{{ url_for('inventory.view_invoice_pdf') }}?invoice_number={{ first_invoice }}"
+       target="_blank"
+       rel="noopener">
+      Print
+    </a>
+  {% else %}
+    <button class="btn-tech-action" disabled
+            style="opacity:.5; cursor:not-allowed;">
+      Print
+    </button>
+  {% endif %}
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
