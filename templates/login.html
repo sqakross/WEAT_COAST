@@ -1,64 +1,241 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container-fluid py-5 d-flex justify-content-center align-items-start" style="min-height:80vh; background:#f8f9fa;">
-  <div style="width:100%; max-width:360px;">
 
-    <!-- Card -->
-    <div class="card shadow-sm border-0 mx-auto"
-         style="border-radius:1rem;
-                background:linear-gradient(#ffffff,#fcfcfc);
-                box-shadow:0 .75rem 1.5rem rgba(0,0,0,.08)!important;">
+<style>
+  /* ====== базовая стилизация, похожая на то что у тебя было ====== */
+  .login-outer {
+    width:100%;
+    min-height:80vh;
+    background:#f8f9fa;
+    display:flex;
+    justify-content:center;
+    align-items:flex-start;
+    padding-top:2rem;
+    padding-bottom:2rem;
+  }
+
+  .login-card-frame {
+    width:100%;
+    max-width:360px;
+  }
+
+  .login-card {
+    border-radius:1rem;
+    background:linear-gradient(#ffffff,#fcfcfc);
+    box-shadow:0 .75rem 1.5rem rgba(0,0,0,.08)!important;
+    border:0;
+  }
+
+  .login-card-header {
+    border-radius:1rem 1rem 0 0;
+    border-bottom:1px solid #dee2e6;
+    background:#fff;
+    text-align:center;
+  }
+  .login-brand {
+    font-size:1rem;
+    font-weight:600;
+    line-height:1.2;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+  }
+  .login-title {
+    font-size:1.1rem;
+    font-weight:700;
+    line-height:1.3;
+    color:#212529;
+    margin-top:.4rem;
+  }
+  .login-sub {
+    font-size:.8rem;
+    line-height:1.2;
+    color:#6c757d;
+    margin-top:.25rem;
+  }
+
+  .login-card-body {
+    padding:1.25rem 1.25rem 1rem 1.25rem;
+    background:transparent;
+  }
+
+  .login-label {
+    font-size:.8rem;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+    margin-bottom:.4rem;
+    color:#212529;
+  }
+
+  .login-input {
+    border-radius:.6rem;
+    font-size:.9rem;
+    padding:.55rem .75rem;
+  }
+
+  .login-hint {
+    font-size:.7rem;
+    line-height:1.2;
+    color:#6c757d;
+  }
+
+  .login-submit-btn {
+    font-weight:600;
+    border-radius:.8rem;
+    padding:.6rem 1rem;
+    font-size:.9rem;
+    line-height:1.3;
+    box-shadow:0 .6rem 1.2rem rgba(13,110,253,.35)!important;
+  }
+
+  .login-footer {
+    border-top:1px solid #dee2e6;
+    border-radius:0 0 1rem 1rem;
+    text-align:center;
+    color:#6c757d;
+    font-size:.7rem;
+    line-height:1.3;
+    background:#fff;
+    padding-top:.75rem;
+    padding-bottom:.75rem;
+  }
+
+  .login-legal {
+    text-align:center;
+    color:#6c757d;
+    font-size:.7rem;
+    line-height:1.3;
+    margin-top:1rem;
+  }
+
+
+  /* =========================================================
+     TABLET TECH MODE FOR LOGIN (Galaxy Tab landscape)
+     цель: большие поля + карточка опускается ближе к клавиатуре
+     активируется ТОЛЬКО если у body класс role-technician
+     ========================================================= */
+  @media (min-width:768px) and (max-width:1400px) {
+    body.role-technician .login-outer {
+      /* тянем карточку вниз, ближе к клавиатуре */
+      align-items:flex-end;
+      min-height:calc(100vh - 5rem); /* минус верхняя фикс-панель техника */
+      padding-top:1rem;
+      padding-bottom:1rem;
+    }
+
+    body.role-technician .login-card-frame {
+      max-width:600px;          /* шире = легче попадать пальцем */
+    }
+
+    body.role-technician .login-card-header .login-brand {
+      font-size:1.1rem;
+      line-height:1.3;
+      letter-spacing:.04em;
+    }
+    body.role-technician .login-card-header .login-title {
+      font-size:1.3rem;
+      line-height:1.35;
+    }
+    body.role-technician .login-card-header .login-sub {
+      font-size:1rem;
+      line-height:1.4;
+    }
+
+    /* более крупные лейблы */
+    body.role-technician .login-label {
+      font-size:1rem;
+      margin-bottom:.5rem;
+      letter-spacing:.04em;
+    }
+
+    /* огромные инпуты под палец */
+    body.role-technician .login-input {
+      font-size:1.3rem !important;
+      line-height:1.4 !important;
+      padding:1rem 1rem !important;
+      border-radius:.9rem !important;
+    }
+
+    body.role-technician .login-hint {
+      font-size:.9rem;
+      line-height:1.3;
+    }
+
+    /* большая кнопка входа */
+    body.role-technician .login-submit-btn {
+      font-size:1.3rem !important;
+      line-height:1.3 !important;
+      padding:1.1rem 1rem !important;
+      border-radius:1rem !important;
+      font-weight:600 !important;
+    }
+
+    /* чуть крупнее текст в футере */
+    body.role-technician .login-footer {
+      font-size:.85rem;
+      line-height:1.4;
+    }
+    body.role-technician .login-legal {
+      font-size:.85rem;
+      line-height:1.4;
+    }
+  }
+</style>
+
+
+<div class="login-outer">
+
+  <div class="login-card-frame">
+
+    <div class="card login-card border-0 mx-auto">
+
       <!-- header -->
-      <div class="card-header bg-white border-0 text-center"
-           style="border-radius:1rem 1rem 0 0; border-bottom:1px solid #dee2e6;">
-        <div class="fw-semibold text-uppercase"
-             style="font-size:1rem; letter-spacing:.05em; line-height:1.2;">
-          West Coast Chief Repair
+      <div class="card-header login-card-header border-0">
+        <div class="login-brand">
+          WEST COAST CHIEF REPAIR
         </div>
-        <div class="fw-bold"
-             style="font-size:1.1rem; line-height:1.3; color:#212529; margin-top:.4rem;">
+        <div class="login-title">
           Inventory Login
         </div>
-        <div class="text-muted"
-             style="font-size:.8rem; line-height:1.2; margin-top:.25rem;">
+        <div class="login-sub">
           Please sign in to continue
         </div>
       </div>
 
       <!-- body -->
-      <div class="card-body" style="padding:1.25rem 1.25rem 1rem 1.25rem;">
-        <form method="POST" action="{{ url_for('auth.login') }}" autocomplete="off">
+      <div class="login-card-body">
+        <form method="POST"
+              action="{{ url_for('auth.login') }}"
+              autocomplete="on">
 
           <!-- username -->
           <div class="mb-3">
-            <label for="username"
-                   class="form-label fw-semibold mb-1"
-                   style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">
+            <label for="username" class="login-label">
               Username
             </label>
             <input type="text"
-                   class="form-control form-control-sm"
+                   class="form-control form-control-sm login-input"
                    id="username"
                    name="username"
                    required
-                   style="border-radius:.6rem; font-size:.9rem; padding:.55rem .75rem;">
+                   autocomplete="username"
+                   autocapitalize="none"
+                   autofocus>
           </div>
 
           <!-- password -->
           <div class="mb-4">
-            <label for="password"
-                   class="form-label fw-semibold mb-1"
-                   style="font-size:.8rem; text-transform:uppercase; letter-spacing:.05em;">
+            <label for="password" class="login-label">
               Password
             </label>
             <input type="password"
-                   class="form-control form-control-sm"
+                   class="form-control form-control-sm login-input"
                    id="password"
                    name="password"
                    required
-                   style="border-radius:.6rem; font-size:.9rem; padding:.55rem .75rem;">
-            <div class="form-text" style="font-size:.7rem; line-height:1.2;">
+                   autocomplete="current-password">
+            <div class="login-hint mt-1">
               Password is case-sensitive
             </div>
           </div>
@@ -66,12 +243,7 @@
           <!-- submit -->
           <div class="d-grid gap-2 mb-2">
             <button type="submit"
-                    class="btn btn-primary shadow-sm"
-                    style="font-weight:600;
-                           border-radius:.8rem;
-                           padding:.6rem 1rem;
-                           font-size:.9rem;
-                           box-shadow:0 .6rem 1.2rem rgba(13,110,253,.35)!important;">
+                    class="btn btn-primary shadow-sm login-submit-btn">
               ⇢ Sign In
             </button>
           </div>
@@ -80,18 +252,16 @@
       </div>
 
       <!-- footer -->
-      <div class="card-footer bg-white border-0 text-center text-muted"
-           style="border-top:1px solid #dee2e6; border-radius:0 0 1rem 1rem; font-size:.7rem; line-height:1.3; padding-top:.75rem;">
+      <div class="login-footer">
         Unauthorized access is prohibited.<br>
         Contact superadmin if you forgot your password.
       </div>
     </div>
 
-    <!-- optional environment / legal small print -->
-    <div class="text-center text-muted mt-3" style="font-size:.7rem; line-height:1.3;">
+    <div class="login-legal">
       WEST COAST CHIEF REPAIR • Internal Use Only
     </div>
-
   </div>
 </div>
+
 {% endblock %}

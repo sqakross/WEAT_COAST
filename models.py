@@ -339,6 +339,7 @@ class GoodsReceipt(db.Model):
     posted_at = db.Column(db.DateTime)
     posted_by = db.Column(db.Integer)
     attachment_path = db.Column(db.String(512))
+    extra_expenses = db.Column(db.Float, default=0.0)
 
     # удобный алиас: .items == .lines
     @property

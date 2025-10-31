@@ -446,6 +446,11 @@
       </a>
 
       <a class="btn-tech-nav"
+         href="{{ url_for('inventory.change_password', user_id=current_user.id if current_user.is_authenticated else 0) }}">
+        Change Password
+      </a>
+
+      <a class="btn-tech-nav"
          href="{{ url_for('auth.logout') }}">
         Logout
       </a>

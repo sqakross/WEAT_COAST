@@ -152,38 +152,73 @@ input[type="checkbox"][disabled],
 
 @media (min-width: 768px) and (max-width: 1400px) {
 
-  /* --- 1. СКРЫВАЕМ СЛОЖНУЮ ШАПКУ ДЛЯ ТЕХНИКА, ПОКАЗЫВАЕМ ПРОСТУЮ --- */
-  body.role-technician .main-navbar {
-    display: none !important;
-  }
-
+    /* тех-панель сверху: фиксированная */
   body.role-technician .tech-toolbar {
     display: block !important;
+
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 0;
+
+    background: #0a1a2d;
+    color: #fff;
+    border-bottom: 2px solid #222;
+    box-shadow:
+      0 2px 4px rgba(0,0,0,.7),
+      0 8px 24px rgba(0,0,0,.6),
+      inset 0 1px 0 rgba(255,255,255,.08);
+
+    z-index: 4000;
   }
 
-  /* делаем тулбар толще, чтобы удобно тапать */
   body.role-technician .tech-toolbar-inner {
-    padding: 1rem .75rem;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: space-around;
+    align-items: stretch;
+    gap: .75rem;
+    padding: .75rem .75rem;
   }
 
+  /* большие читабельные кнопки сверху */
   body.role-technician .tech-toolbar-inner .btn-tech-nav {
     font-size: 1.1rem;
-    padding: 1rem 1.1rem;
+    font-weight: 600;
+    line-height: 1.2;
+    background: #fff;
+    color: #0a1a2d;
+    border: 1px solid rgba(0,0,0,.6);
     border-radius: 0.9rem;
-    min-width: 40%;
+    padding: 1rem 1.1rem;
+    min-width: 30%;
+    flex: 1 1 auto;
     text-align: center;
+    text-decoration: none;
+    box-shadow:
+      0 2px 4px rgba(0,0,0,.8),
+      0 6px 16px rgba(0,0,0,.8),
+      inset 0 1px 0 rgba(255,255,255,.9);
   }
+  body.role-technician .tech-toolbar-inner .btn-tech-nav:active {
+    filter: brightness(1.05);
+  }
+
 
 
   /* --- 2. ГЛОБАЛЬНЫЕ РАЗМЕРЫ ДЛЯ ПАЛЬЦА --- */
 
-  body.role-technician {
+    body.role-technician {
     font-size: 1.15rem;
     line-height: 1.4;
-    /* твой base.css даёт body { padding:20px }.
-       мы слегка уменьшаем чтобы всё не прилипало по бокам */
-    padding: 16px;
+
+    /* контент не лезет под фиксированную верхнюю панель и нижний футер */
+    padding-top: 5.5rem;
+    padding-right: 16px;
+    padding-left: 16px;
+    padding-bottom: 7rem; /* мы это уже делали для нижнего футера */
   }
+
 
   /* таблицы и заголовки внутри таблиц делаем читабельнее */
   body.role-technician table {
