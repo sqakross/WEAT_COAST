@@ -4,19 +4,44 @@
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
     <h3 class="mb-1">Receiving Batch #{{ batch.id }}</h3>
-    <div class="text-muted small">
-      <span class="me-3"><strong>Supplier:</strong> {{ batch|attr('supplier_name')|default('—', true) }}</span>
-      <span class="me-3"><strong>Invoice #:</strong> {{ batch|attr('invoice_number')|default('—', true) }}</span>
-      <span class="me-3"><strong>Date:</strong> {{ batch|attr('invoice_date')|default('—', true) }}</span>
+
+    <div class="text-muted small d-flex flex-wrap align-items-center" style="gap:.5rem;">
+      <span class="me-3">
+        <strong>Supplier:</strong>
+        {{ batch|attr('supplier_name')|default('—', true) }}
+      </span>
+
+      <span class="me-3">
+        <strong>Invoice #:</strong>
+        {{ batch|attr('invoice_number')|default('—', true) }}
+      </span>
+
+      <span class="me-3">
+        <strong>Date:</strong>
+        {{ batch|attr('invoice_date')|default('—', true) }}
+      </span>
+
+      {# статус партии (posted / draft) #}
+      {% set is_posted = (batch|attr('status')|default('', true)) == 'posted' %}
       <span class="me-3">
         <strong>Status:</strong>
-        {% set is_posted = (batch|attr('status')|default('', true)) == 'posted' %}
         {% if is_posted %}
           <span class="badge bg-success">POSTED</span>
         {% else %}
           <span class="badge bg-secondary">DRAFT</span>
         {% endif %}
       </span>
+
+      {# наш новый индикатор состояния склада #}
+      {% if stock_applied %}
+        <span class="badge bg-success" style="font-size:.7rem;">
+          Stock Applied
+        </span>
+      {% else %}
+        <span class="badge bg-secondary" style="font-size:.7rem;">
+          No Stock Applied
+        </span>
+      {% endif %}
     </div>
   </div>
 
@@ -34,10 +59,12 @@
       ‹ Back
     </a>
 
-    {# Unpost/Post button:
-       - показываем ТОЛЬКО суперюзеру
-       - и ТОЛЬКО если можно unpost (can_unpost из контроллера)
+    {# Post / Unpost кнопка через toggle:
+       - показываем только суперюзеру (can_super)
+       - и только если can_unpost из контроллера говорит, что это безопасно
+       - если партия уже частично выдана, мы дизейблим анпост
     #}
+
     {% if can_super and can_unpost %}
       <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
             method="post" class="d-inline">
@@ -45,14 +72,16 @@
           {{ 'Unpost' if is_posted else 'Post' }}
         </button>
       </form>
+
     {% elif can_super and (not can_unpost) and is_posted %}
-      {# батч уже частично израсходован -> блокируем Unpost и показываем причину #}
+      {# батч posted, но уже потреблён техниками -> обычный unpost запрещён #}
       <button class="btn btn-warning" type="button" disabled
               title="Batch already issued to technicians. Cannot unpost.">
         Unpost
       </button>
+
     {% elif can_super and (not is_posted) %}
-      {# DRAFT состояние: пост разрешён даже если consumed=False (consumed будет False в draft) #}
+      {# DRAFT состояние: пост разрешён #}
       <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
             method="post" class="d-inline">
         <button class="btn btn-primary" type="submit">
@@ -61,11 +90,24 @@
       </form>
     {% endif %}
 
+    {# Delete:
+       Правило безопасности:
+       - только суперюзер (can_super)
+       - НО если stock_applied == True (то есть склад ещё держит этот приход),
+         то блокируем Delete (нельзя удалять батч, который всё ещё в стоке).
+       Это защищает от случайного удаления без отката остатков.
+    #}
     {% if can_super %}
       <form action="{{ url_for('inventory.receiving_delete', batch_id=batch.id) }}"
             method="post" class="d-inline"
             onsubmit="return confirm('Delete batch #{{ batch.id }}? This cannot be undone.');">
-        <button class="btn btn-danger" type="submit">Delete</button>
+        <button class="btn btn-danger"
+                type="submit"
+                {% if stock_applied %}disabled
+                   title="Unpost first to remove from stock before deleting."
+                {% endif %}>
+          Delete
+        </button>
       </form>
     {% endif %}
   </div>
@@ -146,10 +188,10 @@
 
 {# ---------- EDIT CARD (Admin / Superadmin) ---------- #}
 
-{# Вместо чистого is_posted мы теперь используем can_edit.
-   can_edit приходит из контроллера:
-   - True  => супер может править
-   - False => либо не супер, либо партия уже consumed
+{# Вместо чистого is_posted мы используем can_edit:
+   - can_edit приходит из контроллера
+   - True: супер/админ и партия не consumed
+   - False: либо не супер, либо партия уже потреблена
 #}
 
 {% if can_super %}

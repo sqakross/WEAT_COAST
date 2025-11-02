@@ -8272,7 +8272,9 @@ def receiving_toggle(batch_id: int):
     from models import ReceivingBatch
     from services.receiving import post_receiving_batch, unpost_receiving_batch
 
-    # кто может жать Post / Unpost
+    log = current_app.logger
+
+    # --- кто может жать Post / Unpost через toggle ---
     role_low = (getattr(current_user, "role", "") or "").strip().lower()
     is_adminish = (
         role_low in ("admin", "superadmin")
@@ -8290,10 +8292,28 @@ def receiving_toggle(batch_id: int):
         return redirect(url_for("inventory.receiving_list"))
 
     status_now = (getattr(batch, "status", "") or "").strip().lower()
+    was_posted_at = getattr(batch, "posted_at", None)
 
-    try:
-        if status_now != "posted":
-            # DRAFT -> POST
+    # =========================================================
+    # CASE 1: сейчас не POSTED -> хотим POST (приход на склад)
+    # =========================================================
+    if status_now != "posted":
+        # защита от двойного прихода:
+        # если batch уже когда-то был проведён (posted_at не пустой),
+        # то склад повторно не трогаем, просто вернём статус "posted".
+        if was_posted_at:
+            log.warning(
+                "[RECEIVING_TOGGLE] Batch %s already had stock applied earlier "
+                "(posted_at=%s). Setting status back to POSTED without re-applying stock.",
+                batch.id, was_posted_at
+            )
+            batch.status = "posted"
+            db.session.commit()
+            flash("Batch marked as POSTED (stock was already applied earlier).", "info")
+            return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+
+        # нормальный путь: первая проводка -> плюсуем остаток через сервис
+        try:
             post_receiving_batch(
                 batch.id,
                 getattr(current_user, "id", None)
@@ -8302,35 +8322,70 @@ def receiving_toggle(batch_id: int):
                 f"Batch #{batch.id} posted and stock updated.",
                 "success"
             )
-
-        else:
-            # POSTED -> UNPOST
-            # сначала проверка - было ли уже списание этим деталям?
-            if _batch_consumed_forbid_unpost(batch):
-                # уже выдавали техникам -> запрещаем откат
-                current_app.logger.debug(
-                    "[RECEIVING_TOGGLE] Blocked UNPOST for batch %s: already consumed.",
-                    batch.id,
-                )
-                flash(
-                    "Cannot unpost: items from this batch were already issued to technicians.",
-                    "danger"
-                )
-                return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
-
-            # иначе можно безопасно откатить
-            unpost_receiving_batch(
-                batch.id,
-                getattr(current_user, "id", None)
+        except Exception as e:
+            db.session.rollback()
+            log.exception(
+                "[RECEIVING_TOGGLE] post failed for batch %s",
+                batch.id
             )
+            flash(f"Failed to post: {e}", "danger")
+
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+
+    # =========================================================
+    # CASE 2: сейчас POSTED -> хотим UNPOST (снять со склада)
+    # =========================================================
+    # helper: супер-админ?
+    def is_superadmin(u) -> bool:
+        r = (getattr(u, "role", "") or "").strip().lower()
+        return (
+            r == "superadmin"
+            or getattr(u, "is_superadmin", False)
+            or getattr(u, "is_super_admin", False)
+        )
+
+    # Если партия уже "потреблена" (из неё что-то выдали технику после постинга),
+    # то мы не даём обычному админу снимать склад, чтобы не уйти в минус.
+    # superadmin может сделать форс-чистку через отдельную кнопку /receiving/<id>/unpost.
+    if _batch_consumed_forbid_unpost(batch):
+        log.debug(
+            "[RECEIVING_TOGGLE] Blocked UNPOST for batch %s: already consumed.",
+            batch.id,
+        )
+
+        if not is_superadmin(current_user):
             flash(
-                f"Batch #{batch.id} reverted to draft and stock rolled back.",
-                "warning"
+                "Cannot unpost: items from this batch were already issued to technicians.",
+                "danger"
             )
+            return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
+        # супер-админу не делаем авто-rollback тут,
+        # чтобы не словить неожиданный минус: он должен нажать свою отдельную Unpost кнопку,
+        # которая идёт на /receiving/<id>/unpost (там только superadmin).
+        flash(
+            "This batch was already consumed. Use SUPERADMIN Unpost button instead.",
+            "warning"
+        )
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+
+    # нормально: партия posted и не была использована -> можно безопасно снять со склада
+    try:
+        unpost_receiving_batch(
+            batch.id,
+            getattr(current_user, "id", None)
+        )
+        flash(
+            f"Batch #{batch.id} reverted to draft and stock rolled back.",
+            "warning"
+        )
     except Exception as e:
         db.session.rollback()
-        flash(f"Failed to toggle: {e}", "danger")
+        log.exception(
+            "[RECEIVING_TOGGLE] unpost failed for batch %s",
+            batch.id
+        )
+        flash(f"Failed to unpost: {e}", "danger")
 
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 

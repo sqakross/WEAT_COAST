@@ -274,14 +274,19 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     Откат прихода:
     - работает ТОЛЬКО если batch.status == 'posted'
     - для каждой строки:
-        мы уменьшаем склад не на it.quantity, а на it.applied_qty (то, что реально зачислили)
-        если сейчас на складе меньше чем applied_qty (уже что-то ушло техникам),
-        то снимаем только то, что осталось (не уходим в минус)
-    - чистим location аккуратно
-    - переводим batch обратно в 'draft'
-    - applied_qty сбрасываем обратно в 0
+        берём сколько реально надо снять со склада.
+        нормальный путь: it.applied_qty (сколько мы реально плюсовали на складе).
+        если applied_qty == 0 (старые/импортные партии не успели это записать),
+        то fallback -> используем it.quantity.
+    - не уходим в минус: снимаем максимум то, что сейчас реально есть.
+    - чистим location по необходимости.
+    - переводим batch обратно в 'draft', сбрасываем posted_at.
+    - applied_qty сбрасываем в 0.
     """
     from flask import current_app
+    from extensions import db
+    from sqlalchemy import func
+    from models import ReceivingBatch, Part
 
     batch = ReceivingBatch.query.get(batch_id)
     if not batch:
@@ -302,33 +307,46 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     )
 
     for it in (batch.items or []):
-        pn = (it.part_number or "").strip().upper()
-        # вместо it.quantity берём сколько реально зашло
+        pn = (getattr(it, "part_number", "") or "").strip().upper()
+        if not pn:
+            continue
+
+        # 1. Сколько мы пытались зачислить при постинге
         qty_applied = int(getattr(it, "applied_qty", 0) or 0)
 
-        if not pn or qty_applied <= 0:
-            # либо строка была пустая, либо не была применена
+        # 2. Fallback для старых партий / автoимпорта:
+        #    если applied_qty == 0, но quantity > 0,
+        #    значит первая проводка не записала applied_qty.
+        #    Тогда считаем, что надо вычесть quantity.
+        if qty_applied <= 0:
+            try:
+                qty_applied = int(getattr(it, "quantity", 0) or 0)
+            except Exception:
+                qty_applied = 0
+
+        if qty_applied <= 0:
+            # вообще нечего списывать (пустая строка или кривые данные)
             continue
 
         part = Part.query.filter(func.upper(Part.part_number) == pn).first()
         if not part:
-            # деталь могла быть удалена вручную из каталога
+            # запчасть могла быть удалена вручную
             continue
 
+        # сколько сейчас реально на складе
         before_qty = _get_part_on_hand(part)
 
-        # мы не можем снять больше, чем реально осталось на складе сейчас
+        # мы не можем снять больше, чем реально осталось
         rollback_qty = qty_applied if qty_applied <= before_qty else before_qty
         after_qty = before_qty - rollback_qty
 
-        # записать новый остаток
         _set_part_on_hand(part, after_qty)
 
         # обновление location:
-        # если остаток стал 0 — просто чистим локацию
-        # иначе пытаемся удалить location от этой поставки
+        # если остаток стал 0 — просто чистим локацию.
+        # если остаток остался >0 — пробуем убрать локацию от этой поставки.
         if hasattr(part, "location"):
-            incoming_loc = (it.location or "").strip().upper()
+            incoming_loc = (getattr(it, "location", "") or "").strip().upper()
 
             if after_qty == 0:
                 part.location = ""
@@ -338,7 +356,7 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
                     part.location = new_loc[:64]
 
         current_app.logger.info(
-            "[RECEIVING_UNPOST] part %s: before=%s, rollback=%s, after=%s (applied_qty was %s)",
+            "[RECEIVING_UNPOST] part %s: before=%s, rollback=%s, after=%s (qty_applied=%s)",
             pn,
             before_qty,
             rollback_qty,
@@ -346,12 +364,11 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
             qty_applied,
         )
 
-        # сбрасываем applied_qty в этой строке,
-        # чтобы повторный UNPOST не пытался снова снять те же штуки
+        # сбрасываем applied_qty чтобы этот же приход не списался второй раз
         if hasattr(it, "applied_qty"):
             it.applied_qty = 0
 
-    # батч становится снова draft
+    # пометить сам batch как draft
     batch.status = "draft"
     batch.posted_at = None
 
@@ -359,7 +376,8 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     if hasattr(batch, "unposted_by"):
         batch.unposted_by = current_user_id
     if hasattr(batch, "unposted_at"):
-        batch.unposted_at = datetime.utcnow()
+        from datetime import datetime as _dt
+        batch.unposted_at = _dt.utcnow()
 
     db.session.commit()
 
@@ -369,7 +387,6 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     )
 
     return batch
-
 
 # ---------- cleanup helper (оставляем как у тебя) ----------
 
