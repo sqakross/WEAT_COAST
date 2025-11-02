@@ -17,7 +17,8 @@
           Preview & Edit Import
         </div>
         <div class="text-muted" style="font-size:.8rem; line-height:1.2;">
-          Review quantities, costs, and locations before posting to stock
+          Review quantities, base cost, and locations. Extra expenses (shipping, etc.) will be
+          spread across all lines proportionally.
         </div>
       </div>
 
@@ -30,13 +31,49 @@
       </div>
     </div>
 
-    <!-- action bar card (Save / Add Row / Apply) -->
+    <!-- action bar card -->
     <div class="card shadow-sm border-0 mb-3"
          style="border-radius:1rem; background:linear-gradient(#ffffff,#fcfcfc); box-shadow:0 .75rem 1.5rem rgba(0,0,0,.08)!important;">
-      <div class="card-body d-flex flex-wrap gap-2 align-items-center justify-content-between"
+      <div class="card-body d-flex flex-wrap gap-3 align-items-start justify-content-between"
            style="padding:1rem 1.25rem;">
 
-        <div class="d-flex flex-wrap gap-2">
+        <div class="d-flex flex-column" style="min-width:220px; max-width:260px;">
+          <label class="form-label mb-1" style="font-size:.8rem; font-weight:600;">
+            Extra expenses ($)
+            <span class="text-muted" style="font-weight:400;">(shipping, fees, etc.)</span>
+          </label>
+          <input class="form-control form-control-sm"
+                 style="border-radius:.5rem; font-size:.9rem; text-align:right;"
+                 name="extra_expenses_display"
+                 id="extra-expenses-input"
+                 value="{{ val(extra_expenses) }}"
+                 inputmode="decimal">
+          <small class="text-muted" style="font-size:.7rem; line-height:1.2;">
+            This amount will be allocated across all items by cost share.
+          </small>
+        </div>
+
+        <div class="flex-grow-1 d-flex flex-wrap gap-2">
+          <div class="d-flex flex-column text-nowrap">
+            <div class="text-muted" style="font-size:.7rem; line-height:1.2;">Subtotal (parts only)</div>
+            <div id="subtotal-display"
+                 style="font-size:1rem; font-weight:600;">$0.00</div>
+          </div>
+
+          <div class="d-flex flex-column text-nowrap">
+            <div class="text-muted" style="font-size:.7rem; line-height:1.2;">Extra expenses</div>
+            <div id="extra-display"
+                 style="font-size:1rem; font-weight:600;">$0.00</div>
+          </div>
+
+          <div class="d-flex flex-column text-nowrap">
+            <div class="text-muted" style="font-size:.7rem; line-height:1.2;">Grand total (invoice)</div>
+            <div id="grand-display"
+                 style="font-size:1rem; font-weight:700; color:#198754;">$0.00</div>
+          </div>
+        </div>
+
+        <div class="d-flex flex-column flex-sm-row gap-2">
           <button class="btn btn-primary shadow-sm"
                   form="import-form"
                   name="save"
@@ -52,9 +89,7 @@
                   style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.85rem;">
             ➕ Add Blank Row
           </button>
-        </div>
 
-        <div class="d-flex flex-wrap gap-2">
           <button class="btn btn-success shadow-sm"
                   form="import-form"
                   name="apply"
@@ -84,7 +119,7 @@
           Incoming Items
         </div>
         <div class="text-muted" style="font-size:.7rem; line-height:1.2;">
-          Check part number, cost, and stock location
+          Adjust base cost or qty if needed. "Adj Cost (+fee)" is automatically calculated and will be saved.
         </div>
       </div>
 
@@ -94,8 +129,9 @@
             style="margin:0;">
         <input type="hidden" name="saved_path" value="{{ saved_path }}">
         <input type="hidden" name="supplier_hint" value="{{ supplier_hint|default('') }}">
+        <input type="hidden" name="extra_expenses" id="extra-expenses-hidden" value="{{ val(extra_expenses) }}">
 
-        {# ВАЖНО: эти три скрытых поля удовлетворяют _units_re (brand/model/serial) #}
+        {# dummy block for parser expecting units[0] group #}
         <input type="hidden" name="units[0][brand]"  value="">
         <input type="hidden" name="units[0][model]"  value="">
         <input type="hidden" name="units[0][serial]" value="">
@@ -103,55 +139,70 @@
         <div class="table-responsive" style="max-height:60vh; border-top:1px solid #dee2e6;">
           <table id="edit-table"
                  class="table align-middle mb-0"
-                 style="font-size:.85rem;">
+                 style="font-size:.8rem;">
             <thead class="table-light"
                    style="position:sticky; top:0; z-index:5; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em;">
               <tr>
                 <th style="min-width:140px;">Part #</th>
                 <th style="min-width:220px;">Description</th>
-                <th style="width:88px;">Qty</th>
-                <th style="width:120px;">Unit Cost</th>
-                <th style="width:120px;">Location</th>
+                <th style="width:70px; text-align:center;">Qty</th>
+                <th style="width:110px; text-align:right;">Base Cost</th>
+                <th style="width:120px; text-align:right;">Adj Cost (+fee)</th>
+                <th style="width:100px; text-align:center;">Location</th>
                 <th style="width:50px;">Del</th>
               </tr>
             </thead>
             <tbody>
             {% for r in rows %}
-              <tr style="border-top:1px solid #f1f1f1;">
+              <tr class="import-row" style="border-top:1px solid #f1f1f1;">
                 <td>
-                  <input class="form-control form-control-sm"
+                  <input class="form-control form-control-sm part-number-input"
                          style="border-radius:.5rem; font-size:.8rem;"
                          name="units[0][rows][{{ loop.index0 }}][part_number]"
                          value="{{ val(r.part_number) }}"
                          autocomplete="off">
                 </td>
                 <td>
-                  <input class="form-control form-control-sm"
+                  <input class="form-control form-control-sm part-name-input"
                          style="border-radius:.5rem; font-size:.8rem;"
                          name="units[0][rows][{{ loop.index0 }}][part_name]"
                          value="{{ val(r.part_name) }}"
                          autocomplete="off">
                 </td>
-                <td style="width:88px;">
-                  <input class="form-control form-control-sm"
+                <td style="width:70px;">
+                  <input class="form-control form-control-sm qty-input"
                          style="border-radius:.5rem; font-size:.8rem; text-align:center;"
                          name="units[0][rows][{{ loop.index0 }}][quantity]"
                          value="{{ val(r.quantity) }}"
                          inputmode="numeric">
                 </td>
-                <td style="width:120px;">
-                  <input class="form-control form-control-sm"
+
+                <!-- BASE COST (editable) -->
+                <td style="width:110px;">
+                  <input class="form-control form-control-sm base-cost-input"
                          style="border-radius:.5rem; font-size:.8rem; text-align:right;"
-                         name="units[0][rows][{{ loop.index0 }}][unit_cost]"
+                         name="units[0][rows][{{ loop.index0 }}][unit_cost_base]"
                          value="{{ val(r.unit_cost) }}"
                          inputmode="decimal">
                 </td>
+
+                <!-- ADJUSTED COST (readonly) -->
                 <td style="width:120px;">
-                  <input class="form-control form-control-sm"
+                  <input class="form-control form-control-sm adj-cost-input"
+                         style="border-radius:.5rem; font-size:.8rem; text-align:right; background:#eaffea; font-weight:600;"
+                         name="units[0][rows][{{ loop.index0 }}][unit_cost]"
+                         value="{{ val(r.unit_cost) }}"
+                         inputmode="decimal"
+                         readonly>
+                </td>
+
+                <td style="width:100px;">
+                  <input class="form-control form-control-sm loc-input"
                          style="border-radius:.5rem; font-size:.8rem; text-align:center;"
                          name="units[0][rows][{{ loop.index0 }}][location]"
                          value="{{ val(r.location) }}">
                 </td>
+
                 <td style="width:50px;">
                   <button class="btn btn-sm btn-outline-danger del-row"
                           type="button"
@@ -166,7 +217,25 @@
           </table>
         </div>
 
-        <!-- bottom action bar duplicate for long lists -->
+        <!-- totals preview under table (mobile-friendly duplicate of header totals) -->
+        <div class="px-3 py-2 border-top" style="font-size:.8rem; background:#fcfcfc;">
+          <div class="row gy-2">
+            <div class="col-12 col-sm-4">
+              <div class="text-muted" style="font-size:.7rem;">Subtotal (parts only)</div>
+              <div id="subtotal-display-bottom" style="font-weight:600;">$0.00</div>
+            </div>
+            <div class="col-12 col-sm-4">
+              <div class="text-muted" style="font-size:.7rem;">Extra expenses</div>
+              <div id="extra-display-bottom" style="font-weight:600;">$0.00</div>
+            </div>
+            <div class="col-12 col-sm-4">
+              <div class="text-muted" style="font-size:.7rem;">Grand total (invoice)</div>
+              <div id="grand-display-bottom" style="font-weight:700; color:#198754;">$0.00</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- bottom actions -->
         <div class="card-footer bg-white d-flex flex-wrap gap-2 justify-content-between align-items-start"
              style="border-top:1px solid #dee2e6; font-size:.75rem;">
           <div class="d-flex flex-wrap gap-2">
@@ -215,40 +284,122 @@
 </div>
 
 <script>
-  // Добавить пустую строку
+  // === helpers ===
+  function parseFloatSafe(v) {
+    const x = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+    return isNaN(x) ? 0 : x;
+  }
+
+  function money(n) {
+    return "$" + (Math.round(n * 100) / 100).toFixed(2);
+  }
+
+  function recalcTotalsAndAdjCosts() {
+    const rows = document.querySelectorAll('#edit-table tbody tr.import-row');
+    const extraInput = document.getElementById('extra-expenses-input');
+    const extraHidden = document.getElementById('extra-expenses-hidden');
+
+    const extraVal = parseFloatSafe(extraInput.value);
+    extraHidden.value = extraVal.toString(); // send to backend on submit
+
+    // 1) collect base line totals
+    let subtotalBase = 0.0;
+    let perRowData = [];
+
+    rows.forEach((tr) => {
+      const qtyEl       = tr.querySelector('.qty-input');
+      const baseCostEl  = tr.querySelector('.base-cost-input');
+
+      const qty        = parseFloatSafe(qtyEl.value);
+      const baseCost   = parseFloatSafe(baseCostEl.value);
+
+      const lineBaseTotal = qty * baseCost; // qty * base cost
+      subtotalBase += lineBaseTotal;
+
+      perRowData.push({
+        tr,
+        qty,
+        baseCost,
+        lineBaseTotal
+      });
+    });
+
+    // 2) distribute extra proportionally by cost share
+    //    cost_share(row) = (row.lineBaseTotal / subtotalBase)
+    //    extra_for_row_total = extraVal * cost_share
+    //    per_item_fee = extra_for_row_total / qty
+    //    adjCost = baseCost + per_item_fee
+    perRowData.forEach((row) => {
+      let adjCost = row.baseCost;
+      if (row.qty > 0 && subtotalBase > 0) {
+        const share = row.lineBaseTotal / subtotalBase;
+        const extraForRowTotal = extraVal * share;
+        const perItemFee = extraForRowTotal / row.qty;
+        adjCost = row.baseCost + perItemFee;
+      }
+
+      const adjCostEl = row.tr.querySelector('.adj-cost-input');
+      adjCostEl.value = (Math.round(adjCost * 100) / 100).toFixed(2);
+    });
+
+    // 3) grand total = subtotalBase + extraVal
+    const grand = subtotalBase + extraVal;
+
+    // 4) update displays (top + bottom)
+    document.getElementById('subtotal-display').textContent       = money(subtotalBase);
+    document.getElementById('extra-display').textContent          = money(extraVal);
+    document.getElementById('grand-display').textContent          = money(grand);
+
+    document.getElementById('subtotal-display-bottom').textContent = money(subtotalBase);
+    document.getElementById('extra-display-bottom').textContent    = money(extraVal);
+    document.getElementById('grand-display-bottom').textContent    = money(grand);
+  }
+
+  // add blank row
   function addBlankRow() {
     const tbody = document.querySelector('#edit-table tbody');
     const idx = tbody.children.length;
     const tr = document.createElement('tr');
+    tr.classList.add('import-row');
     tr.style.borderTop = "1px solid #f1f1f1";
+
     tr.innerHTML = `
       <td>
-        <input class="form-control form-control-sm"
+        <input class="form-control form-control-sm part-number-input"
                style="border-radius:.5rem; font-size:.8rem;"
                name="units[0][rows][${idx}][part_number]"
                autocomplete="off">
       </td>
       <td>
-        <input class="form-control form-control-sm"
+        <input class="form-control form-control-sm part-name-input"
                style="border-radius:.5rem; font-size:.8rem;"
                name="units[0][rows][${idx}][part_name]"
                autocomplete="off">
       </td>
-      <td style="width:88px;">
-        <input class="form-control form-control-sm"
+      <td style="width:70px;">
+        <input class="form-control form-control-sm qty-input"
                style="border-radius:.5rem; font-size:.8rem; text-align:center;"
                name="units[0][rows][${idx}][quantity]"
                value="1"
                inputmode="numeric">
       </td>
-      <td style="width:120px;">
-        <input class="form-control form-control-sm"
+      <td style="width:110px;">
+        <input class="form-control form-control-sm base-cost-input"
                style="border-radius:.5rem; font-size:.8rem; text-align:right;"
-               name="units[0][rows][${idx}][unit_cost]"
+               name="units[0][rows][${idx}][unit_cost_base]"
+               value=""
                inputmode="decimal">
       </td>
       <td style="width:120px;">
-        <input class="form-control form-control-sm"
+        <input class="form-control form-control-sm adj-cost-input"
+               style="border-radius:.5rem; font-size:.8rem; text-align:right; background:#eaffea; font-weight:600;"
+               name="units[0][rows][${idx}][unit_cost]"
+               value=""
+               inputmode="decimal"
+               readonly>
+      </td>
+      <td style="width:100px;">
+        <input class="form-control form-control-sm loc-input"
                style="border-radius:.5rem; font-size:.8rem; text-align:center;"
                name="units[0][rows][${idx}][location]"
                value="MAIN">
@@ -261,21 +412,24 @@
         </button>
       </td>`;
     tbody.appendChild(tr);
+
     applySupplierDefaultToLocations();
+    recalcTotalsAndAdjCosts();
   }
 
   document.getElementById('add-row')?.addEventListener('click', addBlankRow);
   document.getElementById('add-row-bottom')?.addEventListener('click', addBlankRow);
 
-  // Удаление строки
+  // delete row
   document.addEventListener('click', (e) => {
     if (e.target.classList.contains('del-row')) {
       e.preventDefault();
       e.target.closest('tr')?.remove();
+      recalcTotalsAndAdjCosts();
     }
   });
 
-  // ---- АВТО-ПРАВКА LOCATION ПО ПОСТАВЩИКУ ----
+  // auto default LOCATION based on supplier
   function supplierDefaultFromHint(hint) {
     const s = (hint || '').toLowerCase();
     if (s.includes('reliable')) return 'REL';
@@ -283,7 +437,6 @@
     if (s.includes('sears'))    return 'SEARS';
     return 'MAIN';
   }
-
   function looksLikeReliable(source, hint) {
     return /reliable/i.test(source || '') || /reliable/i.test(hint || '');
   }
@@ -299,13 +452,13 @@
     document.querySelectorAll('input[name^="units[0][rows]"][name$="[location]"]').forEach(inp => {
       const cur = (inp.value || '').trim().toUpperCase();
 
-      // 1) если пусто — ставим дефолт
+      // 1) if empty -> fill with default
       if (!cur) {
         inp.value = defLoc;
         return;
       }
 
-      // 2) мягкая правка поставщика
+      // 2) fix mismatched supplier/location pairs
       if (looksLikeReliable(savedPath, supplierHint) && cur === 'MAR') {
         inp.value = 'REL';
         return;
@@ -317,7 +470,19 @@
     });
   }
 
-  // при первом рендере
+  // recalc on edits
+  document.addEventListener('input', (e) => {
+    if (
+      e.target.classList.contains('qty-input') ||
+      e.target.classList.contains('base-cost-input') ||
+      e.target.id === 'extra-expenses-input'
+    ) {
+      recalcTotalsAndAdjCosts();
+    }
+  });
+
+  // initial
   applySupplierDefaultToLocations();
+  recalcTotalsAndAdjCosts();
 </script>
 {% endblock %}

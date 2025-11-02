@@ -1,12 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
+
 <h3>Receiving Batches</h3>
 
 <form class="row g-2 mb-3" method="get">
-  <div class="col-auto"><input name="supplier" class="form-control" placeholder="Supplier" value="{{ filters.supplier }}"></div>
-  <div class="col-auto"><input name="invoice" class="form-control" placeholder="Invoice #" value="{{ filters.invoice }}"></div>
-  <div class="col-auto"><input name="date_from" type="date" class="form-control" value="{{ filters.date_from }}"></div>
-  <div class="col-auto"><input name="date_to" type="date" class="form-control" value="{{ filters.date_to }}"></div>
+  <div class="col-auto">
+    <input name="supplier" class="form-control" placeholder="Supplier" value="{{ filters.supplier }}">
+  </div>
+  <div class="col-auto">
+    <input name="invoice" class="form-control" placeholder="Invoice #" value="{{ filters.invoice }}">
+  </div>
+  <div class="col-auto">
+    <input name="date_from" type="date" class="form-control" value="{{ filters.date_from }}">
+  </div>
+  <div class="col-auto">
+    <input name="date_to" type="date" class="form-control" value="{{ filters.date_to }}">
+  </div>
   <div class="col-auto">
     <select name="status" class="form-select">
       <option value="">Any status</option>
@@ -20,10 +29,12 @@
   </div>
 </form>
 
-{# Только супер-админ #}
+{# Только супер-админ (или эквивалент) #}
 {% set role = current_user.role if current_user.is_authenticated else '' %}
 {% set can_super = current_user.is_authenticated and (
-  role == 'superadmin' or (current_user.is_superadmin|default(false)) or (current_user.is_super_admin|default(false))
+  role == 'superadmin'
+  or (current_user.is_superadmin|default(false))
+  or (current_user.is_super_admin|default(false))
 ) %}
 
 <table class="table table-sm table-hover align-middle">
@@ -33,15 +44,24 @@
       <th style="width:110px;">Date</th>
       <th>Supplier</th>
       <th style="width:160px;">Invoice #</th>
+
       <th style="width:100px;">Status</th>
+
+      {# НОВЫЙ столбец состояния склада #}
+      <th style="width:80px;">Stock</th>
+
       <th style="width:80px;" class="text-end">Qty</th>
       <th style="width:140px;" class="text-end">Total Cost</th>
-      {% if can_super %}<th style="width:260px;">Actions</th>{% endif %}
+
+      {% if can_super %}
+        <th style="width:260px;">Actions</th>
+      {% endif %}
     </tr>
   </thead>
   <tbody>
+
   {% for b in batches %}
-    {# безопасно берём строки #}
+    {# безопасно считаем количество и total для партии #}
     {% set lines = (b.lines if (b.lines is defined) else (b.items if (b.items is defined) else [])) %}
     {% set ns = namespace(qty=0, total=0.0) %}
     {% for it in lines %}
@@ -50,48 +70,102 @@
       {% set ns.qty = ns.qty + q %}
       {% set ns.total = ns.total + (q * u) %}
     {% endfor %}
-    <tr onclick="location.href='{{ url_for('inventory.receiving_detail', batch_id=b.id) }}'" style="cursor:pointer">
+
+    {# is_posted для кнопки Post/Unpost #}
+    {% set is_posted = (b.status|default('', true)) == 'posted' %}
+
+    {# stock_applied = True если склад ещё держит этот приход
+       это мы пробросили из контроллера в stock_flags[b.id] #}
+    {% set stock_applied = (stock_flags[b.id] if stock_flags is defined and b.id in stock_flags else false) %}
+
+    <tr onclick="location.href='{{ url_for('inventory.receiving_detail', batch_id=b.id) }}'"
+        style="cursor:pointer">
       <td>{{ b.id }}</td>
       <td>{{ b.invoice_date|default('—', true) }}</td>
       <td>{{ b.supplier_name|default('', true) }}</td>
       <td>{{ b.invoice_number|default('', true) }}</td>
+
       <td>
-        {% if (b.status|default('', true)) == 'posted' %}
+        {% if is_posted %}
           <span class="badge bg-success">posted</span>
         {% else %}
           <span class="badge bg-secondary">draft</span>
         {% endif %}
       </td>
+
+      {# НОВЫЙ СТОЛБЕЦ: Stock Applied vs Cleared
+         ● зелёный = партия в стоке
+         ● серый   = склад чист / откатили
+      #}
+      <td>
+        {% if stock_applied %}
+          <span class="text-success" style="font-size:.8rem; white-space:nowrap;">
+            ● stock
+          </span>
+        {% else %}
+          <span class="text-muted" style="font-size:.8rem; white-space:nowrap;">
+            ● clear
+          </span>
+        {% endif %}
+      </td>
+
       <td class="text-end">{{ ns.qty }}</td>
       <td class="text-end">
-        {{ b.currency|default('USD', true) }} {{ '%.2f' % (totals.get(b.id, ns.total) if totals is defined else ns.total) }}
+        {{ b.currency|default('USD', true) }}
+        {{ '%.2f' % (totals.get(b.id, ns.total) if totals is defined else ns.total) }}
       </td>
 
       {% if can_super %}
       {# Область кнопок не должна кликать всю строку #}
       <td onclick="event.stopPropagation();">
-        {# Post / Unpost (endpoint должен существовать как receiving_toggle) #}
-        <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}" method="post" style="display:inline;">
-          <button class="btn btn-sm {{ 'btn-warning' if (b.status|default('', true)) == 'posted' else 'btn-primary' }}" type="submit">
-            {{ 'Unpost' if (b.status|default('', true)) == 'posted' else 'Post' }}
+
+        {# Post / Unpost через toggle.
+           - жёлтая "Unpost" если статус posted
+           - синяя "Post" если draft
+        #}
+        <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}"
+              method="post" style="display:inline;">
+          <button
+            class="btn btn-sm {{ 'btn-warning' if is_posted else 'btn-primary' }}"
+            type="submit">
+            {{ 'Unpost' if is_posted else 'Post' }}
           </button>
         </form>
 
-        {# Ручная чистка ключей — только супер-админ #}
-        <form action="{{ url_for('inventory.receiving_clear_keys', batch_id=b.id) }}" method="post" style="display:inline;"
+        {# Clear keys (разрешает ре-импорт того же файла)
+           только супер-админ
+        #}
+        <form action="{{ url_for('inventory.receiving_clear_keys', batch_id=b.id) }}"
+              method="post" style="display:inline;"
               onsubmit="return confirm('Clear import keys for batch #{{ b.id }}? This allows re-import from the same file.');">
-          <button class="btn btn-sm btn-outline-secondary" type="submit">Clear keys</button>
+          <button class="btn btn-sm btn-outline-secondary" type="submit">
+            Clear keys
+          </button>
         </form>
 
-        {# Удаление батча: после commit() у тебя уже вызывается авто-чистка #}
-        <form action="{{ url_for('inventory.receiving_delete', batch_id=b.id) }}" method="post" style="display:inline;"
+        {# Delete:
+           - доступно супер-админу
+           - ЕСЛИ stock_applied == True -> дизейблим, чтобы не удалить батч,
+             который ещё висит на складе.
+        #}
+        <form action="{{ url_for('inventory.receiving_delete', batch_id=b.id) }}"
+              method="post" style="display:inline;"
               onsubmit="return confirm('Delete batch #{{ b.id }}? This will also clear its import keys.');">
-          <button class="btn btn-sm btn-danger" type="submit">Delete</button>
+          <button
+            class="btn btn-sm btn-danger"
+            type="submit"
+            {% if stock_applied %}disabled
+               title="Unpost first to remove from stock before deleting."
+            {% endif %}>
+            Delete
+          </button>
         </form>
+
       </td>
       {% endif %}
     </tr>
   {% endfor %}
   </tbody>
 </table>
+
 {% endblock %}

@@ -10,12 +10,40 @@
 {% endif %}
 
 <form method="get" class="row g-2 mb-3 dashboard-filters" style="position:static;">
-  <div class="col-md-2"><label class="form-label mb-1">Technician</label><input name="tech" class="form-control" value="{{ args.get('tech','') if args else '' }}"></div>
-  <div class="col-md-2"><label class="form-label mb-1">Jobs</label><input name="jobs" class="form-control" value="{{ args.get('jobs','') if args else '' }}" placeholder="981448, ..."></div>
-  <div class="col-md-2"><label class="form-label mb-1">Model / Brand</label><input name="model" class="form-control" value="{{ args.get('model','') if args else '' }}" placeholder="Model or Brand"></div>
-  <div class="col-md-2"><label class="form-label mb-1">Part #</label><input name="pn" class="form-control" value="{{ args.get('pn','') if args else '' }}" placeholder="PN or Alt PN"></div>
-  <div class="col-md-2"><label class="form-label mb-1">From</label><input type="date" name="from" class="form-control" value="{{ args.get('from','') if args else '' }}"></div>
-  <div class="col-md-2"><label class="form-label mb-1">To</label><input type="date" name="to" class="form-control" value="{{ args.get('to','') if args else '' }}"></div>
+
+  <!-- unified text search -->
+  <div class="col-md-4">
+    <label class="form-label mb-1">Search</label>
+    <input
+      name="q"
+      class="form-control"
+      value="{{ args.get('q','') if args else '' }}"
+      placeholder="Tech / Job # / Brand / Model / Part # / Part name"
+    >
+  </div>
+
+  <!-- date range from -->
+  <div class="col-md-2">
+    <label class="form-label mb-1">From</label>
+    <input
+      type="date"
+      name="from"
+      class="form-control"
+      value="{{ args.get('from','') if args else '' }}"
+    >
+  </div>
+
+  <!-- date range to -->
+  <div class="col-md-2">
+    <label class="form-label mb-1">To</label>
+    <input
+      type="date"
+      name="to"
+      class="form-control"
+      value="{{ args.get('to','') if args else '' }}"
+    >
+  </div>
+
   <div class="col-12 d-flex gap-2 mt-1">
     <button class="btn btn-primary">Search</button>
     <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Reset</a>
@@ -26,9 +54,14 @@
   <table class="table table-sm table-hover align-middle wo-list-table">
     <thead class="table-light">
       <tr>
-        <th class="col-id">ID</th><th class="col-tech">Technician</th><th>Jobs</th>
-        <th>Brand/Model</th><th class="col-type">Type</th><th class="col-status">Status</th>
-        <th class="col-created">Created</th><th class="text-end col-actions">Actions</th>
+        <th class="col-id">ID</th>
+        <th class="col-tech">Technician</th>
+        <th>Jobs</th>
+        <th>Brand/Model</th>
+        <th class="col-type">Type</th>
+        <th class="col-status">Status</th>
+        <th class="col-created">Created</th>
+        <th class="text-end col-actions">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -36,17 +69,54 @@
         {% for w in items %}
         <tr>
           <td>{{ w.id }}</td>
+
           <td>{{ w.technician_name or '—' }}</td>
+
           <td>
-            <span class="jobs-trunc" title="{{ w.job_numbers or '' }}">{{ w.job_numbers or '—' }}</span>
-            {% if w.canonical_job %}<div class="text-muted small">primary: <code>{{ w.canonical_job }}</code></div>{% endif %}
+            <span class="jobs-trunc"
+                  title="{{ w.job_numbers or '' }}">
+              {{ w.job_numbers or '—' }}
+            </span>
+            {% if w.canonical_job %}
+              <div class="text-muted small">
+                primary:
+                <code>{{ w.canonical_job }}</code>
+              </div>
+            {% endif %}
           </td>
-          <td><span class="brand-trunc" title="{{ (w.brand or '') ~ ' ' ~ (w.model or '') }}">{{ (w.brand or '') ~ (' ' if w.brand and w.model else '') ~ (w.model or '') }}</span></td>
-          <td>{% if w.job_type == 'INSURANCE' %}<span class="badge bg-warning text-dark">INSURANCE</span>{% else %}<span class="badge bg-secondary">BASE</span>{% endif %}</td>
-          <td>{% if w.status == 'done' %}<span class="badge bg-success">done</span>{% elif w.status == 'ordered' %}<span class="badge bg-info text-dark">ordered</span>{% else %}<span class="badge bg-secondary">search_ordered</span>{% endif %}</td>
-          <td>{{ w.created_at.strftime('%Y-%m-%d') if w.created_at else '—' }}</td>
+
+          <td>
+            <span class="brand-trunc"
+                  title="{{ (w.brand or '') ~ ' ' ~ (w.model or '') }}">
+              {{ (w.brand or '') ~ (' ' if w.brand and w.model else '') ~ (w.model or '') }}
+            </span>
+          </td>
+
+          <td>
+            {% if w.job_type == 'INSURANCE' %}
+              <span class="badge bg-warning text-dark">INSURANCE</span>
+            {% else %}
+              <span class="badge bg-secondary">BASE</span>
+            {% endif %}
+          </td>
+
+          <td>
+            {% if w.status == 'done' %}
+              <span class="badge bg-success">done</span>
+            {% elif w.status == 'ordered' %}
+              <span class="badge bg-info text-dark">ordered</span>
+            {% else %}
+              <span class="badge bg-secondary">search_ordered</span>
+            {% endif %}
+          </td>
+
+          <td>
+            {{ w.created_at.strftime('%Y-%m-%d') if w.created_at else '—' }}
+          </td>
+
           <td class="text-end">
             <div class="wo-actions d-inline-flex gap-1">
+
               {# Open should always go to DETAIL page #}
               <a class="btn btn-outline-primary btn-sm"
                  href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">
@@ -74,7 +144,9 @@
         </tr>
         {% endfor %}
       {% else %}
-        <tr><td colspan="8" class="text-muted">No work orders found.</td></tr>
+        <tr>
+          <td colspan="8" class="text-muted">No work orders found.</td>
+        </tr>
       {% endif %}
     </tbody>
   </table>
