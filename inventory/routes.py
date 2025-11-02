@@ -5448,6 +5448,173 @@ def reports_grouped():
         location=location or '',
     )
 
+
+@inventory_bp.route("/invoice/printdirect")
+@login_required
+def invoice_printdirect():
+    """
+    Таб для техников: открывается по клику "Print".
+    1) Мы вычисляем те же строки, что и в view_invoice_pdf.
+    2) Рендерим ПУСТУЮ html-страницу с iframe PDF + auto window.print().
+
+    Важно:
+    - Здесь мы НЕ пытаемся сами рисовать PDF, мы зовём view_invoice_pdf через URL.
+    - Эта страница откроется в новой вкладке -> жест пользователя -> печать не блокируется.
+    """
+
+    from extensions import db
+    from models import IssuedPartRecord, IssuedBatch
+    from datetime import datetime, time as _time
+    from sqlalchemy import func, or_
+    from flask import request, render_template, flash, redirect, url_for
+    from flask_login import current_user
+
+    # ---- роль/юзер ---
+    role_raw = (getattr(current_user, "role", "") or "").strip().lower()
+    is_admin_like = role_raw in ("admin", "superadmin")
+    is_technician = role_raw in ("technician", "tech")
+    my_name_norm = (getattr(current_user, "username", "") or "").strip().lower()
+
+    def _parse_dt_flex(s: str | None):
+        if not s:
+            return None
+        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(s, fmt)
+            except Exception:
+                pass
+        return None
+
+    # ---- входные параметры ----
+    inv_s = (request.args.get("invoice_number") or "").strip()
+    issued_to_in = (request.args.get("issued_to") or "").strip()
+    reference_job = (request.args.get("reference_job") or "").strip() or None
+    issued_by = (request.args.get("issued_by") or "").strip()
+    issue_date_s = (request.args.get("issue_date") or "").strip()
+
+    inv_no = int(inv_s) if inv_s.isdigit() else None
+
+    # ---- грузим строки, как во view_invoice_pdf (короткий повтор логики) ----
+    recs = []
+    if inv_no is not None:
+        batch_ids = [
+            bid for (bid,) in
+            db.session.query(IssuedBatch.id)
+            .filter(IssuedBatch.invoice_number == inv_no)
+            .all()
+        ]
+
+        q = IssuedPartRecord.query
+        if batch_ids:
+            recs = (
+                q.filter(
+                    or_(
+                        IssuedPartRecord.invoice_number == inv_no,
+                        IssuedPartRecord.batch_id.in_(batch_ids),
+                    )
+                )
+                .order_by(IssuedPartRecord.id.asc())
+                .all()
+            )
+        else:
+            recs = (
+                q.filter_by(invoice_number=inv_no)
+                .order_by(IssuedPartRecord.id.asc())
+                .all()
+            )
+
+        if not recs:
+            flash(f"Invoice #{inv_no} not found.", "warning")
+            return redirect(url_for('inventory.reports_grouped'))
+
+        # подтянуть legacy строки, как делаем в PDF-вью
+        # (нам нужно их тоже показать технику, иначе он будет печатать пусто)
+        hdr_first = recs[0]
+        day = hdr_first.issue_date.date() if hdr_first.issue_date else None
+        if day:
+            extra = (
+                IssuedPartRecord.query
+                .filter(
+                    func.trim(IssuedPartRecord.issued_to) == (hdr_first.issued_to or ""),
+                    func.trim(IssuedPartRecord.issued_by) == (hdr_first.issued_by or ""),
+                    func.trim(IssuedPartRecord.reference_job) == (hdr_first.reference_job or ""),
+                    func.date(IssuedPartRecord.issue_date) == day,
+                    or_(
+                        IssuedPartRecord.invoice_number.is_(None),
+                        IssuedPartRecord.invoice_number == 0
+                    ),
+                    IssuedPartRecord.batch_id.is_(None),
+                )
+                .order_by(IssuedPartRecord.id.asc())
+                .all()
+            )
+            if extra:
+                have_ids = {r.id for r in recs}
+                for r in extra:
+                    if r.id not in have_ids:
+                        recs.append(r)
+
+        recs.sort(key=lambda r: r.id)
+
+    else:
+        # legacy режим без номера
+        if issued_to_in and issued_by and issue_date_s:
+            dt = _parse_dt_flex(issue_date_s) or datetime.utcnow()
+            start = datetime.combine(dt.date(), _time.min)
+            end = datetime.combine(dt.date(), _time.max)
+
+            recs = (
+                IssuedPartRecord.query
+                .filter(
+                    IssuedPartRecord.issued_to == issued_to_in,
+                    IssuedPartRecord.issued_by == issued_by,
+                    IssuedPartRecord.reference_job == reference_job,
+                    IssuedPartRecord.issue_date.between(start, end),
+                )
+                .order_by(IssuedPartRecord.id.asc())
+                .all()
+            )
+
+    if not recs:
+        flash("Invoice lines not found.", "warning")
+        return redirect(url_for('inventory.reports_grouped'))
+
+    # ===== Фильтр для техника: только его строки =====
+    if is_technician and (not is_admin_like):
+        safe_recs = []
+        for r in recs:
+            if (r.issued_to or "").strip().lower() == my_name_norm:
+                safe_recs.append(r)
+        recs = safe_recs
+        if not recs:
+            flash("Access denied for this invoice.", "warning")
+            return redirect(url_for('inventory.reports_grouped'))
+
+    # Нам не надо снова генерировать сам PDF тут.
+    # Нам нужно URL, который возвращает сам PDF (view_invoice_pdf),
+    # и URL для возврата.
+    pdf_url = url_for(
+        'inventory.view_invoice_pdf',
+        invoice_number=inv_no if inv_no is not None else "",
+        issued_to=issued_to_in,
+        reference_job=reference_job,
+        issued_by=issued_by,
+        issue_date=issue_date_s,
+        _external=False
+    )
+
+    back_url = url_for('inventory.reports_grouped')
+
+    # Эта страница откроется в новой вкладке => это пользовательский клик.
+    # Внутри страницы мы сразу откроем print().
+    return render_template(
+        "invoice_autoprint.html",
+        invoice_number=inv_no or "—",
+        pdf_url=pdf_url,
+        back_url=back_url
+    )
+
+
 @inventory_bp.route("/invoice/pdf")
 @login_required
 def view_invoice_pdf():
@@ -5455,44 +5622,73 @@ def view_invoice_pdf():
     Печать инвойса.
 
     Техник/tech:
-      - может видеть ТОЛЬКО свои строки (issued_to == его имя).
-        Если в инвойс попали legacy-строки других людей (склейка без номера),
-        мы их просто вырезаем, а не падаем с 403.
-        Если после фильтрации ничего не осталось — редирект в grouped.
+      - видит ТОЛЬКО свои строки (issued_to == его имя).
+        Чужие строки тихо вырезаются.
+        Если после фильтрации ничего не осталось — редиректим его назад в grouped.
     Admin/superadmin:
       - полный доступ.
 
-    Если у группы ещё НЕТ invoice_number и пришли "legacy"-ключи,
-    перед печатью аккуратно присваиваем новый номер (через batch),
-    коммитим и печатаем уже с этим номером.
+    Legacy-кейс:
+      Если у группы ещё НЕТ invoice_number и это старые строки без batch,
+      аккуратно создаём batch / резервируем номер, коммитим,
+      и печатаем уже с присвоенным номером.
+
+    Параметр ?print=1 пока просто игнорируется на уровне ответа (PDF всё равно inline).
+    В будущем можно будет использовать его внутри generate_invoice_pdf,
+    если ты сделаешь HTML+window.print().
     """
 
     from extensions import db
     from models import IssuedPartRecord, IssuedBatch
     from datetime import datetime, time as _time
     from sqlalchemy import func, or_
-    from flask import request, make_response, flash, redirect, url_for, abort
+    from flask import request, make_response, flash, redirect, url_for
     from flask_login import current_user
 
-    # ---- helper: роль и текущий пользователь ----
+    # ---- роль текущего пользователя ----
     role_raw = (getattr(current_user, "role", "") or "").strip().lower()
     is_admin_like = role_raw in ("admin", "superadmin")
     is_technician = role_raw in ("technician", "tech")
 
-    # нормализованное имя техника (для сравнения с issued_to)
+    # нормализованное имя техника (для сравнения с issued_to в строках)
     my_name_norm = (getattr(current_user, "username", "") or "").strip().lower()
 
+    # ---- вспомогалки --------------------------------------------------------
     def _next_invoice_number():
-        mb = db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0)).scalar() or 0
-        ml = db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)).scalar() or 0
+        mb = (
+            db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0))
+            .scalar()
+            or 0
+        )
+        ml = (
+            db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0))
+            .scalar()
+            or 0
+        )
         return max(int(mb), int(ml)) + 1
 
-    def _ensure_invoice_number_for_records(records, issued_to, issued_by, reference_job, issue_date, location):
-        # Если хотя бы у одной строки уже есть invoice_number — ничего не делаем.
+    def _ensure_invoice_number_for_records(
+        records,
+        issued_to,
+        issued_by,
+        reference_job,
+        issue_date,
+        location,
+    ):
+        """
+        Гарантирует, что у набора records появится invoice_number:
+        1) Пытаемся через твой нормальный хелпер _create_batch_for_records,
+           чтобы всё было красиво.
+        2) Если не вышло — делаем fallback: создаём IssuedBatch вручную,
+           присваиваем номер всем строкам.
+        Возвращает invoice_number (int) или None.
+        """
+
+        # Если в списке уже есть номер хоть у одной строки — просто вернём его.
         if any(getattr(r, "invoice_number", None) for r in records):
             return getattr(records[0], "invoice_number", None)
 
-        # Сначала пробуем создать нормальный IssuedBatch (это твой хелпер)
+        # Попробуем через твой штатный хелпер.
         try:
             batch = _create_batch_for_records(
                 records=records,
@@ -5506,7 +5702,7 @@ def view_invoice_pdf():
         except Exception:
             db.session.rollback()
 
-        # fallback — вручную резервируем новый номер
+        # Fallback: вручную резервируем новый номер и создаём IssuedBatch
         for _ in range(5):
             inv_no_try = _next_invoice_number()
             try:
@@ -5545,29 +5741,31 @@ def view_invoice_pdf():
                 pass
         return None
 
-    # ---- входные параметры (query string) ----
+    # ---- входные параметры (query string) -----------------------------------
     inv_s         = (request.args.get("invoice_number") or "").strip()
     issued_to_in  = (request.args.get("issued_to") or "").strip()
     reference_job = (request.args.get("reference_job") or "").strip() or None
     issued_by     = (request.args.get("issued_by") or "").strip()
     issue_date_s  = (request.args.get("issue_date") or "").strip()
+    # хотим автопечать? пока не используем, но future-proof оставим прочитанным
+    want_auto     = (request.args.get("print") or "").strip() == "1"
 
     inv_no = int(inv_s) if inv_s.isdigit() else None
 
-    # ---- загружаем строки (recs) и заголовок (hdr) ----
+    # ---- загружаем строки recs и собираем hdr -------------------------------
     recs = []
     hdr  = None
 
     if inv_no is not None:
         # 1) Найдём batch_ids с таким invoice_number
         batch_ids = [
-            bid for (bid,) in
-            db.session.query(IssuedBatch.id)
+            bid
+            for (bid,) in db.session.query(IssuedBatch.id)
             .filter(IssuedBatch.invoice_number == inv_no)
             .all()
         ]
 
-        # 2) Берём строки IssuedPartRecord, связанные с этим invoice_number
+        # 2) Берём IssuedPartRecord с этим номером или batch_id
         q = IssuedPartRecord.query
         if batch_ids:
             recs = (
@@ -5583,15 +5781,15 @@ def view_invoice_pdf():
         else:
             recs = (
                 q.filter_by(invoice_number=inv_no)
-                 .order_by(IssuedPartRecord.id.asc())
-                 .all()
+                .order_by(IssuedPartRecord.id.asc())
+                .all()
             )
 
         if not recs:
             flash(f"Invoice #{inv_no} not found.", "warning")
-            return redirect(url_for('inventory.reports_grouped'))
+            return redirect(url_for("inventory.reports_grouped"))
 
-        # 3) Построим hdr
+        # 3) Построим hdr на основе батча или первой строки
         if batch_ids:
             b = db.session.get(IssuedBatch, batch_ids[0])
             hdr = {
@@ -5613,19 +5811,21 @@ def view_invoice_pdf():
                 "location": first.location,
             }
 
-        # 4) Добираем legacy-строки за тот же день без номера (старые строки)
+        # 4) Добавим legacy-строки того же дня без номера (старые "висячие" строки)
         day = hdr["issue_date"].date() if hdr.get("issue_date") else None
         if day:
             extra = (
-                IssuedPartRecord.query
-                .filter(
-                    func.trim(IssuedPartRecord.issued_to) == (hdr["issued_to"] or ""),
-                    func.trim(IssuedPartRecord.issued_by) == (hdr["issued_by"] or ""),
-                    func.trim(IssuedPartRecord.reference_job) == (hdr["reference_job"] or ""),
+                IssuedPartRecord.query.filter(
+                    func.trim(IssuedPartRecord.issued_to)
+                    == (hdr["issued_to"] or ""),
+                    func.trim(IssuedPartRecord.issued_by)
+                    == (hdr["issued_by"] or ""),
+                    func.trim(IssuedPartRecord.reference_job)
+                    == (hdr["reference_job"] or ""),
                     func.date(IssuedPartRecord.issue_date) == day,
                     or_(
                         IssuedPartRecord.invoice_number.is_(None),
-                        IssuedPartRecord.invoice_number == 0
+                        IssuedPartRecord.invoice_number == 0,
                     ),
                     IssuedPartRecord.batch_id.is_(None),
                 )
@@ -5639,7 +5839,7 @@ def view_invoice_pdf():
                     if r.id not in have_ids:
                         recs.append(r)
 
-        # 5) Сортируем окончательную подборку строк
+        # 5) итог сортируем по id
         recs.sort(key=lambda r: r.id)
 
     else:
@@ -5651,8 +5851,7 @@ def view_invoice_pdf():
             end   = datetime.combine(dt.date(), _time.max)
 
             recs = (
-                IssuedPartRecord.query
-                .filter(
+                IssuedPartRecord.query.filter(
                     IssuedPartRecord.issued_to == issued_to_in,
                     IssuedPartRecord.issued_by == issued_by,
                     IssuedPartRecord.reference_job == reference_job,
@@ -5662,18 +5861,15 @@ def view_invoice_pdf():
                 .all()
             )
 
-    # Если вообще ничего не нашли — назад.
+    # Ничего не нашли → назад
     if not recs:
         flash("Invoice lines not found.", "warning")
-        return redirect(url_for('inventory.reports_grouped'))
+        return redirect(url_for("inventory.reports_grouped"))
 
-    # =========================================================
-    # ДОСТУП ТЕХНИКА К PDF (обновлённый блок)
-    # Техник должен видеть только СВОИ строки.
-    # Вместо abort(403) мы теперь фильтруем чужие строки.
-    # =========================================================
+    # ---- Ограничение доступа техника ---------------------------------------
+    # Техник видит ТОЛЬКО строки, где issued_to == его имя.
     if is_technician and (not is_admin_like):
-        allowed_name = my_name_norm  # нормализованное имя техника
+        allowed_name = my_name_norm
 
         safe_recs = []
         for r in recs:
@@ -5683,14 +5879,12 @@ def view_invoice_pdf():
 
         recs = safe_recs
 
-        # Если после фильтрации нет строк — просто вернём техника в его grouped отчет
+        # После фильтрации пусто? Возвращаем техника в его отчёт.
         if not recs:
             flash("Access denied for this invoice.", "warning")
-            return redirect(url_for('inventory.reports_grouped'))
+            return redirect(url_for("inventory.reports_grouped"))
 
-    # =========================================================
-    # Присваиваем invoice_number, если его ещё нет (legacy)
-    # =========================================================
+    # ---- Присвоение invoice_number для legacy инвойсов ---------------------
     if inv_no is None and all(getattr(r, "invoice_number", None) is None for r in recs):
         base = recs[0]
         try:
@@ -5708,21 +5902,27 @@ def view_invoice_pdf():
             db.session.rollback()
             inv_no = None
 
-    # =========================================================
-    # Генерация PDF
-    # =========================================================
-    pdf_bytes = generate_invoice_pdf(recs, invoice_number=inv_no)
+    # ---- Генерация PDF (как раньше, без авто_print аргумента) ---------------
+    pdf_bytes = generate_invoice_pdf(
+        recs,
+        invoice_number=inv_no
+    )
 
+    # Ответ
     resp = make_response(pdf_bytes)
-    fname_base = inv_no or getattr(recs[0], 'id', 'NO_NUM')
+
+    fname_base = inv_no or getattr(recs[0], "id", "NO_NUM")
     if isinstance(fname_base, int):
         fname = f"INVOICE_{int(fname_base):06d}.pdf"
     else:
         fname = "INVOICE.pdf"
 
+    # PDF inline (браузерный viewer)
     resp.headers["Content-Type"] = "application/pdf"
     resp.headers["Content-Disposition"] = f'inline; filename="{fname}"'
+
     return resp
+
 
 @inventory_bp.route('/reports/update_record/<int:record_id>', methods=['POST'])
 @login_required
