@@ -80,6 +80,12 @@
              placeholder="98356, 98256"
              value="{{ IS_EDIT and wo.job_numbers or '' }}"
              {{ ro }} {{ dis }}>
+      {% if not IS_EDIT %}
+      <div class="form-text text-warning">
+        Duplicate protection: if this job already has a Work Order,
+        you'll be redirected to it instead of creating a duplicate.
+      </div>
+      {% endif %}
     </div>
 
     <div class="col-md-2">
@@ -308,6 +314,7 @@
 <script>
 (function(){
   const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
+  const API_DUP   = "{{ url_for('inventory.api_job_duplicate_check') }}";
   const IS_EDIT   = {{ 'true' if IS_EDIT else 'false' }};
   const IS_RO     = {{ 'true' if RO else 'false' }};
 
@@ -320,6 +327,10 @@
   const selectAllBtn = document.getElementById('selectAllInStockBtn');
   const statusSel    = document.querySelector('select[name="status"]');
   const addUnitBtn   = document.getElementById('addUnit');
+
+  // we'll need current WO id for duplicate logic
+  const currentWOInput = form.querySelector('input[name="wo_id"]');
+  const CURRENT_WO_ID  = currentWOInput ? String(currentWOInput.value || '').trim() : '';
 
   function updateSupplierRequired(){
     const must = statusSel && statusSel.value === 'ordered';
@@ -341,13 +352,108 @@
   }
   statusSel?.addEventListener('change', toggleOrderedCols);
 
-  form?.addEventListener('submit', ()=>{
+  // helper: sync ordered_flag hidden inputs before final submit
+  function syncOrderedFlagsBeforeSubmit(){
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
       const cb  = cell.querySelector('.ordered-check');
       const hid = cell.querySelector('.ordered-val');
-      if (hid) hid.value = (cb && cb.checked) ? '1' : '0';
+      if (hid) {
+        hid.value = (cb && cb.checked) ? '1' : '0';
+      }
     });
-  });
+  }
+
+  // DUPLICATE CHECK LOGIC:
+  //  - Only for NEW WO (IS_EDIT === false).
+  //  - Ask backend if job_numbers already exist.
+  //  - If duplicate is SAME WO we're editing -> allow save with no popup.
+  async function handleDuplicateCheckBeforeSubmit(){
+    // if editing existing WO -> never block (this fixes your problem)
+    if (IS_EDIT) {
+      return true;
+    }
+
+    const jobField = form.querySelector('[name="job_numbers"]');
+    if (!jobField) {
+        return true;
+    }
+
+    const rawJobs = (jobField.value || '').trim();
+    if (!rawJobs) {
+        // empty job numbers -> ok
+        return true;
+    }
+
+    const params = new URLSearchParams();
+    params.set("job_numbers", rawJobs);
+
+    let resp;
+    try {
+      resp = await fetch(API_DUP + "?" + params.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { "Accept": "application/json" }
+      });
+    } catch (err) {
+      // network problem -> don't block save
+      return true;
+    }
+
+    if (!resp.ok) {
+      // server error -> don't block save
+      return true;
+    }
+
+    const data = await resp.json();
+
+    // if backend says "no duplicate" -> ok
+    if (!data.duplicate) {
+      return true;
+    }
+
+    // duplicate == true
+    // but if it's the same WO we're already on, allow submit
+    // (CURRENT_WO_ID can be '' for brand new; for edit it's real id)
+    if (CURRENT_WO_ID && String(data.existing_id || '') === CURRENT_WO_ID) {
+      return true;
+    }
+
+    // otherwise it's a real different WO, ask user
+    const msg = (
+      "Work Order #" + data.existing_id +
+      " already exists for this job (" + (data.existing_jobs || "") + ").\n\n" +
+      "Open existing instead?"
+    );
+
+    const goExisting = window.confirm(msg);
+    if (goExisting) {
+      window.location.href =
+        "{{ url_for('inventory.wo_detail', wo_id=0) }}".replace("0", data.existing_id);
+      return false;
+    } else {
+      // user said stay here and NOT create new -> block submit
+      return false;
+    }
+  }
+
+  // final guarded submit handler
+  if (form) {
+    form.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+
+      // run duplicate check if needed
+      const okToSubmit = await handleDuplicateCheckBeforeSubmit();
+      if (!okToSubmit) {
+        return;
+      }
+
+      // sync ordered_flag checkboxes into hidden vals
+      syncOrderedFlagsBeforeSubmit();
+
+      // now really submit the form
+      form.submit();
+    });
+  }
 
   const toMoney = (n)=> (Math.round((Number(n||0)+Number.EPSILON)*100)/100).toFixed(2);
 
@@ -462,7 +568,8 @@
     const pnInput  = tr.querySelector('.pn');
     const qtyInput = tr.querySelector('.qty');
     const whInput  = tr.querySelector('.wh-input');
-    const nameInp  = tr.querySelector('.part-name');
+    theNameInput   = tr.querySelector('.part-name');
+    const nameInp  = theNameInput;
     const costInp  = tr.querySelector('.unit-cost');
     const hintEl   = tr.querySelector('.hint');
 
@@ -750,6 +857,7 @@
     document.getElementById('issueForm').submit();
   });
 
+  // initial calc / hints
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
   document.querySelectorAll('#unitsWrap tbody tr').forEach(fetchHint);
   updateSupplierRequired();

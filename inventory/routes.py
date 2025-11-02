@@ -2325,6 +2325,85 @@ def wo_confirm_lines(wo_id: int):
 
     return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
+@inventory_bp.get("/api/job_duplicate_check", endpoint="api_job_duplicate_check")
+@login_required
+def api_job_duplicate_check():
+    """
+    Check if any of the provided job numbers already exists in an existing WorkOrder.
+    Returns JSON:
+      {
+        "duplicate": true,
+        "existing_id": 123,
+        "existing_jobs": "985639, 985634"
+      }
+    or
+      { "duplicate": false }
+    Only admins/superadmins can create WOs, so we mirror that restriction here.
+    """
+    from sqlalchemy import or_
+    from flask import request, jsonify
+
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role not in ("admin", "superadmin"):
+        # технику вообще не надо создавать WO → для него всегда "не дубликат"
+        return jsonify({"duplicate": False})
+
+    raw_jobs = (request.args.get("job_numbers") or "").strip()
+    if not raw_jobs:
+        return jsonify({"duplicate": False})
+
+    # 1) разобьём строку "985639, 985634" в список
+    job_list = [j.strip() for j in raw_jobs.split(",") if j.strip()]
+    if not job_list:
+        return jsonify({"duplicate": False})
+
+    # 2) возьмём максимальный номер как primary (как твой canonical_job делает)
+    #    пример: если 985639 и 985634 → canonical будет 985639
+    def pick_canonical(nums: list[str]) -> str:
+        ints = []
+        for n in nums:
+            try:
+                ints.append(int(n))
+            except ValueError:
+                pass
+        if ints:
+            return str(max(ints))
+        # fallback если это не числа
+        return nums[0]
+
+    candidate_canonical = pick_canonical(job_list)
+
+    # 3) найдём в базе ворк ордера, которые потенциально содержат этот номер
+    #    мы не можем сделать прямой запрос по w.canonical_job, потому что это @property,
+    #    не колонка. Поэтому сначала фильтруем по job_numbers ILIKE, потом проверяем в питоне.
+    possibles = (
+        db.session.query(WorkOrder)
+        .filter(
+            or_(
+                # широкое совпадение по всей строке
+                WorkOrder.job_numbers.ilike(f"%{candidate_canonical}%"),
+                # а также по каждому введённому номеру (на всякий)
+                *[WorkOrder.job_numbers.ilike(f"%{jn}%") for jn in job_list]
+            )
+        )
+        .order_by(WorkOrder.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    # 4) в питоне проверим реально canonical_job
+    for wo in possibles:
+        if wo.canonical_job == candidate_canonical:
+            return jsonify({
+                "duplicate": True,
+                "existing_id": wo.id,
+                "existing_jobs": wo.job_numbers or ""
+            })
+
+    # если ничего не подошло
+    return jsonify({"duplicate": False})
+
+
 @inventory_bp.get("/work_orders/new", endpoint="wo_new")
 @login_required
 def wo_new():
@@ -2333,7 +2412,7 @@ def wo_new():
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # minimal empty WO-like object for the form
+    # минимальный "пустой" объект, чтобы шаблон мог отрисовать поля
     class _WO:
         id = None
         technician_id = None
@@ -2346,22 +2425,27 @@ def wo_new():
         delivery_fee = 0.0
         markup_percent = 0.0
         status = "search_ordered"
+
     wo = _WO()
 
     technicians = _query_technicians()
     recent_suppliers = session.get("recent_suppliers", []) or []
 
-    # a single empty unit+row for the form
+    # один пустой unit с одной пустой строкой parts для формы
     units = [{
         "brand":  "",
         "model":  "",
         "serial": "",
         "rows": [{
             "id": None,
-            "part_number": "", "part_name": "", "quantity": 1,
+            "part_number": "",
+            "part_name": "",
+            "quantity": 1,
             "alt_numbers": "",
-            "warehouse": "", "supplier": "",
-            "backorder_flag": False, "line_status": "search_ordered",
+            "warehouse": "",
+            "supplier": "",
+            "backorder_flag": False,
+            "line_status": "search_ordered",
             "unit_cost": 0.0,
         }],
     }]
@@ -2376,7 +2460,6 @@ def wo_new():
         selected_tech_id=None,
         selected_tech_username=None,
     )
-
 
 @inventory_bp.get("/api/technicians")
 @login_required
@@ -3778,7 +3861,7 @@ def wo_list():
     Unified search for Work Orders.
 
     GET params:
-      q       - free text (tech name, job#, model, brand, part#, alt part#, part name)
+      q       - free text (tech name, job#, brand, model, part#, alt part#, part name)
       from    - date (YYYY-MM-DD)
       to      - date (YYYY-MM-DD)
 
@@ -3800,6 +3883,7 @@ def wo_list():
     joined_parts = False
 
     # ---- technician visibility restriction ----
+    # techs see only their own WOs (by technician_id, fallback by technician_name)
     if is_technician():
         me_id   = getattr(current_user, "id", None)
         me_name = (getattr(current_user, "username", "") or "").strip()
@@ -3811,11 +3895,11 @@ def wo_list():
             )
         )
 
-    # ---- global search (q) across multiple columns ----
+    # ---- global free-text search (q) ----
     if qtext:
         like = f"%{qtext}%"
 
-        # join parts so we can search by part_number / alt_part_numbers / part_name
+        # join WorkOrderPart only if needed
         q = q.outerjoin(
             WorkOrderPart,
             WorkOrderPart.work_order_id == WorkOrder.id
@@ -3824,7 +3908,7 @@ def wo_list():
 
         filters.append(
             or_(
-                # technician name ("ALAN", "KIM", etc.)
+                # technician name ("ALAN", etc.)
                 WorkOrder.technician_name.ilike(like),
 
                 # job numbers string ("985639, 985634")
@@ -3834,11 +3918,9 @@ def wo_list():
                 WorkOrder.brand.ilike(like),
                 WorkOrder.model.ilike(like),
 
-                # part number(s), alt PN
+                # part info (from work_order_parts)
                 WorkOrderPart.part_number.ilike(like),
                 WorkOrderPart.alt_part_numbers.ilike(like),
-
-                # part name text (new)
                 WorkOrderPart.part_name.ilike(like),
             )
         )
@@ -3862,19 +3944,71 @@ def wo_list():
     if filters:
         q = q.filter(and_(*filters))
 
-    # ---- avoid duplicate WO rows when join hits multiple parts ----
+    # ---- avoid duplicate WO rows if multiple parts match
     if joined_parts:
         q = q.distinct(WorkOrder.id)
 
-    # ---- final fetch ----
+    # ---- fetch rows ----
     items = (
         q.order_by(WorkOrder.created_at.desc())
          .limit(200)
          .all()
     )
 
-    # we pass request.args so template can repopulate form fields
-    return render_template("wo_list.html", items=items, args=request.args)
+    count_items = len(items)
+
+    # ---- build autocomplete hints for <datalist> ----
+    # 1) technicians
+    tech_suggestions = (
+        db.session.query(WorkOrder.technician_name)
+        .distinct()
+        .order_by(WorkOrder.technician_name.asc())
+        .limit(50)
+        .all()
+    )
+
+    # 2) brand/model combos
+    brand_model_suggestions = (
+        db.session.query(WorkOrder.brand, WorkOrder.model)
+        .distinct()
+        .limit(100)
+        .all()
+    )
+
+    # 3) recent part numbers / names
+    recent_parts = (
+        db.session.query(WorkOrderPart.part_number, WorkOrderPart.part_name)
+        .distinct()
+        .limit(100)
+        .all()
+    )
+
+    hint_values_set = set()
+
+    for (t_name,) in tech_suggestions:
+        if t_name:
+            hint_values_set.add(t_name)
+
+    for (b, m) in brand_model_suggestions:
+        combo = ((b or '') + ' ' + (m or '')).strip()
+        if combo:
+            hint_values_set.add(combo)
+
+    for (pn, pname) in recent_parts:
+        if pn:
+            hint_values_set.add(pn)
+        if pname:
+            hint_values_set.add(pname)
+
+    hint_values = sorted(hint_values_set)
+
+    return render_template(
+        "wo_list.html",
+        items=items,
+        args=request.args,
+        count_items=count_items,
+        hint_values=hint_values,
+    )
 
 @inventory_bp.post("/work_orders/<int:wo_id>/issue_instock", endpoint="wo_issue_instock")
 @login_required

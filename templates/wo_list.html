@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>Work Orders</h3>
+<h3 class="d-flex align-items-baseline gap-3">
+  <span>Work Orders</span>
+  <small class="text-muted" style="font-size:.9rem;">
+    {% if count_items is defined %}
+      Showing {{ count_items }} result{% if count_items != 1 %}s{% endif %}
+      {% if count_items >= 200 %}
+        (limited to 200)
+      {% endif %}
+    {% endif %}
+  </small>
+</h3>
 
 {% if current_user.is_authenticated and current_user.role in ['admin','superadmin'] %}
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -11,18 +21,19 @@
 
 <form method="get" class="row g-2 mb-3 dashboard-filters" style="position:static;">
 
-  <!-- unified text search -->
+  {# unified free-text search #}
   <div class="col-md-4">
     <label class="form-label mb-1">Search</label>
     <input
       name="q"
       class="form-control"
+      list="wo-hints"
       value="{{ args.get('q','') if args else '' }}"
       placeholder="Tech / Job # / Brand / Model / Part # / Part name"
     >
   </div>
 
-  <!-- date range from -->
+  {# date from #}
   <div class="col-md-2">
     <label class="form-label mb-1">From</label>
     <input
@@ -33,7 +44,7 @@
     >
   </div>
 
-  <!-- date range to -->
+  {# date to #}
   <div class="col-md-2">
     <label class="form-label mb-1">To</label>
     <input
@@ -49,6 +60,17 @@
     <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Reset</a>
   </div>
 </form>
+
+{# datalist for autocomplete suggestions #}
+<datalist id="wo-hints">
+  {% if hint_values is defined %}
+    {% for h in hint_values %}
+      {% if h %}
+        <option value="{{ h }}">
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+</datalist>
 
 <div class="table-responsive">
   <table class="table table-sm table-hover align-middle wo-list-table">
@@ -123,7 +145,7 @@
                 Open
               </a>
 
-              {# Separate Edit for admins/superadmins #}
+              {# Edit visible only to admin/superadmin #}
               {% if current_user.role in ['admin','superadmin'] %}
                 <a class="btn btn-outline-secondary btn-sm"
                    href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">
@@ -131,6 +153,7 @@
                 </a>
               {% endif %}
 
+              {# Delete only for superadmin #}
               {% if current_user.role == 'superadmin' %}
                 <form method="post"
                       action="{{ url_for('inventory.wo_delete', wo_id=w.id) }}"
@@ -153,5 +176,18 @@
 </div>
 {% endblock %}
 
-
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const searchInput = document.querySelector('input[name="q"]');
+  if (searchInput) {
+    // автофокус только если поле пустое
+    if (!searchInput.value.trim()) {
+      searchInput.focus();
+      searchInput.select();
+    }
+  }
+});
+</script>
+{% endblock %}
 
