@@ -7367,8 +7367,6 @@ def import_parts_upload():
         df["quantity"] = df["qty"].astype(int)
 
         # unit_cost_base:
-        # если есть unit_cost_base присланная из формы - ок
-        # иначе скопируем из unit_cost
         df["unit_cost_base"] = pd.to_numeric(df["unit_cost_base"], errors="coerce")
         df["unit_cost"]      = pd.to_numeric(df["unit_cost"], errors="coerce")
 
@@ -7501,6 +7499,32 @@ def import_parts_upload():
                     out.append(t)
         return "/".join(out)
 
+    # -------- extra: применить ОДИН РАЗ --------------------------------------
+    def _apply_extra_to_df_once(df, extra_expenses_float, eps=1e-6):
+        """
+        Применяет extra-траты к df ТОЛЬКО если они ещё не были применены.
+        Возвращает (df, subtotal_base, grand_total)
+        """
+        import pandas as pd
+
+        df = df.copy()
+        df["quantity"] = pd.to_numeric(df.get("quantity"), errors="coerce").fillna(0).astype(int)
+        df["unit_cost_base"] = pd.to_numeric(df.get("unit_cost_base"), errors="coerce").fillna(0.0)
+        if "unit_cost" not in df.columns:
+            df["unit_cost"] = df["unit_cost_base"]
+        df["unit_cost"] = pd.to_numeric(df.get("unit_cost"), errors="coerce")
+
+        subtotal_base = float((df["quantity"] * df["unit_cost_base"]).sum() or 0.0)
+        current_total = float((df["quantity"] * df["unit_cost"]).sum() or 0.0)
+        extra = float(extra_expenses_float or 0.0)
+        target_total = subtotal_base + extra
+
+        # если уже применено — выходим
+        if abs(current_total - target_total) <= float(eps or 1e-6):
+            return df, subtotal_base, target_total
+
+        return _distribute_extra_and_adjust_costs(df, extra)
+
     def _distribute_extra_and_adjust_costs(df, extra_expenses_float):
         """
         df columns we rely on:
@@ -7514,15 +7538,10 @@ def import_parts_upload():
         df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).astype(int)
         df["unit_cost_base"] = pd.to_numeric(df["unit_cost_base"], errors="coerce")
 
-        # line_base_total = qty * base
         df["line_base_total"] = df["quantity"] * df["unit_cost_base"]
         subtotal_base = float(df["line_base_total"].sum() or 0.0)
 
         if subtotal_base > 0 and extra_expenses_float:
-            # доля строки = line_base_total / subtotal_base
-            # extra_for_row_total = extra * доля
-            # per_item_fee = extra_for_row_total / qty
-            # adj_cost = base + per_item_fee
             def _adj_cost(row):
                 qty = row["quantity"]
                 base_cost = row["unit_cost_base"]
@@ -7535,14 +7554,10 @@ def import_parts_upload():
 
             df["unit_cost"] = df.apply(_adj_cost, axis=1)
         else:
-            # если нет extra или subtotal_base 0, просто unit_cost = base
             df["unit_cost"] = df["unit_cost_base"]
 
-        # округлим до 2х знаков в отображении (но можно хранить полную)
         df["unit_cost"] = df["unit_cost"].astype(float)
-
         grand_total = subtotal_base + float(extra_expenses_float or 0.0)
-
         return df, subtotal_base, grand_total
 
     # ==========================================================================
@@ -7614,13 +7629,22 @@ def import_parts_upload():
             )
 
         # гарантированные столбцы (включая unit_cost_base)
+        # гарантированные столбцы (включая unit_cost_base)
         norm = _ensure_norm_columns(norm, default_loc, saved_path)
 
-        # === ключевой шаг: перераспределяем extra_expenses по строкам ===
-        norm, subtotal_base, grand_total = _distribute_extra_and_adjust_costs(
-            norm,
-            extra_expenses_val
-        )
+        # ВАЖНО: мы пришли ИМЕННО из превью-формы (есть rows[...]),
+        # unit_cost в форме уже "с fee". НИЧЕГО не перераспределяем.
+        # Просто посчитаем totals для отображения/логов и СБРОСИМ extra.
+        import pandas as pd
+        norm["quantity"] = pd.to_numeric(norm["quantity"], errors="coerce").fillna(0).astype(int)
+        norm["unit_cost"] = pd.to_numeric(norm["unit_cost"], errors="coerce").fillna(0.0)
+        norm["unit_cost_base"] = pd.to_numeric(norm["unit_cost_base"], errors="coerce").fillna(0.0)
+
+        subtotal_base = float((norm["quantity"] * norm["unit_cost_base"]).sum() or 0.0)
+        grand_total = float((norm["quantity"] * norm["unit_cost"]).sum() or 0.0)
+
+        # Чтобы нигде далее ничего не "добавилось", принудительно обнулим extra:
+        extra_expenses_val = 0.0
 
         flash(
             f"Supplier hint: {supplier_hint or 'None'}, default location: {default_loc}",
@@ -7631,7 +7655,6 @@ def import_parts_upload():
 
         # ---------- если пользователь нажал SAVE ----------
         if "save" in request.form:
-            # Перерисовываем превью, уже с adj-cost и тоталами.
             return render_template(
                 "import_preview.html",
                 rows=norm.to_dict(orient="records"),
@@ -7700,14 +7723,17 @@ def import_parts_upload():
                 if B_INV:   batch_kwargs[B_INV]   = invoice_guess
                 if B_DATE:  batch_kwargs[B_DATE]  = date.today()
                 if B_CURR:  batch_kwargs[B_CURR]  = "USD"
-                if B_NOTES: batch_kwargs[B_NOTES] = f"Imported from {os.path.basename(saved_path)}"
+                # сохраним сумму в заметке для аудита, но НЕ в числовом поле
+                note_extra = f" (extra applied: {extra_expenses_val:.2f})" if extra_expenses_val else ""
+                if B_NOTES: batch_kwargs[B_NOTES] = f"Imported from {os.path.basename(saved_path)}{note_extra}"
                 if B_STAT:  batch_kwargs[B_STAT]  = "new"
                 if B_C_AT:  batch_kwargs[B_C_AT]  = datetime.utcnow()
                 if B_C_BY:  batch_kwargs[B_C_BY]  = 0
                 if B_P_AT:  batch_kwargs[B_P_AT]  = None
                 if B_P_BY:  batch_kwargs[B_P_BY]  = None
                 if B_ATTP:  batch_kwargs[B_ATTP]  = ""
-                if B_EXTRA: batch_kwargs[B_EXTRA] = float(extra_expenses_val or 0.0)
+                # КРИТИЧЕСКОЕ: числовое поле extra в батче = 0.0 (уже включено в unit_cost строк)
+                if B_EXTRA: batch_kwargs[B_EXTRA] = 0.0
 
                 try:
                     batch = BatchModel(**batch_kwargs)
@@ -7894,6 +7920,7 @@ def import_parts_upload():
                         B_STAT  = _pick_field(BatchModel, ["status","state"])
                         B_P_AT  = _pick_field(BatchModel, ["posted_at"])
                         B_P_BY  = _pick_field(BatchModel, ["posted_by"])
+                        B_EXTRA = _pick_field(BatchModel, ["extra_expenses","shipping_fee","freight","expenses"])
 
                         if B_STAT:
                             setattr(fresh_batch, B_STAT, "posted")
@@ -7905,6 +7932,10 @@ def import_parts_upload():
                             except Exception:
                                 uid = 0
                             setattr(fresh_batch, B_P_BY, uid)
+
+                        # страхуемся: extra в батче = 0.0
+                        if B_EXTRA and getattr(fresh_batch, B_EXTRA, 0) not in (0, 0.0, None):
+                            setattr(fresh_batch, B_EXTRA, 0.0)
 
                         session.add(fresh_batch)
                         session.commit()
@@ -7983,7 +8014,7 @@ def import_parts_upload():
         # гарантировать столбцы
         norm = _ensure_norm_columns(norm, default_loc, path)
 
-        # распределить extra_expenses=0 при первом показе
+        # распределить extra_expenses=0 при первом показе (для отображения)
         norm, subtotal_base, grand_total = _distribute_extra_and_adjust_costs(norm, 0.0)
 
         rows = norm.to_dict(orient="records")

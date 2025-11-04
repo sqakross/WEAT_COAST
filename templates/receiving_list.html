@@ -44,15 +44,11 @@
       <th style="width:110px;">Date</th>
       <th>Supplier</th>
       <th style="width:160px;">Invoice #</th>
-
       <th style="width:100px;">Status</th>
-
-      {# НОВЫЙ столбец состояния склада #}
+      {# Индикатор состояния склада #}
       <th style="width:80px;">Stock</th>
-
       <th style="width:80px;" class="text-end">Qty</th>
       <th style="width:140px;" class="text-end">Total Cost</th>
-
       {% if can_super %}
         <th style="width:260px;">Actions</th>
       {% endif %}
@@ -71,11 +67,10 @@
       {% set ns.total = ns.total + (q * u) %}
     {% endfor %}
 
-    {# is_posted для кнопки Post/Unpost #}
+    {# posted для кнопки Post/Unpost #}
     {% set is_posted = (b.status|default('', true)) == 'posted' %}
 
-    {# stock_applied = True если склад ещё держит этот приход
-       это мы пробросили из контроллера в stock_flags[b.id] #}
+    {# stock_applied: пробрасывается из контроллера в stock_flags[b.id] #}
     {% set stock_applied = (stock_flags[b.id] if stock_flags is defined and b.id in stock_flags else false) %}
 
     <tr onclick="location.href='{{ url_for('inventory.receiving_detail', batch_id=b.id) }}'"
@@ -93,70 +88,50 @@
         {% endif %}
       </td>
 
-      {# НОВЫЙ СТОЛБЕЦ: Stock Applied vs Cleared
-         ● зелёный = партия в стоке
-         ● серый   = склад чист / откатили
-      #}
+      {# Stock Applied vs Cleared #}
       <td>
         {% if stock_applied %}
-          <span class="text-success" style="font-size:.8rem; white-space:nowrap;">
-            ● stock
-          </span>
+          <span class="text-success" style="font-size:.8rem; white-space:nowrap;">● stock</span>
         {% else %}
-          <span class="text-muted" style="font-size:.8rem; white-space:nowrap;">
-            ● clear
-          </span>
+          <span class="text-muted" style="font-size:.8rem; white-space:nowrap;">● clear</span>
         {% endif %}
       </td>
 
       <td class="text-end">{{ ns.qty }}</td>
       <td class="text-end">
         {{ b.currency|default('USD', true) }}
-        {{ '%.2f' % (totals.get(b.id, ns.total) if totals is defined else ns.total) }}
+        {{
+          '%.2f' % (
+            (totals.get(b.id) if (totals is defined and b.id in totals) else ns.total)
+          )
+        }}
       </td>
 
       {% if can_super %}
-      {# Область кнопок не должна кликать всю строку #}
+      {# Не кликаем всю строку при нажатии на кнопки #}
       <td onclick="event.stopPropagation();">
 
-        {# Post / Unpost через toggle.
-           - жёлтая "Unpost" если статус posted
-           - синяя "Post" если draft
-        #}
+        {# Post / Unpost через toggle #}
         <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}"
               method="post" style="display:inline;">
-          <button
-            class="btn btn-sm {{ 'btn-warning' if is_posted else 'btn-primary' }}"
-            type="submit">
+          <button class="btn btn-sm {{ 'btn-warning' if is_posted else 'btn-primary' }}" type="submit">
             {{ 'Unpost' if is_posted else 'Post' }}
           </button>
         </form>
 
-        {# Clear keys (разрешает ре-импорт того же файла)
-           только супер-админ
-        #}
+        {# Clear keys #}
         <form action="{{ url_for('inventory.receiving_clear_keys', batch_id=b.id) }}"
               method="post" style="display:inline;"
               onsubmit="return confirm('Clear import keys for batch #{{ b.id }}? This allows re-import from the same file.');">
-          <button class="btn btn-sm btn-outline-secondary" type="submit">
-            Clear keys
-          </button>
+          <button class="btn btn-sm btn-outline-secondary" type="submit">Clear keys</button>
         </form>
 
-        {# Delete:
-           - доступно супер-админу
-           - ЕСЛИ stock_applied == True -> дизейблим, чтобы не удалить батч,
-             который ещё висит на складе.
-        #}
+        {# Delete: блокируем, если партия висит на складе #}
         <form action="{{ url_for('inventory.receiving_delete', batch_id=b.id) }}"
               method="post" style="display:inline;"
               onsubmit="return confirm('Delete batch #{{ b.id }}? This will also clear its import keys.');">
-          <button
-            class="btn btn-sm btn-danger"
-            type="submit"
-            {% if stock_applied %}disabled
-               title="Unpost first to remove from stock before deleting."
-            {% endif %}>
+          <button class="btn btn-sm btn-danger" type="submit"
+                  {% if stock_applied %}disabled title="Unpost first to remove from stock before deleting."{% endif %}>
             Delete
           </button>
         </form>
