@@ -5,9 +5,7 @@
   <small class="text-muted" style="font-size:.9rem;">
     {% if count_items is defined %}
       Showing {{ count_items }} result{% if count_items != 1 %}s{% endif %}
-      {% if count_items >= 200 %}
-        (limited to 200)
-      {% endif %}
+      {% if count_items >= 200 %}(limited to 200){% endif %}
     {% endif %}
   </small>
 </h3>
@@ -20,39 +18,23 @@
 {% endif %}
 
 <form method="get" class="row g-2 mb-3 dashboard-filters" style="position:static;">
-
-  {# unified free-text search #}
   <div class="col-md-4">
     <label class="form-label mb-1">Search</label>
-    <input
-      name="q"
-      class="form-control"
-      list="wo-hints"
-      value="{{ args.get('q','') if args else '' }}"
-      placeholder="Tech / Job # / Brand / Model / Part # / Part name"
-    >
+    <input name="q" class="form-control" list="wo-hints"
+           value="{{ args.get('q','') if args else '' }}"
+           placeholder="Tech / Job # / Brand / Model / Part # / Part name">
   </div>
 
-  {# date from #}
   <div class="col-md-2">
     <label class="form-label mb-1">From</label>
-    <input
-      type="date"
-      name="from"
-      class="form-control"
-      value="{{ args.get('from','') if args else '' }}"
-    >
+    <input type="date" name="from" class="form-control"
+           value="{{ args.get('from','') if args else '' }}">
   </div>
 
-  {# date to #}
   <div class="col-md-2">
     <label class="form-label mb-1">To</label>
-    <input
-      type="date"
-      name="to"
-      class="form-control"
-      value="{{ args.get('to','') if args else '' }}"
-    >
+    <input type="date" name="to" class="form-control"
+           value="{{ args.get('to','') if args else '' }}">
   </div>
 
   <div class="col-12 d-flex gap-2 mt-1">
@@ -61,13 +43,10 @@
   </div>
 </form>
 
-{# datalist for autocomplete suggestions #}
 <datalist id="wo-hints">
   {% if hint_values is defined %}
     {% for h in hint_values %}
-      {% if h %}
-        <option value="{{ h }}">
-      {% endif %}
+      {% if h %}<option value="{{ h }}">{% endif %}
     {% endfor %}
   {% endif %}
 </datalist>
@@ -95,14 +74,12 @@
           <td>{{ w.technician_name or '—' }}</td>
 
           <td>
-            <span class="jobs-trunc"
-                  title="{{ w.job_numbers or '' }}">
+            <span class="jobs-trunc" title="{{ w.job_numbers or '' }}">
               {{ w.job_numbers or '—' }}
             </span>
             {% if w.canonical_job %}
               <div class="text-muted small">
-                primary:
-                <code>{{ w.canonical_job }}</code>
+                primary: <code>{{ w.canonical_job }}</code>
               </div>
             {% endif %}
           </td>
@@ -132,28 +109,29 @@
             {% endif %}
           </td>
 
-          <td>
-            {{ w.created_at.strftime('%Y-%m-%d') if w.created_at else '—' }}
-          </td>
+          <td>{{ w.created_at.strftime('%Y-%m-%d') if w.created_at else '—' }}</td>
 
           <td class="text-end">
             <div class="wo-actions d-inline-flex gap-1">
-
-              {# Open should always go to DETAIL page #}
               <a class="btn btn-outline-primary btn-sm"
                  href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">
                 Open
               </a>
 
-              {# Edit visible only to admin/superadmin #}
+              {# Admins: полноценный Edit #}
               {% if current_user.role in ['admin','superadmin'] %}
                 <a class="btn btn-outline-secondary btn-sm"
                    href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">
                   Edit
                 </a>
+              {% else %}
+                {# Не-админы: доступ к форме в RO #}
+                <a class="btn btn-outline-secondary btn-sm"
+                   href="{{ url_for('inventory.wo_edit', wo_id=w.id, readonly=1) }}">
+                  Form
+                </a>
               {% endif %}
 
-              {# Delete only for superadmin #}
               {% if current_user.role == 'superadmin' %}
                 <form method="post"
                       action="{{ url_for('inventory.wo_delete', wo_id=w.id) }}"
@@ -180,14 +158,10 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const searchInput = document.querySelector('input[name="q"]');
-  if (searchInput) {
-    // автофокус только если поле пустое
-    if (!searchInput.value.trim()) {
-      searchInput.focus();
-      searchInput.select();
-    }
+  if (searchInput && !searchInput.value.trim()) {
+    searchInput.focus();
+    searchInput.select();
   }
 });
 </script>
 {% endblock %}
-
