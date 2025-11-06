@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+
 <h3 class="d-flex align-items-baseline gap-3">
   <span>Work Orders</span>
   <small class="text-muted" style="font-size:.9rem;">
@@ -17,40 +18,279 @@
 </div>
 {% endif %}
 
-<form method="get" class="row g-2 mb-3 dashboard-filters" style="position:static;">
-  <div class="col-md-4">
-    <label class="form-label mb-1">Search</label>
-    <input name="q" class="form-control" list="wo-hints"
-           value="{{ args.get('q','') if args else '' }}"
-           placeholder="Tech / Job # / Brand / Model / Part # / Part name">
+<style>
+  .card-lite      { border:1px solid #dee2e6; border-radius:.75rem; background:#fff; }
+  .card-lite .hd  { background:#f8f9fa; border-bottom:1px solid #dee2e6; padding:.6rem .9rem; }
+  .card-lite .bd  { padding:.9rem; }
+
+  /* SEARCH row */
+  .search-grid{ display:grid; grid-template-columns: 1.6fr 160px 160px auto; gap:.6rem; }
+  @media (max-width: 992px){ .search-grid{ grid-template-columns: 1fr; } }
+
+  /* FILTERS row */
+  .filters-grid{ display:grid; grid-template-columns: 1fr 1fr 1fr auto; gap:.6rem; }
+  @media (max-width: 992px){ .filters-grid{ grid-template-columns: 1fr; } }
+
+  .active-chips .badge{ margin-right:.25rem; }
+
+  /* table widths */
+  .wo-list-table .col-id{ width:60px; white-space:nowrap; }
+  .wo-list-table .col-tech{ width:140px; }
+  .wo-list-table .col-type{ width:110px; text-align:center; white-space:nowrap; }
+  .wo-list-table .col-status{ width:140px; text-align:center; white-space:nowrap; }
+  .wo-list-table .col-created{ width:110px; white-space:nowrap; }
+  .wo-list-table .col-actions{ width:180px; white-space:nowrap; }
+  .jobs-trunc,.brand-trunc{ max-width:320px; display:inline-block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
+
+  /* Sticky tools */
+  :root { --sticky-top: 64px; }
+  @media (max-width: 768px){ :root { --sticky-top: 56px; } }
+  .sticky-tools{ position: sticky; top: var(--sticky-top); z-index: 1030; }
+  .sticky-tools .card-lite{ margin-bottom:.6rem; box-shadow: 0 6px 14px rgba(16,24,40,.06); }
+  .sticky-tools::after{ content:''; display:block; height:.25rem; }
+
+  /* ----- Desktop filter bar + toggle ----- */
+  .filter-bar{ border:1px solid #dee2e6; background:#fff; border-radius:.75rem; padding:.45rem .75rem; }
+  .filter-bar .summary{ display:flex; gap:.5rem; align-items:center; overflow:auto; }
+  .filter-chip{ font-size:.8rem; }
+  .filter-icon-btn{ display:inline-flex; align-items:center; gap:.35rem; }
+
+  /* ----- Touch/Tablet offcanvas + buttons ----- */
+  .offcanvas-filters{ width:320px; max-width:90vw; box-shadow: -8px 0 20px rgba(16,24,40,.12); }
+  .offcanvas-filters .offcanvas-body{ padding:.9rem; }
+
+  /* Кнопка вызова фильтров в хедере Search */
+  .btn-filter-touch{ display:none; }
+  @media (pointer:coarse){ .btn-filter-touch{ display:inline-flex !important; } }
+  @media (pointer:fine){  .btn-filter-touch{ display:none !important; } }
+
+  /* Плавающая FAB — только тач */
+  .fab-filter{
+    position: fixed; right: 16px; bottom: 16px; z-index: 1040;
+    width: 52px; height: 52px; border-radius: 50%;
+    display: none; align-items:center; justify-content:center;
+    box-shadow: 0 8px 24px rgba(16,24,40,.18);
+  }
+  @media (pointer:coarse){ .fab-filter{ display:flex; } }
+
+  /* Десктопная панель фильтров (бар + collapse) скрыта на таче */
+  @media (pointer:coarse){ .filters-desktop{ display:none !important; } }
+</style>
+
+<div class="sticky-tools">
+
+  <!-- ================== SEARCH (всегда видно) ================== -->
+  <div class="card-lite">
+    <div class="hd d-flex justify-content-between align-items-center">
+      <div class="fw-semibold">Search</div>
+
+      <!-- Кнопка Filters для планшета/тача (всегда доступна всем ролям) -->
+      <button class="btn btn-outline-secondary btn-sm btn-filter-touch"
+              type="button"
+              data-bs-toggle="offcanvas"
+              data-bs-target="#filtersOffcanvas"
+              aria-controls="filtersOffcanvas">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="me-1">
+          <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
+        </svg>
+        Filters
+      </button>
+    </div>
+    <div class="bd">
+      <form method="get" class="search-grid align-items-end">
+        <div>
+          <label class="form-label mb-1 small">Query</label>
+          <input name="q" class="form-control"
+                 list="wo-hints"
+                 value="{{ (filters.q if filters else '') }}"
+                 placeholder="Tech / Job # / Brand / Model / Part # / Part name">
+        </div>
+
+        <div>
+          <label class="form-label mb-1 small">From</label>
+          <input type="date" name="from" class="form-control"
+                 value="{{ (filters['from'] if filters and filters['from'] else '') }}">
+        </div>
+
+        <div>
+          <label class="form-label mb-1 small">To</label>
+          <input type="date" name="to" class="form-control"
+                 value="{{ (filters['to'] if filters and filters['to'] else '') }}">
+        </div>
+
+        <div class="d-flex gap-2 justify-content-end">
+          <!-- сохраняем текущие значения фильтров -->
+          <input type="hidden" name="tech_id" value="{{ filters.tech_id if filters else '' }}">
+          <input type="hidden" name="type"    value="{{ filters.type    if filters else '' }}">
+          <input type="hidden" name="status"  value="{{ filters.status  if filters else '' }}">
+          <button class="btn btn-primary px-4" type="submit">Search</button>
+          <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Reset</a>
+        </div>
+      </form>
+    </div>
   </div>
 
-  <div class="col-md-2">
-    <label class="form-label mb-1">From</label>
-    <input type="date" name="from" class="form-control"
-           value="{{ args.get('from','') if args else '' }}">
+  <!-- datalist подсказок -->
+  <datalist id="wo-hints">
+    {% if hint_values is defined %}
+      {% for h in hint_values %}{% if h %}<option value="{{ h }}">{% endif %}{% endfor %}
+    {% endif %}
+  </datalist>
+
+  <!-- ================== ДЕСКТОПНЫЕ ФИЛЬТРЫ (бар + collapse) ================== -->
+  <div class="filters-desktop">
+    <!-- Однострочный бар -->
+    <div class="filter-bar">
+      <div class="summary">
+        <strong>Filters</strong>
+        {% set has_any = (filters and (filters.tech_id or filters.type or filters.status)) %}
+        {% if filters and filters.tech_id %}<span class="badge text-bg-secondary filter-chip">tech: {{ filters.tech_id }}</span>{% endif %}
+        {% if filters and filters.type %}<span class="badge text-bg-secondary filter-chip">type: {{ filters.type }}</span>{% endif %}
+        {% if filters and filters.status %}<span class="badge text-bg-secondary filter-chip">status: {{ filters.status }}</span>{% endif %}
+        {% if not has_any %}<span class="text-muted small">None</span>{% endif %}
+
+        <!-- Кнопка раскрытия формы -->
+        <button class="btn btn-outline-secondary btn-sm filter-icon-btn ms-auto"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#filtersCollapse"
+                aria-expanded="false"
+                aria-controls="filtersCollapse"
+                title="Adjust filters">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+            <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
+          </svg>
+          Filters
+        </button>
+      </div>
+    </div>
+
+    <!-- Скрытая форма фильтров -->
+    <div class="collapse mt-2" id="filtersCollapse">
+      <div class="card-lite">
+        <div class="bd">
+          <form method="get" class="filters-grid align-items-end">
+            <div>
+              <label class="form-label mb-1 small">Technician</label>
+              <select name="tech_id" class="form-select">
+                <option value="">Any</option>
+                {% for tid, tname in (technicians or []) %}
+                  <option value="{{ tid }}" {{ 'selected' if filters and filters.tech_id==tid }}>
+                    {{ tname }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div>
+              <label class="form-label mb-1 small">Type</label>
+              <select name="type" class="form-select">
+                <option value="">Any</option>
+                <option value="BASE"      {{ 'selected' if filters and filters.type=='BASE' }}>BASE</option>
+                <option value="INSURANCE" {{ 'selected' if filters and filters.type=='INSURANCE' }}>INSURANCE</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="form-label mb-1 small">Status</label>
+              <select name="status" class="form-select">
+                <option value="">Any</option>
+                <option value="search_ordered" {{ 'selected' if filters and filters.status=='search_ordered' }}>search_ordered</option>
+                <option value="ordered"        {{ 'selected' if filters and filters.status=='ordered' }}>ordered</option>
+                <option value="done"           {{ 'selected' if filters and filters.status=='done' }}>done</option>
+              </select>
+            </div>
+
+            <div class="d-flex gap-2 justify-content-end">
+              <input type="hidden" name="q"    value="{{ filters.q    if filters else '' }}">
+              <input type="hidden" name="from" value="{{ filters['from'] if filters and filters['from'] else '' }}">
+              <input type="hidden" name="to"   value="{{ filters['to']   if filters and filters['to']   else '' }}">
+              <button class="btn btn-primary px-4" type="submit">Apply</button>
+              <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Clear</a>
+            </div>
+          </form>
+
+          <div class="active-chips mt-2 small">
+            {% if filters %}
+              {% if filters.q %}<span class="badge text-bg-secondary">q: {{ filters.q }}</span>{% endif %}
+              {% if filters.tech_id %}<span class="badge text-bg-secondary">tech_id: {{ filters.tech_id }}</span>{% endif %}
+              {% if filters.type %}<span class="badge text-bg-secondary">type: {{ filters.type }}</span>{% endif %}
+              {% if filters.status %}<span class="badge text-bg-secondary">status: {{ filters.status }}</span>{% endif %}
+              {% if filters['from'] %}<span class="badge text-bg-secondary">from: {{ filters['from'] }}</span>{% endif %}
+              {% if filters['to'] %}<span class="badge text-bg-secondary">to: {{ filters['to'] }}</span>{% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div> <!-- /filters-desktop -->
+
+</div> <!-- /sticky-tools -->
+
+<!-- ================== TOUCH OFFCANVAS (планшеты, техники) ================== -->
+<div class="offcanvas offcanvas-end offcanvas-filters"
+     tabindex="-1" id="filtersOffcanvas" aria-labelledby="filtersOffcanvasLabel">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="filtersOffcanvasLabel">Filters</h5>
+    <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
   </div>
+  <div class="offcanvas-body">
+    <form method="get" class="filters-grid align-items-end">
+      <div>
+        <label class="form-label mb-1 small">Technician</label>
+        <select name="tech_id" class="form-select">
+          <option value="">Any</option>
+          {% for tid, tname in (technicians or []) %}
+            <option value="{{ tid }}" {{ 'selected' if filters and filters.tech_id==tid }}>{{ tname }}</option>
+          {% endfor %}
+        </select>
+      </div>
 
-  <div class="col-md-2">
-    <label class="form-label mb-1">To</label>
-    <input type="date" name="to" class="form-control"
-           value="{{ args.get('to','') if args else '' }}">
+      <div>
+        <label class="form-label mb-1 small">Type</label>
+        <select name="type" class="form-select">
+          <option value="">Any</option>
+          <option value="BASE"      {{ 'selected' if filters and filters.type=='BASE' }}>BASE</option>
+          <option value="INSURANCE" {{ 'selected' if filters and filters.type=='INSURANCE' }}>INSURANCE</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="form-label mb-1 small">Status</label>
+        <select name="status" class="form-select">
+          <option value="">Any</option>
+          <option value="search_ordered" {{ 'selected' if filters and filters.status=='search_ordered' }}>search_ordered</option>
+          <option value="ordered"        {{ 'selected' if filters and filters.status=='ordered' }}>ordered</option>
+          <option value="done"           {{ 'selected' if filters and filters.status=='done' }}>done</option>
+        </select>
+      </div>
+
+      <!-- переносим текущие поля поиска -->
+      <input type="hidden" name="q"    value="{{ filters.q    if filters else '' }}">
+      <input type="hidden" name="from" value="{{ filters['from'] if filters and filters['from'] else '' }}">
+      <input type="hidden" name="to"   value="{{ filters['to']   if filters and filters['to']   else '' }}">
+
+      <div class="d-flex gap-2 justify-content-end mt-2">
+        <button class="btn btn-primary px-4" type="submit">Apply</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Clear</a>
+      </div>
+    </form>
   </div>
+</div>
 
-  <div class="col-12 d-flex gap-2 mt-1">
-    <button class="btn btn-primary">Search</button>
-    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Reset</a>
-  </div>
-</form>
+<!-- Плавающая кнопка (тач) -->
+<button class="btn btn-primary fab-filter"
+        type="button"
+        data-bs-toggle="offcanvas"
+        data-bs-target="#filtersOffcanvas"
+        aria-controls="filtersOffcanvas"
+        title="Filters">
+  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16">
+    <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
+  </svg>
+</button>
 
-<datalist id="wo-hints">
-  {% if hint_values is defined %}
-    {% for h in hint_values %}
-      {% if h %}<option value="{{ h }}">{% endif %}
-    {% endfor %}
-  {% endif %}
-</datalist>
-
+<!-- ================== TABLE ================== -->
 <div class="table-responsive">
   <table class="table table-sm table-hover align-middle wo-list-table">
     <thead class="table-light">
@@ -70,36 +310,28 @@
         {% for w in items %}
         <tr>
           <td>{{ w.id }}</td>
-
           <td>{{ w.technician_name or '—' }}</td>
-
           <td>
             <span class="jobs-trunc" title="{{ w.job_numbers or '' }}">
               {{ w.job_numbers or '—' }}
             </span>
             {% if w.canonical_job %}
-              <div class="text-muted small">
-                primary: <code>{{ w.canonical_job }}</code>
-              </div>
+              <div class="text-muted small">primary: <code>{{ w.canonical_job }}</code></div>
             {% endif %}
           </td>
-
           <td>
-            <span class="brand-trunc"
-                  title="{{ (w.brand or '') ~ ' ' ~ (w.model or '') }}">
+            <span class="brand-trunc" title="{{ (w.brand or '') ~ ' ' ~ (w.model or '') }}">
               {{ (w.brand or '') ~ (' ' if w.brand and w.model else '') ~ (w.model or '') }}
             </span>
           </td>
-
-          <td>
+          <td class="text-center">
             {% if w.job_type == 'INSURANCE' %}
               <span class="badge bg-warning text-dark">INSURANCE</span>
             {% else %}
               <span class="badge bg-secondary">BASE</span>
             {% endif %}
           </td>
-
-          <td>
+          <td class="text-center">
             {% if w.status == 'done' %}
               <span class="badge bg-success">done</span>
             {% elif w.status == 'ordered' %}
@@ -108,28 +340,18 @@
               <span class="badge bg-secondary">search_ordered</span>
             {% endif %}
           </td>
-
           <td>{{ w.created_at.strftime('%Y-%m-%d') if w.created_at else '—' }}</td>
-
           <td class="text-end">
             <div class="wo-actions d-inline-flex gap-1">
               <a class="btn btn-outline-primary btn-sm"
-                 href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">
-                Open
-              </a>
+                 href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">Open</a>
 
-              {# Admins: полноценный Edit #}
               {% if current_user.role in ['admin','superadmin'] %}
                 <a class="btn btn-outline-secondary btn-sm"
-                   href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">
-                  Edit
-                </a>
+                   href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">Edit</a>
               {% else %}
-                {# Не-админы: доступ к форме в RO #}
                 <a class="btn btn-outline-secondary btn-sm"
-                   href="{{ url_for('inventory.wo_edit', wo_id=w.id, readonly=1) }}">
-                  Form
-                </a>
+                   href="{{ url_for('inventory.wo_edit', wo_id=w.id, readonly=1) }}">Form</a>
               {% endif %}
 
               {% if current_user.role == 'superadmin' %}
@@ -145,23 +367,19 @@
         </tr>
         {% endfor %}
       {% else %}
-        <tr>
-          <td colspan="8" class="text-muted">No work orders found.</td>
-        </tr>
+        <tr><td colspan="8" class="text-muted">No work orders found.</td></tr>
       {% endif %}
     </tbody>
   </table>
 </div>
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-  const searchInput = document.querySelector('input[name="q"]');
-  if (searchInput && !searchInput.value.trim()) {
-    searchInput.focus();
-    searchInput.select();
-  }
+  const q = document.querySelector('input[name="q"]');
+  if (q && !q.value.trim()) { q.focus(); q.select(); }
 });
 </script>
 {% endblock %}

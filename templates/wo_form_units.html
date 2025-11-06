@@ -339,7 +339,11 @@
       else     inp.removeAttribute('required');
     });
   }
-  statusSel?.addEventListener('change', updateSupplierRequired);
+  statusSel?.addEventListener('change', ()=>{
+    updateSupplierRequired();
+    // при ручной смене статуса тоже проверим автологику
+    reevaluateWOStatusFromOrd();
+  });
 
   function toggleOrderedCols(){
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
@@ -352,6 +356,32 @@
   }
   statusSel?.addEventListener('change', toggleOrderedCols);
 
+  // === NEW: есть ли хотя бы один отмеченный Ord
+  function hasAnyOrderedChecked(){
+    return Array.from(document.querySelectorAll('.unit-table .ordered-check'))
+      .some(cb => cb.checked);
+  }
+
+  // === NEW: авто-установка статуса по чекбоксам Ord
+  function reevaluateWOStatusFromOrd(){
+    if (!statusSel) return;
+    const cur = statusSel.value;
+    if (cur === 'done') return; // done не трогаем
+
+    if (hasAnyOrderedChecked()){
+      if (cur !== 'ordered'){
+        statusSel.value = 'ordered';
+        toggleOrderedCols();
+        updateSupplierRequired();
+      }
+    } else {
+      if (cur !== 'search_ordered'){
+        statusSel.value = 'search_ordered';
+        updateSupplierRequired();
+      }
+    }
+  }
+
   // helper: sync ordered_flag hidden inputs before final submit
   function syncOrderedFlagsBeforeSubmit(){
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
@@ -363,26 +393,15 @@
     });
   }
 
-  // DUPLICATE CHECK LOGIC:
-  //  - Only for NEW WO (IS_EDIT === false).
-  //  - Ask backend if job_numbers already exist.
-  //  - If duplicate is SAME WO we're editing -> allow save with no popup.
+  // DUPLICATE CHECK LOGIC (без изменений) ...
   async function handleDuplicateCheckBeforeSubmit(){
-    // if editing existing WO -> never block (this fixes your problem)
-    if (IS_EDIT) {
-      return true;
-    }
+    if (IS_EDIT) return true;
 
     const jobField = form.querySelector('[name="job_numbers"]');
-    if (!jobField) {
-        return true;
-    }
+    if (!jobField) return true;
 
     const rawJobs = (jobField.value || '').trim();
-    if (!rawJobs) {
-        // empty job numbers -> ok
-        return true;
-    }
+    if (!rawJobs) return true;
 
     const params = new URLSearchParams();
     params.set("job_numbers", rawJobs);
@@ -395,30 +414,18 @@
         headers: { "Accept": "application/json" }
       });
     } catch (err) {
-      // network problem -> don't block save
       return true;
     }
 
-    if (!resp.ok) {
-      // server error -> don't block save
-      return true;
-    }
+    if (!resp.ok) return true;
 
     const data = await resp.json();
+    if (!data.duplicate) return true;
 
-    // if backend says "no duplicate" -> ok
-    if (!data.duplicate) {
-      return true;
-    }
-
-    // duplicate == true
-    // but if it's the same WO we're already on, allow submit
-    // (CURRENT_WO_ID can be '' for brand new; for edit it's real id)
     if (CURRENT_WO_ID && String(data.existing_id || '') === CURRENT_WO_ID) {
       return true;
     }
 
-    // otherwise it's a real different WO, ask user
     const msg = (
       "Work Order #" + data.existing_id +
       " already exists for this job (" + (data.existing_jobs || "") + ").\n\n" +
@@ -431,7 +438,6 @@
         "{{ url_for('inventory.wo_detail', wo_id=0) }}".replace("0", data.existing_id);
       return false;
     } else {
-      // user said stay here and NOT create new -> block submit
       return false;
     }
   }
@@ -441,16 +447,12 @@
     form.addEventListener('submit', async (e)=>{
       e.preventDefault();
 
-      // run duplicate check if needed
       const okToSubmit = await handleDuplicateCheckBeforeSubmit();
-      if (!okToSubmit) {
-        return;
-      }
+      if (!okToSubmit) return;
 
       // sync ordered_flag checkboxes into hidden vals
       syncOrderedFlagsBeforeSubmit();
 
-      // now really submit the form
       form.submit();
     });
   }
@@ -639,11 +641,13 @@
       });
   }
 
+  // при изменении чекбокса Ord — синхронизируем hidden и статус WO
   unitsWrap.addEventListener('change', (e)=>{
     if (e.target.classList.contains('ordered-check')){
       const td  = e.target.closest('td');
       const hid = td && td.querySelector('.ordered-val');
       if (hid) hid.value = e.target.checked ? '1' : '0';
+      reevaluateWOStatusFromOrd();
     }
   });
 
@@ -798,6 +802,8 @@
       recomputeUnitSubtotal(card);
       fetchHint(tbody.lastElementChild);
       toggleOrderedCols();
+      // NEW: после добавления строки – пересчёт статуса
+      reevaluateWOStatusFromOrd();
       return;
     }
 
@@ -806,6 +812,8 @@
       const card = btn.closest('.card');
       tr?.remove();
       recomputeUnitSubtotal(card);
+      // NEW: пересчёт после удаления строки
+      reevaluateWOStatusFromOrd();
       return;
     }
   });
@@ -817,6 +825,8 @@
     updateSupplierRequired();
     recomputeUnitSubtotal(card);
     toggleOrderedCols();
+    // NEW: пересчёт после добавления юнита
+    reevaluateWOStatusFromOrd();
   });
 
   selectAllBtn?.addEventListener('click', ()=>{
@@ -862,6 +872,8 @@
   document.querySelectorAll('#unitsWrap tbody tr').forEach(fetchHint);
   updateSupplierRequired();
   toggleOrderedCols();
+  // NEW: первичный пересчёт статуса по уже отмеченным Ord
+  reevaluateWOStatusFromOrd();
 })();
 </script>
 
