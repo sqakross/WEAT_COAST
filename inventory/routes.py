@@ -2329,80 +2329,69 @@ def wo_confirm_lines(wo_id: int):
 @login_required
 def api_job_duplicate_check():
     """
-    Check if any of the provided job numbers already exists in an existing WorkOrder.
-    Returns JSON:
-      {
-        "duplicate": true,
-        "existing_id": 123,
-        "existing_jobs": "985639, 985634"
-      }
-    or
+    Проверяет, пересекается ли любой из переданных job numbers с уже существующими Work Orders.
+    Параметры:
+      - job_numbers: строка с номерами через запятую/пробел/; (например '984891, 989898')
+      - current_wo_id (опц.): id текущей WO — чтобы не считать её же дублем при редактировании
+
+    Ответ:
+      { "duplicate": true, "existing_id": 123, "existing_jobs": "984891, 989898" }
+      или
       { "duplicate": false }
-    Only admins/superadmins can create WOs, so we mirror that restriction here.
     """
-    from sqlalchemy import or_
     from flask import request, jsonify
+    from flask_login import current_user
+    from sqlalchemy import or_
+    from models import WorkOrder
+    import re
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
     if role not in ("admin", "superadmin"):
-        # технику вообще не надо создавать WO → для него всегда "не дубликат"
         return jsonify({"duplicate": False})
 
     raw_jobs = (request.args.get("job_numbers") or "").strip()
-    if not raw_jobs:
+    current_wo_id = (request.args.get("current_wo_id") or "").strip()
+
+    def _parse_jobs(raw: str) -> list[str]:
+        s = (raw or "").upper()
+        parts = re.split(r"[,\s;]+", s)
+        cleaned, seen = [], set()
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            if p not in seen:
+                seen.add(p)
+                cleaned.append(p)
+        return cleaned
+
+    def _parse_jobs_from_wo(wo: WorkOrder) -> set[str]:
+        return set(_parse_jobs(wo.job_numbers or ""))
+
+    jobs_list = _parse_jobs(raw_jobs)
+    if not jobs_list:
         return jsonify({"duplicate": False})
+    jobs_set = set(jobs_list)
 
-    # 1) разобьём строку "985639, 985634" в список
-    job_list = [j.strip() for j in raw_jobs.split(",") if j.strip()]
-    if not job_list:
-        return jsonify({"duplicate": False})
+    # Узкое SQL-фильтрование по LIKE, чтобы не грузить все WOs
+    like_filters = [WorkOrder.job_numbers.ilike(f"%{j}%") for j in jobs_list]
+    q = WorkOrder.query.filter(or_(*like_filters))
+    if current_wo_id.isdigit():
+        q = q.filter(WorkOrder.id != int(current_wo_id))
 
-    # 2) возьмём максимальный номер как primary (как твой canonical_job делает)
-    #    пример: если 985639 и 985634 → canonical будет 985639
-    def pick_canonical(nums: list[str]) -> str:
-        ints = []
-        for n in nums:
-            try:
-                ints.append(int(n))
-            except ValueError:
-                pass
-        if ints:
-            return str(max(ints))
-        # fallback если это не числа
-        return nums[0]
+    possibles = q.order_by(WorkOrder.created_at.desc()).limit(50).all()
 
-    candidate_canonical = pick_canonical(job_list)
-
-    # 3) найдём в базе ворк ордера, которые потенциально содержат этот номер
-    #    мы не можем сделать прямой запрос по w.canonical_job, потому что это @property,
-    #    не колонка. Поэтому сначала фильтруем по job_numbers ILIKE, потом проверяем в питоне.
-    possibles = (
-        db.session.query(WorkOrder)
-        .filter(
-            or_(
-                # широкое совпадение по всей строке
-                WorkOrder.job_numbers.ilike(f"%{candidate_canonical}%"),
-                # а также по каждому введённому номеру (на всякий)
-                *[WorkOrder.job_numbers.ilike(f"%{jn}%") for jn in job_list]
-            )
-        )
-        .order_by(WorkOrder.created_at.desc())
-        .limit(10)
-        .all()
-    )
-
-    # 4) в питоне проверим реально canonical_job
     for wo in possibles:
-        if wo.canonical_job == candidate_canonical:
+        exist_set = _parse_jobs_from_wo(wo)
+        overlap = sorted(exist_set.intersection(jobs_set))
+        if overlap:
             return jsonify({
                 "duplicate": True,
                 "existing_id": wo.id,
-                "existing_jobs": wo.job_numbers or ""
+                "existing_jobs": wo.job_numbers or ", ".join(overlap),
             })
 
-    # если ничего не подошло
     return jsonify({"duplicate": False})
-
 
 @inventory_bp.get("/work_orders/new", endpoint="wo_new")
 @login_required
@@ -3219,6 +3208,7 @@ def wo_save():
     from flask_login import current_user
     import re
     from datetime import date
+    from sqlalchemy import or_
 
     # ---------- helpers ----------
     def _clip(s, n):
@@ -3247,6 +3237,22 @@ def wo_save():
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id_val))
         return redirect(url_for("inventory.wo_list"))
 
+    def _parse_jobs(raw: str) -> list[str]:
+        s = (raw or "").upper()
+        parts = re.split(r"[,\s;]+", s)
+        cleaned, seen = [], set()
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            if p not in seen:
+                seen.add(p)
+                cleaned.append(p)
+        return cleaned
+
+    def _jobs_set_from_wo(wo_obj) -> set[str]:
+        return set(_parse_jobs(getattr(wo_obj, "job_numbers", "") or ""))
+
     # ---------- access control ----------
     role_low = (getattr(current_user, "role", "") or "").strip().lower()
     if role_low not in ("admin", "superadmin"):
@@ -3274,7 +3280,6 @@ def wo_save():
     tech_id_val   = None
     tech_name_val = None
 
-    # если пришёл ID техника — пробуем найти пользователя
     if tech_id_raw.isdigit():
         try:
             tid = int(tech_id_raw)
@@ -3285,7 +3290,6 @@ def wo_save():
         except Exception:
             pass
 
-    # иначе используем введённое имя техника
     if not tech_name_val:
         if tech_name_raw:
             tech_name_val = tech_name_raw.strip().upper()
@@ -3313,6 +3317,74 @@ def wo_save():
     if serial_hdr:
         wo.serial = serial_hdr
 
+    # ---------- ВАЛИДАЦИЯ заголовка ----------
+    if not tech_name_val:
+        if is_new:
+            # ниже есть универсальный ререндер, используем его
+            pass
+        else:
+            db.session.rollback()
+            flash("Technician is required before saving Work Order.", "warning")
+            return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+
+    if not wo.job_numbers:
+        if is_new:
+            # ниже есть универсальный ререндер, используем его
+            pass
+        else:
+            db.session.rollback()
+            flash("Job number is required.", "warning")
+            return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+
+    # === DUP GUARD: строгая проверка пересечения job_numbers до любых модификаций ===
+    input_jobs = _parse_jobs(wo.job_numbers)
+    if not input_jobs:
+        # пойдём через универсальный ререндер с сообщением
+        def _rerender(msg_text: str):
+            db.session.rollback()
+            flash(msg_text, "warning")
+            technicians = _query_technicians()
+            recent_suppliers = session.get("recent_suppliers", []) or []
+            sel_tid   = wo.technician_id
+            sel_tname = wo.technician_name or None
+            safe_units = [{
+                "brand":  wo.brand or "",
+                "model":  wo.model or "",
+                "serial": wo.serial or "",
+                "rows": [{
+                    "id": None, "part_number": "", "part_name": "",
+                    "quantity": 1, "alt_numbers": "", "warehouse": "",
+                    "supplier": "", "backorder_flag": False,
+                    "line_status": "search_ordered", "unit_cost": 0.0,
+                    "ordered_flag": False,
+                }],
+            }]
+            return render_template(
+                "wo_form_units.html",
+                wo=wo, units=safe_units, recent_suppliers=recent_suppliers,
+                readonly=False, technicians=technicians,
+                selected_tech_id=sel_tid, selected_tech_username=sel_tname,
+            )
+        return _rerender("Job number is required.")
+
+    input_set = set(input_jobs)
+    like_filters = [WorkOrder.job_numbers.ilike(f"%{j}%") for j in input_jobs]
+    q = WorkOrder.query.filter(or_(*like_filters))
+    if not is_new:
+        q = q.filter(WorkOrder.id != wo.id)
+
+    possibles = q.order_by(WorkOrder.created_at.desc()).limit(50).all()
+    for existing in possibles:
+        exist_set = _jobs_set_from_wo(existing)
+        if exist_set & input_set:
+            flash(f"Work Order for job(s) {', '.join(sorted(exist_set & input_set))} already exists (#{existing.id}).", "warning")
+            return redirect(url_for("inventory.wo_detail", wo_id=existing.id))
+    # === /DUP GUARD ===
+
+    # На новых нужно id — добавляем в сессию пораньше
+    if is_new:
+        db.session.add(wo)
+
     # ---------- собрать units[...] и их rows[...] ----------
     re_unit = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
     re_row  = re.compile(
@@ -3334,7 +3406,6 @@ def wo_save():
             ui, ri, name = int(m.group(1)), int(m.group(2)), m.group(3)
             units_map.setdefault(ui, {"rows": {}})
             units_map[ui]["rows"].setdefault(ri, {})
-            # чекбоксы могут дублироваться: берём последний
             if name in ("ordered_flag", "backorder_flag"):
                 vals = request.form.getlist(key)
                 val  = vals[-1] if vals else f.get(key)
@@ -3376,7 +3447,7 @@ def wo_save():
                 "backorder_flag": bo_flag,
                 "line_status":    lstatus if lstatus in ("search_ordered", "ordered", "done") else "search_ordered",
                 "unit_cost":      (ucost if (ucost is not None) else 0.0),
-                "ordered_flag":   ord_flag,   # <-- сохраняем!
+                "ordered_flag":   ord_flag,
             }
 
             if pn and qty > 0:
@@ -3397,7 +3468,7 @@ def wo_save():
         sum(len(u.get('rows') or []) for u in units_payload)
     )
 
-    # DEBUG: показать что у нас получилось по ordered_flag до сохранения
+    # DEBUG dump
     try:
         dbg_rows = []
         for u_i, u_blk in sorted(units_map.items()):
@@ -3455,7 +3526,7 @@ def wo_save():
             selected_tech_username=sel_tname,
         )
 
-    # ---------- ВАЛИДАЦИЯ ----------
+    # ---------- ВАЛИДАЦИЯ (продолжение) ----------
     if not tech_name_val:
         if is_new:
             return _rerender_same_screen("Technician is required before saving Work Order.")
@@ -3472,10 +3543,10 @@ def wo_save():
             flash("Job number is required.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
+    # если шапка без строк
     if is_new:
         db.session.add(wo)
 
-    # если шапка без строк
     if new_rows_count == 0:
         if units_payload:
             first = units_payload[0]
@@ -3578,7 +3649,6 @@ def wo_save():
             pn_upper = (r.get("part_number") or "").strip().upper()
             sup_norm = _norm_supplier(sup)
 
-            # что пришло из формы по "ordered_flag"
             ord_in_raw = r.get("ordered_flag")
             ord_in     = _b(ord_in_raw)
 
@@ -3586,13 +3656,11 @@ def wo_save():
             prev_was_ordered, prev_date = (prev_state if prev_state else (False, None))
 
             if ord_in:
-                # если раньше уже был ordered — оставляем ту же дату
                 if prev_was_ordered and prev_date:
                     ord_date = prev_date
                 else:
                     ord_date = date.today()
             else:
-                # галку не поставили → не ordered
                 ord_date = None
                 ord_in   = False
 
@@ -3613,12 +3681,10 @@ def wo_save():
                 status=("ordered" if ord_in else "search_ordered"),
             )
 
-            # склад
             if hasattr(wop, "warehouse"):
                 wop.warehouse = (r.get("warehouse") or "")[:120]
             wop.unit_label = (r.get("warehouse") or "")[:120] or None
 
-            # цена
             if hasattr(wop, "unit_cost"):
                 uc = r.get("unit_cost")
                 if uc is not None and uc != "":
@@ -3627,7 +3693,6 @@ def wo_save():
                     except Exception:
                         wop.unit_cost = None
 
-            # ordered info
             if hasattr(wop, "ordered_flag"):
                 wop.ordered_flag = ord_in
             if hasattr(wop, "ordered_date"):
