@@ -23,11 +23,25 @@
   .card-lite .hd  { background:#f8f9fa; border-bottom:1px solid #dee2e6; padding:.6rem .9rem; }
   .card-lite .bd  { padding:.9rem; }
 
-  /* SEARCH row */
-  .search-grid{ display:grid; grid-template-columns: 1.6fr 160px 160px auto; gap:.6rem; }
-  @media (max-width: 992px){ .search-grid{ grid-template-columns: 1fr; } }
+  /* ---------- SEARCH layout ---------- */
+  .search-grid{
+    display:grid;
+    grid-template-columns: 1.6fr 160px 160px auto; /* Query | From | To | Actions */
+    gap:.6rem;
+    align-items:end;
+  }
+  /* планшеты/тач: одна строка Query | Search | Reset; From/To скрываем */
+  @media (pointer:coarse){
+    .search-grid{
+      grid-template-columns: 1fr auto auto;
+      gap:.5rem;
+    }
+    .search-grid .field-date{ display:none !important; }
+    .search-grid .actions{ display:flex; gap:.5rem; justify-content:flex-end; }
+    .search-grid input[name="q"]{ min-width: 0; }
+  }
 
-  /* FILTERS row */
+  /* ---------- FILTERS layout ---------- */
   .filters-grid{ display:grid; grid-template-columns: 1fr 1fr 1fr auto; gap:.6rem; }
   @media (max-width: 992px){ .filters-grid{ grid-template-columns: 1fr; } }
 
@@ -40,7 +54,21 @@
   .wo-list-table .col-status{ width:140px; text-align:center; white-space:nowrap; }
   .wo-list-table .col-created{ width:110px; white-space:nowrap; }
   .wo-list-table .col-actions{ width:180px; white-space:nowrap; }
-  .jobs-trunc,.brand-trunc{ max-width:320px; display:inline-block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
+
+  .jobs-trunc,.brand-trunc{
+    max-width:320px; display:inline-block; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;
+  }
+
+  /* На таче ужимаем тексты и выделяем место для Actions */
+  @media (pointer:coarse){
+    .wo-list-table .col-actions{ width:96px; }                /* фикс ширины колонки действий */
+    .wo-list-table .col-created{ width:84px; }
+    .jobs-trunc,.brand-trunc{ max-width:180px; }
+    /* СТАВИМ КНОПКИ В СТОЛБИК */
+    .wo-actions{ flex-direction:column !important; gap:.4rem !important; align-items:stretch !important; }
+    .wo-actions .btn{ width:100%; padding:.375rem .5rem; }    /* полная ширина и компактные отступы */
+  }
 
   /* Sticky tools */
   :root { --sticky-top: 64px; }
@@ -55,11 +83,11 @@
   .filter-chip{ font-size:.8rem; }
   .filter-icon-btn{ display:inline-flex; align-items:center; gap:.35rem; }
 
-  /* ----- Touch/Tablet offcanvas + buttons ----- */
+  /* ----- Touch Offcanvas + buttons ----- */
   .offcanvas-filters{ width:320px; max-width:90vw; box-shadow: -8px 0 20px rgba(16,24,40,.12); }
   .offcanvas-filters .offcanvas-body{ padding:.9rem; }
 
-  /* Кнопка вызова фильтров в хедере Search */
+  /* Кнопка Filters в шапке Search — только на таче */
   .btn-filter-touch{ display:none; }
   @media (pointer:coarse){ .btn-filter-touch{ display:inline-flex !important; } }
   @media (pointer:fine){  .btn-filter-touch{ display:none !important; } }
@@ -73,23 +101,19 @@
   }
   @media (pointer:coarse){ .fab-filter{ display:flex; } }
 
-  /* Десктопная панель фильтров (бар + collapse) скрыта на таче */
+  /* Десктопная панель фильтров скрыта на таче */
   @media (pointer:coarse){ .filters-desktop{ display:none !important; } }
 </style>
 
 <div class="sticky-tools">
 
-  <!-- ================== SEARCH (всегда видно) ================== -->
+  <!-- ================== SEARCH ================== -->
   <div class="card-lite">
     <div class="hd d-flex justify-content-between align-items-center">
       <div class="fw-semibold">Search</div>
-
-      <!-- Кнопка Filters для планшета/тача (всегда доступна всем ролям) -->
       <button class="btn btn-outline-secondary btn-sm btn-filter-touch"
-              type="button"
-              data-bs-toggle="offcanvas"
-              data-bs-target="#filtersOffcanvas"
-              aria-controls="filtersOffcanvas">
+              type="button" data-bs-toggle="offcanvas"
+              data-bs-target="#filtersOffcanvas" aria-controls="filtersOffcanvas">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="me-1">
           <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
         </svg>
@@ -97,7 +121,7 @@
       </button>
     </div>
     <div class="bd">
-      <form method="get" class="search-grid align-items-end">
+      <form method="get" class="search-grid">
         <div>
           <label class="form-label mb-1 small">Query</label>
           <input name="q" class="form-control"
@@ -106,20 +130,18 @@
                  placeholder="Tech / Job # / Brand / Model / Part # / Part name">
         </div>
 
-        <div>
+        <div class="field-date">
           <label class="form-label mb-1 small">From</label>
           <input type="date" name="from" class="form-control"
                  value="{{ (filters['from'] if filters and filters['from'] else '') }}">
         </div>
-
-        <div>
+        <div class="field-date">
           <label class="form-label mb-1 small">To</label>
           <input type="date" name="to" class="form-control"
                  value="{{ (filters['to'] if filters and filters['to'] else '') }}">
         </div>
 
-        <div class="d-flex gap-2 justify-content-end">
-          <!-- сохраняем текущие значения фильтров -->
+        <div class="actions d-flex gap-2 justify-content-end">
           <input type="hidden" name="tech_id" value="{{ filters.tech_id if filters else '' }}">
           <input type="hidden" name="type"    value="{{ filters.type    if filters else '' }}">
           <input type="hidden" name="status"  value="{{ filters.status  if filters else '' }}">
@@ -130,16 +152,14 @@
     </div>
   </div>
 
-  <!-- datalist подсказок -->
   <datalist id="wo-hints">
     {% if hint_values is defined %}
       {% for h in hint_values %}{% if h %}<option value="{{ h }}">{% endif %}{% endfor %}
     {% endif %}
   </datalist>
 
-  <!-- ================== ДЕСКТОПНЫЕ ФИЛЬТРЫ (бар + collapse) ================== -->
+  <!-- ================== DESKTOP FILTERS (bar + collapse) ================== -->
   <div class="filters-desktop">
-    <!-- Однострочный бар -->
     <div class="filter-bar">
       <div class="summary">
         <strong>Filters</strong>
@@ -149,14 +169,10 @@
         {% if filters and filters.status %}<span class="badge text-bg-secondary filter-chip">status: {{ filters.status }}</span>{% endif %}
         {% if not has_any %}<span class="text-muted small">None</span>{% endif %}
 
-        <!-- Кнопка раскрытия формы -->
         <button class="btn btn-outline-secondary btn-sm filter-icon-btn ms-auto"
-                type="button"
-                data-bs-toggle="collapse"
-                data-bs-target="#filtersCollapse"
-                aria-expanded="false"
-                aria-controls="filtersCollapse"
-                title="Adjust filters">
+                type="button" data-bs-toggle="collapse"
+                data-bs-target="#filtersCollapse" aria-expanded="false"
+                aria-controls="filtersCollapse" title="Adjust filters">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
             <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
           </svg>
@@ -165,7 +181,6 @@
       </div>
     </div>
 
-    <!-- Скрытая форма фильтров -->
     <div class="collapse mt-2" id="filtersCollapse">
       <div class="card-lite">
         <div class="bd">
@@ -227,7 +242,7 @@
 
 </div> <!-- /sticky-tools -->
 
-<!-- ================== TOUCH OFFCANVAS (планшеты, техники) ================== -->
+<!-- ================== TOUCH OFFCANVAS ================== -->
 <div class="offcanvas offcanvas-end offcanvas-filters"
      tabindex="-1" id="filtersOffcanvas" aria-labelledby="filtersOffcanvasLabel">
   <div class="offcanvas-header">
@@ -265,7 +280,6 @@
         </select>
       </div>
 
-      <!-- переносим текущие поля поиска -->
       <input type="hidden" name="q"    value="{{ filters.q    if filters else '' }}">
       <input type="hidden" name="from" value="{{ filters['from'] if filters and filters['from'] else '' }}">
       <input type="hidden" name="to"   value="{{ filters['to']   if filters and filters['to']   else '' }}">
@@ -278,12 +292,10 @@
   </div>
 </div>
 
-<!-- Плавающая кнопка (тач) -->
+<!-- FAB (touch) -->
 <button class="btn btn-primary fab-filter"
-        type="button"
-        data-bs-toggle="offcanvas"
-        data-bs-target="#filtersOffcanvas"
-        aria-controls="filtersOffcanvas"
+        type="button" data-bs-toggle="offcanvas"
+        data-bs-target="#filtersOffcanvas" aria-controls="filtersOffcanvas"
         title="Filters">
   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16">
     <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
@@ -345,7 +357,6 @@
             <div class="wo-actions d-inline-flex gap-1">
               <a class="btn btn-outline-primary btn-sm"
                  href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">Open</a>
-
               {% if current_user.role in ['admin','superadmin'] %}
                 <a class="btn btn-outline-secondary btn-sm"
                    href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">Edit</a>
@@ -353,7 +364,6 @@
                 <a class="btn btn-outline-secondary btn-sm"
                    href="{{ url_for('inventory.wo_edit', wo_id=w.id, readonly=1) }}">Form</a>
               {% endif %}
-
               {% if current_user.role == 'superadmin' %}
                 <form method="post"
                       action="{{ url_for('inventory.wo_delete', wo_id=w.id) }}"

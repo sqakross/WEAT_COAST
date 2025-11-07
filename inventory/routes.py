@@ -3926,12 +3926,9 @@ def wo_list():
     Unified search for Work Orders.
 
     GET params:
-      q        - free text (tech name, job#, brand, model, part#, alt part#, part name)
-      from     - date (YYYY-MM-DD)
-      to       - date (YYYY-MM-DD)
-      tech_id  - technician id
-      type     - BASE | INSURANCE
-      status   - search_ordered | ordered | done
+      q       - free text (tech name, job#, brand, model, part#, alt part#, part name)
+      from    - date (YYYY-MM-DD)
+      to      - date (YYYY-MM-DD)
 
     Visibility rule:
       - if current_user.role == 'technician', only show their own work orders
@@ -3941,12 +3938,9 @@ def wo_list():
     from sqlalchemy import and_, or_, func
 
     # ---- incoming params ----
-    qtext    = (request.args.get("q") or "").strip()
-    dfrom    = (request.args.get("from") or "").strip()  # YYYY-MM-DD
-    dto      = (request.args.get("to")   or "").strip()  # YYYY-MM-DD
-    tech_id  = request.args.get("tech_id", type=int)
-    job_type = (request.args.get("type") or "").strip()           # BASE | INSURANCE
-    status   = (request.args.get("status") or "").strip()         # search_ordered | ordered | done
+    qtext = (request.args.get("q") or "").strip()
+    dfrom = (request.args.get("from") or "").strip()  # YYYY-MM-DD
+    dto   = (request.args.get("to")   or "").strip()  # YYYY-MM-DD
 
     # ---- base query ----
     q = db.session.query(WorkOrder)
@@ -3955,33 +3949,21 @@ def wo_list():
 
     # ---- technician visibility restriction ----
     # techs see only their own WOs (by technician_id, fallback by technician_name)
-    me_id   = getattr(current_user, "id", None)
-    me_name = (getattr(current_user, "username", "") or "").strip()
-
     if is_technician():
+        me_id   = getattr(current_user, "id", None)
+        me_name = (getattr(current_user, "username", "") or "").strip()
+
         filters.append(
             or_(
                 WorkOrder.technician_id == me_id,
                 func.trim(WorkOrder.technician_name) == me_name,
             )
         )
-        # защитимся от просмотра чужих данных: игнорируем чужие tech_id
-        if tech_id and tech_id != me_id:
-            tech_id = me_id
-
-    # ---- explicit filters: technician / type / status ----
-    if tech_id:
-        filters.append(WorkOrder.technician_id == tech_id)
-
-    if job_type in ("BASE", "INSURANCE"):
-        filters.append(WorkOrder.job_type == job_type)
-
-    if status in ("search_ordered", "ordered", "done"):
-        filters.append(WorkOrder.status == status)
 
     # ---- global free-text search (q) ----
     if qtext:
         like = f"%{qtext}%"
+
         # join WorkOrderPart only if needed
         q = q.outerjoin(
             WorkOrderPart,
@@ -3991,7 +3973,7 @@ def wo_list():
 
         filters.append(
             or_(
-                # technician name
+                # technician name ("ALAN", etc.)
                 WorkOrder.technician_name.ilike(like),
 
                 # job numbers string ("985639, 985634")
@@ -4037,44 +4019,11 @@ def wo_list():
          .limit(200)
          .all()
     )
+
     count_items = len(items)
 
-    # ---- technicians list for <select> ----
-    # 1) если есть твой хелпер — используй его
-    technicians = []
-    try:
-        if "_query_technicians" in globals():
-            technicians = _query_technicians()  # ожидается [(id, username), ...]
-        else:
-            raise NameError
-    except Exception:
-        # 2) фоллбек: собрать из WorkOrder (id + предпочитаемое имя)
-        # coalesce(username, name) для читаемого лейбла
-        label_expr = func.coalesce(
-            func.nullif(func.trim(WorkOrder.technician_username), ""),
-            func.nullif(func.trim(WorkOrder.technician_name), "")
-        )
-        rows = (
-            db.session.query(WorkOrder.technician_id, label_expr.label("tech_label"))
-            .filter(WorkOrder.technician_id.isnot(None))
-            .distinct()
-            .order_by(func.lower("tech_label").asc())
-            .all()
-        )
-        technicians = [(tid, lbl or f"Tech #{tid}") for (tid, lbl) in rows]
-
-    # урезаем список для роли technician, чтобы он не видел чужие id в селекте
-    if is_technician():
-        # найдём метку текущего техника
-        my_label = None
-        for tid, lbl in technicians:
-            if tid == me_id:
-                my_label = lbl; break
-        if not my_label:
-            my_label = me_name or f"Tech #{me_id or '-'}"
-        technicians = [(me_id, my_label)]
-
     # ---- build autocomplete hints for <datalist> ----
+    # 1) technicians
     tech_suggestions = (
         db.session.query(WorkOrder.technician_name)
         .distinct()
@@ -4082,53 +4031,49 @@ def wo_list():
         .limit(50)
         .all()
     )
+
+    # 2) brand/model combos
     brand_model_suggestions = (
         db.session.query(WorkOrder.brand, WorkOrder.model)
         .distinct()
         .limit(100)
         .all()
     )
+
+    # 3) recent part numbers / names
     recent_parts = (
         db.session.query(WorkOrderPart.part_number, WorkOrderPart.part_name)
         .distinct()
         .limit(100)
         .all()
     )
+
     hint_values_set = set()
+
     for (t_name,) in tech_suggestions:
         if t_name:
             hint_values_set.add(t_name)
+
     for (b, m) in brand_model_suggestions:
         combo = ((b or '') + ' ' + (m or '')).strip()
         if combo:
             hint_values_set.add(combo)
+
     for (pn, pname) in recent_parts:
         if pn:
             hint_values_set.add(pn)
         if pname:
             hint_values_set.add(pname)
-    hint_values = sorted(hint_values_set)
 
-    # ---- filters map for template (удержание значений) ----
-    filters_map = {
-        "q": qtext,
-        "from": dfrom,
-        "to": dto,
-        "tech_id": tech_id,
-        "type": job_type,
-        "status": status,
-    }
+    hint_values = sorted(hint_values_set)
 
     return render_template(
         "wo_list.html",
         items=items,
         args=request.args,
-        filters=filters_map,
-        technicians=technicians,
         count_items=count_items,
         hint_values=hint_values,
     )
-
 
 @inventory_bp.post("/work_orders/<int:wo_id>/issue_instock", endpoint="wo_issue_instock")
 @login_required
@@ -5510,7 +5455,7 @@ def reports_grouped():
     from collections import defaultdict
     from datetime import datetime, time
     from sqlalchemy.orm import selectinload
-    from sqlalchemy import func, or_
+    from sqlalchemy import func, or_, case, and_
     from flask import render_template, request
     from flask_login import current_user
     from extensions import db
@@ -5540,11 +5485,11 @@ def reports_grouped():
     # ТЕХНИК: принудительно фильтруем только по себе
     recipient_effective = me_user if role_low == "technician" else recipient_raw
 
-    # даты → границы дня
+    # ---------- Даты: работаем по календарным дням ----------
     start_dt_raw = _parse_date_ymd(start_date_s)
     end_dt_raw   = _parse_date_ymd(end_date_s)
-    start_dt = datetime.combine(start_dt_raw.date(), time.min) if start_dt_raw else None
-    end_dt   = datetime.combine(end_dt_raw.date(),   time.max) if end_dt_raw   else None
+    start_day = start_dt_raw.date() if start_dt_raw else None
+    end_day   = end_dt_raw.date()   if end_dt_raw   else None
 
     # invoice_number (опционально)
     try:
@@ -5561,6 +5506,20 @@ def reports_grouped():
             selectinload(IssuedPartRecord.part),
             selectinload(IssuedPartRecord.batch),
         )
+    )
+
+    # ----- КЛЮЧЕВОЕ: правильная «отчётная дата» строки -----
+    # Признак возврата: отрицательное количество ИЛИ reference_job начинается с 'RETURN'
+    is_return = or_(
+        IssuedPartRecord.quantity < 0,
+        func.upper(func.coalesce(IssuedPartRecord.reference_job, '')).like('RETURN%')
+    )
+
+    # Для возвратов используем дату из заголовка батча (дата на карточке),
+    # для обычных — дату строки; если чего-то нет — coalesce.
+    date_expr = case(
+        (is_return, IssuedBatch.issue_date),
+        else_=func.coalesce(IssuedPartRecord.issue_date, IssuedBatch.issue_date)
     )
 
     # Фильтр по "кому выдано"
@@ -5583,17 +5542,20 @@ def reports_grouped():
 
     if reference_job:
         q = q.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
-    if start_dt:
-        q = q.filter(IssuedPartRecord.issue_date >= start_dt)
-    if end_dt:
-        q = q.filter(IssuedPartRecord.issue_date <= end_dt)
+
+    # ---------- Фильтрация по календарным дням (DATE(...), включительно) ----------
+    if start_day:
+        q = q.filter(func.date(date_expr) >= start_day.isoformat())
+    if end_day:
+        q = q.filter(func.date(date_expr) <= end_day.isoformat())
+
     if invoice_no is not None:
         q = q.filter(IssuedPartRecord.invoice_number == invoice_no)
     if location:
         q = q.filter(IssuedPartRecord.location == location)
 
     rows = q.order_by(
-        IssuedPartRecord.issue_date.desc(),
+        func.date(date_expr).desc(),
         IssuedPartRecord.id.desc()
     ).all()
 
@@ -5601,20 +5563,15 @@ def reports_grouped():
     grouped = defaultdict(list)
     for r in rows:
         if getattr(r, 'batch_id', None):
-            # Каждая партия (batch) — отдельная группа
             key = ('BATCH', r.batch_id)
         else:
-            # В legacy-ветке добавляем invoice_number в ключ,
-            # чтобы разные накладные не слипались.
+            # безопасный день для ключа: та же логика, что и в date_expr
+            is_ret = ((r.quantity or 0) < 0) or ((r.reference_job or '').upper().startswith('RETURN'))
+            safe_dt = (r.batch.issue_date if (is_ret and getattr(r, "batch", None)) else
+                       (r.issue_date or (r.batch.issue_date if getattr(r, "batch", None) else None)))
+            day = (safe_dt.date() if safe_dt else datetime.min.date())
             inv_num = getattr(r, 'invoice_number', None)
-            key = (
-                'LEGACY',
-                r.issued_to,
-                r.reference_job,
-                r.issued_by,
-                r.issue_date.date(),
-                inv_num,  # важно!
-            )
+            key = ('LEGACY', r.issued_to, r.reference_job, r.issued_by, day, inv_num)
         grouped[key].append(r)
 
     invoices = []
@@ -5635,7 +5592,6 @@ def reports_grouped():
 
         if gkey[0] == 'BATCH':
             batch = items_sorted[0].batch
-            # На всякий случай: если у батча номера нет, возьмём из строки
             batch_inv_number = batch.invoice_number or next(
                 (it.invoice_number for it in reversed(items_sorted) if (it.invoice_number or 0) > 0),
                 None
@@ -5655,18 +5611,14 @@ def reports_grouped():
                 '_sort_id': max((it.id for it in items_sorted), default=0),
             }
         else:
-            # gkey = ('LEGACY', issued_to, ref_job, issued_by, day, inv_num)
             _, issued_to, ref_job, issued_by, day, inv_num = gkey
             issue_dt = datetime.combine(day, time.min)
             first = items_sorted[0]
-
-            # ---- Fallback для номера инвойса в legacy-группах ----
             inv_num_from_items = next(
                 (it.invoice_number for it in reversed(items_sorted) if (it.invoice_number or 0) > 0),
                 None
             )
             resolved_inv_num = inv_num or inv_num_from_items
-
             if not resolved_inv_num:
                 batch_guess = (
                     db.session.query(IssuedBatch)
@@ -5713,7 +5665,6 @@ def reports_grouped():
         'reports_grouped.html',
         invoices=invoices,
         total=grand_total,
-        # возвращаем значения в форму
         start_date=start_date_s,
         end_date=end_date_s,
         recipient=(recipient_effective or ''),
@@ -5721,7 +5672,6 @@ def reports_grouped():
         invoice=invoice_s or '',
         location=location or '',
     )
-
 
 @inventory_bp.route("/invoice/printdirect")
 @login_required
@@ -7413,45 +7363,6 @@ def import_parts_upload():
         except Exception:
             return None
 
-    def _parse_invoice_date_str(s: str | None) -> date | None:
-        """Ожидаем YYYY-MM-DD из <input type="date">. Возвращаем date или None."""
-        if not s:
-            return None
-        try:
-            parts = [int(x) for x in s.split("-")]
-            if len(parts) == 3:
-                return date(parts[0], parts[1], parts[2])
-        except Exception:
-            return None
-        return None
-
-    def _infer_invoice_date(norm_df) -> date | None:
-        """
-        Пытаемся достать дату из столбца 'date' (если он есть) — берём
-        самое частое значение, парсим YYYY-MM-DD или MM/DD/YYYY.
-        """
-        try:
-            import pandas as pd
-            if norm_df is None or norm_df.empty or "date" not in norm_df.columns:
-                return None
-            vals = [str(x).strip() for x in norm_df["date"].dropna().astype(str).tolist() if str(x).strip()]
-            if not vals:
-                return None
-            from collections import Counter
-            best = Counter(vals).most_common(1)[0][0]
-            # пробуем ISO
-            d = _parse_invoice_date_str(best)
-            if d:
-                return d
-            # пробуем MM/DD/YYYY
-            m = re.match(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*$", best)
-            if m:
-                mm, dd, yyyy = map(int, m.groups())
-                return date(yyyy, mm, dd)
-        except Exception:
-            pass
-        return None
-
     def _infer_invoice_number(norm_df, source_file: str, supplier_hint: str | None) -> str:
         # unchanged from your code
         if norm_df is not None:
@@ -7482,10 +7393,6 @@ def import_parts_upload():
                         text += d[i].get_text() + "\n"
             except Exception:
                 try:
-                    from pdfminer_high_level import extract_text  # noqa
-                except Exception:
-                    pass
-                try:
                     from pdfminer.high_level import extract_text
                     text = extract_text(source_file) or ""
                 except Exception:
@@ -7497,7 +7404,7 @@ def import_parts_upload():
         return ""
 
     def _ensure_norm_columns(df, default_loc: str, saved_path: str):
-        # ... ВАШ НЕИЗМЕНЁННЫЙ КОД ИЗ СООБЩЕНИЯ ...
+        # your unchanged version
         import pandas as pd
         if df is None:
             cols = [
@@ -7506,9 +7413,9 @@ def import_parts_upload():
                 "order_no", "invoice_no", "date", "unit_cost_base"
             ]
             return pd.DataFrame(columns=cols)
-        # (оставляем всю реализацию без изменений)
-        # --- начало оригинальной реализации ---
+
         df = df.copy()
+
         need_cols = [
             "part_number", "part_name", "qty", "quantity", "unit_cost",
             "unit_cost_base",
@@ -7518,19 +7425,30 @@ def import_parts_upload():
         for c in need_cols:
             if c not in df.columns:
                 df[c] = None
+
         qty = pd.to_numeric(df["qty"], errors="coerce")
         quantity = pd.to_numeric(df["quantity"], errors="coerce")
+
         df.loc[qty.isna() & quantity.notna(), "qty"] = quantity
         df.loc[quantity.isna() & qty.notna(), "quantity"] = qty
+
         df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
         df.loc[df["qty"] < 0, "qty"] = 0
         df["quantity"] = df["qty"].astype(int)
+
+        # unit_cost_base:
         df["unit_cost_base"] = pd.to_numeric(df["unit_cost_base"], errors="coerce")
         df["unit_cost"]      = pd.to_numeric(df["unit_cost"], errors="coerce")
+
+        # где base пустая, подставляем unit_cost
         mask_no_base = df["unit_cost_base"].isna()
         df.loc[mask_no_base, "unit_cost_base"] = df.loc[mask_no_base, "unit_cost"]
+
+        # source_file
         sf_empty = df["source_file"].isna() | (df["source_file"].astype(str).str.strip() == "")
         df.loc[sf_empty, "source_file"] = saved_path
+
+        # location
         loc_empty = df["location"].isna() | (df["location"].astype(str).str.strip() == "")
         df.loc[loc_empty, "location"] = (default_loc or "MAIN")
         df["location"] = (
@@ -7539,6 +7457,8 @@ def import_parts_upload():
             .str.strip()
             .str.upper()
         )
+
+        # normalize strings
         for col in ("part_number", "part_name", "supplier", "order_no", "invoice_no", "row_key", "source_file"):
             df[col] = (
                 df[col]
@@ -7547,10 +7467,13 @@ def import_parts_upload():
                 .fillna("")
                 .str.strip()
             )
+
+        # row_key generation if empty
         rk_empty = df["row_key"].isna() | (df["row_key"].astype(str).str.strip() == "")
         if rk_empty.any():
             df = df.reset_index(drop=False).rename(columns={"index": "__row_i"})
             file_id = os.path.basename(str(saved_path or ""))
+
             def _mk_key(row):
                 pn = str(row.get("part_number", "")).strip().upper()
                 loc = str(row.get("location", "")).strip().upper()
@@ -7568,9 +7491,13 @@ def import_parts_upload():
                         cost_base = "NA"
                 i = int(row.get("__row_i", 0) or 0)
                 return f"{file_id}|{i}|{pn}|{loc}|{qty_local}|{cost_base}"
+
             df.loc[rk_empty, "row_key"] = df[rk_empty].apply(_mk_key, axis=1)
+
             if "__row_i" in df.columns:
                 del df["__row_i"]
+
+        # drop fully empty
         drop_mask = (
             (df["part_number"].astype(str).str.strip() == "") &
             (df["part_name"].astype(str).str.strip() == "") &
@@ -7579,8 +7506,8 @@ def import_parts_upload():
         )
         if drop_mask.any():
             df = df[~drop_mask].copy()
+
         return df
-        # --- конец оригинальной реализации ---
 
     def _detect_supplier_from_content(saved_path: str, df_hint):
         # unchanged logic from your version
@@ -7590,6 +7517,7 @@ def import_parts_upload():
                 return "Reliable Parts"
             if "marcone" in base or "marcon" in base:
                 return "Marcone"
+
             blob = ""
             if df_hint is not None:
                 try:
@@ -7602,11 +7530,13 @@ def import_parts_upload():
                     )
                 except Exception:
                     pass
+
             blob_l = blob.lower()
             if "reliable" in blob_l:
                 return "Reliable Parts"
             if "marcone" in blob_l or "marcon" in blob_l:
                 return "Marcone"
+
             text = ""
             try:
                 import fitz
@@ -7641,28 +7571,46 @@ def import_parts_upload():
 
     # -------- extra: применить ОДИН РАЗ --------------------------------------
     def _apply_extra_to_df_once(df, extra_expenses_float, eps=1e-6):
+        """
+        Применяет extra-траты к df ТОЛЬКО если они ещё не были применены.
+        Возвращает (df, subtotal_base, grand_total)
+        """
         import pandas as pd
+
         df = df.copy()
         df["quantity"] = pd.to_numeric(df.get("quantity"), errors="coerce").fillna(0).astype(int)
         df["unit_cost_base"] = pd.to_numeric(df.get("unit_cost_base"), errors="coerce").fillna(0.0)
         if "unit_cost" not in df.columns:
             df["unit_cost"] = df["unit_cost_base"]
         df["unit_cost"] = pd.to_numeric(df.get("unit_cost"), errors="coerce")
+
         subtotal_base = float((df["quantity"] * df["unit_cost_base"]).sum() or 0.0)
         current_total = float((df["quantity"] * df["unit_cost"]).sum() or 0.0)
         extra = float(extra_expenses_float or 0.0)
         target_total = subtotal_base + extra
+
+        # если уже применено — выходим
         if abs(current_total - target_total) <= float(eps or 1e-6):
             return df, subtotal_base, target_total
+
         return _distribute_extra_and_adjust_costs(df, extra)
 
     def _distribute_extra_and_adjust_costs(df, extra_expenses_float):
+        """
+        df columns we rely on:
+          - quantity (int)
+          - unit_cost_base (float)  <-- чистая цена за штуку
+        We compute adjusted unit_cost per row with proportional distribution.
+        """
         import pandas as pd
+
         df = df.copy()
         df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).astype(int)
         df["unit_cost_base"] = pd.to_numeric(df["unit_cost_base"], errors="coerce")
+
         df["line_base_total"] = df["quantity"] * df["unit_cost_base"]
         subtotal_base = float(df["line_base_total"].sum() or 0.0)
+
         if subtotal_base > 0 and extra_expenses_float:
             def _adj_cost(row):
                 qty = row["quantity"]
@@ -7673,9 +7621,11 @@ def import_parts_upload():
                 extra_for_row = extra_expenses_float * share
                 per_item_fee = extra_for_row / qty
                 return base_cost + per_item_fee
+
             df["unit_cost"] = df.apply(_adj_cost, axis=1)
         else:
             df["unit_cost"] = df["unit_cost_base"]
+
         df["unit_cost"] = df["unit_cost"].astype(float)
         grand_total = subtotal_base + float(extra_expenses_float or 0.0)
         return df, subtotal_base, grand_total
@@ -7709,13 +7659,10 @@ def import_parts_upload():
         except Exception:
             extra_expenses_val = 0.0
 
-        # <-- НОВОЕ: читаем invoice_date из формы (YYYY-MM-DD)
-        inv_date_str = (request.form.get("invoice_date") or "").strip()
-        inv_date = _parse_invoice_date_str(inv_date_str)
-
         if not saved_path:
             flash("Saved path is empty. Upload the file again.", "warning")
 
+        # превью форма -> dict[] -> DataFrame
         rows = parse_preview_rows_relaxed(request.form)
         if not rows:
             flash("Нет данных в форме (пустая таблица).", "warning")
@@ -7727,12 +7674,12 @@ def import_parts_upload():
                 extra_expenses=extra_expenses_val,
                 subtotal_base=0.0,
                 grand_total=extra_expenses_val,
-                invoice_date=inv_date_str or "",
             )
 
         norm = rows_to_norm_df(rows, saved_path)
         norm = _coerce_norm_df(norm)
 
+        # supplier_hint
         supplier_hint = (
             (request.form.get("supplier_hint") or "").strip()
             or _detect_supplier_from_content(saved_path, norm)
@@ -7749,20 +7696,24 @@ def import_parts_upload():
                 extra_expenses=extra_expenses_val,
                 subtotal_base=0.0,
                 grand_total=extra_expenses_val,
-                invoice_date=inv_date_str or "",
             )
 
+        # гарантированные столбцы (включая unit_cost_base)
+        # гарантированные столбцы (включая unit_cost_base)
         norm = _ensure_norm_columns(norm, default_loc, saved_path)
 
+        # ВАЖНО: мы пришли ИМЕННО из превью-формы (есть rows[...]),
+        # unit_cost в форме уже "с fee". НИЧЕГО не перераспределяем.
+        # Просто посчитаем totals для отображения/логов и СБРОСИМ extra.
         import pandas as pd
         norm["quantity"] = pd.to_numeric(norm["quantity"], errors="coerce").fillna(0).astype(int)
         norm["unit_cost"] = pd.to_numeric(norm["unit_cost"], errors="coerce").fillna(0.0)
         norm["unit_cost_base"] = pd.to_numeric(norm["unit_cost_base"], errors="coerce").fillna(0.0)
 
         subtotal_base = float((norm["quantity"] * norm["unit_cost_base"]).sum() or 0.0)
-        grand_total   = float((norm["quantity"] * norm["unit_cost"]).sum() or 0.0)
+        grand_total = float((norm["quantity"] * norm["unit_cost"]).sum() or 0.0)
 
-        # extra уже включён в unit_cost в форме:
+        # Чтобы нигде далее ничего не "добавилось", принудительно обнулим extra:
         extra_expenses_val = 0.0
 
         flash(
@@ -7772,12 +7723,7 @@ def import_parts_upload():
 
         invoice_guess = _infer_invoice_number(norm, saved_path, supplier_hint) or ""
 
-        # если даты нет в форме — попытаемся угадать из df
-        if not inv_date:
-            inv_date = _infer_invoice_date(norm) or date.today()
-        inv_date_str = inv_date.isoformat()
-
-        # ---------- SAVE ----------
+        # ---------- если пользователь нажал SAVE ----------
         if "save" in request.form:
             return render_template(
                 "import_preview.html",
@@ -7786,8 +7732,7 @@ def import_parts_upload():
                 supplier_hint=supplier_hint or "",
                 extra_expenses=extra_expenses_val,
                 subtotal_base=subtotal_base,
-                grand_total=grand_total,
-                invoice_date=inv_date_str,
+                grand_total=grand_total
             )
 
         # ---------- APPLY ----------
@@ -7803,7 +7748,6 @@ def import_parts_upload():
                     subtotal_base=subtotal_base,
                     grand_total=grand_total,
                     default_loc=default_loc or "MAIN",
-                    invoice_date=inv_date_str,
                 )
 
             session = db.session
@@ -7847,8 +7791,9 @@ def import_parts_upload():
                 batch_kwargs = {}
                 if B_SUP:   batch_kwargs[B_SUP]   = (supplier_hint or "Unknown")
                 if B_INV:   batch_kwargs[B_INV]   = invoice_guess
-                if B_DATE:  batch_kwargs[B_DATE]  = inv_date or date.today()   # <-- ИСПОЛЬЗУЕМ ВЫБРАННУЮ ДАТУ
+                if B_DATE:  batch_kwargs[B_DATE]  = date.today()
                 if B_CURR:  batch_kwargs[B_CURR]  = "USD"
+                # сохраним сумму в заметке для аудита, но НЕ в числовом поле
                 note_extra = f" (extra applied: {extra_expenses_val:.2f})" if extra_expenses_val else ""
                 if B_NOTES: batch_kwargs[B_NOTES] = f"Imported from {os.path.basename(saved_path)}{note_extra}"
                 if B_STAT:  batch_kwargs[B_STAT]  = "new"
@@ -7857,6 +7802,7 @@ def import_parts_upload():
                 if B_P_AT:  batch_kwargs[B_P_AT]  = None
                 if B_P_BY:  batch_kwargs[B_P_BY]  = None
                 if B_ATTP:  batch_kwargs[B_ATTP]  = ""
+                # КРИТИЧЕСКОЕ: числовое поле extra в батче = 0.0 (уже включено в unit_cost строк)
                 if B_EXTRA: batch_kwargs[B_EXTRA] = 0.0
 
                 try:
@@ -7874,37 +7820,53 @@ def import_parts_upload():
                     logging.exception("Failed to create ReceivingBatch: %s", e)
                     flash("Не удалось создать ReceivingBatch. Продолжаю без батча.", "warning")
 
+            # вспомогательная: проверка дубликатов
             def duplicate_exists(rk: str) -> bool:
                 return has_key(rk)
 
+            # основной апдейтер склада
             def make_movement(m: dict) -> None:
-                # ... ВАШ НЕИЗМЕНЁННЫЙ КОД make_movement(...) ...
+                """
+                Применяем одну строку приходной накладной к складу.
+                m["unit_cost"] УЖЕ скорректирована (adj cost).
+                """
                 PartModel = Part
+
                 PN_FIELDS   = ["part_number","number","sku","code","partnum","pn"]
                 NAME_FIELDS = ["name","part_name","descr","description","title"]
                 QTY_FIELDS  = ["quantity","qty","on_hand","stock","count"]
                 LOC_FIELDS  = ["location","bin","shelf","place","loc"]
                 COST_FIELDS = ["unit_cost","cost","price","unitprice","last_cost"]
                 SUP_FIELDS  = ["supplier","vendor","provider"]
+
                 pn_field   = _pick_field(PartModel, PN_FIELDS)
                 name_field = _pick_field(PartModel, NAME_FIELDS)
                 qty_field  = _pick_field(PartModel, QTY_FIELDS)
                 loc_field  = _pick_field(PartModel, LOC_FIELDS)
                 cost_field = _pick_field(PartModel, COST_FIELDS)
                 sup_field  = _pick_field(PartModel, SUP_FIELDS)
+
                 if pn_field is None or qty_field is None:
                     raise RuntimeError("Не найдено поле PART # или QTY в модели Part.")
+
                 incoming_pn   = m["part_number"]
                 incoming_qty  = int(m.get("qty") or m.get("quantity") or 0)
-                incoming_cost = m.get("unit_cost")
+                incoming_cost = m.get("unit_cost")  # это уже adj cost
                 incoming_name = m.get("part_name") or ""
                 incoming_loc  = (m.get("location") or "").strip().upper()
                 incoming_sup  = m.get("supplier") or ""
+
+                # ищем Part по PN
                 part = PartModel.query.filter(
                     getattr(PartModel, pn_field) == incoming_pn
                 ).first()
+
                 if not part:
-                    kwargs = {pn_field: incoming_pn, qty_field: 0}
+                    # создаём Part
+                    kwargs = {
+                        pn_field: incoming_pn,
+                        qty_field: 0,
+                    }
                     if name_field and incoming_name:
                         kwargs[name_field] = incoming_name
                     if loc_field:
@@ -7913,6 +7875,7 @@ def import_parts_upload():
                         kwargs[cost_field] = float(incoming_cost)
                     if sup_field and incoming_sup:
                         kwargs[sup_field] = incoming_sup
+
                     part = PartModel(**kwargs)
                     session.add(part)
                     try:
@@ -7924,13 +7887,22 @@ def import_parts_upload():
                         ).first()
                         if not part:
                             raise
+
                 on_hand_before = int(getattr(part, qty_field) or 0)
                 old_loc_before = getattr(part, loc_field) if loc_field else None
+
+                # qty +
                 setattr(part, qty_field, on_hand_before + incoming_qty)
+
+                # last cost = incoming adj cost
                 if cost_field and (incoming_cost is not None):
                     setattr(part, cost_field, float(incoming_cost))
+
+                # name fill if empty
                 if name_field and incoming_name and not getattr(part, name_field):
                     setattr(part, name_field, incoming_name)
+
+                # smart merge location
                 if loc_field:
                     incoming_loc_up = incoming_loc
                     if incoming_loc_up:
@@ -7940,6 +7912,7 @@ def import_parts_upload():
                         else:
                             setattr(part, loc_field, incoming_loc_up)
 
+                # create ReceivingItem / GoodsReceiptLine
                 if ItemModel is not None and batch is not None and batch_id_field is not None:
                     I_BATCH = _pick_field(ItemModel, ["goods_receipt_id","batch_id","receiving_id"])
                     I_PART  = _pick_field(ItemModel, ["part_id","item_part_id"])
@@ -7948,18 +7921,25 @@ def import_parts_upload():
                     I_QTY   = _pick_field(ItemModel, ["qty","quantity"])
                     I_COST  = _pick_field(ItemModel, ["unit_cost","cost","price","unitprice"])
                     I_LOC   = _pick_field(ItemModel, ["location","bin","shelf","place","loc"])
+
                     try:
                         item_kwargs = {}
-                        if I_BATCH: item_kwargs[I_BATCH] = getattr(batch, batch_id_field)
+                        if I_BATCH:
+                            item_kwargs[I_BATCH] = getattr(batch, batch_id_field)
                         if I_PART:
                             item_kwargs[I_PART] = getattr(part, "id", None)
                         else:
-                            if I_PN:    item_kwargs[I_PN] = incoming_pn
-                            if I_PNAME: item_kwargs[I_PNAME] = incoming_name
-                        if I_QTY:   item_kwargs[I_QTY] = incoming_qty
+                            if I_PN:
+                                item_kwargs[I_PN] = incoming_pn
+                            if I_PNAME:
+                                item_kwargs[I_PNAME] = incoming_name
+                        if I_QTY:
+                            item_kwargs[I_QTY] = incoming_qty
                         if I_COST and (incoming_cost is not None):
                             item_kwargs[I_COST] = float(incoming_cost)
-                        if I_LOC:   item_kwargs[I_LOC] = incoming_loc
+                        if I_LOC:
+                            item_kwargs[I_LOC] = incoming_loc
+
                         if item_kwargs.get(I_QTY, 0) > 0:
                             session.add(ItemModel(**item_kwargs))
                     except IntegrityError as e:
@@ -7971,9 +7951,12 @@ def import_parts_upload():
                         logging.exception("Failed to create ReceivingItem: %s", e)
                         flash("Не удалось создать строку приёмки (см. лог).", "warning")
 
-                meta = {"file": m.get("source_file"),
-                        "supplier": (m.get("supplier") or "").strip(),
-                        "invoice": (invoice_guess or "").strip()}
+                # register dedupe key
+                meta = {
+                    "file": m.get("source_file"),
+                    "supplier": (m.get("supplier") or "").strip(),
+                    "invoice": (invoice_guess or "").strip(),
+                }
                 try:
                     if batch is not None and batch_id_field:
                         meta["batch_id"] = getattr(batch, batch_id_field)
@@ -7981,12 +7964,14 @@ def import_parts_upload():
                     pass
                 add_key(m["row_key"], meta)
 
+            # построить движения и применить make_movement()
             built, errors = build_receive_movements(
                 norm,
                 duplicate_exists_func=duplicate_exists,
                 make_movement_func=make_movement
             )
 
+            # фиксируем всё
             try:
                 session.commit()
             except Exception as e:
@@ -7995,6 +7980,7 @@ def import_parts_upload():
                 flash("Ошибка при окончательной записи в базу. Изменения откатились.", "danger")
                 return redirect(url_for("inventory.import_parts_upload"))
 
+            # теперь отметить batch как posted
             bid = None
             if batch is not None and batch_id_field:
                 try:
@@ -8006,12 +7992,18 @@ def import_parts_upload():
                         B_P_BY  = _pick_field(BatchModel, ["posted_by"])
                         B_EXTRA = _pick_field(BatchModel, ["extra_expenses","shipping_fee","freight","expenses"])
 
-                        if B_STAT: setattr(fresh_batch, B_STAT, "posted")
-                        if B_P_AT: setattr(fresh_batch, B_P_AT, datetime.utcnow())
+                        if B_STAT:
+                            setattr(fresh_batch, B_STAT, "posted")
+                        if B_P_AT:
+                            setattr(fresh_batch, B_P_AT, datetime.utcnow())
                         if B_P_BY:
-                            try:    uid = getattr(current_user, "id", 0)
-                            except: uid = 0
+                            try:
+                                uid = getattr(current_user, "id", 0)
+                            except Exception:
+                                uid = 0
                             setattr(fresh_batch, B_P_BY, uid)
+
+                        # страхуемся: extra в батче = 0.0
                         if B_EXTRA and getattr(fresh_batch, B_EXTRA, 0) not in (0, 0.0, None):
                             setattr(fresh_batch, B_EXTRA, 0.0)
 
@@ -8057,6 +8049,7 @@ def import_parts_upload():
         ext = os.path.splitext(path)[1].lower()
         df  = dataframe_from_pdf(path, try_ocr=False) if ext == ".pdf" else load_table(path)
 
+        # до нормализации — угадать поставщика
         supplier_hint = _detect_supplier_from_content(path, df)
         default_loc   = _supplier_to_default_location(supplier_hint)
         flash(
@@ -8077,7 +8070,6 @@ def import_parts_upload():
                 extra_expenses=0.0,
                 subtotal_base=0.0,
                 grand_total=0.0,
-                invoice_date=date.today().isoformat(),
             )
 
         norm, issues = normalize_table(
@@ -8089,14 +8081,14 @@ def import_parts_upload():
         for msg in issues:
             flash(msg, "warning")
 
+        # гарантировать столбцы
         norm = _ensure_norm_columns(norm, default_loc, path)
+
+        # распределить extra_expenses=0 при первом показе (для отображения)
         norm, subtotal_base, grand_total = _distribute_extra_and_adjust_costs(norm, 0.0)
 
         rows = norm.to_dict(orient="records")
         rows = fix_norm_records(rows, default_loc)
-
-        # Попытка угадать дату из данных, иначе сегодня
-        inv_date = _infer_invoice_date(norm) or date.today()
 
         return render_template(
             "import_preview.html",
@@ -8106,7 +8098,6 @@ def import_parts_upload():
             extra_expenses=0.0,
             subtotal_base=subtotal_base,
             grand_total=grand_total,
-            invoice_date=inv_date.isoformat(),
         )
 
     # ===== C) GET → показать форму загрузки ===================================
