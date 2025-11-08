@@ -2,7 +2,7 @@ from __future__ import annotations
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func, or_, and_
 from models import IssuedPartRecord, WorkOrder, WorkOrderPart, TechReceiveLog, IssuedBatch, Part, ReceivingBatch, \
-    ReceivingItem, OrderItem
+    ReceivingItem, OrderItem, IssuedBatch
 from services.receiving import unpost_receiving_batch
 import json
 from services.receiving import post_receiving_batch
@@ -2220,6 +2220,240 @@ def set_setting(key, value):
     data[key] = value
     with open(p, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+def _recompute_batch_consumption(batch: "IssuedBatch") -> None:
+    """
+    Устанавливает batch.consumed_flag = True, если все строки в батче полностью списаны (или qty<=0),
+    иначе False. Также обновляет consumed_at/by по последнему действию.
+    """
+    if not batch:
+        return
+    # Считаем сумму позитивных qty и сумму consumed по всем строкам
+    total_qty = 0
+    total_used = 0
+    last_when = None
+    last_who  = None
+
+    for it in (batch.parts or []):
+        q = int(it.quantity or 0)
+        used = int(it.consumed_qty or 0)
+        if q > 0:
+            total_qty  += q
+            total_used += min(q, used)
+        # возьмём самое позднее consumed_at
+        if it.consumed_at and (last_when is None or it.consumed_at > last_when):
+            last_when = it.consumed_at
+            last_who  = it.consumed_by
+
+    fully = (total_qty > 0 and total_used >= total_qty)
+    batch.consumed_flag = bool(fully)
+    batch.consumed_at   = last_when
+    batch.consumed_by   = last_who
+
+@inventory_bp.post("/reports/consume/reset")
+def unconsume_invoice():
+    """
+    Сбрасывает consumed_* у выбранных строк инвойса, либо у всего инвойса (по группе).
+    Доступ: admin, superadmin, user.
+    """
+    from flask_login import current_user
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role not in ("admin", "superadmin", "user"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.reports_grouped"))
+
+    # Группа
+    issued_to     = (request.form.get("group_issued_to") or "").strip()
+    reference_job = (request.form.get("group_reference_job") or "").strip()
+    issued_by     = (request.form.get("group_issued_by") or "").strip()
+    issue_date_s  = (request.form.get("group_issue_date") or "").strip()
+    location      = (request.form.get("location") or "").strip()
+
+    invoice_number = request.form.get("invoice_number", type=int)
+
+    apply_scope = (request.form.get("apply_scope") or "all").strip()  # all|selected
+    selected_ids = request.form.getlist("record_ids[]") or []
+
+    # Базовый запрос группы
+    q = IssuedPartRecord.query
+    if invoice_number:
+        q = q.filter(IssuedPartRecord.invoice_number == invoice_number)
+    else:
+        # супер-точное совпадение группы
+        q = q.filter(
+            IssuedPartRecord.issued_to == issued_to,
+            IssuedPartRecord.issued_by == issued_by,
+            IssuedPartRecord.reference_job == (reference_job or None),
+            func.strftime("%Y-%m-%d %H:%M:%S", IssuedPartRecord.issue_date) == issue_date_s
+        )
+        if location:
+            q = q.filter(IssuedPartRecord.location == location)
+
+    items = q.all()
+    if apply_scope == "selected":
+        sel = {int(x) for x in selected_ids if str(x).isdigit()}
+        items = [it for it in items if it.id in sel]
+
+    changed = 0
+    touched_batches = set()
+    for it in items:
+        if it.unconsume_all():
+            changed += 1
+            if it.batch_id:
+                touched_batches.add(it.batch_id)
+
+    # Пересчёт consumed_flag на батчах
+    if touched_batches:
+        batches = IssuedBatch.query.filter(IssuedBatch.id.in_(list(touched_batches))).all()
+        for b in batches:
+            _recompute_batch_consumption(b)
+
+    db.session.commit()
+    flash(f"Unconsumed {changed} row(s).", "success")
+    # вернёмся назад по тем же фильтрам
+    return redirect(url_for("inventory.reports_grouped"))
+
+
+# ====== CONSUME (partial usage) ===============================================
+@inventory_bp.post("/invoices/consume")
+@login_required
+def consume_invoice():
+    """
+    Увеличивает consumed_qty по выбранным строкам (или по всему инвойсу — по radio apply_scope).
+    Использует значения qty_<id> из формы. Никогда не превышает исходный quantity.
+    Игнорирует возвраты (quantity < 0).
+    Доступно для admin/superadmin.
+    """
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role not in ("admin", "superadmin", "user"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.reports_grouped"))
+
+    from models import IssuedPartRecord, IssuedBatch
+    from sqlalchemy import func
+
+    form = request.form
+
+    # ключи группы (для режима 'Entire invoice')
+    group_issued_to     = (form.get("group_issued_to") or "").strip()
+    group_reference_job = (form.get("group_reference_job") or "").strip()
+    group_issued_by     = (form.get("group_issued_by") or "").strip()
+    group_issue_date_s  = (form.get("group_issue_date") or "").strip()
+    location            = (form.get("location") or "").strip()
+
+    # радиокнопка области: all | selected
+    apply_scope = (form.get("apply_scope") or "all").strip().lower()
+    # список выбранных записей для режима 'selected'
+    selected_ids = [int(x) for x in form.getlist("record_ids[]") if str(x).isdigit()]
+
+    # Собираем кандидатные строки
+    q = db.session.query(IssuedPartRecord).options(db.joinedload(IssuedPartRecord.part),
+                                                   db.joinedload(IssuedPartRecord.batch))
+
+    if apply_scope == "selected" and selected_ids:
+        q = q.filter(IssuedPartRecord.id.in_(selected_ids))
+    else:
+        # Entire invoice (legacy-группа по ключам)
+        # Матчим по trimmed-полям и дате (DATE(issue_date) == DATE(form))
+        try:
+            grp_dt = datetime.strptime(group_issue_date_s, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            grp_dt = None
+
+        if grp_dt is None:
+            flash("Invalid group date for invoice consume.", "warning")
+            return redirect(url_for("inventory.reports_grouped"))
+
+        q = q.filter(
+            func.trim(IssuedPartRecord.issued_to) == group_issued_to,
+            func.trim(IssuedPartRecord.issued_by) == group_issued_by,
+            func.date(IssuedPartRecord.issue_date) == grp_dt.date(),
+        )
+        # reference_job может быть пустым
+        if group_reference_job:
+            q = q.filter(func.trim(IssuedPartRecord.reference_job) == group_reference_job)
+        else:
+            q = q.filter(func.coalesce(IssuedPartRecord.reference_job, "") == "")
+
+        # Если в карточке был location — берём его как скоп.
+        if location:
+            q = q.filter(func.trim(IssuedPartRecord.location) == location)
+
+    rows = q.all()
+    if not rows:
+        flash("No rows matched for consumption.", "warning")
+        return redirect(url_for("inventory.reports_grouped"))
+
+    changed = 0
+    now_user = (getattr(current_user, "username", "") or "").strip()
+
+    for r in rows:
+        # Игнорируем возвраты
+        if (r.quantity or 0) <= 0:
+            continue
+
+        # Сколько увеличить — берём qty_<id> из формы, по умолчанию 1
+        try:
+            add_qty = int(form.get(f"qty_{r.id}", "1"))
+        except Exception:
+            add_qty = 1
+        if add_qty <= 0:
+            continue
+
+        # ограничим по оставшемуся
+        q_total = int(r.quantity or 0)
+        used    = int(r.consumed_qty or 0)
+        remain  = max(0, q_total - used)
+        if remain <= 0:
+            continue
+
+        add_qty = min(add_qty, remain)
+        if r.apply_consume(add_qty, user=now_user, note="consume via reports_grouped"):
+            changed += 1
+            db.session.add(r)
+
+    if changed:
+        # Синхронизируем флаг батча, если есть
+        _sync_batches_consumed_flag(rows)
+        db.session.commit()
+        flash(f"Marked consumed on {changed} row(s).", "success")
+    else:
+        flash("Nothing to consume (all selected rows already fully consumed).", "info")
+
+    # Вернёмся туда же
+    return redirect(url_for("inventory.reports_grouped"))
+
+
+def _sync_batches_consumed_flag(rows: list):
+    """
+    Если у строк есть batch — считаем для каждого: consumed_flag = all(item.consumed_qty >= item.quantity, quantity>0)
+    и ставим/снимаем batch.consumed_flag. Также обновляем consumed_at/by у батча.
+    """
+    from models import IssuedPartRecord, IssuedBatch
+
+    # Сгруппируем id батчей
+    batch_ids = {getattr(r, "batch_id", None) for r in rows if getattr(r, "batch_id", None)}
+    if not batch_ids:
+        return
+
+    for bid in batch_ids:
+        batch = db.session.query(IssuedBatch).options(db.selectinload(IssuedBatch.parts)).get(bid)
+        if not batch:
+            continue
+
+        # Только строки с quantity>0 участвуют в расчёте
+        items = [p for p in (batch.parts or []) if (p.quantity or 0) > 0]
+        if not items:
+            # Если в батче нет положительных строк — считаем не потреблённым
+            batch.consumed_flag = False
+        else:
+            all_consumed = all((int(p.consumed_qty or 0) >= int(p.quantity or 0)) for p in items)
+            batch.consumed_flag = bool(all_consumed)
+
+        batch.consumed_at = datetime.utcnow()
+        batch.consumed_by = (getattr(current_user, "username", "") or "").strip()
+
+        db.session.add(batch)
 
 # --- Confirm selected lines / whole invoice ---
 @inventory_bp.post("/work_orders/<int:wo_id>/confirm")
@@ -5477,6 +5711,7 @@ def reports_grouped():
     reference_job  = (params.get('reference_job') or '').strip() or None
     invoice_s      = (params.get('invoice_number') or params.get('invoice') or params.get('invoice_no') or '').strip()
     location       = (params.get('location') or '').strip() or None
+    status         = (params.get('status') or '').strip().upper()  # НОВОЕ
 
     # роль/текущий пользователь
     role_low = (getattr(current_user, "role", "") or "").strip().lower()
@@ -5509,14 +5744,10 @@ def reports_grouped():
     )
 
     # ----- КЛЮЧЕВОЕ: правильная «отчётная дата» строки -----
-    # Признак возврата: отрицательное количество ИЛИ reference_job начинается с 'RETURN'
     is_return = or_(
         IssuedPartRecord.quantity < 0,
         func.upper(func.coalesce(IssuedPartRecord.reference_job, '')).like('RETURN%')
     )
-
-    # Для возвратов используем дату из заголовка батча (дата на карточке),
-    # для обычных — дату строки; если чего-то нет — coalesce.
     date_expr = case(
         (is_return, IssuedBatch.issue_date),
         else_=func.coalesce(IssuedPartRecord.issue_date, IssuedBatch.issue_date)
@@ -5543,7 +5774,7 @@ def reports_grouped():
     if reference_job:
         q = q.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
 
-    # ---------- Фильтрация по календарным дням (DATE(...), включительно) ----------
+    # ---------- Фильтрация по календарным дням (включительно) ----------
     if start_day:
         q = q.filter(func.date(date_expr) >= start_day.isoformat())
     if end_day:
@@ -5553,6 +5784,27 @@ def reports_grouped():
         q = q.filter(IssuedPartRecord.invoice_number == invoice_no)
     if location:
         q = q.filter(IssuedPartRecord.location == location)
+
+    # ---------- НОВОЕ: фильтр по статусу строки ----------
+    # OPEN: quantity>0 and COALESCE(consumed_qty,0)=0
+    # PARTIAL: quantity>0 and 0<consumed<quantity
+    # CONSUMED: quantity>0 and consumed>=quantity
+    if status == "OPEN":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) == 0
+        )
+    elif status == "PARTIAL":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) < IssuedPartRecord.quantity
+        )
+    elif status == "CONSUMED":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) >= IssuedPartRecord.quantity
+        )
 
     rows = q.order_by(
         func.date(date_expr).desc(),
@@ -5565,7 +5817,6 @@ def reports_grouped():
         if getattr(r, 'batch_id', None):
             key = ('BATCH', r.batch_id)
         else:
-            # безопасный день для ключа: та же логика, что и в date_expr
             is_ret = ((r.quantity or 0) < 0) or ((r.reference_job or '').upper().startswith('RETURN'))
             safe_dt = (r.batch.issue_date if (is_ret and getattr(r, "batch", None)) else
                        (r.issue_date or (r.batch.issue_date if getattr(r, "batch", None) else None)))
@@ -5671,6 +5922,7 @@ def reports_grouped():
         reference_job=reference_job or '',
         invoice=invoice_s or '',
         location=location or '',
+        status=status or '',   # НОВОЕ: пробрасываем в шаблон
     )
 
 @inventory_bp.route("/invoice/printdirect")

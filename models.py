@@ -261,37 +261,92 @@ class IssuedPartRecord(db.Model):
     reference_job = db.Column(db.String(255), index=True)
     issue_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     unit_cost_at_issue = db.Column(db.Float, nullable=False)
+
+    # техподтверждение (как было)
     confirmed_by_tech = db.Column(db.Boolean, default=False, nullable=False)
     confirmed_at = db.Column(db.DateTime)
     confirmed_by = db.Column(db.String(64))
+
     invoice_number = db.Column(db.Integer, index=True)
     location = db.Column(db.String(120), index=True)
 
+    # связь с батчем
     batch_id = db.Column(db.Integer, db.ForeignKey('issued_batch.id', ondelete='SET NULL'), index=True)
     batch = db.relationship("IssuedBatch", back_populates="parts", lazy="joined")
+
     part  = db.relationship('Part', backref=db.backref('issued_records', lazy=True))
+
+    # --- НОВЫЕ ПОЛЯ (соответствуют миграции) ---
+    consumed_qty  = db.Column(db.Integer, nullable=True)             # 0..quantity
+    consumed_flag = db.Column(db.Boolean, nullable=False, default=False)
+    consumed_at   = db.Column(db.DateTime, nullable=True)
+    consumed_by   = db.Column(db.String(120), nullable=True)
+    consumed_note = db.Column(db.String(500), nullable=True)
+
+    # --- Удобные свойства/методы ---
+
+    @property
+    def remaining_qty(self) -> int:
+        q = int(self.quantity or 0)
+        used = int(self.consumed_qty or 0)
+        return max(0, q - used)
+
+    @property
+    def status_tuple(self) -> tuple[str, int, int]:
+        """('OPEN'|'PARTIAL'|'CONSUMED', consumed_qty, quantity)"""
+        q = int(self.quantity or 0)
+        used = int(self.consumed_qty or 0)
+        if used <= 0:
+            return ("OPEN", 0, q)
+        if used >= q and q > 0:
+            return ("CONSUMED", q, q)
+        return ("PARTIAL", used, q)
+
+    @property
+    def status_label(self) -> str:
+        kind, used, q = self.status_tuple
+        if kind == "OPEN":
+            return "OPEN"
+        if kind == "CONSUMED":
+            return f"CONSUMED {q}/{q}"
+        return f"PARTIAL {used}/{q}"
+
+    def _sync_flag(self):
+        q = int(self.quantity or 0)
+        used = int(self.consumed_qty or 0)
+        self.consumed_flag = (q > 0 and used >= q)
+
+    def apply_consume(self, delta: int, user: str | None = None, note: str | None = None) -> bool:
+        """Увеличить списание на delta (>=1), не превышая quantity. Возвращает: были ли изменения."""
+        d = int(delta or 0)
+        if d <= 0:
+            return False
+        q = int(self.quantity or 0)
+        used = int(self.consumed_qty or 0)
+        new_used = min(q, used + d)
+        if new_used == used:
+            return False
+        self.consumed_qty = new_used
+        self.consumed_at = datetime.utcnow()
+        if user:
+            self.consumed_by = (user or "").strip()[:120]
+        if note:
+            self.consumed_note = (note or "").strip()[:500]
+        self._sync_flag()
+        return True
+
+    def unconsume_all(self) -> bool:
+        """Сбросить списание по строке (для отката)."""
+        changed = bool(self.consumed_qty or self.consumed_flag or self.consumed_at or self.consumed_by or self.consumed_note)
+        self.consumed_qty = None
+        self.consumed_flag = False
+        self.consumed_at = None
+        self.consumed_by = None
+        self.consumed_note = None
+        return changed
 
     def __repr__(self):
         return f"<IssuedPartRecord id={self.id} inv={self.invoice_number} batch={self.batch_id}>"
-
-
-class IssuedBatch(db.Model):
-    __tablename__ = "issued_batch"
-    __table_args__ = {'extend_existing': True}
-
-    id = db.Column(db.Integer, primary_key=True)
-    invoice_number = db.Column(db.Integer, unique=True, index=True, nullable=False)
-    issued_to = db.Column(db.String(255), nullable=False)
-    issued_by = db.Column(db.String(255), nullable=False)
-    reference_job = db.Column(db.String(255))
-    issue_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    location = db.Column(db.String(120))
-
-    parts = db.relationship("IssuedPartRecord", back_populates="batch", lazy="selectin")
-
-    def __repr__(self):
-        return f"<IssuedBatch id={self.id} invoice={self.invoice_number} to={self.issued_to}>"
-
 
 # --------------------------------
 # External Order tracking
@@ -315,6 +370,72 @@ class OrderItem(db.Model):
     notes        = db.Column(db.Text)
     row_key      = db.Column(db.String(512), unique=True)
 
+# ---- вставь это место сразу после IssuedPartRecord (или рядом с ним) ----
+
+class IssuedBatch(db.Model):
+    __tablename__ = "issued_batch"
+    __table_args__ = {'extend_existing': True}
+
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_number = db.Column(db.Integer, unique=True, index=True, nullable=False)
+    issued_to = db.Column(db.String(255), nullable=False)
+    issued_by = db.Column(db.String(255), nullable=False)
+    reference_job = db.Column(db.String(255))
+    issue_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    location = db.Column(db.String(120))
+
+    # связи: одна «шапка» на много строк выдачи
+    parts = db.relationship("IssuedPartRecord", back_populates="batch", lazy="selectin")
+
+    # --- поля учёта списаний (из миграции 11072025_add_stock) ---
+    is_stock      = db.Column(db.Boolean, nullable=False, default=False)
+    consumed_flag = db.Column(db.Boolean, nullable=False, default=False)
+    consumed_at   = db.Column(db.DateTime, nullable=True)
+    consumed_by   = db.Column(db.String(120), nullable=True)
+    consumed_note = db.Column(db.String(500), nullable=True)
+
+    # --- удобные свойства/методы для UI ---
+
+    @property
+    def is_stock_inferred(self) -> bool:
+        """Подстраховка: если is_stock не проставлен в старых данных — считаем по reference_job."""
+        ref = (self.reference_job or "").strip().lower()
+        return bool(self.is_stock or ref.startswith("stock"))
+
+    @property
+    def aggregate_consumption(self) -> dict:
+        """Сумма по строкам: всего, списано, остаток."""
+        q_total = sum(int(r.quantity or 0) for r in (self.parts or []))
+        used_total = sum(int(r.consumed_qty or 0) for r in (self.parts or []))
+        rem_total = max(0, q_total - used_total)
+        return {"qty_total": q_total, "used_total": used_total, "remaining_total": rem_total}
+
+    @property
+    def status_label(self) -> str:
+        """OPEN / PARTIAL x/y / CONSUMED для всего инвойса."""
+        agg = self.aggregate_consumption
+        q, used = agg["qty_total"], agg["used_total"]
+        if q <= 0 or used <= 0:
+            return "OPEN"
+        if used >= q:
+            return "CONSUMED"
+        return f"PARTIAL {used}/{q}"
+
+    def _sync_flag(self):
+        agg = self.aggregate_consumption
+        self.consumed_flag = (agg["qty_total"] > 0 and agg["used_total"] >= agg["qty_total"])
+
+    def mark_consumed_meta(self, user: str | None = None, note: str | None = None):
+        """Обновить метаданные списания (когда, кем, примечание) и синхронизировать флаг."""
+        self.consumed_at = datetime.utcnow()
+        if user:
+            self.consumed_by = (user or "").strip()[:120]
+        if note:
+            self.consumed_note = (note or "").strip()[:500]
+        self._sync_flag()
+
+    def __repr__(self):
+        return f"<IssuedBatch id={self.id} invoice={self.invoice_number} to={self.issued_to}>"
 
 # --------------------------------
 # Goods Receipts (приход)

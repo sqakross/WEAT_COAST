@@ -394,7 +394,30 @@ def _boot_ensure_core_columns():
         logging.exception("Boot ensure columns failed")
 
 
+# --- НОВОЕ: безопасно гарантируем поля «consumption» в issued_part_record и issued_batch
+def _ensure_consumption_columns():
+    try:
+        with app.app_context():
+            # issued_part_record: новые поля
+            _ensure_column("issued_part_record", "consumed_qty",  "INTEGER")
+            _ensure_column("issued_part_record", "consumed_flag", "INTEGER DEFAULT 0")
+            _ensure_column("issued_part_record", "consumed_at",   "DATETIME")
+            _ensure_column("issued_part_record", "consumed_by",   "TEXT")
+            _ensure_column("issued_part_record", "consumed_note", "TEXT")
+
+            # issued_batch: агрегированные поля прогресса
+            _ensure_column("issued_batch", "consumed_flag", "INTEGER DEFAULT 0")
+            _ensure_column("issued_batch", "consumed_at",   "DATETIME")
+            _ensure_column("issued_batch", "consumed_by",   "TEXT")
+
+            # опция для пометки складских батчей
+            _ensure_column("issued_batch", "is_stock", "INTEGER DEFAULT 0")
+    except Exception:
+        logging.exception("Ensure consumption columns failed")
+
+
 _boot_ensure_core_columns()
+_ensure_consumption_columns()
 
 
 # -------------------------------------------------------------------
@@ -471,4 +494,3 @@ if __name__ == "__main__":
     # Если без TLS нужно будет:
     # logging.info(f"Starting dev server on http://0.0.0.0:{port}, debug={debug}")
     # app.run(host='0.0.0.0', port=port, debug=debug)
-
