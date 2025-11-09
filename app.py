@@ -108,6 +108,7 @@ logging.info(
 # -------------------------------------------------------------------
 extra_templates = [
     os.path.join(Config.BASE_DIR, "inventory", "templates"),
+    os.path.join(Config.BASE_DIR, "supplier_returns", "templates"),  # <<< NEW
 ]
 extra_loaders = [FileSystemLoader(p) for p in extra_templates if os.path.isdir(p)]
 if extra_loaders:
@@ -191,6 +192,10 @@ from inventory.routes import inventory_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(inventory_bp)
+
+# --- Supplier Returns (отдельный модуль) ---
+from supplier_returns import supplier_returns_bp  # <<< NEW
+app.register_blueprint(supplier_returns_bp, url_prefix="/supplier_returns")  # <<< NEW
 
 logging.info("Flask app configured and blueprints registered.")
 

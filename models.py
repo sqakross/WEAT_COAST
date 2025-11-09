@@ -511,6 +511,68 @@ class GoodsReceiptLine(db.Model):
         except Exception:
             return 0.0
 
+# --------------------------------
+# Supplier Returns (новые таблицы)
+# --------------------------------
+class SupplierReturnBatch(db.Model):
+    __tablename__ = "supplier_return_batch"
+    __table_args__ = {"extend_existing": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # кто/что возвращаем
+    supplier_name = db.Column(db.String(200), index=True)
+    reference_receiving_id = db.Column(db.Integer)  # опционально, без FK, просто справочно
+
+    # статусы и мета
+    status = db.Column(db.String(20), nullable=False, default="draft")  # draft|posted
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_by = db.Column(db.String(120))
+    posted_at = db.Column(db.DateTime)
+    posted_by = db.Column(db.String(120))
+
+    # агрегаты
+    total_items = db.Column(db.Integer, nullable=False, default=0)
+    total_value = db.Column(db.Float,   nullable=False, default=0.0)
+
+    # строки возврата
+    items = db.relationship(
+        "SupplierReturnItem",
+        back_populates="batch",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    def __repr__(self):
+        return f"<SupplierReturnBatch id={self.id} status={self.status} supplier={self.supplier_name!r}>"
+
+
+class SupplierReturnItem(db.Model):
+    __tablename__ = "supplier_return_item"
+    __table_args__ = {"extend_existing": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    batch_id = db.Column(
+        db.Integer,
+        db.ForeignKey("supplier_return_batch.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    part_number = db.Column(db.String(120), nullable=False, index=True)
+    part_name   = db.Column(db.String(255))
+    location    = db.Column(db.String(120), index=True)
+
+    qty_returned = db.Column(db.Integer, nullable=False, default=0)
+    unit_cost    = db.Column(db.Float,   nullable=False, default=0.0)
+    total_cost   = db.Column(db.Float,   nullable=False, default=0.0)
+
+    batch = db.relationship("SupplierReturnBatch", back_populates="items", lazy="joined")
+
+    def __repr__(self):
+        return f"<SupplierReturnItem id={self.id} pn={self.part_number!r} qty={self.qty_returned} loc={self.location!r}>"
+
 # --- Backwards-compatible aliases (как у тебя) ---
 ReceivingBatch = GoodsReceipt
 ReceivingItem  = GoodsReceiptLine

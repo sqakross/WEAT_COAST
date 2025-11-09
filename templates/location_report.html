@@ -2,16 +2,13 @@
 {% block content %}
 
 <style>
-  /* корневой контейнер всей страницы */
   .inventory-report-page {
     display: flex;
     flex-direction: column;
     height: calc(100vh - 60px);
     max-height: calc(100vh - 60px);
-    font-size: 1.1rem; /* БАЗА ТЕПЕРЬ БОЛЬШАЯ */
+    font-size: 1.1rem;
   }
-
-  /* === STICKY TOP TOOLBAR === */
   .sticky-toolbar {
     position: sticky;
     top: 0;
@@ -21,214 +18,85 @@
     border-radius: 8px;
     padding: 18px 20px;
     margin-bottom: 10px;
-    font-size: 1.05rem; /* крупнее подписей */
+    font-size: 1.05rem;
     line-height: 1.5;
   }
-
-  .toolbar-row1,
-  .toolbar-row2 {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 16px 20px;
+  .toolbar-row1, .toolbar-row2 {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 16px 20px;
   }
-
-  .toolbar-row1 .left-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
-  }
-
-  .toolbar-summary {
-    font-size: 1rem;
-    line-height: 1.5;
-  }
-  .toolbar-summary div {
-    white-space: nowrap;
-  }
-
-  .label-inline {
-    font-size: 1rem;
-    font-weight: 600;
-    margin-right: 6px;
-    white-space: nowrap;
-  }
-
-  /* big inputs/buttons */
-  .form-control-sm {
-    font-size: 1rem;
-    padding: 8px 10px;
-    height: 40px;
-    line-height: 1.4;
-    min-width: 140px;
-  }
-
-  /* datalist-trigger inputs (location / search) share this class */
-  .btn-sm {
-    font-size: 1rem;
-    padding: 8px 12px;
-    height: 40px;
-    line-height: 1.4;
-  }
-
-  /* === AREA BELOW TOOLBAR === */
-  .locations-scroll-area {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    padding-right: 6px;
-    font-size: 1.1rem;
-  }
-
-  /* === ONE LOCATION CARD === */
+  .toolbar-row1 .left-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .toolbar-summary { font-size: 1rem; line-height: 1.5; }
+  .toolbar-summary div { white-space: nowrap; }
+  .label-inline { font-size: 1rem; font-weight: 600; margin-right: 6px; white-space: nowrap; }
+  .form-control-sm { font-size: 1rem; padding: 8px 10px; height: 40px; line-height: 1.4; min-width: 140px; }
+  .btn-sm { font-size: 1rem; padding: 8px 12px; height: 40px; line-height: 1.4; }
+  .locations-scroll-area { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 6px; font-size: 1.1rem; }
   .location-card {
-    border: 2px solid #ccc;
-    border-radius: 8px;
-    background: #fff;
-    padding: 18px 20px;
-    margin-bottom: 20px;
-
-    display: flex;
-    flex-direction: column;
-
-    /* теперь карточка выше, потому что текст крупнее */
-    min-height: 260px;
-    max-height: 480px;
-    font-size: 1rem; /* внутри карточки текст */
-    line-height: 1.5;
+    border: 2px solid #ccc; border-radius: 8px; background: #fff; padding: 18px 20px; margin-bottom: 20px;
+    display: flex; flex-direction: column; min-height: 260px; max-height: 480px; font-size: 1rem; line-height: 1.5;
   }
-
-  .location-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 14px;
-    row-gap: 8px;
-  }
-
-  .location-header h4 {
-    font-size: 1.2rem; /* название Location */
-    font-weight: 600;
-    margin: 0 0 6px 0;
-  }
-
-  .location-meta {
-    font-size: 1rem;
-    line-height: 1.5;
-  }
-
-  /* блок "Filter in X:" справа в заголовке карточки */
-  .location-header .form-control-sm {
-    min-width: 200px;
-  }
-
-  .match-count {
-    font-size: 0.9rem;
-    color: #555;
-    min-width: 90px;
-    line-height: 1.4;
-  }
-
-  /* === TABLE WRAPPER WITH SCROLL === */
-  .table-wrapper {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-  }
-
-  table.location-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 1rem;      /* вот тут самое важное: КРУПНЫЕ СТРОКИ */
-    line-height: 1.5;
-  }
-
+  .location-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; row-gap: 8px; }
+  .location-header h4 { font-size: 1.2rem; font-weight: 600; margin: 0 0 6px 0; }
+  .location-meta { font-size: 1rem; line-height: 1.5; }
+  .location-header .form-control-sm { min-width: 200px; }
+  .match-count { font-size: 0.9rem; color: #555; min-width: 90px; line-height: 1.4; }
+  .table-wrapper { flex: 1 1 auto; min-height: 0; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; }
+  table.location-table { width: 100%; border-collapse: collapse; font-size: 1rem; line-height: 1.5; }
   table.location-table thead th {
-    position: sticky;
-    top: 0;
-    background: #f8f9fa;
-    z-index: 10;
-    border-bottom: 2px solid #aaa;
-    text-align: left;
-    padding: 10px 12px;   /* ↑ больше паддинги */
-    white-space: nowrap;
-    font-size: 1rem;
-    font-weight: 600;
+    position: sticky; top: 0; background: #f8f9fa; z-index: 10; border-bottom: 2px solid #aaa;
+    text-align: left; padding: 10px 12px; white-space: nowrap; font-size: 1rem; font-weight: 600;
   }
-
-  table.location-table tbody td {
-    border-bottom: 1px solid #eee;
-    padding: 10px 12px;   /* ↑ больше паддинги */
-    vertical-align: top;
-    font-family: monospace;
-    font-size: 1rem;
-  }
-
-  tr.location-total-row {
-    background: #e9f3ff;
-    font-weight: 700;
-    font-size: 1rem;
-  }
+  table.location-table tbody td { border-bottom: 1px solid #eee; padding: 10px 12px; vertical-align: top; font-family: monospace; font-size: 1rem; }
+  tr.location-total-row { background: #e9f3ff; font-weight: 700; font-size: 1rem; }
+  .no-results { padding: .75rem 1rem; margin: .5rem 0; border-radius: .5rem; border: 1px dashed #bbb; color: #555; }
 </style>
-
-
 
 <div class="inventory-report-page">
 
   <!-- ===== STICKY TOOLBAR ===== -->
   <div class="sticky-toolbar">
 
-    <!-- ROW 1: кнопки + summary всех локаций -->
+    <!-- ROW 1 -->
     <div class="toolbar-row1">
-
       <div class="left-actions">
-        <a href="{{ url_for('inventory.print_location_report') }}" class="btn btn-primary btn-sm">
-          🖨️ Print Location Report
-        </a>
-
-        <a href="{{ url_for('inventory.print_inventory_summary') }}" class="btn btn-secondary btn-sm">
-          🖨️ Print Inventory Summary
-        </a>
-
-        <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-secondary btn-sm">
-          ← Back to Dashboard
-        </a>
+        <a href="{{ url_for('inventory.print_location_report') }}" class="btn btn-primary btn-sm">🖨️ Print Location Report</a>
+        <a href="{{ url_for('inventory.print_inventory_summary') }}" class="btn btn-secondary btn-sm">🖨️ Print Inventory Summary</a>
+        <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-secondary btn-sm">← Back to Dashboard</a>
       </div>
 
       <div class="ms-auto toolbar-summary">
         <div><strong>All Locations Total Qty:</strong> {{ grand_total_quantity }}</div>
         <div><strong>All Locations Total Value:</strong> ${{ '%.2f'|format(grand_total_value) }}</div>
       </div>
-
     </div>
 
-    <!-- ROW 2: выбор локации + поиск по парту -->
+    <!-- ROW 2 -->
     <div class="toolbar-row2" style="margin-top:10px;">
 
       <!-- выбрать/перейти к конкретной локации -->
-      <form class="d-flex flex-wrap align-items-center gap-2"
-            method="get"
-            action="{{ url_for('inventory.location_report') }}">
+      <form class="d-flex flex-wrap align-items-center gap-2" method="get" action="{{ url_for('inventory.location_report') }}">
         <label class="label-inline">Location:</label>
 
-        <!-- поле ввода / выпадалка -->
         <input
           class="form-control form-control-sm"
-          style="width:120px;"
+          style="width:160px;"
           type="text"
           name="loc"
-          value="{{ current_location or '' }}"
+          value="{{ (current_location or '') }}"
           list="locationList"
           autocomplete="off"
+          placeholder="type or pick..."
         >
         <datalist id="locationList">
+          {% set __has_unknown = false %}
           {% for loc_name in all_locations %}
-            <option value="{{ loc_name }}"></option>
+            {% set _n = loc_name or 'Unknown' %}
+            {% if _n|lower in ['','unknown','—','-','none','null'] %}{% set __has_unknown = true %}{% endif %}
+            <option value="{{ _n }}"></option>
           {% endfor %}
+          {% if not __has_unknown %}
+            <option value="Unknown"></option>
+          {% endif %}
         </datalist>
 
         <button class="btn btn-sm btn-primary" type="submit">Go</button>
@@ -240,10 +108,10 @@
         <input
           id="globalPartSearchInput"
           class="form-control form-control-sm"
-          style="min-width:180px;"
+          style="min-width:220px;"
           type="text"
           placeholder="part # / name..."
-          oninput="filterAllLocations()"
+          oninput="debouncedFilterAll()"
         >
         <span id="globalMatchCount" class="match-count"></span>
       </div>
@@ -251,10 +119,12 @@
     </div>
   </div>
 
-  <!-- ===== SCROLL AREA FOR ALL LOCATIONS ===== -->
+  <!-- ===== SCROLL AREA ===== -->
   <div class="locations-scroll-area">
 
     {% if locations %}
+      <div id="globalNoResults" class="no-results" style="display:none;">No matches found.</div>
+
       {% for loc, data in locations.items() %}
       <div class="location-card" data-location="{{ loc }}">
         <div class="location-header">
@@ -268,12 +138,12 @@
             </div>
           </div>
 
-          <!-- поиск только внутри этой локации -->
+          <!-- поиск внутри локации -->
           <div class="d-flex flex-wrap align-items-center gap-2">
             <label class="label-inline">Filter in {{ loc }}:</label>
             <input
               class="form-control form-control-sm locationFilterInput"
-              style="min-width:160px;"
+              style="min-width:180px;"
               type="text"
               placeholder="part # / name..."
               oninput="filterSingleLocation(this)"
@@ -282,7 +152,6 @@
           </div>
         </div>
 
-        <!-- таблица со скроллом -->
         <div class="table-wrapper">
           <table class="location-table">
             <thead>
@@ -298,11 +167,11 @@
             <tbody class="partsTableBody">
               {% for part in data.parts %}
               <tr>
-                <td class="part-number">{{ part.part_number }}</td>
-                <td class="part-name">{{ part.name }}</td>
-                <td>{{ part.quantity }}</td>
-                <td>${{ '%.2f'|format(part.unit_cost) }}</td>
-                <td>${{ '%.2f'|format(part.quantity * part.unit_cost) }}</td>
+                <td class="part-number">{{ part.part_number|default('', true) }}</td>
+                <td class="part-name">{{ part.name|default('', true) }}</td>
+                <td>{{ (part.quantity or 0) }}</td>
+                <td>${{ '%.2f'|format(part.unit_cost or 0.0) }}</td>
+                <td>${{ '%.2f'|format((part.quantity or 0) * (part.unit_cost or 0.0)) }}</td>
               </tr>
               {% endfor %}
 
@@ -328,105 +197,95 @@
 
 
 <script>
-  // === ГЛОБАЛЬНЫЙ ПОИСК ПО ВСЕМ ЛОКАЦИЯМ ===
+  // --- маленький debounce, чтобы не дёргать фильтр на каждый символ
+  function debounce(fn, ms) {
+    let t; return function(...args){ clearTimeout(t); t=setTimeout(()=>fn.apply(this,args), ms); };
+  }
+
   function filterAllLocations() {
-    const q = (document.getElementById('globalPartSearchInput').value || '')
-      .toLowerCase()
-      .trim();
+    const inputEl = document.getElementById('globalPartSearchInput');
+    const q = (inputEl && inputEl.value || '').toLowerCase().trim();
 
     let totalVisibleRows = 0;
+    let visibleCards = 0;
 
-    // для каждой локации фильтруем строки
-    document.querySelectorAll('.location-card').forEach(card => {
+    const cards = document.querySelectorAll('.location-card');
+    cards.forEach(card => {
       const tbody = card.querySelector('.partsTableBody');
-      const rows  = tbody.querySelectorAll('tr');
+      if (!tbody) return;
+
+      const rows = Array.from(tbody.querySelectorAll('tr'));
       let localVisible = 0;
 
       rows.forEach(tr => {
-        // не скрывать финальный total-row
         const isTotalRow = tr.classList.contains('location-total-row');
-        if (isTotalRow) {
-          // total-row скрывать только если ВСЕ строки скрыты
-          return;
-        }
+        if (isTotalRow) return;
 
-        const pn = tr.querySelector('.part-number')?.textContent.toLowerCase() || "";
-        const nm = tr.querySelector('.part-name')?.textContent.toLowerCase() || "";
-        const match = pn.includes(q) || nm.includes(q);
+        const pnCell = tr.querySelector('.part-number');
+        const nmCell = tr.querySelector('.part-name');
+        const pn = (pnCell && pnCell.textContent ? pnCell.textContent : '').toLowerCase();
+        const nm = (nmCell && nmCell.textContent ? nmCell.textContent : '').toLowerCase();
 
+        const match = !q || pn.includes(q) || nm.includes(q);
         tr.style.display = match ? '' : 'none';
+
         if (match) {
           localVisible++;
-          totalVisibleRows++;
+          if (q) totalVisibleRows++;
         }
       });
 
-      // показать/скрыть total-row если в этой локации ничего не видно
       const totalRow = tbody.querySelector('.location-total-row');
-      if (totalRow) {
-        totalRow.style.display = (localVisible > 0 || q === '') ? '' : 'none';
-      }
+      if (totalRow) totalRow.style.display = (localVisible > 0 || q === '') ? '' : 'none';
 
-      // обновить локальный счётчик в шапке локации
       const localCounter = card.querySelector('.localMatchCount');
-      if (localCounter) {
-        if (q === '') {
-          localCounter.textContent = '';
-        } else {
-          localCounter.textContent = localVisible + " match(es)";
-        }
-      }
+      if (localCounter) localCounter.textContent = q ? (localVisible + " match(es)") : '';
 
-      // если глобальный поиск, мы не скрываем всю карточку,
-      // но при желании можно спрятать карточку без матчей:
-      // card.style.display = (localVisible>0 || q==='') ? '' : 'none';
+      // скрываем карточку, если в ней нет совпадений при непустом запросе
+      const cardVisible = (localVisible > 0 || q === '');
+      card.style.display = cardVisible ? '' : 'none';
+      if (cardVisible) visibleCards++;
     });
 
-    // глобальный счётчик совпадений
     const globalCounter = document.getElementById('globalMatchCount');
-    if (q === '') {
-      globalCounter.textContent = '';
-    } else {
-      globalCounter.textContent = totalVisibleRows + " total match(es)";
-    }
+    if (globalCounter) globalCounter.textContent = q ? (totalVisibleRows + " total match(es)") : '';
+
+    const noRes = document.getElementById('globalNoResults');
+    if (noRes) noRes.style.display = (q && visibleCards === 0) ? '' : 'none';
   }
 
-  // === ЛОКАЛЬНЫЙ ПОИСК В ОДНОЙ ЛОКАЦИИ ===
+  const debouncedFilterAll = debounce(filterAllLocations, 120);
+
   function filterSingleLocation(inputEl) {
     const card = inputEl.closest('.location-card');
-    const tbody = card.querySelector('.partsTableBody');
-    const rows  = tbody.querySelectorAll('tr');
+    if (!card) return;
 
+    const tbody = card.querySelector('.partsTableBody');
+    if (!tbody) return;
+
+    const rows  = Array.from(tbody.querySelectorAll('tr'));
     const q = (inputEl.value || '').toLowerCase().trim();
     let visibleHere = 0;
 
     rows.forEach(tr => {
       const isTotalRow = tr.classList.contains('location-total-row');
-      if (isTotalRow) { return; }
+      if (isTotalRow) return;
 
-      const pn = tr.querySelector('.part-number')?.textContent.toLowerCase() || "";
-      const nm = tr.querySelector('.part-name')?.textContent.toLowerCase() || "";
-      const match = pn.includes(q) || nm.includes(q);
+      const pnCell = tr.querySelector('.part-number');
+      const nmCell = tr.querySelector('.part-name');
+      const pn = (pnCell && pnCell.textContent ? pnCell.textContent : '').toLowerCase();
+      const nm = (nmCell && nmCell.textContent ? nmCell.textContent : '').toLowerCase();
 
+      const match = !q || pn.includes(q) || nm.includes(q);
       tr.style.display = match ? '' : 'none';
       if (match) visibleHere++;
     });
 
-    // total-row видимость
     const totalRow = tbody.querySelector('.location-total-row');
-    if (totalRow) {
-      totalRow.style.display = (visibleHere > 0 || q === '') ? '' : 'none';
-    }
+    if (totalRow) totalRow.style.display = (visibleHere > 0 || q === '') ? '' : 'none';
 
-    // локальный счётчик
     const localCounter = card.querySelector('.localMatchCount');
-    if (localCounter) {
-      if (q === '') {
-        localCounter.textContent = '';
-      } else {
-        localCounter.textContent = visibleHere + " match(es)";
-      }
-    }
+    if (localCounter) localCounter.textContent = q ? (visibleHere + " match(es)") : '';
   }
 </script>
 

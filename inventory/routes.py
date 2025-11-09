@@ -4163,18 +4163,25 @@ def wo_list():
       q       - free text (tech name, job#, brand, model, part#, alt part#, part name)
       from    - date (YYYY-MM-DD)
       to      - date (YYYY-MM-DD)
-
-    Visibility rule:
-      - if current_user.role == 'technician', only show their own work orders
-        (match by technician_id OR fallback exact technician_name).
+      tech_id - technician id (admin/superadmin only; technicians ignored)
+      type    - BASE | INSURANCE
+      status  - search_ordered | ordered | done
     """
     from datetime import datetime, timedelta
     from sqlalchemy import and_, or_, func
 
     # ---- incoming params ----
     qtext = (request.args.get("q") or "").strip()
-    dfrom = (request.args.get("from") or "").strip()  # YYYY-MM-DD
-    dto   = (request.args.get("to")   or "").strip()  # YYYY-MM-DD
+    dfrom = (request.args.get("from") or "").strip()
+    dto   = (request.args.get("to")   or "").strip()
+
+    tech_id_raw = (request.args.get("tech_id") or "").strip()
+    type_raw    = (request.args.get("type")    or "").strip().upper()
+    status_raw  = (request.args.get("status")  or "").strip()
+
+    tech_id = int(tech_id_raw) if tech_id_raw.isdigit() else None
+    job_type = type_raw if type_raw in ("BASE", "INSURANCE") else ""
+    status   = status_raw if status_raw in ("search_ordered", "ordered", "done") else ""
 
     # ---- base query ----
     q = db.session.query(WorkOrder)
@@ -4182,47 +4189,39 @@ def wo_list():
     joined_parts = False
 
     # ---- technician visibility restriction ----
-    # techs see only their own WOs (by technician_id, fallback by technician_name)
     if is_technician():
         me_id   = getattr(current_user, "id", None)
         me_name = (getattr(current_user, "username", "") or "").strip()
+        filters.append(or_(
+            WorkOrder.technician_id == me_id,
+            func.trim(WorkOrder.technician_name) == me_name,
+        ))
+        tech_id = None  # технику нельзя выбирать чужого техника
 
-        filters.append(
-            or_(
-                WorkOrder.technician_id == me_id,
-                func.trim(WorkOrder.technician_name) == me_name,
-            )
-        )
+    # ---- explicit filters (Apply) ----
+    if tech_id:
+        filters.append(WorkOrder.technician_id == tech_id)
 
-    # ---- global free-text search (q) ----
+    if job_type:
+        filters.append(WorkOrder.job_type == job_type)
+
+    if status:
+        filters.append(WorkOrder.status == status)
+
+    # ---- free-text search ----
     if qtext:
         like = f"%{qtext}%"
-
-        # join WorkOrderPart only if needed
-        q = q.outerjoin(
-            WorkOrderPart,
-            WorkOrderPart.work_order_id == WorkOrder.id
-        )
+        q = q.outerjoin(WorkOrderPart, WorkOrderPart.work_order_id == WorkOrder.id)
         joined_parts = True
-
-        filters.append(
-            or_(
-                # technician name ("ALAN", etc.)
-                WorkOrder.technician_name.ilike(like),
-
-                # job numbers string ("985639, 985634")
-                WorkOrder.job_numbers.ilike(like),
-
-                # brand / model
-                WorkOrder.brand.ilike(like),
-                WorkOrder.model.ilike(like),
-
-                # part info (from work_order_parts)
-                WorkOrderPart.part_number.ilike(like),
-                WorkOrderPart.alt_part_numbers.ilike(like),
-                WorkOrderPart.part_name.ilike(like),
-            )
-        )
+        filters.append(or_(
+            WorkOrder.technician_name.ilike(like),
+            WorkOrder.job_numbers.ilike(like),
+            WorkOrder.brand.ilike(like),
+            WorkOrder.model.ilike(like),
+            WorkOrderPart.part_number.ilike(like),
+            WorkOrderPart.alt_part_numbers.ilike(like),
+            WorkOrderPart.part_name.ilike(like),
+        ))
 
     # ---- created_at date range (inclusive) ----
     if dfrom:
@@ -4248,65 +4247,61 @@ def wo_list():
         q = q.distinct(WorkOrder.id)
 
     # ---- fetch rows ----
-    items = (
-        q.order_by(WorkOrder.created_at.desc())
-         .limit(200)
-         .all()
-    )
-
+    items = q.order_by(WorkOrder.created_at.desc()).limit(200).all()
     count_items = len(items)
 
-    # ---- build autocomplete hints for <datalist> ----
-    # 1) technicians
+    # ---- datalist hints ----
     tech_suggestions = (
         db.session.query(WorkOrder.technician_name)
-        .distinct()
-        .order_by(WorkOrder.technician_name.asc())
-        .limit(50)
-        .all()
+        .distinct().order_by(WorkOrder.technician_name.asc()).limit(50).all()
     )
-
-    # 2) brand/model combos
     brand_model_suggestions = (
         db.session.query(WorkOrder.brand, WorkOrder.model)
-        .distinct()
-        .limit(100)
-        .all()
+        .distinct().limit(100).all()
     )
-
-    # 3) recent part numbers / names
     recent_parts = (
         db.session.query(WorkOrderPart.part_number, WorkOrderPart.part_name)
-        .distinct()
-        .limit(100)
-        .all()
+        .distinct().limit(100).all()
     )
-
     hint_values_set = set()
-
     for (t_name,) in tech_suggestions:
-        if t_name:
-            hint_values_set.add(t_name)
-
+        if t_name: hint_values_set.add(t_name)
     for (b, m) in brand_model_suggestions:
         combo = ((b or '') + ' ' + (m or '')).strip()
-        if combo:
-            hint_values_set.add(combo)
-
+        if combo: hint_values_set.add(combo)
     for (pn, pname) in recent_parts:
-        if pn:
-            hint_values_set.add(pn)
-        if pname:
-            hint_values_set.add(pname)
-
+        if pn: hint_values_set.add(pn)
+        if pname: hint_values_set.add(pname)
     hint_values = sorted(hint_values_set)
+
+    # ---- technicians for dropdown ----
+    try:
+        technicians = (
+            db.session.query(User.id, User.username)
+            .filter(func.lower(User.role) == "technician")
+            .order_by(User.username.asc())
+            .all()
+        )
+    except Exception:
+        technicians = []
+
+    # ---- filters context for template ----
+    filters_ctx = {
+        "q": qtext,
+        "from": dfrom,
+        "to": dto,
+        "tech_id": tech_id,
+        "type": job_type,
+        "status": status,
+    }
 
     return render_template(
         "wo_list.html",
         items=items,
-        args=request.args,
         count_items=count_items,
         hint_values=hint_values,
+        technicians=technicians,
+        filters=filters_ctx,
     )
 
 @inventory_bp.post("/work_orders/<int:wo_id>/issue_instock", endpoint="wo_issue_instock")
@@ -5381,31 +5376,78 @@ def dashboard():
 #                            grand_total_quantity=grand_total_quantity,
 #                            grand_total_value=grand_total_value)
 
-@inventory_bp.route('/dashboard/location_report')
+@inventory_bp.route('/dashboard/location_report', methods=['GET'], endpoint='location_report')
 @login_required
 def location_report():
-    parts = Part.query.filter(Part.quantity > 0).all()
+    current_location_raw = (request.args.get('loc') or '').strip()
+    norm = current_location_raw.lower()
 
-    locations = defaultdict(lambda: {
-        'parts': [],
-        'total_quantity': 0,
-        'total_value': 0.0,
-    })
+    base_q = Part.query.filter(Part.quantity > 0)
 
+    # ---- datalist всех локаций (уникальные, с красивыми названиями) ----
+    loc_rows = (Part.query.with_entities(Part.location)
+                .filter(Part.quantity > 0)
+                .distinct().all())
+    seen = set()
+    all_locations = []
+    for (loc,) in loc_rows:
+        label = (loc or 'Unknown')
+        key = (label.strip().lower() or 'unknown')
+        if key not in seen:
+            seen.add(key)
+            all_locations.append(label)
+    all_locations.sort()
+
+    # ---- выборка по локации ----
+    if norm:
+        # Unknown-группа
+        if norm in ('unknown', '—', '-', 'none', 'null', ''):
+            parts = base_q.filter(or_(Part.location == None, Part.location == '')).all()
+        else:
+            # 1) точное совпадение без регистра
+            exact = (base_q.filter(
+                func.lower(func.coalesce(Part.location, '')) == norm
+            ).all())
+
+            if exact:
+                parts = exact
+            else:
+                # 2) если пользователь явно использовал wildcard (*), делаем LIKE по шаблону
+                if '*' in current_location_raw:
+                    like_pat = norm.replace('*', '%')
+                    parts = (base_q.filter(
+                        func.lower(func.coalesce(Part.location, '')).like(like_pat)
+                    ).all())
+                else:
+                    # 3) префиксный поиск (без регистра): norm%
+                    #   (чтобы 'rel' не ловил всё подряд как contains)
+                    parts = (base_q.filter(
+                        func.lower(func.coalesce(Part.location, '')).like(f"{norm}%")
+                    ).all())
+    else:
+        parts = base_q.all()
+
+    # ---- группировка и итоги ----
+    locations = defaultdict(lambda: {'parts': [], 'total_quantity': 0, 'total_value': 0.0})
     for part in parts:
-        loc = part.location or 'Unknown'
+        loc = (part.location or 'Unknown').strip() or 'Unknown'
+        qty = int(part.quantity or 0)
+        cost = float(part.unit_cost or 0.0)
         locations[loc]['parts'].append(part)
-        locations[loc]['total_quantity'] += part.quantity
-        locations[loc]['total_value'] += part.quantity * part.unit_cost
+        locations[loc]['total_quantity'] += qty
+        locations[loc]['total_value']    += qty * cost
 
-    grand_total_quantity = sum(data['total_quantity'] for data in locations.values())
-    grand_total_value = sum(data['total_value'] for data in locations.values())
+    grand_total_quantity = sum(x['total_quantity'] for x in locations.values()) if locations else 0
+    grand_total_value    = sum(x['total_value'] for x in locations.values()) if locations else 0.0
 
-    return render_template('location_report.html',
-                           locations=locations,
-                           grand_total_quantity=grand_total_quantity,
-                           grand_total_value=grand_total_value)
-
+    return render_template(
+        'location_report.html',
+        locations=locations,
+        all_locations=all_locations,
+        current_location=current_location_raw,
+        grand_total_quantity=grand_total_quantity,
+        grand_total_value=grand_total_value
+    )
 # --- Печать детального отчёта по локациям (весь список товаров) ---
 @inventory_bp.route('/dashboard/location_report/print')
 @login_required
@@ -9792,45 +9834,30 @@ def add_part_batch_form():
 @inventory_bp.post("/add-batch", endpoint="add_part_batch")
 @login_required
 def add_part_batch():
-    """
-    Новый поток:
-    1. Читаем batch_payload (массив деталей).
-    2. Создаём ReceivingBatch (черновик) -> это GoodsReceipt.
-    3. Создаём ReceivingItem строки -> это GoodsReceiptLine.
-    4. Коммитим draft, чтобы получить batch.id.
-    5. Делаем post_receiving_batch(batch.id) → это:
-          - прибавит qty к складу ОДИН РАЗ
-          - выставит batch.status = 'posted'
-    6. Редиректим на receiving_detail(batch_id).
-    """
-
     role_low = (getattr(current_user, "role", "") or "").lower()
     if role_low not in ("admin", "superadmin"):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.dashboard"))
 
-    payload_raw = request.form.get("batch_payload", "[]").strip()
+    # --- надёжное чтение payload ---
+    payload_raw = (request.form.get("batch_payload") or "").strip()
+    if not payload_raw:
+        current_app.logger.warning("Empty batch_payload in POST form")
+        flash("Invalid batch data: empty payload", "danger")
+        return redirect(url_for("inventory.dashboard"))
+
     try:
         items = json.loads(payload_raw)
     except Exception:
-        current_app.logger.exception("Bad batch_payload JSON")
-        flash("Invalid batch data", "danger")
+        current_app.logger.exception("Bad batch_payload JSON: %r", payload_raw[:500])
+        flash("Invalid batch data: JSON parse error", "danger")
         return redirect(url_for("inventory.dashboard"))
 
-    # Пример items:
-    # [
-    #   {
-    #     "part_number": "WR14X27232",
-    #     "name": "GASKET DOOR FF WAV",
-    #     "qty": 2,
-    #     "cost": "37.98",
-    #     "loc": "A2/B2",
-    #     "stock_now": "5"
-    #   },
-    #   ...
-    # ]
+    if not isinstance(items, list) or not items:
+        flash("Invalid batch data: expected non-empty list", "danger")
+        return redirect(url_for("inventory.dashboard"))
 
-    # ---------- 1. создаём сам batch в status='draft' ----------
+    # ---------- 1. создаём batch (draft) ----------
     supplier_hint = "ADD-BATCH"
     invoice_hint  = datetime.utcnow().strftime("BULK-%Y%m%d-%H%M%S")
 
@@ -9845,34 +9872,29 @@ def add_part_batch():
         created_by = getattr(current_user, "id", None),
     )
     db.session.add(batch)
-    db.session.flush()   # теперь batch.id существует, но ещё не commit
+    db.session.flush()  # batch.id
 
-    # ---------- 2. добавляем строки ----------
+    # ---------- 2. строки ----------
     line_no = 1
     for row in items:
         pn  = (row.get("part_number") or "").strip().upper()
         nm  = (row.get("name") or "").strip()
         loc = (row.get("loc") or "").strip().upper()
-
-        # qty
         try:
             qty = int(row.get("qty") or 0)
         except Exception:
             qty = 0
-
-        # Пропускаем пустые/некорректные ряды
-        if qty <= 0 or not pn:
-            continue
-
-        # cost
         try:
             unit_cost_val = float(row.get("cost")) if row.get("cost") not in (None, "") else 0.0
         except Exception:
             unit_cost_val = 0.0
 
-        # ВАЖНО: в новой модели FK называется goods_receipt_id, не batch_id.
+        if not pn or qty <= 0:
+            current_app.logger.warning("Skip invalid row in add-batch: %r", row)
+            continue
+
         line = ReceivingItem(
-            goods_receipt_id = batch.id,
+            goods_receipt_id = batch.id,   # важно: новое имя FK
             line_no          = line_no,
             part_number      = pn,
             part_name        = nm or None,
@@ -9883,8 +9905,7 @@ def add_part_batch():
         db.session.add(line)
         line_no += 1
 
-    # ---------- 3. коммитим draft+строки ----------
-    # Сейчас batch.status всё ещё "draft", ничего не прибавлено в склад.
+    # ---------- 3. commit draft ----------
     try:
         db.session.commit()
     except Exception as e:
@@ -9893,10 +9914,7 @@ def add_part_batch():
         flash(f"Failed to save new batch: {e}", "danger")
         return redirect(url_for("inventory.dashboard"))
 
-    # ---------- 4. официально постим через сервис ----------
-    # post_receiving_batch(batch.id, user_id) должен:
-    #   - прибавить qty в Part.quantity/on_hand
-    #   - переключить status -> 'posted'
+    # ---------- 4. post (обновление склада) ----------
     from services.receiving import post_receiving_batch
     try:
         post_receiving_batch(batch.id, getattr(current_user, "id", None))

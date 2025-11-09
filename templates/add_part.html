@@ -4,7 +4,7 @@
 <div class="container-fluid py-4 d-flex justify-content-center">
   <div style="width:100%; max-width:1100px;">
 
-    <!-- header row with title + back -->
+    <!-- Header -->
     <div class="d-flex flex-wrap justify-content-between align-items-start mb-3"
          style="position:sticky; top:0; z-index:10; background:#f8f9fa; padding:.5rem 0;">
       <div>
@@ -13,7 +13,6 @@
           Scan barcode OR type manually → Add to list → Edit below → Commit
         </div>
       </div>
-
       <div class="mt-2 mt-sm-0">
         <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-secondary btn-sm">
           ← Back to Dashboard
@@ -21,7 +20,7 @@
       </div>
     </div>
 
-    <!-- CARD: Intake / Scan -->
+    <!-- Intake -->
     <div class="card shadow-sm border-0 mb-4">
       <div class="card-header bg-white py-2">
         <div class="fw-semibold" style="font-size:.9rem;">Part Intake / Scan</div>
@@ -30,136 +29,83 @@
         </div>
       </div>
       <div class="card-body">
-        <!-- row: inputs -->
         <div class="row g-3 align-items-end">
 
-          <!-- Part Number / Barcode -->
           <div class="col-md-3">
             <label class="form-label fw-semibold small text-uppercase mb-1">Part # / Barcode</label>
-            <input
-              type="text"
-              class="form-control form-control-sm text-uppercase"
-              id="inp_part_number"
-              placeholder="SCAN OR TYPE..."
-              style="text-transform:uppercase; font-weight:500;"
-              autofocus
-            >
-            <div class="form-text" style="font-size:.7rem;">
-              Scanner: focus here, scan, Enter
-            </div>
+            <input type="text" class="form-control form-control-sm text-uppercase" id="inp_part_number"
+                   placeholder="SCAN OR TYPE..." style="text-transform:uppercase; font-weight:500;" autofocus>
+            <div class="form-text" style="font-size:.7rem;">Scanner: focus here, scan, Enter</div>
           </div>
 
-          <!-- Name -->
           <div class="col-md-3">
             <label class="form-label fw-semibold small text-uppercase mb-1">Name</label>
-            <input
-              type="text"
-              class="form-control form-control-sm"
-              id="inp_name"
-              placeholder="auto or type manually">
-            <div class="form-text" id="name_hint" style="font-size:.7rem;">
-              Autofills if part exists
-            </div>
+            <input type="text" class="form-control form-control-sm" id="inp_name" placeholder="auto or type manually">
+            <div class="form-text" id="name_hint" style="font-size:.7rem;">Autofills if part exists</div>
           </div>
 
-          <!-- Qty -->
           <div class="col-md-2">
             <label class="form-label fw-semibold small text-uppercase mb-1">Qty</label>
-            <input
-              type="number"
-              class="form-control form-control-sm text-center"
-              id="inp_qty"
-              min="1"
-              value="1">
+            <input type="number" class="form-control form-control-sm text-center" id="inp_qty" min="1" value="1">
           </div>
 
-          <!-- Cost -->
           <div class="col-md-2">
             <label class="form-label fw-semibold small text-uppercase mb-1">Cost $</label>
-            <input
-              type="number"
-              step="0.01"
-              class="form-control form-control-sm text-center"
-              id="inp_cost"
-              placeholder="0.00">
+            <input type="number" step="0.01" class="form-control form-control-sm text-center" id="inp_cost" placeholder="0.00">
           </div>
 
-          <!-- Location -->
           <div class="col-md-2">
             <label class="form-label fw-semibold small text-uppercase mb-1">Location</label>
-            <input
-              type="text"
-              class="form-control form-control-sm text-uppercase text-center"
-              id="inp_loc"
-              placeholder="A2/B2">
+            <input type="text" class="form-control form-control-sm text-uppercase text-center" id="inp_loc" placeholder="A2/B2">
           </div>
 
-          <!-- Existing stock preview row -->
           <div class="col-12">
             <div class="row g-2">
-
               <div class="col-sm-6 col-lg-3">
-                <div class="border rounded p-2 bg-light" style="font-size:.8rem; line-height:1.2;">
+                <div class="border rounded p-2 bg-light" style="font-size:.8rem;">
                   <div class="text-muted" style="font-size:.7rem;">Qty now</div>
                   <div class="fw-semibold" id="stock_qty">—</div>
-
                   <div class="text-muted mt-1" style="font-size:.7rem;">Loc now</div>
                   <div class="fw-semibold text-uppercase" id="stock_loc">—</div>
                 </div>
               </div>
-
               <div class="col-sm-6 col-lg-3">
-                <div class="border rounded p-2 bg-light" style="font-size:.8rem; line-height:1.2;">
+                <div class="border rounded p-2 bg-light" style="font-size:.8rem;">
                   <div class="text-muted" style="font-size:.7rem;">Cost now $</div>
                   <div class="fw-semibold" id="stock_cost">—</div>
-
                   <div class="text-muted mt-1" style="font-size:.7rem;">Name</div>
                   <div class="fw-semibold" id="stock_name">—</div>
                 </div>
               </div>
-
-              <div class="col-lg-6 d-flex flex-column justify-content-between"
-                   style="font-size:.75rem; line-height:1.3;">
+              <div class="col-lg-6 d-flex flex-column justify-content-between" style="font-size:.75rem;">
                 <div class="text-muted">
-                  This info is pulled from system if the part already exists.
-                  You can still change values in the Batch Items table before saving.
+                  This info is pulled from system if the part already exists. You can still edit values below.
                 </div>
                 <div class="d-flex flex-wrap gap-2 mt-2">
-                  <button class="btn btn-primary btn-sm" id="btn_add_item" type="button">
-                    ➕ Add to List
-                  </button>
-                  <button class="btn btn-outline-secondary btn-sm" id="btn_clear_fields" type="button">
-                    Clear Fields
-                  </button>
+                  <button class="btn btn-primary btn-sm" id="btn_add_item" type="button">➕ Add to List</button>
+                  <button class="btn btn-outline-secondary btn-sm" id="btn_clear_fields" type="button">Clear Fields</button>
                 </div>
               </div>
-
             </div>
           </div>
 
-        </div><!-- /row -->
-      </div><!-- /card-body -->
-    </div><!-- /card -->
+        </div>
+      </div>
+    </div>
 
-    <!-- CARD: Batch Items -->
+    <!-- Batch -->
     <div class="card shadow-sm border-0">
       <div class="card-header bg-white py-2 d-flex justify-content-between align-items-start flex-wrap">
         <div>
           <div class="fw-semibold" style="font-size:.9rem;">Batch Items</div>
-          <div class="text-muted" style="font-size:.75rem;">
-            Edit before committing to inventory
-          </div>
+          <div class="text-muted" style="font-size:.75rem;">Edit before committing to inventory</div>
         </div>
-
-        <button class="btn btn-outline-danger btn-sm mt-2 mt-sm-0" id="btn_clear_all" type="button">
-          ✕ Clear All
-        </button>
+        <button class="btn btn-outline-danger btn-sm mt-2 mt-sm-0" id="btn_clear_all" type="button">✕ Clear All</button>
       </div>
 
       <div class="card-body">
         <div class="table-responsive">
-          <table class="table table-bordered align-middle mb-3"
-                 style="min-width:800px; font-size:.8rem;">
+          <table class="table table-bordered align-middle mb-3" style="min-width:800px; font-size:.8rem;">
             <thead class="table-light">
               <tr class="text-nowrap text-center align-middle">
                 <th style="min-width:110px;">Part #</th>
@@ -171,387 +117,322 @@
                 <th style="width:60px;">Remove</th>
               </tr>
             </thead>
-            <tbody id="batch_tbody">
-              <!-- rows injected -->
-            </tbody>
+            <tbody id="batch_tbody"></tbody>
           </table>
         </div>
 
         <form method="POST" action="{{ url_for('inventory.add_part_batch') }}" id="commitForm">
           <input type="hidden" name="batch_payload" id="batch_payload">
-
           <div class="d-flex flex-wrap gap-2 pt-3 border-top">
-            <button type="submit"
-                    class="btn btn-success btn-lg"
-                    style="min-width:240px;">
+            <button type="button" id="btn_commit" class="btn btn-success btn-lg" style="min-width:240px;">
               ✅ Commit Batch to Inventory
             </button>
-
-            <a href="{{ url_for('inventory.dashboard') }}"
-               class="btn btn-outline-secondary btn-lg">
-              ← Cancel / Back
-            </a>
+            <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-secondary btn-lg">← Cancel / Back</a>
           </div>
         </form>
       </div>
-    </div><!-- /card -->
+    </div>
 
-  </div><!-- /max-width wrapper -->
-</div><!-- /container -->
+  </div>
+</div>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-    // ===== DOM =====
-    const pnInput     = document.getElementById('inp_part_number');
-    const nameInput   = document.getElementById('inp_name');
-    const qtyInput    = document.getElementById('inp_qty');
-    const costInput   = document.getElementById('inp_cost');
-    const locInput    = document.getElementById('inp_loc');
+  // -------- DOM ----------
+  const pnInput   = document.getElementById('inp_part_number');
+  const nameInput = document.getElementById('inp_name');
+  const qtyInput  = document.getElementById('inp_qty');
+  const costInput = document.getElementById('inp_cost');
+  const locInput  = document.getElementById('inp_loc');
+  const nameHintEl= document.getElementById('name_hint');
 
-    const nameHintEl  = document.getElementById('name_hint');
+  const stockQtyEl  = document.getElementById('stock_qty');
+  const stockLocEl  = document.getElementById('stock_loc');
+  const stockCostEl = document.getElementById('stock_cost');
+  const stockNameEl = document.getElementById('stock_name');
 
-    const stockQtyEl  = document.getElementById('stock_qty');
-    const stockLocEl  = document.getElementById('stock_loc');
-    const stockCostEl = document.getElementById('stock_cost');
-    const stockNameEl = document.getElementById('stock_name');
+  const addBtn      = document.getElementById('btn_add_item');
+  const clearBtn    = document.getElementById('btn_clear_fields');
+  const clearAllBtn = document.getElementById('btn_clear_all');
 
-    const addBtn      = document.getElementById('btn_add_item');
-    const clearBtn    = document.getElementById('btn_clear_fields');
-    const clearAllBtn = document.getElementById('btn_clear_all');
+  const batchBody = document.getElementById('batch_tbody');
+  const payloadEl = document.getElementById('batch_payload');
+  const commitForm= document.getElementById('commitForm');
+  const commitBtn = document.getElementById('btn_commit');
 
-    const batchBody   = document.getElementById('batch_tbody');
-    const payloadEl   = document.getElementById('batch_payload');
-    const commitForm  = document.getElementById('commitForm');
+  // -------- DATA ----------
+  // Строго единый формат строки
+  // { part_number: 'STRING', name: 'STRING', qty: NUMBER, cost: NUMBER|STRING, loc: 'STRING', stock_now: 'STRING' }
+  let batchItems = [];
 
-    // ===== DATA =====
-    // каждая строка:
-    // { part_number, name, qty, cost, loc, stock_now }
-    let batchItems = [];
+  // Безопасные хелперы
+  const s = v => (v === null || v === undefined) ? "" : String(v);
+  const upper = v => s(v).trim().toUpperCase();
 
-    // --- helpers ---
-    function normPN(raw) {
-        return (raw || "").trim().toUpperCase();
+  function normPN(v){ return upper(v); }
+
+  async function lookupExistingPart(pn){
+    const info = {exists:false, name:"", cost:"", loc:"", stock_now:"0"};
+    if(!pn) return info;
+    try{
+      const resp = await fetch(`/api/part/${encodeURIComponent(pn)}`);
+      if(!resp.ok) return info;
+      const d = await resp.json();
+      info.exists    = true;
+      info.name      = s(d.name);
+      info.cost      = (d.unit_cost ?? "") === "" ? "" : s(d.unit_cost);
+      info.loc       = s(d.location);
+      info.stock_now = s(d.quantity ?? 0);
+    }catch(_){}
+    return info;
+  }
+
+  function updatePreview(i){
+    stockQtyEl.textContent  = i.stock_now || "—";
+    stockLocEl.textContent  = i.loc       || "—";
+    stockCostEl.textContent = i.cost      || "—";
+    stockNameEl.textContent = i.name      || "—";
+  }
+
+  function fillInputsFromInfo(i){
+    if(i.exists){
+      if(!nameInput.value) nameInput.value = i.name;
+      if(!costInput.value) costInput.value = i.cost;
+      if(!locInput.value)  locInput.value  = i.loc;
+      nameHintEl.textContent = "Existing part (you can still edit)";
+    }else{
+      nameHintEl.textContent = "New part (please type name)";
+    }
+  }
+
+  async function preloadFromPN(){
+    const pn = normPN(pnInput.value);
+    if(!pn) return;
+    const info = await lookupExistingPart(pn);
+    updatePreview(info);
+    fillInputsFromInfo(info);
+  }
+
+  function clearEntryFields(){
+    pnInput.value = ""; nameInput.value = ""; qtyInput.value = "1";
+    costInput.value = ""; locInput.value = "";
+    stockQtyEl.textContent = stockLocEl.textContent = stockCostEl.textContent = stockNameEl.textContent = "—";
+    nameHintEl.textContent = "Autofills if part exists";
+    pnInput.focus();
+  }
+
+  function renderTable(){
+    batchBody.innerHTML = "";
+    batchItems.forEach((it, idx) => {
+      const tr = document.createElement("tr");
+      tr.classList.add("align-middle","text-center");
+      tr.innerHTML = `
+        <td>
+          <input type="text" class="form-control form-control-sm text-uppercase text-start"
+                 style="min-width:100px; font-family:monospace;"
+                 value="${s(it.part_number)}"
+                 data-idx="${idx}" data-field="part_number">
+        </td>
+        <td style="text-align:left;">
+          <input type="text" class="form-control form-control-sm" style="min-width:180px;"
+                 value="${s(it.name)}"
+                 data-idx="${idx}" data-field="name">
+        </td>
+        <td>
+          <input type="number" class="form-control form-control-sm text-center" min="1" style="width:70px;"
+                 value="${Number(it.qty)||1}"
+                 data-idx="${idx}" data-field="qty">
+        </td>
+        <td>
+          <input type="number" step="0.01" class="form-control form-control-sm text-center" style="width:90px;"
+                 value="${s(it.cost)}"
+                 data-idx="${idx}" data-field="cost">
+        </td>
+        <td>
+          <input type="text" class="form-control form-control-sm text-uppercase text-center" style="width:90px;"
+                 value="${s(it.loc)}"
+                 data-idx="${idx}" data-field="loc">
+        </td>
+        <td>${s(it.stock_now)}</td>
+        <td><button class="btn btn-outline-danger btn-sm" data-del="${idx}">✕</button></td>`;
+      batchBody.appendChild(tr);
+    });
+  }
+
+  // live-редактирование
+  batchBody.addEventListener("input", (e)=>{
+    const idx   = e.target.getAttribute("data-idx");
+    const field = e.target.getAttribute("data-field");
+    if(idx === null || field === null) return;
+
+    if(field === "qty"){
+      let v = parseInt(s(e.target.value), 10);
+      if(isNaN(v) || v < 1) v = 1;
+      batchItems[idx].qty = v;
+      e.target.value = v;
+      return;
+    }
+    if(field === "cost"){
+      // храним как строку, парсим только на сабмите — меньше проблем с локалями
+      batchItems[idx].cost = s(e.target.value);
+      return;
+    }
+    if(field === "loc"){
+      const v = upper(e.target.value);
+      batchItems[idx].loc = v;
+      e.target.value = v;
+      return;
+    }
+    if(field === "part_number"){
+      const v = upper(e.target.value);
+      batchItems[idx].part_number = v;
+      e.target.value = v;
+      return;
+    }
+    if(field === "name"){
+      batchItems[idx].name = s(e.target.value);
+    }
+  });
+
+  // удалить строку
+  batchBody.addEventListener("click", (e)=>{
+    const delIdx = e.target.getAttribute("data-del");
+    if(delIdx !== null){
+      batchItems.splice(parseInt(delIdx,10), 1);
+      renderTable();
+    }
+  });
+
+  // очистить всё
+  clearAllBtn.addEventListener("click", ()=>{
+    if(!batchItems.length) return;
+    if(!confirm("Clear entire batch?")) return;
+    batchItems = [];
+    renderTable();
+    pnInput.focus();
+  });
+
+  // добавить текущий ввод в батч
+  async function addCurrentRowToBatch(){
+    const pn  = normPN(pnInput.value);
+    let   nm  = s(nameInput.value).trim();
+    let   qty = parseInt(s(qtyInput.value),10);
+    let   cost= s(costInput.value).trim();
+    let   loc = upper(locInput.value);
+
+    if(!pn){ pnInput.focus(); return; }
+    if(!qty || qty < 1) qty = 1;
+
+    // автоподтяжка
+    const info = await lookupExistingPart(pn);
+    updatePreview(info);
+    if(info.exists && !nm)   nm   = info.name;
+    if(info.exists && !cost) cost = info.cost;
+    if(info.exists && !loc)  loc  = upper(info.loc);
+
+    nameHintEl.textContent = info.exists
+      ? "Existing part (you can still edit)"
+      : "New part (please type name)";
+
+    const existing = batchItems.find(x => x.part_number === pn);
+    if(existing){
+      existing.qty = (parseInt(existing.qty,10) || 0) + qty;
+      if(nm)   existing.name = nm;
+      if(cost) existing.cost = cost;
+      if(loc)  existing.loc  = loc;
+    }else{
+      batchItems.push({
+        part_number: pn,
+        name: nm,
+        qty: qty,
+        cost: cost,           // строка — распарсим позже
+        loc: loc,
+        stock_now: s(info.stock_now)
+      });
+    }
+    renderTable();
+    clearEntryFields();
+  }
+
+  addBtn.addEventListener("click", async ()=>{ await addCurrentRowToBatch(); });
+  pnInput.addEventListener("keydown", async (e)=>{ if(e.key === "Enter"){ e.preventDefault(); await addCurrentRowToBatch(); }});
+  pnInput.addEventListener("blur", async ()=>{ await preloadFromPN(); });
+  clearBtn.addEventListener("click", ()=>{ clearEntryFields(); });
+
+  // -------- Сериализация + сабмит ----------
+  function validateAndNormalize(){
+    if(!batchItems.length){
+      alert("No items in batch");
+      pnInput.focus();
+      return null;
     }
 
-    async function lookupExistingPart(pn) {
-        let info = {
-            exists: false,
-            name: "",
-            cost: "",
-            loc: "",
-            stock_now: "0"
-        };
+    const normalized = [];
+    for(let i=0;i<batchItems.length;i++){
+      const r  = batchItems[i];
 
-        if (!pn) return info;
+      const pn = upper(r.part_number);
+      const nm = s(r.name).trim();
+      const lc = upper(r.loc);
 
-        try {
-            const resp = await fetch(`/api/part/${encodeURIComponent(pn)}`);
-            if (!resp.ok) throw new Error("not found");
+      // cost может быть числом или строкой — приводим безопасно:
+      const rawCost = r.cost;
+      const costNum = parseFloat(s(rawCost).replace(",", "."));
+      const qtyNum  = Math.max(1, parseInt(s(r.qty),10) || 1);
 
-            const data = await resp.json();
+      // строгая проверка
+      const errs = [];
+      if(!pn) errs.push("Part #");
+      if(!nm) errs.push("Name");
+      if(!(costNum > 0)) errs.push("Cost $ > 0");
+      if(!lc) errs.push("Location");
 
-            info.exists = true;
-            info.name = data.name || "";
-            info.cost = (data.unit_cost !== undefined && data.unit_cost !== null)
-                        ? data.unit_cost
-                        : "";
-            info.loc  = data.location || "";
-            info.stock_now = (data.quantity !== undefined && data.quantity !== null)
-                             ? String(data.quantity)
-                             : "0";
+      if(errs.length){
+        alert(
+          "Each row must have:\n- " + errs.join("\n- ")
+          + `\n\nRow #${i+1} is invalid.`
+        );
+        return null;
+      }
 
-            return info;
-        } catch (err) {
-            return info;
-        }
+      normalized.push({
+        part_number: pn,
+        name: nm,
+        qty: qtyNum,
+        cost: costNum,   // уже число
+        loc: lc
+      });
     }
 
-    function updatePreview(info) {
-        stockQtyEl.textContent  = info.stock_now || "—";
-        stockLocEl.textContent  = info.loc || "—";
-        stockCostEl.textContent = info.cost || "—";
-        stockNameEl.textContent = info.name || "—";
-    }
+    return normalized;
+  }
 
-    function fillInputsFromInfo(info) {
-        // автозаполняем только если поле пустое.
-        // можно потом руками править перед Add to List
-        if (info.exists) {
-            if (!nameInput.value) nameInput.value = info.name || "";
-            if (!costInput.value) costInput.value = info.cost || "";
-            if (!locInput.value)  locInput.value  = info.loc  || "";
-            nameHintEl.textContent = "Existing part (you can still edit)";
-        } else {
-            nameHintEl.textContent = "New part (please type name)";
-        }
-    }
+  function submitBatch(){
+    const normalized = validateAndNormalize();
+    if(!normalized) return;
 
-    async function preloadFromPN() {
-        const pn = normPN(pnInput.value);
-        if (!pn) return;
-        const info = await lookupExistingPart(pn);
-        updatePreview(info);
-        fillInputsFromInfo(info);
-    }
+    payloadEl.value = JSON.stringify(normalized);
+    // защита от двойного клика
+    commitBtn.disabled = true;
+    commitBtn.classList.add('disabled');
 
-    function clearEntryFields() {
-        pnInput.value   = "";
-        nameInput.value = "";
-        qtyInput.value  = "1";
-        costInput.value = "";
-        locInput.value  = "";
+    // нативный сабмит
+    commitForm.submit();
+  }
 
-        stockQtyEl.textContent  = "—";
-        stockLocEl.textContent  = "—";
-        stockCostEl.textContent = "—";
-        stockNameEl.textContent = "—";
+  commitBtn.addEventListener('click', submitBatch);
+  // лог для понимания, что сабмит стартовал
+  commitForm.addEventListener('submit', ()=>console.log("[ADD-BATCH] native submit started"));
 
-        nameHintEl.textContent  = "Autofills if part exists";
-
-        pnInput.focus();
-    }
-
-    // --- render table ---
-    function renderTable() {
-        batchBody.innerHTML = "";
-
-        batchItems.forEach((item, idx) => {
-            const tr = document.createElement("tr");
-            tr.classList.add("align-middle", "text-center");
-
-            tr.innerHTML = `
-                <td style="vertical-align:middle;">
-                  <input type="text"
-                         class="form-control form-control-sm text-uppercase text-start"
-                         style="min-width:100px; font-family:monospace;"
-                         value="${item.part_number}"
-                         data-idx="${idx}" data-field="part_number">
-                </td>
-
-                <td style="vertical-align:middle; text-align:left;">
-                  <input type="text"
-                         class="form-control form-control-sm"
-                         style="min-width:180px;"
-                         value="${item.name || ""}"
-                         data-idx="${idx}" data-field="name">
-                </td>
-
-                <td style="width:70px; vertical-align:middle;">
-                  <input type="number"
-                         class="form-control form-control-sm text-center"
-                         style="width:70px;"
-                         min="1"
-                         value="${item.qty}"
-                         data-idx="${idx}" data-field="qty">
-                </td>
-
-                <td style="width:90px; vertical-align:middle;">
-                  <input type="number"
-                         step="0.01"
-                         class="form-control form-control-sm text-center"
-                         style="width:90px;"
-                         value="${item.cost}"
-                         data-idx="${idx}" data-field="cost">
-                </td>
-
-                <td style="width:90px; vertical-align:middle;">
-                  <input type="text"
-                         class="form-control form-control-sm text-uppercase text-center"
-                         style="width:90px;"
-                         value="${item.loc}"
-                         data-idx="${idx}" data-field="loc">
-                </td>
-
-                <td style="width:90px; vertical-align:middle;">
-                  ${item.stock_now || ""}
-                </td>
-
-                <td style="width:60px; vertical-align:middle;">
-                  <button class="btn btn-outline-danger btn-sm" data-del="${idx}">✕</button>
-                </td>
-            `;
-
-            batchBody.appendChild(tr);
-        });
-    }
-
-    // редактирование ячеек в таблице (все поля редактируемые)
-    batchBody.addEventListener("input", (e) => {
-        const idx   = e.target.getAttribute("data-idx");
-        const field = e.target.getAttribute("data-field");
-        if (idx === null || field === null) return;
-
-        if (field === "qty") {
-            let v = parseInt(e.target.value || "1", 10);
-            if (isNaN(v) || v < 1) v = 1;
-            batchItems[idx].qty = v;
-            e.target.value = v;
-        } else if (field === "loc") {
-            const v = (e.target.value || "").trim().toUpperCase();
-            batchItems[idx].loc = v;
-            e.target.value = v;
-        } else if (field === "part_number") {
-            const v = (e.target.value || "").trim().toUpperCase();
-            batchItems[idx].part_number = v;
-            e.target.value = v;
-        } else if (field === "name") {
-            batchItems[idx].name = e.target.value;
-        } else if (field === "cost") {
-            batchItems[idx].cost = e.target.value;
-        }
-    });
-
-    // удаление строки
-    batchBody.addEventListener("click", (e) => {
-        const delIdx = e.target.getAttribute("data-del");
-        if (delIdx !== null) {
-            batchItems.splice(parseInt(delIdx,10), 1);
-            renderTable();
-        }
-    });
-
-    // очистка всего батча
-    clearAllBtn.addEventListener("click", () => {
-        if (!batchItems.length) return;
-        if (!confirm("Clear entire batch?")) return;
-        batchItems = [];
-        renderTable();
-        pnInput.focus();
-    });
-
-    // --- addCurrentRowToBatch with merge same PN ---
-    async function addCurrentRowToBatch() {
-        const pn  = normPN(pnInput.value);
-        let nm    = (nameInput.value || "").trim();
-        let qty   = parseInt(qtyInput.value || "1", 10);
-        let cost  = (costInput.value || "").trim();
-        let loc   = (locInput.value  || "").trim().toUpperCase();
-
-        if (!pn) {
-            pnInput.focus();
-            return;
-        }
-        if (!qty || qty < 1) qty = 1;
-
-        // подтянуть инфу для превью / автозаполнения
-        const info = await lookupExistingPart(pn);
-        updatePreview(info);
-
-        // автозаполнение пустых значений из системы (если деталь уже есть)
-        if (info.exists && !nm)   nm   = info.name || nm;
-        if (info.exists && !cost) cost = info.cost || cost;
-        if (info.exists && !loc)  loc  = (info.loc || "").toUpperCase();
-
-        nameHintEl.textContent = info.exists
-            ? "Existing part (you can still edit)"
-            : "New part (please type name)";
-
-        // ищем, есть ли уже такой PN в batchItems
-        const existing = batchItems.find(item => item.part_number === pn);
-
-        if (existing) {
-            // наращиваем qty
-            const baseQty = parseInt(existing.qty || "0", 10) || 0;
-            existing.qty = baseQty + qty;
-
-            // если в этот раз ввели новые данные — обновим
-            if (nm)   existing.name = nm;
-            if (cost) existing.cost = cost;
-            if (loc)  existing.loc  = loc;
-            // stock_now оставляем как было
-        } else {
-            // новый PN в батче
-            batchItems.push({
-                part_number: pn,
-                name: nm,
-                qty: qty,
-                cost: cost,
-                loc: loc,
-                stock_now: info.stock_now || ""
-            });
-        }
-
-        // обновляем таблицу
-        renderTable();
-
-        // очистка верхней формы
-        pnInput.value = "";
-        pnInput.focus();
-
-        nameInput.value = "";
-        qtyInput.value  = "1";
-        costInput.value = "";
-        locInput.value  = "";
-
-        stockQtyEl.textContent  = "—";
-        stockLocEl.textContent  = "—";
-        stockCostEl.textContent = "—";
-        stockNameEl.textContent = "—";
-        nameHintEl.textContent  = "Autofills if part exists";
-    }
-
-    // Добавление: кнопка и Enter в поле Part #
-    addBtn.addEventListener("click", async () => {
-        await addCurrentRowToBatch();
-    });
-
-    pnInput.addEventListener("keydown", async (e) => {
-        if (e.key === "Enter") {
-            e.preventDefault();
-            await addCurrentRowToBatch();
-        }
-    });
-
-    // автоподтягивание данных по PN, когда уходим с поля
-    pnInput.addEventListener("blur", async () => {
-        await preloadFromPN();
-    });
-
-    // очистить верхние инпуты (но не batchItems)
-    clearBtn.addEventListener("click", () => {
-        clearEntryFields();
-    });
-
-    // перед сабмитом сериализуем batchItems в скрытый инпут
-    commitForm.addEventListener("submit", (e) => {
-        if (!batchItems.length) {
-            e.preventDefault();
-            alert("No items in batch");
-            pnInput.focus();
-            return;
-        }
-
-        // ВАЛИДАЦИЯ (обязательные поля)
-        for (let i = 0; i < batchItems.length; i++) {
-            const row = batchItems[i];
-            const pn  = (row.part_number || "").trim();
-            const nm  = (row.name || "").trim();
-            const ct  = (row.cost || "").trim();
-            const lc  = (row.loc || "").trim();
-
-            // cost должен быть числом > 0
-            const costNum = parseFloat(ct);
-            const costValid = !isNaN(costNum) && costNum > 0;
-
-            if (!pn || !nm || !lc || !costValid) {
-                e.preventDefault();
-                alert(
-                    "Each row must have:\n" +
-                    "- Part #\n" +
-                    "- Name\n" +
-                    "- Cost $ > 0\n" +
-                    "- Location\n\n" +
-                    "Please fix highlighted row before committing."
-                );
-                // Можно автофокуснуть на проблемную ячейку
-                // но делаем минимум, чтобы не ломать остальное
-                return;
-            }
-        }
-
-        // если всё ок -> отправляем
-        payloadEl.value = JSON.stringify(batchItems);
-    });
+  // глобальный ловец ошибок (на всякий)
+  window.addEventListener('error', (e)=>{
+    console.error("[ADD-BATCH] JS error", e.error || e.message);
+    alert("Unexpected error: " + (e.message || e.error));
+    try{
+      commitBtn.disabled = false;
+      commitBtn.classList.remove('disabled');
+    }catch(_){}
+  });
 });
 </script>
 {% endblock %}

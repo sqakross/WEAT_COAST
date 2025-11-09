@@ -1,29 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h3 class="d-flex align-items-baseline gap-3">
-  <span>Work Orders</span>
-  <small class="text-muted" style="font-size:.9rem;">
-    {% if count_items is defined %}
-      Showing {{ count_items }} result{% if count_items != 1 %}s{% endif %}
-      {% if count_items >= 200 %}(limited to 200){% endif %}
-    {% endif %}
-  </small>
-</h3>
-
-{% if current_user.is_authenticated and current_user.role in ['admin','superadmin'] %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <div></div>
-  <a href="{{ url_for('inventory.wo_new') }}" class="btn btn-success">+ New Work Order</a>
-</div>
-{% endif %}
-
 <style>
+  /* ===== Общие карточки ===== */
   .card-lite      { border:1px solid #dee2e6; border-radius:.75rem; background:#fff; }
   .card-lite .hd  { background:#f8f9fa; border-bottom:1px solid #dee2e6; padding:.6rem .9rem; }
   .card-lite .bd  { padding:.9rem; }
 
-  /* ---------- SEARCH layout ---------- */
+  /* ===== Sticky-панель под верхним меню ===== */
+  :root { --sticky-top: 64px; }          /* подстрой под высоту твоего topbar */
+  @media (max-width: 768px){ :root { --sticky-top: 56px; } }
+
+  .sticky-tools{ position: sticky; top: var(--sticky-top); z-index: 1030; }
+  .sticky-tools .card-lite{ margin-bottom:.6rem; box-shadow: 0 6px 14px rgba(16,24,40,.06); }
+  .sticky-tools::after{ content:''; display:block; height:.25rem; } /* визуально «склеивает» с фильтрами */
+
+  /* ===== Шапка (заголовок + New Work Order + кнопка Filters на таче) ===== */
+  .wo-title{ display:flex; gap:.75rem; align-items:baseline; }
+  .wo-title h3{ font-size:1.15rem; line-height:1.2; margin:0; }
+  .wo-title small{ color:#6c757d; font-size:.9rem; }
+
+  .btn-filter-touch{ display:none; }
+  @media (pointer:coarse){ .btn-filter-touch{ display:inline-flex !important; } }
+  @media (pointer:fine){  .btn-filter-touch{ display:none !important; } }
+
+  /* ===== SEARCH ===== */
   .search-grid{
     display:grid;
     grid-template-columns: 1.6fr 160px 160px auto; /* Query | From | To | Actions */
@@ -41,13 +42,28 @@
     .search-grid input[name="q"]{ min-width: 0; }
   }
 
-  /* ---------- FILTERS layout ---------- */
+  /* ===== DESKTOP FILTERS ===== */
+  .filter-bar{ border:1px solid #dee2e6; background:#fff; border-radius:.75rem; padding:.45rem .75rem; }
+  .filter-bar .summary{ display:flex; gap:.5rem; align-items:center; overflow:auto; }
+  .filter-chip{ font-size:.8rem; }
+  .filter-icon-btn{ display:inline-flex; align-items:center; gap:.35rem; }
   .filters-grid{ display:grid; grid-template-columns: 1fr 1fr 1fr auto; gap:.6rem; }
   @media (max-width: 992px){ .filters-grid{ grid-template-columns: 1fr; } }
-
   .active-chips .badge{ margin-right:.25rem; }
 
-  /* table widths */
+  /* ===== TOUCH OFFCANVAS + FAB ===== */
+  .offcanvas-filters{ width:320px; max-width:90vw; box-shadow: -8px 0 20px rgba(16,24,40,.12); }
+  .offcanvas-filters .offcanvas-body{ padding:.9rem; }
+
+  .fab-filter{
+    position: fixed; right: 16px; bottom: 16px; z-index: 1040;
+    width: 52px; height: 52px; border-radius: 50%;
+    display: none; align-items:center; justify-content:center;
+    box-shadow: 0 8px 24px rgba(16,24,40,.18);
+  }
+  @media (pointer:coarse){ .fab-filter{ display:flex; } }
+
+  /* ===== Таблица ===== */
   .wo-list-table .col-id{ width:60px; white-space:nowrap; }
   .wo-list-table .col-tech{ width:140px; }
   .wo-list-table .col-type{ width:110px; text-align:center; white-space:nowrap; }
@@ -60,66 +76,65 @@
     overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;
   }
 
-  /* На таче ужимаем тексты и выделяем место для Actions */
+  /* На таче — компактные кнопки действий в столбик */
   @media (pointer:coarse){
-    .wo-list-table .col-actions{ width:96px; }                /* фикс ширины колонки действий */
+    .wo-list-table .col-actions{ width:96px; }
     .wo-list-table .col-created{ width:84px; }
     .jobs-trunc,.brand-trunc{ max-width:180px; }
-    /* СТАВИМ КНОПКИ В СТОЛБИК */
     .wo-actions{ flex-direction:column !important; gap:.4rem !important; align-items:stretch !important; }
-    .wo-actions .btn{ width:100%; padding:.375rem .5rem; }    /* полная ширина и компактные отступы */
+    .wo-actions .btn{ width:100%; padding:.375rem .5rem; }
   }
 
-  /* Sticky tools */
-  :root { --sticky-top: 64px; }
-  @media (max-width: 768px){ :root { --sticky-top: 56px; } }
-  .sticky-tools{ position: sticky; top: var(--sticky-top); z-index: 1030; }
-  .sticky-tools .card-lite{ margin-bottom:.6rem; box-shadow: 0 6px 14px rgba(16,24,40,.06); }
-  .sticky-tools::after{ content:''; display:block; height:.25rem; }
+  /* Убираем зазор между Search и Filters */
+.sticky-tools .card-lite { margin-bottom: .2rem; }                 /* было .6rem */
+.sticky-tools .card-lite .hd { padding-bottom: .4rem; }            /* уплотняем заголовок */
+.sticky-tools .card-lite .bd { padding-top: .6rem; padding-bottom: .35rem; } /* меньше низ */
 
-  /* ----- Desktop filter bar + toggle ----- */
-  .filter-bar{ border:1px solid #dee2e6; background:#fff; border-radius:.75rem; padding:.45rem .75rem; }
-  .filter-bar .summary{ display:flex; gap:.5rem; align-items:center; overflow:auto; }
-  .filter-chip{ font-size:.8rem; }
-  .filter-icon-btn{ display:inline-flex; align-items:center; gap:.35rem; }
+.sticky-tools .filters-desktop .filter-bar{
+  margin-top: -.2rem;                                              /* подтягиваем бар к Search */
+  padding-top: .35rem;                                             /* ровная линия */
+  border-top-left-radius: 0;                                       /* визуально как единый блок */
+  border-top-right-radius: 0;
+  /* Если видна тонкая линия между блоками – можно убрать верхнюю границу */
+  /* border-top: 0; */
+}
 
-  /* ----- Touch Offcanvas + buttons ----- */
-  .offcanvas-filters{ width:320px; max-width:90vw; box-shadow: -8px 0 20px rgba(16,24,40,.12); }
-  .offcanvas-filters .offcanvas-body{ padding:.9rem; }
-
-  /* Кнопка Filters в шапке Search — только на таче */
-  .btn-filter-touch{ display:none; }
-  @media (pointer:coarse){ .btn-filter-touch{ display:inline-flex !important; } }
-  @media (pointer:fine){  .btn-filter-touch{ display:none !important; } }
-
-  /* Плавающая FAB — только тач */
-  .fab-filter{
-    position: fixed; right: 16px; bottom: 16px; z-index: 1040;
-    width: 52px; height: 52px; border-radius: 50%;
-    display: none; align-items:center; justify-content:center;
-    box-shadow: 0 8px 24px rgba(16,24,40,.18);
-  }
-  @media (pointer:coarse){ .fab-filter{ display:flex; } }
-
-  /* Десктопная панель фильтров скрыта на таче */
-  @media (pointer:coarse){ .filters-desktop{ display:none !important; } }
+/* Дополнительно: убираем технический «прокладочный» зазор */
+.sticky-tools::after{ height: 0; }                                  /* было .25re
 </style>
 
 <div class="sticky-tools">
-
-  <!-- ================== SEARCH ================== -->
+  <!-- ===== Заголовок + New Work Order (липко) ===== -->
   <div class="card-lite">
     <div class="hd d-flex justify-content-between align-items-center">
-      <div class="fw-semibold">Search</div>
-      <button class="btn btn-outline-secondary btn-sm btn-filter-touch"
-              type="button" data-bs-toggle="offcanvas"
-              data-bs-target="#filtersOffcanvas" aria-controls="filtersOffcanvas">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="me-1">
-          <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
-        </svg>
-        Filters
-      </button>
+      <div class="wo-title">
+        <h3>Work Orders</h3>
+        <small>
+          {% if count_items is defined %}
+            Showing {{ count_items }} result{% if count_items != 1 %}s{% endif %}
+            {% if count_items >= 200 %}(limited to 200){% endif %}
+          {% endif %}
+        </small>
+      </div>
+
+      <div class="d-flex gap-2">
+        <!-- Кнопка Filters для тача (открывает offcanvas) -->
+        <button class="btn btn-outline-secondary btn-sm btn-filter-touch"
+                type="button" data-bs-toggle="offcanvas"
+                data-bs-target="#filtersOffcanvas" aria-controls="filtersOffcanvas">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="me-1">
+            <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
+          </svg>
+          Filters
+        </button>
+
+        {% if current_user.is_authenticated and current_user.role in ['admin','superadmin'] %}
+          <a href="{{ url_for('inventory.wo_new') }}" class="btn btn-success btn-sm">+ New Work Order</a>
+        {% endif %}
+      </div>
     </div>
+
+    <!-- ===== Search ===== -->
     <div class="bd">
       <form method="get" class="search-grid">
         <div>
@@ -158,7 +173,7 @@
     {% endif %}
   </datalist>
 
-  <!-- ================== DESKTOP FILTERS (bar + collapse) ================== -->
+  <!-- ===== Desktop Filters (bar + collapse) ===== -->
   <div class="filters-desktop">
     <div class="filter-bar">
       <div class="summary">
@@ -239,10 +254,9 @@
       </div>
     </div>
   </div> <!-- /filters-desktop -->
-
 </div> <!-- /sticky-tools -->
 
-<!-- ================== TOUCH OFFCANVAS ================== -->
+<!-- ===== Touch Offcanvas ===== -->
 <div class="offcanvas offcanvas-end offcanvas-filters"
      tabindex="-1" id="filtersOffcanvas" aria-labelledby="filtersOffcanvasLabel">
   <div class="offcanvas-header">
@@ -302,7 +316,7 @@
   </svg>
 </button>
 
-<!-- ================== TABLE ================== -->
+<!-- ===== Таблица ===== -->
 <div class="table-responsive">
   <table class="table table-sm table-hover align-middle wo-list-table">
     <thead class="table-light">

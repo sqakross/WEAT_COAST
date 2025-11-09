@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container" style="max-width: 1100px;">
+  <div class="d-flex align-items-center justify-content-between mt-4 mb-2">
+    <a href="{{ url_for('supplier_returns.list_returns') }}" class="btn btn-light">&larr; Back</a>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <div>
+        <h5 class="mb-0">Supplier Return #{{ b.id }}</h5>
+        <small class="text-muted">
+          Status:
+          {% if b.status == 'posted' %}
+            <span class="badge bg-success">posted</span>
+          {% else %}
+            <span class="badge bg-secondary">draft</span>
+          {% endif %}
+        </small>
+      </div>
+
+      <div class="d-flex gap-2">
+        {% if b.status == 'draft' %}
+          <form method="post" action="{{ url_for('supplier_returns.toggle_return', batch_id=b.id) }}">
+            <button class="btn btn-success" title="Decrement stock">Post</button>
+          </form>
+          <form method="post" action="{{ url_for('supplier_returns.delete_return', batch_id=b.id) }}"
+                onsubmit="return confirm('Delete draft?');">
+            <button class="btn btn-outline-danger">Delete</button>
+          </form>
+        {% else %}
+          <form method="post" action="{{ url_for('supplier_returns.toggle_return', batch_id=b.id) }}"
+                onsubmit="return confirm('Unpost? This will restore stock.');">
+            <button class="btn btn-warning">Unpost</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+
+    <form method="post" action="{{ url_for('supplier_returns.edit_return', batch_id=b.id) }}">
+      <div class="card-body">
+        <div class="row g-3 mb-2">
+          <div class="col-md-6">
+            <label class="form-label">Supplier</label>
+            <input class="form-control" name="supplier_name" value="{{ b.supplier_name or '' }}" required>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="mb-0">Items</h6>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="btn-add-row">+ Add Row</button>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle" id="items-table">
+            <thead class="table-light">
+              <tr>
+                <th style="width:170px;">Part #</th>
+                <th>Part name</th>
+                <th style="width:110px;">Qty</th>
+                <th style="width:140px;">Unit Cost</th>
+                <th style="width:130px;">Location</th>
+                <th style="width:120px;" class="text-end">Total</th>
+                <th style="width:70px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for it in b.items %}
+              <tr>
+                <td><input class="form-control form-control-sm" name="part_number[]" value="{{ it.part_number }}"></td>
+                <td><input class="form-control form-control-sm" name="part_name[]" value="{{ it.part_name or '' }}"></td>
+                <td><input class="form-control form-control-sm qty" name="qty_returned[]" type="number" min="1" step="1" value="{{ it.qty_returned or 1 }}"></td>
+                <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="{{ it.unit_cost or 0 }}"></td>
+                <td><input class="form-control form-control-sm" name="location[]" value="{{ it.location or '' }}"></td>
+                <td class="text-end line-total">${{ '%.2f'|format(it.total_cost or 0) }}</td>
+                <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>
+              </tr>
+              {% endfor %}
+              {% if not b.items %}
+              <tr>
+                <td><input class="form-control form-control-sm" name="part_number[]" placeholder="e.g. WD21X22276"></td>
+                <td><input class="form-control form-control-sm" name="part_name[]" placeholder=""></td>
+                <td><input class="form-control form-control-sm qty" name="qty_returned[]" type="number" min="1" step="1" value="1"></td>
+                <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="0.00"></td>
+                <td><input class="form-control form-control-sm" name="location[]" placeholder="L1"></td>
+                <td class="text-end line-total">$0.00</td>
+                <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>
+              </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="row mt-3">
+          <div class="col-md-6">
+            <small class="text-muted">
+              Subtotal is Qty × Unit Cost. Display only; server recalculates on save.
+            </small>
+          </div>
+          <div class="col-md-6">
+            <div class="d-flex justify-content-end">
+              <div style="min-width:260px;">
+                <div class="d-flex justify-content-between"><div>Subtotal (items):</div><div class="fw-semibold" id="subtotal">$0.00</div></div>
+                <div class="d-flex justify-content-between"><div>Grand Total:</div><div class="fw-bold" id="grandtotal">$0.00</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="card-footer d-flex gap-2">
+        <button class="btn btn-primary">Save</button>
+        {% if b.status == 'draft' %}
+          <button type="submit" formaction="{{ url_for('supplier_returns.toggle_return', batch_id=b.id) }}"
+                  formmethod="post" class="btn btn-success">Post (decrement stock)</button>
+        {% else %}
+          <button type="submit" formaction="{{ url_for('supplier_returns.toggle_return', batch_id=b.id) }}"
+                  formmethod="post" class="btn btn-warning">Unpost (restore stock)</button>
+        {% endif %}
+        <a href="{{ url_for('supplier_returns.list_returns') }}" class="btn btn-light">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function(){
+  function fmt(n){ return '$' + (Math.round(n*100)/100).toFixed(2); }
+  function recalcRow(tr){
+    const qty = parseFloat(tr.querySelector('.qty')?.value || '0');
+    const cost = parseFloat(tr.querySelector('.cost')?.value || '0');
+    const total = (qty>0 && cost>0) ? (qty*cost) : 0;
+    const cell = tr.querySelector('.line-total'); if(cell){ cell.textContent = fmt(total); }
+    return total;
+  }
+  function recalcAll(){
+    let sum = 0;
+    document.querySelectorAll('#items-table tbody tr').forEach(tr => { sum += recalcRow(tr); });
+    const subtotal = document.getElementById('subtotal'); const grand = document.getElementById('grandtotal');
+    if(subtotal) subtotal.textContent = fmt(sum); if(grand) grand.textContent = fmt(sum);
+  }
+  recalcAll();
+  document.getElementById('items-table').addEventListener('input', function(e){
+    if(e.target.classList.contains('qty') || e.target.classList.contains('cost')){ recalcAll(); }
+  });
+  document.getElementById('items-table').addEventListener('click', function(e){
+    if(e.target.classList.contains('btn-del-row')){
+      const tr = e.target.closest('tr'); tr.parentNode.removeChild(tr); recalcAll();
+    }
+  });
+  document.getElementById('btn-add-row').addEventListener('click', function(){
+    const tbody = document.querySelector('#items-table tbody');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input class="form-control form-control-sm" name="part_number[]" placeholder="Part #"></td>
+      <td><input class="form-control form-control-sm" name="part_name[]" placeholder=""></td>
+      <td><input class="form-control form-control-sm qty" name="qty_returned[]" type="number" min="1" step="1" value="1"></td>
+      <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="0.00"></td>
+      <td><input class="form-control form-control-sm" name="location[]" placeholder=""></td>
+      <td class="text-end line-total">$0.00</td>
+      <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+})();
+</script>
+{% endblock %}

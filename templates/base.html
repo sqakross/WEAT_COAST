@@ -2,13 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-
-  <!-- важно для планшета и PWA -->
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-
   <title>WEST COAST CHIEF REPAIR - Inventory System</title>
 
-  <!-- PWA manifest (иконка + standalone режим без адресной строки) -->
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
   <meta name="theme-color" content="#0a1a2d" />
 
@@ -22,442 +18,178 @@
   <style>
     /* ---------- NAVBAR SKIN ---------- */
     .wccr-navbar {
-      /* dark navy → slightly lighter navy vertical gradient */
       background: linear-gradient(to bottom, #0a1a2d 0%, #122b4a 60%, #0a1a2d 100%);
       color: #fff;
-      box-shadow:
-        0 2px 4px rgba(0,0,0,.7),
-        0 8px 24px rgba(0,0,0,.6),
-        inset 0 1px 0 rgba(255,255,255,.08);
+      box-shadow: 0 2px 4px rgba(0,0,0,.7), 0 8px 24px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08);
       border-bottom: 1px solid rgba(255,255,255,.12);
     }
+    .wccr-navbar .navbar-brand { font-weight: 600; font-size: .9rem; line-height: 1.2; letter-spacing: .03em; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
+    .wccr-navbar .navbar-brand span.sub { display:block; font-weight:400; font-size:.6rem; line-height:1.1; color:rgba(255,255,255,.6); }
 
-    .wccr-navbar .navbar-brand {
-      font-weight: 600;
-      font-size: .9rem;
-      line-height: 1.2;
-      letter-spacing: .03em;
-      color: #fff;
-      text-shadow: 0 1px 2px rgba(0,0,0,.8);
-    }
-    .wccr-navbar .navbar-brand span.sub {
-      display: block;
-      font-weight: 400;
-      font-size: .6rem;
-      line-height: 1.1;
-      color: rgba(255,255,255,.6);
-    }
-
-    /* nav links */
     .wccr-navbar .navbar-nav .nav-link {
-      font-size: .7rem;
-      font-weight: 600;
-      letter-spacing: .05em;
-      text-transform: uppercase;
-      color: rgba(255,255,255,.8);
-      padding: .6rem .8rem;
-      border-radius: .5rem;
-      line-height:1.2;
-      text-shadow: 0 1px 2px rgba(0,0,0,.8);
-      transition: all .12s linear;
-      display: flex;
-      align-items: center;
-      gap: .4rem;
+      font-size:.7rem; font-weight:600; letter-spacing:.05em; text-transform:uppercase;
+      color:rgba(255,255,255,.8); padding:.6rem .8rem; border-radius:.5rem; line-height:1.2;
+      text-shadow:0 1px 2px rgba(0,0,0,.8); transition:all .12s linear; display:flex; align-items:center; gap:.4rem;
     }
-    .wccr-navbar .navbar-nav .nav-link:hover {
-      color: #fff;
-      background: rgba(255,255,255,.08);
-      box-shadow: 0 2px 4px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.15);
-    }
+    .wccr-navbar .navbar-nav .nav-link:hover { color:#fff; background:rgba(255,255,255,.08); box-shadow:0 2px 4px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.15); }
     .wccr-navbar .navbar-nav .nav-link.active,
-    .wccr-navbar .navbar-nav .show > .nav-link {
-      color: #0a1a2d;
-      background: linear-gradient(to bottom,#ffffff 0%,#dbe5ff 100%);
-      box-shadow:
-        0 2px 4px rgba(0,0,0,.9),
-        0 0 8px rgba(255,255,255,.4),
-        inset 0 1px 0 rgba(255,255,255,.9),
-        inset 0 -1px 0 rgba(0,0,0,.2);
-      text-shadow: 0 1px 0 rgba(255,255,255,.7);
+    .wccr-navbar .navbar-nav .show>.nav-link {
+      color:#0a1a2d; background:linear-gradient(to bottom,#ffffff 0%,#dbe5ff 100%);
+      box-shadow:0 2px 4px rgba(0,0,0,.9),0 0 8px rgba(255,255,255,.4), inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.2);
+      text-shadow:0 1px 0 rgba(255,255,255,.7);
     }
 
-    /* dropdown menu styling */
     .wccr-navbar .dropdown-menu {
-      background-color: #0f223c;
-      border-radius: .5rem;
-      border: 1px solid rgba(255,255,255,.15);
-      box-shadow:
-        0 8px 24px rgba(0,0,0,.9),
-        0 1px 0 rgba(255,255,255,.08) inset;
-      min-width: 220px;
-      padding: .4rem;
+      background-color:#0f223c; border-radius:.5rem; border:1px solid rgba(255,255,255,.15);
+      box-shadow:0 8px 24px rgba(0,0,0,.9), 0 1px 0 rgba(255,255,255,.08) inset; min-width:220px; padding:.4rem;
     }
-    .wccr-navbar .dropdown-item {
-      font-size: .7rem;
-      font-weight: 500;
-      letter-spacing: .03em;
-      color: rgba(255,255,255,.85);
-      border-radius: .4rem;
-      padding: .5rem .75rem;
-    }
-    .wccr-navbar .dropdown-item:hover {
-      background: rgba(255,255,255,.08);
-      color: #fff;
-    }
+    .wccr-navbar .dropdown-item { font-size:.7rem; font-weight:500; letter-spacing:.03em; color:rgba(255,255,255,.85); border-radius:.4rem; padding:.5rem .75rem; }
+    .wccr-navbar .dropdown-item:hover { background:rgba(255,255,255,.08); color:#fff; }
 
-    /* user info / buttons on the right */
-    .wccr-userbox {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: flex-end;
-      gap: .5rem .75rem;
-      font-size: .7rem;
-      line-height:1.2;
-      color:#fff;
-      text-shadow:0 1px 2px rgba(0,0,0,.9);
-    }
-    .wccr-userbox .welcome-label {
-      color: rgba(255,255,255,.8);
-      font-weight:400;
-    }
-    .wccr-userbox .username {
-      font-weight:600;
-      color:#fff;
-    }
+    .wccr-userbox { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:.5rem .75rem; font-size:.7rem; line-height:1.2; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.9); }
+    .wccr-userbox .welcome-label { color:rgba(255,255,255,.8); font-weight:400; }
+    .wccr-userbox .username { font-weight:600; color:#fff; }
     .wccr-userbox .role-badge {
-      background: linear-gradient(to bottom,#fff,#c8d4ff 90%);
-      color:#0a1a2d;
-      font-size:.6rem;
-      font-weight:600;
-      line-height:1.1;
-      padding:.25rem .4rem;
-      border-radius:.4rem;
-      text-transform:uppercase;
-      box-shadow:
-        0 1px 2px rgba(0,0,0,.9),
-        inset 0 1px 0 rgba(255,255,255,.9),
-        inset 0 -1px 0 rgba(0,0,0,.3);
+      background:linear-gradient(to bottom,#fff,#c8d4ff 90%); color:#0a1a2d; font-size:.6rem; font-weight:600; line-height:1.1;
+      padding:.25rem .4rem; border-radius:.4rem; text-transform:uppercase;
+      box-shadow:0 1px 2px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.3);
     }
 
-    .wccr-btn-ghost,
-    .wccr-btn-solid {
-      font-size:.65rem;
-      font-weight:600;
-      line-height:1.2;
-      letter-spacing:.05em;
-      text-transform:uppercase;
-      border-radius:999px;
-      border:1px solid transparent;
-      padding:.5rem .75rem;
-      white-space:nowrap;
-      box-shadow:
-        0 2px 4px rgba(0,0,0,.8),
-        0 6px 16px rgba(0,0,0,.8),
-        inset 0 1px 0 rgba(255,255,255,.3);
-      text-shadow:0 1px 2px rgba(0,0,0,.8);
-      transition:all .12s linear;
+    .wccr-btn-ghost, .wccr-btn-solid {
+      font-size:.65rem; font-weight:600; line-height:1.2; letter-spacing:.05em; text-transform:uppercase; border-radius:999px; border:1px solid transparent; padding:.5rem .75rem; white-space:nowrap;
+      box-shadow:0 2px 4px rgba(0,0,0,.8),0 6px 16px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.3); text-shadow:0 1px 2px rgba(0,0,0,.8); transition:all .12s linear;
     }
+    .wccr-btn-ghost { color:#fff; background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.4); }
+    .wccr-btn-ghost:hover{ background:rgba(255,255,255,.15); border-color:#fff; color:#fff; box-shadow:0 3px 6px rgba(0,0,0,.9),0 0 8px rgba(255,255,255,.4), inset 0 1px 0 rgba(255,255,255,.4); }
+    .wccr-btn-solid { color:#0a1a2d; background:linear-gradient(to bottom,#ffffff 0%,#e2e9ff 100%); border-color:rgba(0,0,0,.6); text-shadow:0 1px 0 rgba(255,255,255,.8); }
+    .wccr-btn-solid:hover { filter:brightness(1.05); box-shadow:0 3px 6px rgba(0,0,0,.9),0 0 8px rgba(255,255,255,.5), inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.3); }
 
-    /* CHANGE PASSWORD = ghost outline light */
-    .wccr-btn-ghost {
-      color:#fff;
-      background:rgba(255,255,255,.08);
-      border-color:rgba(255,255,255,.4);
-    }
-    .wccr-btn-ghost:hover{
-      background:rgba(255,255,255,.15);
-      border-color:#fff;
-      color:#fff;
-      box-shadow:
-        0 3px 6px rgba(0,0,0,.9),
-        0 0 8px rgba(255,255,255,.4),
-        inset 0 1px 0 rgba(255,255,255,.4);
-    }
+    .navbar-toggler.wccr-toggler { border:1px solid rgba(255,255,255,.4); border-radius:.5rem; padding:.4rem .5rem; box-shadow:0 2px 4px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.3); }
+    .navbar-toggler.wccr-toggler .navbar-toggler-icon { filter:invert(1) drop-shadow(0 1px 2px rgba(0,0,0,.9)); }
 
-    /* LOGOUT = solid pill bright */
-    .wccr-btn-solid {
-      color:#0a1a2d;
-      background:linear-gradient(to bottom,#ffffff 0%,#e2e9ff 100%);
-      border-color:rgba(0,0,0,.6);
-      text-shadow:0 1px 0 rgba(255,255,255,.8);
-    }
-    .wccr-btn-solid:hover {
-      filter:brightness(1.05);
-      box-shadow:
-        0 3px 6px rgba(0,0,0,.9),
-        0 0 8px rgba(255,255,255,.5),
-        inset 0 1px 0 rgba(255,255,255,.9),
-        inset 0 -1px 0 rgba(0,0,0,.3);
-    }
+    body { background-color:#f5f6f8; }
+    main.main-wrapper { padding-top:4.75rem; padding-bottom:2rem; }
 
-    /* mobile toggler custom look */
-    .navbar-toggler.wccr-toggler {
-      border:1px solid rgba(255,255,255,.4);
-      border-radius:.5rem;
-      padding:.4rem .5rem;
-      box-shadow:
-        0 2px 4px rgba(0,0,0,.8),
-        inset 0 1px 0 rgba(255,255,255,.3);
-    }
-    .navbar-toggler.wccr-toggler .navbar-toggler-icon {
-      filter:invert(1) drop-shadow(0 1px 2px rgba(0,0,0,.9));
-    }
+    .alert { border-radius:.6rem; box-shadow:0 .5rem 1rem rgba(0,0,0,.15); font-size:.8rem; line-height:1.3; font-weight:500; }
+    #globalToast { border-radius:.6rem; box-shadow:0 .5rem 1rem rgba(0,0,0,.6); font-size:.8rem; line-height:1.3; font-weight:500; }
 
-    /* main body spacing under fixed nav */
-    body {
-      background-color:#f5f6f8;
-    }
-    main.main-wrapper {
-      padding-top:4.75rem; /* a little more than nav height */
-      padding-bottom:2rem;
-    }
+    table { font-size:.8rem; }
+    th { font-weight:600; text-transform:uppercase; letter-spacing:.03em; font-size:.7rem; }
 
-    /* flash alerts a bit nicer */
-    .alert {
-      border-radius:.6rem;
-      box-shadow:0 .5rem 1rem rgba(0,0,0,.15);
-      font-size:.8rem;
-      line-height:1.3;
-      font-weight:500;
-    }
-
-    /* global toast tweak */
-    #globalToast {
-      border-radius:.6rem;
-      box-shadow:0 .5rem 1rem rgba(0,0,0,.6);
-      font-size:.8rem;
-      line-height:1.3;
-      font-weight:500;
-    }
-
-    /* tighter table text globally but keep readability */
-    table {
-      font-size:.8rem;
-    }
-    th {
-      font-weight:600;
-      text-transform:uppercase;
-      letter-spacing:.03em;
-      font-size:.7rem;
-    }
-
-    /* --------------------------
-       TECH TOOLBAR (tablet tech mode)
-       hidden by default, revealed w/ CSS later
-       -------------------------- */
-    .tech-toolbar {
-      display: none; /* we'll override in CSS for technician tablet */
-      background: #0a1a2d;
-      color: #fff;
-      border-bottom: 2px solid #222;
-      box-shadow:
-        0 2px 4px rgba(0,0,0,.7),
-        0 8px 24px rgba(0,0,0,.6),
-        inset 0 1px 0 rgba(255,255,255,.08);
-    }
-    .tech-toolbar-inner {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-around;
-      align-items: center;
-      gap: .75rem;
-      padding: .75rem .75rem;
-    }
+    .tech-toolbar { display:none; background:#0a1a2d; color:#fff; border-bottom:2px solid #222; box-shadow:0 2px 4px rgba(0,0,0,.7),0 8px 24px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08); }
+    .tech-toolbar-inner { display:flex; flex-wrap:wrap; justify-content:space-around; align-items:center; gap:.75rem; padding:.75rem .75rem; }
     .tech-toolbar-inner .btn-tech-nav {
-      font-size: 1rem;
-      font-weight: 600;
-      line-height: 1.2;
-      background: #fff;
-      color: #0a1a2d;
-      border: 1px solid rgba(0,0,0,.6);
-      border-radius: .8rem;
-      padding: .9rem 1rem;
-      min-width: 30%;
-      text-align: center;
-      text-decoration: none;
-      box-shadow:
-        0 2px 4px rgba(0,0,0,.8),
-        0 6px 16px rgba(0,0,0,.8),
-        inset 0 1px 0 rgba(255,255,255,.9);
+      font-size:1rem; font-weight:600; line-height:1.2; background:#fff; color:#0a1a2d; border:1px solid rgba(0,0,0,.6); border-radius:.8rem; padding:.9rem 1rem; min-width:30%; text-align:center; text-decoration:none;
+      box-shadow:0 2px 4px rgba(0,0,0,.8),0 6px 16px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.9);
     }
-    .tech-toolbar-inner .btn-tech-nav:active {
-      filter: brightness(1.05);
-    }
+    .tech-toolbar-inner .btn-tech-nav:active { filter:brightness(1.05); }
   </style>
 
   {% block extra_head %}{% endblock %}
 </head>
 
 <body class="role-{{ (current_user.role or '')|lower }}">
-  <!-- MAIN NAVBAR (desktop / admin view) -->
   <nav class="navbar navbar-expand-lg fixed-top wccr-navbar main-navbar">
     <div class="container-fluid py-2">
-
-      <!-- BRAND / LOGO -->
       <a class="navbar-brand d-flex flex-column justify-content-center" href="{{ url_for('inventory.dashboard') }}">
         <div>WEST COAST CHIEF REPAIR</div>
         <span class="sub">INVENTORY CONTROL</span>
       </a>
 
-      <!-- MOBILE TOGGLER -->
       <button class="navbar-toggler wccr-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain"
               aria-controls="navbarMain" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
 
-      <!-- NAV CONTENT -->
       <div class="collapse navbar-collapse mt-3 mt-lg-0" id="navbarMain">
-
-        <!-- LEFT NAV LINKS -->
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.location_report' %} active{% endif %}"
-               href="{{ url_for('inventory.location_report') }}">
-              INVENTORY
-            </a>
+               href="{{ url_for('inventory.location_report') }}">INVENTORY</a>
           </li>
-
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.dashboard' %} active{% endif %}"
-               href="{{ url_for('inventory.dashboard') }}">
-              DASHBOARD
-            </a>
+               href="{{ url_for('inventory.dashboard') }}">DASHBOARD</a>
           </li>
-
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.add_part' %} active{% endif %}"
-               href="{{ url_for('inventory.add_part') }}">
-              ADD PART
-            </a>
+               href="{{ url_for('inventory.add_part') }}">ADD PART</a>
           </li>
-
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.issue_part' %} active{% endif %}"
-               href="{{ url_for('inventory.issue_part') }}">
-              ISSUE PART
-            </a>
+               href="{{ url_for('inventory.issue_part') }}">ISSUE PART</a>
           </li>
 
           {% set is_wo = request.endpoint and request.endpoint.startswith('inventory.wo_') %}
           <li class="nav-item">
             <a class="nav-link{{ ' active' if is_wo else '' }}"
-               href="{{ url_for('inventory.wo_list') }}">
-              WORK ORDERS
-            </a>
+               href="{{ url_for('inventory.wo_list') }}">WORK ORDERS</a>
           </li>
 
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.receiving') %} active{% endif %}"
-               href="{{ url_for('inventory.receiving_list') }}">
-              RECEIVING
-            </a>
+               href="{{ url_for('inventory.receiving_list') }}">RECEIVING</a>
           </li>
+
+          {# NEW: Supplier Returns menu for admins #}
+          {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
+          <li class="nav-item">
+            <a class="nav-link{% if request.endpoint and request.endpoint.startswith('supplier_returns.') %} active{% endif %}"
+               href="{{ url_for('supplier_returns.list_returns') }}">RETURNS</a>
+          </li>
+          {% endif %}
 
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.reports') %} active{% endif %}"
-               href="{{ url_for('inventory.reports_grouped') }}">
-              REPORTS
-            </a>
+               href="{{ url_for('inventory.reports_grouped') }}">REPORTS</a>
           </li>
-
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.import_parts') %} active{% endif %}"
-               href="{{ url_for('inventory.import_parts_upload') }}">
-              IMPORT PARTS
-            </a>
+               href="{{ url_for('inventory.import_parts_upload') }}">IMPORT PARTS</a>
           </li>
 
-          <!-- DROPDOWN -->
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle text-uppercase"
-               href="#"
-               id="compareDropdown"
-               role="button"
-               data-bs-toggle="dropdown"
-               data-bs-display="static"
-               aria-expanded="false">
-              COMPARE PARTS
-            </a>
+            <a class="nav-link dropdown-toggle text-uppercase" href="#" id="compareDropdown" role="button"
+               data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">COMPARE PARTS</a>
             <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="compareDropdown">
-              <li>
-                <a class="dropdown-item" href="{{ url_for('inventory.download_marcone_report') }}">
-                  📥 Marcone Report
-                </a>
-              </li>
-              <li>
-                <a class="dropdown-item" href="{{ url_for('inventory.download_reliable_report') }}">
-                  📥 Reliable Report
-                </a>
-              </li>
+              <li><a class="dropdown-item" href="{{ url_for('inventory.download_marcone_report') }}">📥 Marcone Report</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('inventory.download_reliable_report') }}">📥 Reliable Report</a></li>
             </ul>
           </li>
 
           {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.users') %} active{% endif %}"
-               href="{{ url_for('inventory.users') }}">
-              MANAGE USERS
-            </a>
+               href="{{ url_for('inventory.users') }}">MANAGE USERS</a>
           </li>
           {% endif %}
         </ul>
 
         {% if current_user.is_authenticated %}
-        <!-- RIGHT SIDE USER BOX -->
         <div class="ms-lg-3 wccr-userbox">
           <div class="d-flex flex-wrap align-items-center gap-2 me-lg-2">
             <span class="welcome-label">WELCOME,</span>
             <span class="username">{{ current_user.username }}</span>
-            <span class="role-badge">
-              {{ (current_user.role or '')|upper }}
-            </span>
+            <span class="role-badge">{{ (current_user.role or '')|upper }}</span>
           </div>
-
           <div class="d-flex flex-wrap align-items-center gap-2">
-            <a class="wccr-btn-ghost text-decoration-none"
-               href="{{ url_for('inventory.change_password', user_id=current_user.id) }}">
-              🔑 CHANGE PASSWORD
-            </a>
-
-            <a class="wccr-btn-solid text-decoration-none"
-               href="{{ url_for('auth.logout') }}">
-              LOGOUT
-            </a>
+            <a class="wccr-btn-ghost text-decoration-none" href="{{ url_for('inventory.change_password', user_id=current_user.id) }}">🔑 CHANGE PASSWORD</a>
+            <a class="wccr-btn-solid text-decoration-none" href="{{ url_for('auth.logout') }}">LOGOUT</a>
           </div>
         </div>
         {% endif %}
-
-      </div><!-- /.navbar-collapse -->
-    </div><!-- /.container-fluid -->
+      </div>
+    </div>
   </nav>
 
-  {# TECH TOOLBAR (simplified nav for technician tablet mode).
-     Hidden by default via CSS. We'll reveal it only when:
-     - body has class role-technician
-     - screen is tablet-size (CSS we'll add in style.css next step)
-  #}
   <div class="tech-toolbar">
     <div class="tech-toolbar-inner container-fluid">
-      <a class="btn-tech-nav"
-         href="{{ url_for('inventory.wo_list') }}">
-        Work Orders
-      </a>
-
-      <a class="btn-tech-nav"
-         href="{{ url_for('inventory.change_password', user_id=current_user.id if current_user.is_authenticated else 0) }}">
-        Change Password
-      </a>
-
-      <a class="btn-tech-nav"
-         href="{{ url_for('auth.logout') }}">
-        Logout
-      </a>
+      <a class="btn-tech-nav" href="{{ url_for('inventory.wo_list') }}">Work Orders</a>
+      <a class="btn-tech-nav" href="{{ url_for('inventory.change_password', user_id=current_user.id if current_user.is_authenticated else 0) }}">Change Password</a>
+      <a class="btn-tech-nav" href="{{ url_for('auth.logout') }}">Logout</a>
     </div>
   </div>
 
-  <!-- MAIN CONTENT AREA -->
   <main class="container main-wrapper">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -469,29 +201,23 @@
         {% endfor %}
       {% endif %}
     {% endwith %}
-
     {% block content %}{% endblock %}
   </main>
 
-  <!-- GLOBAL TOAST -->
   <div class="position-fixed bottom-0 end-0 p-3" style="z-index:1080">
-    <div id="globalToast" class="toast align-items-center text-bg-success border-0" role="alert"
-         aria-live="assertive" aria-atomic="true">
+    <div id="globalToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
       <div class="d-flex">
         <div class="toast-body" id="globalToastBody">Done.</div>
-        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"
-                aria-label="Close"></button>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
       </div>
     </div>
   </div>
 
-  <!-- SCRIPTS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
           integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
           crossorigin="anonymous"></script>
 
   <script>
-    // global toast helper
     window.showToast = function (msg, opts = {}) {
       const el = document.getElementById('globalToast');
       const body = document.getElementById('globalToastBody');
@@ -500,19 +226,14 @@
       if (window.bootstrap && bootstrap.Toast) {
         const t = new bootstrap.Toast(el, { delay: opts.delay || 2000 });
         t.show();
-      } else {
-        alert(body.textContent);
-      }
+      } else { alert(body.textContent); }
     };
   </script>
 
-  <!-- PWA service worker registration -->
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register("{{ url_for('static', filename='service-worker.js') }}")
-        .catch(err => {
-          console.warn("SW registration failed", err);
-        });
+        .catch(err => { console.warn("SW registration failed", err); });
     }
   </script>
 
