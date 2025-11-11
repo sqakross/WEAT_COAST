@@ -19,25 +19,32 @@
         </small>
       </div>
 
+      <!-- Header actions submit the main form as well -->
       <div class="d-flex gap-2">
         {% if b.status == 'draft' %}
-          <form method="post" action="{{ url_for('supplier_returns.toggle_return', batch_id=b.id) }}">
-            <button class="btn btn-success" title="Decrement stock">Post</button>
-          </form>
+          <button id="btn-post-top" type="submit" form="editForm" name="action" value="post"
+                  class="btn btn-success"
+                  data-disable-on-submit="true" data-action-label="Posting…"
+                  title="Decrement stock">Post</button>
           <form method="post" action="{{ url_for('supplier_returns.delete_return', batch_id=b.id) }}"
                 onsubmit="return confirm('Delete draft?');">
             <button class="btn btn-outline-danger">Delete</button>
           </form>
         {% else %}
-          <form method="post" action="{{ url_for('supplier_returns.toggle_return', batch_id=b.id) }}"
-                onsubmit="return confirm('Unpost? This will restore stock.');">
-            <button class="btn btn-warning">Unpost</button>
-          </form>
+          <button id="btn-unpost-top" type="submit" form="editForm" name="action" value="unpost"
+                  class="btn btn-warning"
+                  data-disable-on-submit="true" data-action-label="Unposting…"
+                  onclick="return confirm('Unpost? This will restore stock.');">
+            Unpost
+          </button>
         {% endif %}
       </div>
     </div>
 
-    <form method="post" action="{{ url_for('supplier_returns.edit_return', batch_id=b.id) }}">
+    <form id="editForm" method="post" action="{{ url_for('supplier_returns.edit_return', batch_id=b.id) }}">
+      <!-- гарантируем, что action всегда уходит -->
+      <input type="hidden" name="action" id="action-hidden" value="save"/>
+
       <div class="card-body">
         <div class="row g-3 mb-2">
           <div class="col-md-6">
@@ -66,23 +73,24 @@
             </thead>
             <tbody>
               {% for it in b.items %}
-              <tr>
-                <td><input class="form-control form-control-sm" name="part_number[]" value="{{ it.part_number }}"></td>
-                <td><input class="form-control form-control-sm" name="part_name[]" value="{{ it.part_name or '' }}"></td>
-                <td><input class="form-control form-control-sm qty" name="qty_returned[]" type="number" min="1" step="1" value="{{ it.qty_returned or 1 }}"></td>
-                <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="{{ it.unit_cost or 0 }}"></td>
-                <td><input class="form-control form-control-sm" name="location[]" value="{{ it.location or '' }}"></td>
+              {% set bad = (loop.index0 in (errors_idx|default([]))) %}
+              <tr class="{% if bad %}table-danger{% endif %}">
+                <td><input class="form-control form-control-sm" name="part_number[]" value="{{ it.part_number }}" placeholder="Scan or type Part #"></td>
+                <td><input class="form-control form-control-sm" name="part_name[]"  value="{{ it.part_name or '' }}"></td>
+                <td><input class="form-control form-control-sm qty"  name="qty_returned[]" type="number" min="1" step="1" value="{{ it.qty_returned or 1 }}"></td>
+                <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="{{ ('%.2f'|format(it.unit_cost or 0)) }}"></td>
+                <td><input class="form-control form-control-sm" name="location[]" value="{{ it.location or '' }}" placeholder="auto"></td>
                 <td class="text-end line-total">${{ '%.2f'|format(it.total_cost or 0) }}</td>
                 <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>
               </tr>
               {% endfor %}
               {% if not b.items %}
               <tr>
-                <td><input class="form-control form-control-sm" name="part_number[]" placeholder="e.g. WD21X22276"></td>
-                <td><input class="form-control form-control-sm" name="part_name[]" placeholder=""></td>
-                <td><input class="form-control form-control-sm qty" name="qty_returned[]" type="number" min="1" step="1" value="1"></td>
+                <td><input class="form-control form-control-sm" name="part_number[]" placeholder="Scan or type Part #"></td>
+                <td><input class="form-control form-control-sm" name="part_name[]"  placeholder=""></td>
+                <td><input class="form-control form-control-sm qty"  name="qty_returned[]" type="number" min="1" step="1" value="1"></td>
                 <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="0.00"></td>
-                <td><input class="form-control form-control-sm" name="location[]" placeholder="L1"></td>
+                <td><input class="form-control form-control-sm" name="location[]" placeholder="auto"></td>
                 <td class="text-end line-total">$0.00</td>
                 <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>
               </tr>
@@ -93,9 +101,8 @@
 
         <div class="row mt-3">
           <div class="col-md-6">
-            <small class="text-muted">
-              Subtotal is Qty × Unit Cost. Display only; server recalculates on save.
-            </small>
+            <small class="text-muted d-block">Subtotal is Qty × Unit Cost. Display only; server recalculates on save.</small>
+            <small class="text-danger d-block">Red rows indicate missing or invalid Part Numbers.</small>
           </div>
           <div class="col-md-6">
             <div class="d-flex justify-content-end">
@@ -108,14 +115,24 @@
         </div>
 
       </div>
+
       <div class="card-footer d-flex gap-2">
-        <button class="btn btn-primary">Save</button>
+        <button id="btn-save-bottom" type="submit" name="action" value="save"
+                class="btn btn-primary"
+                data-disable-on-submit="true" data-action-label="Saving…">Save</button>
         {% if b.status == 'draft' %}
-          <button type="submit" formaction="{{ url_for('supplier_returns.toggle_return', batch_id=b.id) }}"
-                  formmethod="post" class="btn btn-success">Post (decrement stock)</button>
+          <button id="btn-post-bottom" type="submit" name="action" value="post"
+                  class="btn btn-success"
+                  data-disable-on-submit="true" data-action-label="Posting…">
+            Post (decrement stock)
+          </button>
         {% else %}
-          <button type="submit" formaction="{{ url_for('supplier_returns.toggle_return', batch_id=b.id) }}"
-                  formmethod="post" class="btn btn-warning">Unpost (restore stock)</button>
+          <button id="btn-unpost-bottom" type="submit" name="action" value="unpost"
+                  class="btn btn-warning"
+                  data-disable-on-submit="true" data-action-label="Unposting…"
+                  onclick="return confirm('Unpost? This will restore stock.')">
+            Unpost (restore stock)
+          </button>
         {% endif %}
         <a href="{{ url_for('supplier_returns.list_returns') }}" class="btn btn-light">Cancel</a>
       </div>
@@ -123,45 +140,236 @@
   </div>
 </div>
 
+<style>
+  .flash-ok { animation: flashOk 900ms ease-out 1; }
+  @keyframes flashOk { 0%{box-shadow:0 0 0 0 rgba(40,167,69,.7);} 100%{box-shadow:0 0 0 12px rgba(40,167,69,0);} }
+  .cell-error input { border-color: #dc3545 !important; }
+  .cell-error [title] { cursor: help; }
+</style>
+
 <script>
 (function(){
-  function fmt(n){ return '$' + (Math.round(n*100)/100).toFixed(2); }
+  const API_LOOKUP = "{{ url_for('supplier_returns.api_part_lookup') }}";
+
+  // ---------- helpers ----------
+  const fmt = n => '$' + (Math.round((+n||0)*100)/100).toFixed(2);
+
   function recalcRow(tr){
-    const qty = parseFloat(tr.querySelector('.qty')?.value || '0');
+    const qty  = parseFloat(tr.querySelector('.qty')?.value || '0');
     const cost = parseFloat(tr.querySelector('.cost')?.value || '0');
-    const total = (qty>0 && cost>0) ? (qty*cost) : 0;
-    const cell = tr.querySelector('.line-total'); if(cell){ cell.textContent = fmt(total); }
+    const total = (qty>0 && cost>=0) ? (qty*cost) : 0;
+    const cell = tr.querySelector('.line-total');
+    if(cell) cell.textContent = fmt(total);
     return total;
   }
   function recalcAll(){
     let sum = 0;
-    document.querySelectorAll('#items-table tbody tr').forEach(tr => { sum += recalcRow(tr); });
-    const subtotal = document.getElementById('subtotal'); const grand = document.getElementById('grandtotal');
-    if(subtotal) subtotal.textContent = fmt(sum); if(grand) grand.textContent = fmt(sum);
+    document.querySelectorAll('#items-table tbody tr').forEach(tr => sum += recalcRow(tr));
+    document.getElementById('subtotal').textContent   = fmt(sum);
+    document.getElementById('grandtotal').textContent = fmt(sum);
   }
-  recalcAll();
-  document.getElementById('items-table').addEventListener('input', function(e){
-    if(e.target.classList.contains('qty') || e.target.classList.contains('cost')){ recalcAll(); }
+
+  // normalize location on client before submit
+  function normalizeLocation(s){
+    if(!s) return '';
+    let v = (s || '').trim();
+    if (v.toLowerCase() === 'auto') return '';
+    v = v.replace(/\s*\/\s*/g, '/');  // A2 / B2 -> A2/B2
+    v = v.replace(/\s+/g, ' ');       // collapse spaces
+    return v;
+  }
+
+  // disable submit buttons to prevent double click
+  let submitLock = false;
+  function setLoading(btn, on){
+    if(!btn) return;
+    if(on){
+      btn.dataset._oldText = btn.textContent;
+      btn.disabled = true;
+      if(btn.dataset.actionLabel) btn.textContent = btn.dataset.actionLabel;
+    } else {
+      btn.disabled = false;
+      if(btn.dataset._oldText) btn.textContent = btn.dataset._oldText;
+      delete btn.dataset._oldText;
+    }
+  }
+  function disableAllSubmitButtons(){
+    document.querySelectorAll('[data-disable-on-submit="true"]').forEach(b=>setLoading(b,true));
+  }
+  function enableAllSubmitButtons(){
+    document.querySelectorAll('[data-disable-on-submit="true"]').forEach(b=>setLoading(b,false));
+  }
+
+  // client-side inline errors
+  function markCellError(input, msg){
+    const td = input?.closest('td');
+    if(!td) return;
+    td.classList.add('cell-error');
+    if(msg) input.setAttribute('title', msg);
+  }
+  function clearRowClientErrors(tr){
+    tr.querySelectorAll('.cell-error').forEach(td=>td.classList.remove('cell-error'));
+    tr.querySelectorAll('[title]').forEach(el=>{
+      if (el.classList.contains('qty') || el.classList.contains('cost') || el.name === 'part_number[]') {
+        el.removeAttribute('title');
+      }
+    });
+  }
+
+  // soft validation before POST
+  function validateBeforePost(){
+    let ok = true;
+    let firstBadInput = null;
+
+    document.querySelectorAll('#items-table tbody tr').forEach(tr=>{
+      clearRowClientErrors(tr);
+      const pn   = tr.querySelector('input[name="part_number[]"]');
+      const qty  = tr.querySelector('.qty');
+      const cost = tr.querySelector('.cost');
+
+      if (!pn || !pn.value.trim()) return; // empty PN row ignored
+
+      if (qty && !(parseInt(qty.value,10) > 0)) {
+        ok = false; markCellError(qty, 'Quantity must be > 0'); if(!firstBadInput) firstBadInput = qty;
+      }
+      if (cost && !(parseFloat(cost.value) >= 0)) {
+        ok = false; markCellError(cost, 'Unit cost cannot be negative'); if(!firstBadInput) firstBadInput = cost;
+      }
+    });
+
+    if(!ok && firstBadInput){
+      firstBadInput.focus({preventScroll:false});
+      firstBadInput.scrollIntoView({behavior:'smooth', block:'center'});
+    }
+    return ok;
+  }
+
+  // lookup and auto-fill
+  async function lookupAndFill(inputEl){
+    const tr = inputEl.closest('tr');
+    const pn = (inputEl.value || '').trim();
+    if(!tr) return;
+
+    if(!pn){ tr.classList.add('table-danger'); return; }
+
+    try{
+      const res = await fetch(API_LOOKUP + "?pn=" + encodeURIComponent(pn), {headers:{Accept:"application/json"}});
+      if(!res.ok){ tr.classList.add('table-danger'); return; }
+      const data = await res.json();
+      if(!data.ok){ tr.classList.add('table-danger'); return; }
+
+      tr.classList.remove('table-danger');
+
+      const n = tr.querySelector('input[name="part_name[]"]');
+      const c = tr.querySelector('input[name="unit_cost[]"]');
+      const l = tr.querySelector('input[name="location[]"]');
+
+      if(n && (!n.value || !n.value.trim())) { n.value = data.data.name || ''; n.classList.add('flash-ok'); setTimeout(()=>n.classList.remove('flash-ok'), 900); }
+      if(c){
+        const cur = parseFloat(c.value || '0');
+        if(!(cur>0)) { c.value = (data.data.unit_cost || 0).toFixed(2); c.classList.add('flash-ok'); setTimeout(()=>c.classList.remove('flash-ok'), 900); }
+      }
+      if(l){
+        let cur = (l.value || '').trim().toLowerCase();
+        if(!cur || cur === 'auto') { l.value = data.data.location || ''; l.classList.add('flash-ok'); setTimeout(()=>l.classList.remove('flash-ok'), 900); }
+      }
+      recalcRow(tr); recalcAll();
+    }catch(e){
+      tr.classList.add('table-danger');
+    }
+  }
+
+  // ---------- events ----------
+  let debounceTimer=null;
+  const table = document.getElementById('items-table');
+
+  table.addEventListener('input', e=>{
+    const t = e.target;
+    if(t.name==='part_number[]'){
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(()=>lookupAndFill(t), 250);
+    }
+    if(t.classList.contains('qty')||t.classList.contains('cost')) recalcAll();
   });
-  document.getElementById('items-table').addEventListener('click', function(e){
-    if(e.target.classList.contains('btn-del-row')){
-      const tr = e.target.closest('tr'); tr.parentNode.removeChild(tr); recalcAll();
+
+  // hotkeys
+  table.addEventListener('keydown', e=>{
+    const t = e.target;
+    if(t.name==='part_number[]' && e.key==='Enter'){
+      e.preventDefault();
+      lookupAndFill(t);
+    } else if ((t.classList.contains('qty') || t.classList.contains('cost')) && e.key==='Enter'){
+      e.preventDefault();
+      recalcAll();
+      const tr = t.closest('tr');
+      const next = tr?.nextElementSibling;
+      const nextPn = next?.querySelector('input[name="part_number[]"]');
+      if(nextPn) nextPn.focus();
     }
   });
-  document.getElementById('btn-add-row').addEventListener('click', function(){
-    const tbody = document.querySelector('#items-table tbody');
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><input class="form-control form-control-sm" name="part_number[]" placeholder="Part #"></td>
-      <td><input class="form-control form-control-sm" name="part_name[]" placeholder=""></td>
-      <td><input class="form-control form-control-sm qty" name="qty_returned[]" type="number" min="1" step="1" value="1"></td>
-      <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="0.00"></td>
-      <td><input class="form-control form-control-sm" name="location[]" placeholder=""></td>
-      <td class="text-end line-total">$0.00</td>
-      <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>
-    `;
-    tbody.appendChild(tr);
+
+  // delete row
+  table.addEventListener('click', e=>{
+    if(e.target.classList.contains('btn-del-row')){
+      const tr=e.target.closest('tr');
+      tr.parentNode.removeChild(tr);
+      recalcAll();
+    }
   });
+
+  // add row
+  document.getElementById('btn-add-row').addEventListener('click', ()=>{
+    const tbody=document.querySelector('#items-table tbody');
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td><input class="form-control form-control-sm" name="part_number[]" placeholder="Scan or type Part #"></td>
+      <td><input class="form-control form-control-sm" name="part_name[]"  placeholder=""></td>
+      <td><input class="form-control form-control-sm qty"  name="qty_returned[]" type="number" min="1" step="1" value="1"></td>
+      <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="0.00"></td>
+      <td><input class="form-control form-control-sm" name="location[]" placeholder="auto"></td>
+      <td class="text-end line-total">$0.00</td>
+      <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>`;
+    tbody.appendChild(tr);
+    tr.querySelector('input[name="part_number[]"]').focus();
+    recalcAll();
+  });
+
+  // фикс: всегда проставляем скрытому инпуту выбранное действие
+  document.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[name="action"]');
+    if(!btn) return;
+    const hidden = document.getElementById('action-hidden');
+    if(hidden) hidden.value = btn.value || 'save';
+  });
+
+  // normalize locations, validate, and protect against double submit
+  const form = document.getElementById('editForm');
+  form.addEventListener('submit', (e)=>{
+    if(submitLock){ e.preventDefault(); return; }
+
+    // normalize all location[]
+    form.querySelectorAll('input[name="location[]"]').forEach(inp=>{
+      inp.value = normalizeLocation(inp.value);
+    });
+
+    // прочитаем выбранное действие из скрытого поля (железно во всех браузерах)
+    const hidden = document.getElementById('action-hidden');
+    const chosenAction = hidden ? (hidden.value || '') : ((e.submitter && e.submitter.value) ? e.submitter.value : '');
+
+    if (chosenAction === 'post') {
+      if (!validateBeforePost()) {
+        e.preventDefault();
+        return;
+      }
+    }
+
+    submitLock = true;
+    disableAllSubmitButtons();
+    setTimeout(()=>{ submitLock=false; enableAllSubmitButtons(); }, 6000);
+  });
+
+  // initial totals
+  recalcAll();
 })();
 </script>
 {% endblock %}

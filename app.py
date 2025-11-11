@@ -1,23 +1,22 @@
+# app.py — ГОТОВЫЙ
+
 from flask import Flask, request, redirect, url_for
 from config import Config
 import os, sys, io, logging, time
 from logging.handlers import RotatingFileHandler
 from extensions import db, login_manager
 from flask_login import current_user
-from sqlalchemy.orm import relationship
 
 # Sentry
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 
-from security import is_technician  # (оставляем импорт если где-то ещё юзается)
+from security import is_technician  # (если где-то ещё используется)
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from jinja2 import ChoiceLoader, FileSystemLoader
-from urllib.parse import urlencode
-
 
 # -------------------------------------------------------------------
 # 1) Форсируем UTF-8 для stdout/stderr (кириллица в print)
@@ -35,7 +34,6 @@ def _force_utf8_stdio():
 
 _force_utf8_stdio()
 
-
 # -------------------------------------------------------------------
 # 2) Директории (instance, uploads, logs)
 # -------------------------------------------------------------------
@@ -45,22 +43,16 @@ os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
 LOG_DIR = os.path.join(Config.BASE_DIR, 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
 
-
 # -------------------------------------------------------------------
 # 3) Логирование в файл + в консоль (UTF-8)
-#    ВАЖНО: жёстко ограничиваемся уровнем INFO, никакого DEBUG спама
 # -------------------------------------------------------------------
 formatter = logging.Formatter('[%(asctime)s] %(levelname)s %(name)s: %(message)s')
-
 root = logging.getLogger()
 root.setLevel(logging.INFO)
 
-# на всякий случай пробиваем для типичных логгеров нашего проекта
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger("app").setLevel(logging.INFO)
 logging.getLogger("inventory").setLevel(logging.INFO)
-
-# Flask dev server (werkzeug) оставляем повыше, чтобы не лил каждую строчку запроса
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 fh = RotatingFileHandler(
@@ -78,7 +70,6 @@ if not root.handlers:
     root.addHandler(fh)
     root.addHandler(sh)
 
-
 # -------------------------------------------------------------------
 # 4) Flask app init
 # -------------------------------------------------------------------
@@ -87,10 +78,10 @@ app.config.from_object(Config)
 app.config.from_pyfile('config.py', silent=True)  # instance/config.py (если есть)
 
 # флаги импорта
-app.config['WCCR_IMPORT_ENABLED'] = 1   # применяем импорт
-app.config['WCCR_IMPORT_DRY_RUN'] = 0   # не dry-run
+app.config['WCCR_IMPORT_ENABLED'] = 1
+app.config['WCCR_IMPORT_DRY_RUN'] = 0
 
-# Ограничим размер аплоадов (32 МБ по умолчанию)
+# Ограничим размер аплоадов
 app.config.setdefault("MAX_CONTENT_LENGTH", 32 * 1024 * 1024)
 
 # Таймзона отображения времени
@@ -102,13 +93,12 @@ logging.info(
     app.config.get("WCCR_IMPORT_DRY_RUN"),
 )
 
-
 # -------------------------------------------------------------------
-# 4.1) Доп. пути для шаблонов
+# 4.1) Доп. пути для шаблонов (inventory + supplier_returns)
 # -------------------------------------------------------------------
 extra_templates = [
     os.path.join(Config.BASE_DIR, "inventory", "templates"),
-    os.path.join(Config.BASE_DIR, "supplier_returns", "templates"),  # <<< NEW
+    os.path.join(Config.BASE_DIR, "supplier_returns", "templates"),
 ]
 extra_loaders = [FileSystemLoader(p) for p in extra_templates if os.path.isdir(p)]
 if extra_loaders:
@@ -121,7 +111,6 @@ if extra_loaders:
 else:
     logging.warning("No extra template dirs found among: %s", extra_templates)
 
-
 # -------------------------------------------------------------------
 # 5) Sentry (если задан SENTRY_DSN)
 # -------------------------------------------------------------------
@@ -129,10 +118,7 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
 if SENTRY_DSN:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
-        integrations=[
-            FlaskIntegration(),
-            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
-        ],
+        integrations=[FlaskIntegration(), LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)],
         traces_sample_rate=float(os.getenv("SENTRY_TRACES", "0.0")),
         profiles_sample_rate=float(os.getenv("SENTRY_PROFILES", "0.0")),
         send_default_pii=False,
@@ -142,13 +128,10 @@ if SENTRY_DSN:
 else:
     logging.info("Sentry DSN not set; skipping Sentry init.")
 
-
 # -------------------------------------------------------------------
 # 6) DB / Login manager
 # -------------------------------------------------------------------
-# На всякий случай создадим фактическую instance-папку Flask
 os.makedirs(app.instance_path, exist_ok=True)
-
 db.init_app(app)
 login_manager.init_app(app)
 login_manager.login_view = 'auth.login'
@@ -159,7 +142,6 @@ logging.info(
     app.config.get("WCCR_IMPORT_DRY_RUN"),
 )
 
-
 # -------------------------------------------------------------------
 # 7) Jinja-фильтры локального времени
 # -------------------------------------------------------------------
@@ -168,7 +150,6 @@ def _to_local(dt: datetime, fmt: str):
         return "—"
     tzname = app.config.get("DISPLAY_TZ", "America/Los_Angeles")
     try:
-        # считаем, что в БД время хранится как UTC-naive
         dt_utc = dt.replace(tzinfo=ZoneInfo("UTC"))
         dt_local = dt_utc.astimezone(ZoneInfo(tzname))
         return dt_local.strftime(fmt)
@@ -183,7 +164,6 @@ def jinja_local_dt(dt: datetime, fmt: str = "%Y-%m-%d %H:%M"):
 def jinja_local_date(dt: datetime, fmt: str = "%Y-%m-%d"):
     return _to_local(dt, fmt)
 
-
 # -------------------------------------------------------------------
 # 8) Blueprints
 # -------------------------------------------------------------------
@@ -193,88 +173,41 @@ from inventory.routes import inventory_bp
 app.register_blueprint(auth_bp)
 app.register_blueprint(inventory_bp)
 
-# --- Supplier Returns (отдельный модуль) ---
-from supplier_returns import supplier_returns_bp  # <<< NEW
-app.register_blueprint(supplier_returns_bp, url_prefix="/supplier_returns")  # <<< NEW
+# Supplier Returns — используем один blueprint из routes, префикс задаём здесь
+from supplier_returns.routes import supplier_returns_bp
+app.register_blueprint(supplier_returns_bp, url_prefix="/supplier_returns")
 
 logging.info("Flask app configured and blueprints registered.")
-
 
 # -------------------------------------------------------------------
 # 9) Ограничение навигации для роли technician / viewer
 # -------------------------------------------------------------------
 ALLOWED_TECH_ENDPOINTS = {
-    # Work Orders
     "inventory.wo_list",
     "inventory.wo_detail",
-
-    # подтверждения / чекбоксы
     "inventory.wo_confirm_lines",
     "inventory.issued_confirm_toggle",
-
-    # отчёты / документы
     "inventory.reports_grouped",
-
-    # >>> НОВОЕ: печать PDF инвойса <<<
     "inventory.view_invoice_pdf",
-
-    # профиль
     "inventory.change_password",
     "auth.logout",
-
-    # login и статика
     "auth.login",
     "static",
 }
-
 
 ALLOWED_VIEWER_ENDPOINTS = {
     "inventory.wo_list",
     "inventory.wo_detail",
     "inventory.reports_grouped",
-
     "inventory.change_password",
     "auth.logout",
-
     "static",
 }
-
-def _is_allowed_for_tech(endpoint: str) -> bool:
-    if not endpoint:
-        return False
-
-    # статика
-    if endpoint == "static":
-        return True
-
-    # любые Work Order эндпоинты (список, детали, confirm и т.д.)
-    if endpoint.startswith("inventory.wo_"):
-        return True
-
-    # отчёты (grouped и т.п.)
-    if endpoint.startswith("inventory.reports_"):
-        return True
-
-    # >>> НОВОЕ: явно разрешаем печать инвойса для техника <<<
-    if endpoint in {
-        "inventory.view_invoice_pdf",  # наш основной PDF
-        "inventory.invoice_pdf",       # если у тебя было старое имя
-        "inventory.print_invoice",
-        "inventory.print_report",
-    }:
-        return True
-
-    # профиль / выход
-    if endpoint in {"inventory.change_password", "auth.logout", "auth.login"}:
-        return True
-
-    return False
 
 @app.before_request
 def restrict_role_routes():
     """
     Ограничиваем доступ по ролям 'technician' и 'viewer' *только* разрешёнными endpoint'ами.
-    Все остальные запросы уводим на список Work Orders.
     Для остальных ролей (admin/superadmin/user) — без ограничений.
     """
     try:
@@ -285,39 +218,28 @@ def restrict_role_routes():
         role = (getattr(current_user, "role", "") or "").strip().lower()
 
         if role == "technician":
-            if ep in ALLOWED_TECH_ENDPOINTS:
-                return
-            if ep.endswith(".health") or ep.endswith(".ping"):
+            if ep in ALLOWED_TECH_ENDPOINTS or ep.endswith(".health") or ep.endswith(".ping"):
                 return
             return redirect(url_for("inventory.wo_list"))
 
         if role == "viewer":
-            if ep in ALLOWED_VIEWER_ENDPOINTS:
-                return
-            if ep.endswith(".health") or ep.endswith(".ping"):
+            if ep in ALLOWED_VIEWER_ENDPOINTS or ep.endswith(".health") or ep.endswith(".ping"):
                 return
             return redirect(url_for("inventory.wo_list"))
 
-        # admin/superadmin/user — не ограничиваем тут
+        # admin/superadmin/user — не ограничиваем
         return
     except Exception:
-        # safety fallback
         try:
             return redirect(url_for("inventory.wo_list"))
         except Exception:
             return
 
-
 # -------------------------------------------------------------------
 # 10) Вспомогательные миграции (безопасные автополевые апдейты)
 # -------------------------------------------------------------------
 def _ensure_column(table: str, column: str, ddl_type: str):
-    """
-    Безопасно добавляет колонку, если её нет (SQLite).
-    Если таблицы нет — пропускаем без ошибки.
-    """
     try:
-        # есть ли таблица?
         row = db.session.execute(
             db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
             {"t": table}
@@ -326,35 +248,23 @@ def _ensure_column(table: str, column: str, ddl_type: str):
             logging.info("Skip ensure column %s.%s: table does not exist", table, column)
             return
 
-        # есть ли колонка?
         rows = db.session.execute(db.text(f"PRAGMA table_info({table})")).fetchall()
-        names = {r[1] for r in rows}  # name на индексе 1
+        names = {r[1] for r in rows}
         if column in names:
             return
 
         logging.info("Adding column %s to %s ...", column, table)
-        db.session.execute(
-            db.text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
-        )
+        db.session.execute(db.text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
         db.session.commit()
         logging.info("Added column %s to %s.", column, table)
     except Exception as e:
         logging.exception("Failed to ensure column %s.%s: %s", table, column, e)
 
-
 def _backfill_units_for_legacy_parts():
-    """
-    Разово мигрирует старые данные:
-    - создаёт WorkUnit для WorkOrder, если его нет;
-    - прописывает unit_id в work_order_parts, где он NULL.
-    Повторный запуск безопасен.
-    """
     from models import WorkOrder, WorkUnit
-
     orders = WorkOrder.query.all()
     created_units = 0
 
-    # 1) создать недостающие units
     for wo in orders:
         if not wo.units:
             unit = WorkUnit(
@@ -367,7 +277,6 @@ def _backfill_units_for_legacy_parts():
             db.session.flush()
             created_units += 1
 
-    # 2) привязать части без unit_id к первому unit заказа
     res = db.session.execute(db.text("""
         UPDATE work_order_parts
         SET unit_id = (
@@ -379,60 +288,41 @@ def _backfill_units_for_legacy_parts():
         )
         WHERE unit_id IS NULL AND work_order_id IS NOT NULL
     """))
-
     db.session.commit()
     logging.info("Backfill: created %s units; updated %s parts", created_units, res.rowcount)
 
-
 def _boot_ensure_core_columns():
-    """
-    Гарантируем критичные колонки, чтобы не падало при старте.
-    """
     try:
         with app.app_context():
-            # строки заказов
             _ensure_column("work_order_parts", "ordered_flag", "INTEGER DEFAULT 0")
             _ensure_column("work_order_parts", "ordered_date", "DATE")
-            # сами заказы
             _ensure_column("work_orders", "ordered_date", "DATE")
     except Exception:
         logging.exception("Boot ensure columns failed")
 
-
-# --- НОВОЕ: безопасно гарантируем поля «consumption» в issued_part_record и issued_batch
 def _ensure_consumption_columns():
     try:
         with app.app_context():
-            # issued_part_record: новые поля
             _ensure_column("issued_part_record", "consumed_qty",  "INTEGER")
             _ensure_column("issued_part_record", "consumed_flag", "INTEGER DEFAULT 0")
             _ensure_column("issued_part_record", "consumed_at",   "DATETIME")
             _ensure_column("issued_part_record", "consumed_by",   "TEXT")
             _ensure_column("issued_part_record", "consumed_note", "TEXT")
 
-            # issued_batch: агрегированные поля прогресса
             _ensure_column("issued_batch", "consumed_flag", "INTEGER DEFAULT 0")
             _ensure_column("issued_batch", "consumed_at",   "DATETIME")
             _ensure_column("issued_batch", "consumed_by",   "TEXT")
-
-            # опция для пометки складских батчей
             _ensure_column("issued_batch", "is_stock", "INTEGER DEFAULT 0")
     except Exception:
         logging.exception("Ensure consumption columns failed")
 
-
 _boot_ensure_core_columns()
 _ensure_consumption_columns()
 
-
 # -------------------------------------------------------------------
-# 11) Чистка старых .docx из uploads (старше N дней)
+# 11) Чистка старых .docx из uploads
 # -------------------------------------------------------------------
 def cleanup_old_reports(folder: str, days_old: int = 3):
-    """
-    Удаляет .docx файлы из `folder`, которым больше days_old дней.
-    Если файл залочен Word'ом — просто логируем warning и идём дальше.
-    """
     try:
         now_ts = time.time()
         max_age_seconds = days_old * 24 * 60 * 60
@@ -440,11 +330,9 @@ def cleanup_old_reports(folder: str, days_old: int = 3):
         for name in os.listdir(folder):
             if not name.lower().endswith(".docx"):
                 continue
-
             full_path = os.path.join(folder, name)
             if not os.path.isfile(full_path):
                 continue
-
             try:
                 stat = os.stat(full_path)
                 age_seconds = now_ts - stat.st_mtime
@@ -453,10 +341,8 @@ def cleanup_old_reports(folder: str, days_old: int = 3):
                     logging.info("CLEANUP: removed old report %s", full_path)
             except Exception as e:
                 logging.warning("CLEANUP: failed to remove %s: %s", full_path, e)
-
     except Exception as e:
         logging.warning("CLEANUP: general failure: %s", e)
-
 
 # -------------------------------------------------------------------
 # 12) Локальный запуск (dev, adhoc HTTPS)
@@ -466,20 +352,15 @@ if __name__ == "__main__":
         db.create_all()
         logging.info("DB tables ensured (create_all).")
 
-        # существовавший столбец
         _ensure_column("work_order_parts", "unit_label", "TEXT")
-        # связь с WorkUnit
         _ensure_column("work_order_parts", "unit_id", "INTEGER")
-        # цена строки
         _ensure_column("work_order_parts", "unit_cost", "REAL")
 
-        # Разовая миграция старых данных → unit_id
         try:
             _backfill_units_for_legacy_parts()
         except Exception:
             logging.exception("Backfill failed")
 
-        # авто-чистка старых (ненужных) DOCX отчётов
         cleanup_old_reports(app.config["UPLOAD_FOLDER"], days_old=3)
         logging.info("Old .docx cleanup complete.")
 
@@ -487,15 +368,8 @@ if __name__ == "__main__":
     debug = os.getenv("DEBUG", "true").lower() == "true"
     use_ssl = os.getenv("USE_SSL", "1").lower() in ("1", "true", "yes")
 
-    logging.info(
-        f"Starting dev server on https://0.0.0.0:{port} (adhoc TLS), debug={debug}"
-    )
-    app.run(
-        host='0.0.0.0',
-        port=port,
-        debug=debug,
-        ssl_context='adhoc'
-    )
-    # Если без TLS нужно будет:
+    logging.info(f"Starting dev server on https://0.0.0.0:{port} (adhoc TLS), debug={debug}")
+    app.run(host='0.0.0.0', port=port, debug=debug, ssl_context='adhoc')
+    # Для HTTP:
     # logging.info(f"Starting dev server on http://0.0.0.0:{port}, debug={debug}")
     # app.run(host='0.0.0.0', port=port, debug=debug)

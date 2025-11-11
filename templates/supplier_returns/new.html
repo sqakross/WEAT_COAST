@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container" style="max-width: 800px;">
+  <div class="d-flex align-items-center justify-content-between mt-4 mb-2">
+    <a href="{{ url_for('supplier_returns.list_returns') }}" class="btn btn-light">&larr; Back</a>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">New Supplier Return</h5>
+      <small class="text-muted">Create a draft, then add items.</small>
+    </div>
+
+    <form method="post" action="{{ url_for('supplier_returns.new_return') }}">
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">Supplier</label>
+          <input class="form-control" name="supplier_name" placeholder="e.g. Marcone" required>
+        </div>
+      </div>
+      <div class="card-footer d-flex gap-2">
+        <button class="btn btn-primary">Create Draft</button>
+        <a href="{{ url_for('supplier_returns.list_returns') }}" class="btn btn-light">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
