@@ -148,6 +148,7 @@ python app.py
 
 Положи туда ярлык на твой .bat.
 
+sertify https://1.1.1.45:5000/_download_ca
 
 
 

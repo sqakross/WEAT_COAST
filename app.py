@@ -1,8 +1,6 @@
-# app.py — ГОТОВЫЙ
-
-from flask import Flask, request, redirect, url_for
+from flask import Flask, request, redirect, url_for, send_file, abort
 from config import Config
-import os, sys, io, logging, time
+import os, sys, io, logging, time, ipaddress
 from logging.handlers import RotatingFileHandler
 from extensions import db, login_manager
 from flask_login import current_user
@@ -180,6 +178,41 @@ app.register_blueprint(supplier_returns_bp, url_prefix="/supplier_returns")
 logging.info("Flask app configured and blueprints registered.")
 
 # -------------------------------------------------------------------
+# Раздача КОРНЕВОГО CA-корня клиентам (для установки доверия)
+# -------------------------------------------------------------------
+@app.get("/_download_ca")
+def download_ca():
+    """
+    Скачивание корневого CA для установки на клиентских ПК.
+    Ищи файл ssl/ca.crt (PEM) или ssl/wccr-root.cer (DER).
+    Открой в браузере: https://<IP>:<PORT>/_download_ca
+    """
+    # Предпочтительно DER (для Windows). Если нет — отдадим PEM.
+    der_path = os.path.join("ssl", "wccr-root.cer")
+    pem_path = os.path.join("ssl", "ca.crt")
+
+    if os.path.exists(der_path):
+        send_path = der_path
+        mtype = "application/x-x509-ca-cert"
+        dname = "wccr-root.cer"
+    elif os.path.exists(pem_path):
+        send_path = pem_path
+        mtype = "application/x-x509-ca-cert"
+        dname = "wccr-root.cer"
+    else:
+        return "CA file not found. Put ssl/wccr-root.cer or ssl/ca.crt on server.", 404
+
+    # (опционально) ограничим скачивание локальными/приватными адресами
+    try:
+        ip = ipaddress.ip_address(request.remote_addr or "127.0.0.1")
+        if not (ip.is_private or ip.is_loopback):
+            return abort(403)
+    except Exception:
+        pass
+
+    return send_file(send_path, mimetype=mtype, as_attachment=True, download_name=dname, max_age=0)
+
+# -------------------------------------------------------------------
 # 9) Ограничение навигации для роли technician / viewer
 # -------------------------------------------------------------------
 ALLOWED_TECH_ENDPOINTS = {
@@ -345,7 +378,7 @@ def cleanup_old_reports(folder: str, days_old: int = 3):
         logging.warning("CLEANUP: general failure: %s", e)
 
 # -------------------------------------------------------------------
-# 12) Локальный запуск (dev, adhoc HTTPS)
+# 12) Локальный запуск (dev, HTTPS с локальным сертификатом)
 # -------------------------------------------------------------------
 if __name__ == "__main__":
     with app.app_context():
@@ -368,8 +401,17 @@ if __name__ == "__main__":
     debug = os.getenv("DEBUG", "true").lower() == "true"
     use_ssl = os.getenv("USE_SSL", "1").lower() in ("1", "true", "yes")
 
-    logging.info(f"Starting dev server on https://0.0.0.0:{port} (adhoc TLS), debug={debug}")
-    app.run(host='0.0.0.0', port=port, debug=debug, ssl_context='adhoc')
-    # Для HTTP:
-    # logging.info(f"Starting dev server on http://0.0.0.0:{port}, debug={debug}")
-    # app.run(host='0.0.0.0', port=port, debug=debug)
+    if use_ssl:
+        # ВАЖНО: используем серверный сертификат, подписанный нашим CA
+        cert_path = os.path.join("ssl", "server.crt")
+        key_path  = os.path.join("ssl", "server.key")
+
+        if os.path.exists(cert_path) and os.path.exists(key_path):
+            logging.info(f"Starting secure server on https://0.0.0.0:{port}, debug={debug}")
+            app.run(host="0.0.0.0", port=port, debug=debug, ssl_context=(cert_path, key_path))
+        else:
+            logging.warning("SSL server cert not found (ssl/server.crt|server.key). Falling back to HTTP.")
+            app.run(host="0.0.0.0", port=port, debug=debug)
+    else:
+        logging.info(f"Starting HTTP server on http://0.0.0.0:{port}, debug={debug}")
+        app.run(host="0.0.0.0", port=port, debug=debug)

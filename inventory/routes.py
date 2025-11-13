@@ -1252,6 +1252,11 @@ def _next_invoice_number() -> int:
     seed = INVOICE_START_AT - 1
     return max(mb, ml, seed) + 1
 
+def _next_invoice_number() -> int:
+    """Новый уникальный invoice_number на основе максимумов по Batch и Record."""
+    mb = db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0)).scalar() or 0
+    ml = db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)).scalar() or 0
+    return max(int(mb), int(ml)) + 1
 
 def _create_batch_for_records(
     records: list,
@@ -1272,7 +1277,6 @@ def _create_batch_for_records(
 
     for _ in range(5):  # несколько попыток на случай гонки за номер
         inv_no = _next_invoice_number()
-
         try:
             with db.session.begin_nested():  # SAVEPOINT
                 batch = IssuedBatch(
@@ -1286,7 +1290,7 @@ def _create_batch_for_records(
                 db.session.add(batch)
                 db.session.flush()  # резервируем уникальный номер (может кинуть IntegrityError)
 
-                # привязываем строки к батчу и переносим «шапку» для консистентности
+                # привязать строки к батчу + синхронизировать «шапку»
                 for r in records:
                     r.batch_id = batch.id
                     r.invoice_number = inv_no
@@ -1298,8 +1302,7 @@ def _create_batch_for_records(
 
                 db.session.flush()
 
-            # успех
-            return batch
+            return batch  # успех
 
         except IntegrityError:
             db.session.rollback()
@@ -2828,6 +2831,191 @@ def wo_toggle_ordered(wo_id: int, wop_id: int):
 
     return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
+def _auto_assign_invoice_for_wo(wo, current_user):
+    """
+    Находит «свежие» строки выдачи для этого WO без invoice_number/batch
+    и группами присваивает им номер через _create_batch_for_records(...).
+    Возвращает: количество созданных батчей.
+    """
+    from extensions import db
+    from models import IssuedPartRecord
+
+    canon = (wo.canonical_job or "").strip()
+    if not canon:
+        return 0
+
+    # Нормализуем имя техника (куда выдавали)
+    issued_to = (wo.technician_username or wo.technician_name or "").strip()
+    if not issued_to:
+        return 0
+
+    # Подскоп «свежести»: за последний день (можно сузить до сегодняшней даты)
+    now = datetime.utcnow()
+    start = datetime.combine(now.date(), _time.min)
+    end   = datetime.combine(now.date(), _time.max)
+
+    # Кандидаты: строки по этому рефу, без номера и без батча, за сегодня
+    q = (
+        db.session.query(IssuedPartRecord)
+        .filter(
+            or_(
+                func.trim(IssuedPartRecord.reference_job) == canon,
+                func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
+            ),
+            or_(IssuedPartRecord.invoice_number.is_(None),
+                IssuedPartRecord.invoice_number == 0),
+            IssuedPartRecord.batch_id.is_(None),
+            IssuedPartRecord.issue_date.between(start, end),
+        )
+        .order_by(IssuedPartRecord.id.asc())
+    )
+    cand = q.all()
+    if not cand:
+        return 0
+
+    # Фильтруем реально «наши» строки (на случай общих рефов)
+    # Чаще всего issued_to совпадает с техником WO:
+    same_to = [r for r in cand if (r.issued_to or "").strip().lower() == issued_to.strip().lower()]
+    if not same_to:
+        # если ничего не нашли по issued_to — не трогаем (чтобы не схватить чужие)
+        return 0
+
+    # Группировка по (issued_to, issued_by, reference_job, дата)
+    def _key(r):
+        d = r.issue_date.date() if r.issue_date else now.date()
+        return (
+            (r.issued_to or issued_to).strip(),
+            (r.issued_by or (getattr(current_user, "username", "") or "system")).strip(),
+            (r.reference_job or canon).strip(),
+            d,
+            (r.location or None),
+        )
+
+    groups = {}
+    for r in same_to:
+        groups.setdefault(_key(r), []).append(r)
+
+    created = 0
+    for (issued_to_k, issued_by_k, ref_k, day_k, location_k), records in groups.items():
+        try:
+            issue_dt = datetime.combine(day_k, _time.min)
+            _create_batch_for_records(
+                records=records,
+                issued_to=issued_to_k,
+                issued_by=issued_by_k or "system",
+                reference_job=ref_k,
+                issue_date=issue_dt,
+                location=location_k,
+            )
+            created += 1
+        except Exception:
+            db.session.rollback()
+            continue
+
+    if created:
+        from extensions import db
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            created = 0
+
+    return created
+
+# --- helper: build 'batches' payload for wo_detail (adds issued_at_dt) ---
+from datetime import datetime
+
+def _serialize_batches_for_wo_detail(db_batches, wo):
+    """
+    db_batches: iterable IssuedBatch (или твоя структура), у которой есть:
+      - id, technician (имя/username), canonical_ref/reference_job, invoice_number, issued_at
+      - items/records: список IssuedPartRecord (или эквивалент) с полями:
+          id, part (obj) или part_id, quantity, unit_cost_at_issue, issue_date, confirmed
+    wo: текущий WorkOrder (для фолбэков на canonical_job/technician_name)
+
+    Возвращает список словарей для Jinja:
+      keys: is_return, items, total_value, technician, canonical_ref, reference_job,
+            invoice_number, issued_at_dt  (+ оставим issued_at для бэк-совместимости)
+    """
+    result = []
+    for b in db_batches:
+        # --- безопасно собираем список записей (IssuedPartRecord)
+        recs = getattr(b, "records", None) or getattr(b, "items", None) or []
+
+        items = []
+        total_value = 0.0
+        any_confirmed = False
+        all_confirmed = True if recs else False
+        is_return_batch = False
+
+        # Определяем issued_at_dt: приоритет — поле батча; иначе по первой записи
+        issued_at_dt = getattr(b, "issued_at", None)
+        if not issued_at_dt and recs:
+            # возьмём минимальную дату записи как «время батча»
+            issued_at_dt = min((getattr(r, "issue_date", None) for r in recs if getattr(r, "issue_date", None)), default=None)
+
+        # Собираем айтемы
+        for r in recs:
+            qty = getattr(r, "quantity", 0) or 0
+            unit = getattr(r, "unit_cost_at_issue", None)
+            name = None
+            pn = None
+
+            part_obj = getattr(r, "part", None)
+            if part_obj is not None:
+                pn = getattr(part_obj, "part_number", None) or getattr(part_obj, "id", None) or getattr(r, "part_id", None)
+                name = getattr(part_obj, "name", None) or ""
+            else:
+                pn = getattr(r, "part_id", None)
+                name = ""
+
+            line_val = (unit or 0.0) * qty
+            total_value += line_val
+
+            if qty < 0:
+                is_return_batch = True
+
+            confirmed = bool(getattr(r, "confirmed", False))
+            any_confirmed = any_confirmed or confirmed
+            if not confirmed:
+                all_confirmed = False
+
+            items.append({
+                "id": getattr(r, "id", None),
+                "pn": pn or "",
+                "name": name or "",
+                "qty": qty,
+                "unit_price": unit,
+                "confirmed": confirmed,
+                "negative": qty < 0,
+            })
+
+        # Фолбэки по технику/референсу
+        tech = getattr(b, "technician", None) or getattr(wo, "technician_name", None) or ""
+        canonical_ref = getattr(b, "canonical_ref", None) or getattr(b, "reference_job", None) or getattr(wo, "canonical_job", None) or ""
+        reference_job = getattr(b, "reference_job", None) or getattr(wo, "canonical_job", None) or ""
+
+        result.append({
+            "is_return": is_return_batch,
+            "items": items,
+            "total_value": float(total_value),
+            "technician": tech,
+            "canonical_ref": canonical_ref,
+            "reference_job": reference_job,
+            "invoice_number": getattr(b, "invoice_number", None),
+
+            # ключ для нового шаблона (будет отрендерен через |local_dt):
+            "issued_at_dt": issued_at_dt,
+
+            # оставим старый, если где-то ещё используется:
+            "issued_at": getattr(b, "issued_at", None) or (
+                issued_at_dt.strftime("%Y-%m-%d %H:%M") if isinstance(issued_at_dt, datetime) else None
+            ),
+            # для совместимости можно вернуть и «issued_by», если нужно в legacy-печатях
+            "issued_by": getattr(b, "issued_by", None),
+        })
+    return result
+
 
 # --- Work Order details ---
 @inventory_bp.get("/work_orders/<int:wo_id>", endpoint="wo_detail")
@@ -2856,14 +3044,6 @@ def wo_detail(wo_id):
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # print("DEBUG CHECK", {
-    #     "user_id": current_user.id,
-    #     "wo_tech_id": wo.technician_id,
-    #     "user_role": current_user.role,
-    #     "user_name": current_user.username,
-    #     "wo_tech_name": wo.technician_username or wo.technician_name,
-    # })
-
     # 2) доступы (улучшенная логика)
     role_raw = (getattr(current_user, "role", "") or "").strip().lower()
     me_id = getattr(current_user, "id", None)
@@ -2872,18 +3052,15 @@ def wo_detail(wo_id):
     wo_tech_id = getattr(wo, "technician_id", None)
     wo_tech_name = (wo.technician_username or wo.technician_name or "").strip().lower()
 
-    # нормализованные роли
     is_admin_like = role_raw in ("admin", "superadmin")
     is_technician = role_raw in ("technician", "tech")
 
-    # проверка принадлежности Work Order
     is_my_wo = False
     if wo_tech_id and me_id and (wo_tech_id == me_id):
         is_my_wo = True
     elif wo_tech_name and me_name and (wo_tech_name == me_name):
         is_my_wo = True
 
-    # доступы
     if is_technician and not is_my_wo:
         flash("You don't have access to this Work Order.", "danger")
         return redirect(url_for("inventory.wo_list"))
@@ -3018,8 +3195,8 @@ def wo_detail(wo_id):
     batches = []
     for _, recs in grouped.items():
         b = recs[0].batch if recs and getattr(recs[0], "batch", None) else None
-        issued_at = (b.issue_date if b else recs[0].issue_date)
-        issued_at_str = _fmt(issued_at)
+        issued_at = (b.issue_date if b else recs[0].issue_date)  # <-- datetime
+        issued_at_str = _fmt(issued_at)  # строка для совместимости
         tech = recs[0].issued_to
         ref = (b.reference_job if b else (recs[0].reference_job or "")) or ""
         report_id = (b.invoice_number if b else recs[0].invoice_number)
@@ -3065,7 +3242,12 @@ def wo_detail(wo_id):
 
         batches.append(
             {
+                # НОВОЕ: отдаём datetime для шаблона (покажется через |local_dt)
+                "issued_at_dt": issued_at,
+
+                # Оставляем старую строку для бэк-совместимости (legacy печать и т.д.)
                 "issued_at": issued_at_str,
+
                 "technician": tech,
                 "canonical_ref": canon,
                 "reference_job": ref,
@@ -5609,6 +5791,14 @@ def add_part():
 @inventory_bp.route('/issue', methods=['GET', 'POST'])
 @login_required
 def issue_part():
+    from datetime import datetime
+    from flask import request, render_template, redirect, url_for, flash
+    from flask_login import current_user
+    from urllib.parse import urlencode
+
+    from extensions import db
+    from models import Part, IssuedPartRecord
+
     parts = Part.query.filter(Part.quantity > 0).all()
 
     if request.method == 'POST':
@@ -5623,50 +5813,69 @@ def issue_part():
             flash('No parts to issue.', 'warning')
             return redirect(url_for('.issue_part'))
 
+        new_records: list[IssuedPartRecord] = []
+
+        # шапка батча — из первой строки
+        first = all_parts[0]
+        issued_to = (first.get('recipient') or '').strip()
+        reference_job = (first.get('reference_job') or '').strip() or None
+        issued_by = current_user.username
+        issue_dt = datetime.utcnow()
+        location = None  # при наличии — подставь
+
+        # 1) валидируем сток и создаём строки выдачи
         for item in all_parts:
             part = Part.query.get(item['part_id'])
-            if not part or part.quantity < item['quantity']:
+            qty  = int(item.get('quantity') or 0)
+
+            if not part or qty <= 0 or part.quantity < qty:
                 flash(f"Not enough stock for {item.get('part_number', 'UNKNOWN')}", 'danger')
                 return redirect(url_for('.issue_part'))
 
-            part.quantity -= item['quantity']
+            part.quantity -= qty
 
-            record = IssuedPartRecord(
+            rec = IssuedPartRecord(
                 part_id=part.id,
-                quantity=item['quantity'],
-                issued_to=item['recipient'],
-                reference_job=item['reference_job'],
-                issued_by=current_user.username,
-                issue_date=datetime.utcnow(),
-                unit_cost_at_issue=part.unit_cost  # фиксируем цену на момент выдачи
+                quantity=qty,
+                issued_to=issued_to,
+                reference_job=reference_job,
+                issued_by=issued_by,
+                issue_date=issue_dt,
+                unit_cost_at_issue=part.unit_cost,
+                location=location,
             )
-            db.session.add(record)
+            db.session.add(rec)
+            new_records.append(rec)
 
-        db.session.commit()
+        # 2) сразу создаём батч + номер инвойса
+        try:
+            _create_batch_for_records(
+                records=new_records,
+                issued_to=issued_to,
+                issued_by=issued_by,
+                reference_job=reference_job,
+                issue_date=issue_dt,
+                location=location,
+            )
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error creating invoice batch: {e}', 'danger')
+            return redirect(url_for('.issue_part'))
+
         flash('All parts issued successfully.', 'success')
 
-        # >>> ЖЁСТКИЙ РЕДИРЕКТ СРАЗУ В ОТЧЁТ (без url_for, чтобы исключить любые конфликты)
-        today = datetime.utcnow().date().isoformat()
-        first = all_parts[0]
-        recipient = (first.get('recipient') or '').strip()
-        reference_job = (first.get('reference_job') or '').strip()
-
+        # 3) редирект в grouped — инвойс уже существует
+        today = issue_dt.date().isoformat()
         params = {'start_date': today, 'end_date': today}
-        if recipient:
-            params['recipient'] = recipient
+        if issued_to:
+            params['recipient'] = issued_to
         if reference_job:
             params['reference_job'] = reference_job
 
-        # Итог: /reports_grouped?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&recipient=...&reference_job=...
         return redirect('/reports_grouped?' + urlencode(params), code=303)
 
     return render_template('issue_part.html', parts=parts)
-
-
-
-# ----------------- Reports -----------------
-
-
 
 @inventory_bp.route('/reports', methods=['GET', 'POST'])
 @login_required
@@ -5971,166 +6180,27 @@ def reports_grouped():
 @login_required
 def invoice_printdirect():
     """
-    Таб для техников: открывается по клику "Print".
-    1) Мы вычисляем те же строки, что и в view_invoice_pdf.
-    2) Рендерим ПУСТУЮ html-страницу с iframe PDF + auto window.print().
-
-    Важно:
-    - Здесь мы НЕ пытаемся сами рисовать PDF, мы зовём view_invoice_pdf через URL.
-    - Эта страница откроется в новой вкладке -> жест пользователя -> печать не блокируется.
+    Больше не рендерим промежуточную HTML-страницу и не вызываем window.print().
+    Просто отправляем пользователя в обычный PDF viewer (/invoice/pdf),
+    передавая полученные query-параметры как есть.
     """
+    from flask import request, redirect, url_for
 
-    from extensions import db
-    from models import IssuedPartRecord, IssuedBatch
-    from datetime import datetime, time as _time
-    from sqlalchemy import func, or_
-    from flask import request, render_template, flash, redirect, url_for
-    from flask_login import current_user
-
-    # ---- роль/юзер ---
-    role_raw = (getattr(current_user, "role", "") or "").strip().lower()
-    is_admin_like = role_raw in ("admin", "superadmin")
-    is_technician = role_raw in ("technician", "tech")
-    my_name_norm = (getattr(current_user, "username", "") or "").strip().lower()
-
-    def _parse_dt_flex(s: str | None):
-        if not s:
-            return None
-        for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%m/%d/%Y"):
-            try:
-                return datetime.strptime(s, fmt)
-            except Exception:
-                pass
-        return None
-
-    # ---- входные параметры ----
-    inv_s = (request.args.get("invoice_number") or "").strip()
-    issued_to_in = (request.args.get("issued_to") or "").strip()
+    inv_s         = (request.args.get("invoice_number") or "").strip()
+    issued_to_in  = (request.args.get("issued_to") or "").strip()
     reference_job = (request.args.get("reference_job") or "").strip() or None
-    issued_by = (request.args.get("issued_by") or "").strip()
-    issue_date_s = (request.args.get("issue_date") or "").strip()
+    issued_by     = (request.args.get("issued_by") or "").strip()
+    issue_date_s  = (request.args.get("issue_date") or "").strip()
 
-    inv_no = int(inv_s) if inv_s.isdigit() else None
-
-    # ---- грузим строки, как во view_invoice_pdf (короткий повтор логики) ----
-    recs = []
-    if inv_no is not None:
-        batch_ids = [
-            bid for (bid,) in
-            db.session.query(IssuedBatch.id)
-            .filter(IssuedBatch.invoice_number == inv_no)
-            .all()
-        ]
-
-        q = IssuedPartRecord.query
-        if batch_ids:
-            recs = (
-                q.filter(
-                    or_(
-                        IssuedPartRecord.invoice_number == inv_no,
-                        IssuedPartRecord.batch_id.in_(batch_ids),
-                    )
-                )
-                .order_by(IssuedPartRecord.id.asc())
-                .all()
-            )
-        else:
-            recs = (
-                q.filter_by(invoice_number=inv_no)
-                .order_by(IssuedPartRecord.id.asc())
-                .all()
-            )
-
-        if not recs:
-            flash(f"Invoice #{inv_no} not found.", "warning")
-            return redirect(url_for('inventory.reports_grouped'))
-
-        # подтянуть legacy строки, как делаем в PDF-вью
-        # (нам нужно их тоже показать технику, иначе он будет печатать пусто)
-        hdr_first = recs[0]
-        day = hdr_first.issue_date.date() if hdr_first.issue_date else None
-        if day:
-            extra = (
-                IssuedPartRecord.query
-                .filter(
-                    func.trim(IssuedPartRecord.issued_to) == (hdr_first.issued_to or ""),
-                    func.trim(IssuedPartRecord.issued_by) == (hdr_first.issued_by or ""),
-                    func.trim(IssuedPartRecord.reference_job) == (hdr_first.reference_job or ""),
-                    func.date(IssuedPartRecord.issue_date) == day,
-                    or_(
-                        IssuedPartRecord.invoice_number.is_(None),
-                        IssuedPartRecord.invoice_number == 0
-                    ),
-                    IssuedPartRecord.batch_id.is_(None),
-                )
-                .order_by(IssuedPartRecord.id.asc())
-                .all()
-            )
-            if extra:
-                have_ids = {r.id for r in recs}
-                for r in extra:
-                    if r.id not in have_ids:
-                        recs.append(r)
-
-        recs.sort(key=lambda r: r.id)
-
-    else:
-        # legacy режим без номера
-        if issued_to_in and issued_by and issue_date_s:
-            dt = _parse_dt_flex(issue_date_s) or datetime.utcnow()
-            start = datetime.combine(dt.date(), _time.min)
-            end = datetime.combine(dt.date(), _time.max)
-
-            recs = (
-                IssuedPartRecord.query
-                .filter(
-                    IssuedPartRecord.issued_to == issued_to_in,
-                    IssuedPartRecord.issued_by == issued_by,
-                    IssuedPartRecord.reference_job == reference_job,
-                    IssuedPartRecord.issue_date.between(start, end),
-                )
-                .order_by(IssuedPartRecord.id.asc())
-                .all()
-            )
-
-    if not recs:
-        flash("Invoice lines not found.", "warning")
-        return redirect(url_for('inventory.reports_grouped'))
-
-    # ===== Фильтр для техника: только его строки =====
-    if is_technician and (not is_admin_like):
-        safe_recs = []
-        for r in recs:
-            if (r.issued_to or "").strip().lower() == my_name_norm:
-                safe_recs.append(r)
-        recs = safe_recs
-        if not recs:
-            flash("Access denied for this invoice.", "warning")
-            return redirect(url_for('inventory.reports_grouped'))
-
-    # Нам не надо снова генерировать сам PDF тут.
-    # Нам нужно URL, который возвращает сам PDF (view_invoice_pdf),
-    # и URL для возврата.
-    pdf_url = url_for(
+    return redirect(url_for(
         'inventory.view_invoice_pdf',
-        invoice_number=inv_no if inv_no is not None else "",
+        invoice_number=inv_s,
         issued_to=issued_to_in,
         reference_job=reference_job,
         issued_by=issued_by,
-        issue_date=issue_date_s,
-        _external=False
-    )
+        issue_date=issue_date_s
+    ), code=302)
 
-    back_url = url_for('inventory.reports_grouped')
-
-    # Эта страница откроется в новой вкладке => это пользовательский клик.
-    # Внутри страницы мы сразу откроем print().
-    return render_template(
-        "invoice_autoprint.html",
-        invoice_number=inv_no or "—",
-        pdf_url=pdf_url,
-        back_url=back_url
-    )
 
 
 @inventory_bp.route("/invoice/pdf")

@@ -323,7 +323,13 @@
 
         <tr class="{% if is_return %}inv-return-row{% endif %}">
           <td class="batch-issued-at">
-            <span class="issued-at-text">{{ b.get('issued_at') }}</span>
+            <span class="issued-at-text">
+              {% if b.get('issued_at_dt') %}
+                {{ b.get('issued_at_dt')|local_dt }}
+              {% else %}
+                {{ b.get('issued_at') }}
+              {% endif %}
+            </span>
             <span class="batch-badge-holder ms-2">
               {% if b.get('all_confirmed') %}
                 <span class="badge bg-success inv-badge">All confirmed</span>
@@ -397,22 +403,46 @@
           </td>
 
           {% if can_view_docs %}
+            {# ---- REPORT: делаем доступным всегда (фильтры работают без номера) ---- #}
             <td class="text-nowrap">
-              {% if invoice_num %}
-                <a class="btn btn-sm btn-outline-secondary"
-                   href="{{ url_for('inventory.reports_grouped') }}?issued_to={{ tech_for_links|urlencode }}&technician={{ tech_for_links|urlencode }}&company={{ tech_for_links|urlencode }}&tech={{ tech_for_links|urlencode }}&reference_job={{ job_for_links|urlencode }}&ref_job={{ job_for_links|urlencode }}&ref={{ job_for_links|urlencode }}&job={{ job_for_links|urlencode }}&jobs={{ job_for_links|urlencode }}"
-                   target="_blank" rel="noopener">
-                  Open Report
-                </a>
-              {% else %}
-                —
-              {% endif %}
+              <a class="btn btn-sm btn-outline-secondary"
+                 href="{{ url_for('inventory.reports_grouped') }}?issued_to={{ tech_for_links|urlencode }}&technician={{ tech_for_links|urlencode }}&company={{ tech_for_links|urlencode }}&tech={{ tech_for_links|urlencode }}&reference_job={{ job_for_links|urlencode }}&ref_job={{ job_for_links|urlencode }}&ref={{ job_for_links|urlencode }}&job={{ job_for_links|urlencode }}&jobs={{ job_for_links|urlencode }}"
+                 target="_blank" rel="noopener">
+                Open Report
+              </a>
             </td>
 
+            {# ---- PRINT: всегда ведём на /invoice/pdf ---- #}
             <td>
+              {% set print_href = None %}
               {% if invoice_num %}
+                {# обычный случай — по номеру #}
+                {% set print_href = url_for('inventory.view_invoice_pdf') ~
+                   '?invoice_number=' ~ invoice_num ~
+                   '&ref_job=' ~ (b.get('reference_job') or wo.canonical_job) %}
+              {% else %}
+                {# legacy: по issued_to / issued_by / reference_job / issue_date #}
+                {% set issued_at_dt = b.get('issued_at_dt') %}
+                {% if issued_at_dt %}
+                  {# локальное отображение; если без секунд, добавим :00 #}
+                  {% set issued_at_local = issued_at_dt|local_dt %}
+                  {% set issued_at_for_url = issued_at_local ~ (':00' if issued_at_local and (issued_at_local|length == 16) else '') %}
+                {% else %}
+                  {% set issued_at_raw = b.get('issued_at') or '' %}
+                  {% set issued_at_for_url = issued_at_raw ~ (':00' if issued_at_raw and (issued_at_raw|length == 16) else '') %}
+                {% endif %}
+                {% if issued_at_for_url and tech_for_links %}
+                  {% set print_href = url_for('inventory.view_invoice_pdf') ~
+                     '?issued_to=' ~ tech_for_links|urlencode ~
+                     '&reference_job=' ~ (b.get('reference_job') or wo.canonical_job)|urlencode ~
+                     '&issued_by=' ~ current_user.username|urlencode ~
+                     '&issue_date=' ~ issued_at_for_url|urlencode %}
+                {% endif %}
+              {% endif %}
+
+              {% if print_href %}
                 <a class="btn btn-sm btn-outline-primary"
-                   href="{{ url_for('inventory.view_invoice_pdf') }}?invoice_number={{ invoice_num }}&ref_job={{ b.get('reference_job') or wo.canonical_job }}"
+                   href="{{ print_href }}"
                    target="_blank" rel="noopener">
                   Print
                 </a>

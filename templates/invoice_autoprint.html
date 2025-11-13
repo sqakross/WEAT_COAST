@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>
+    {% if invoice_number and invoice_number != "—" %}
+      Invoice {{ "%06d"|format(invoice_number|int) }}
+    {% else %}
+      Invoice (legacy)
+    {% endif %}
+  </title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { height: 100%; margin: 0; }
+    .topbar {
+      display: flex; gap: .5rem; align-items: center;
+      padding: .5rem .75rem; background: #f8f9fa; border-bottom: 1px solid #e9ecef;
+      position: sticky; top: 0; z-index: 5;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+    }
+    .topbar a, .topbar button {
+      text-decoration: none; border: 1px solid #ced4da; padding: .35rem .6rem; border-radius: 6px; background: white; cursor: pointer;
+    }
+    .wrap { height: calc(100% - 44px); }
+    iframe { width: 100%; height: 100%; border: 0; display: block; }
+    @media print {
+      .topbar { display: none !important; }
+      .wrap   { height: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <strong>
+      {% if invoice_number and invoice_number != "—" %}
+        Invoice {{ "%06d"|format(invoice_number|int) }}
+      {% else %}
+        Invoice
+      {% endif %}
+    </strong>
+    <span style="flex:1 1 auto;"></span>
+    {% if back_url %}<a href="{{ back_url }}">← Back</a>{% endif %}
+    <a href="{{ pdf_url }}" target="_blank" rel="noopener">Open PDF</a>
+    <button type="button" onclick="window.print()">Print</button>
+  </div>
+
+  <div class="wrap">
+    <iframe id="pdfFrame" src="{{ pdf_url }}" title="Invoice PDF"></iframe>
+    <noscript>
+      JavaScript is required to auto-print. Open the PDF: <a href="{{ pdf_url }}">open</a>
+    </noscript>
+  </div>
+
+  <script>
+    (function () {
+      // Автопечать, когда PDF загрузится в iframe.
+      const iframe = document.getElementById('pdfFrame');
+      const triggerPrint = () => {
+        // небольшая задержка на рендер встроенного PDF-вьюера
+        setTimeout(() => { try { window.print(); } catch(e) {} }, 300);
+      };
+      // Сработает в большинстве браузеров (same-origin)
+      iframe.addEventListener('load', triggerPrint);
+
+      // Подстраховка: если событие не прилетело, дернуть печать через таймер
+      setTimeout(triggerPrint, 1500);
+    })();
+  </script>
+</body>
+</html>
