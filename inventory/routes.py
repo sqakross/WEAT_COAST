@@ -4854,7 +4854,7 @@ def wo_edit(wo_id: int):
 
     technicians = _query_technicians()
 
-    # preselect
+    # --- preselect technician ---
     selected_tech_id = None
     selected_tech_username = None
     if getattr(wo, "technician_id", None):
@@ -4872,25 +4872,46 @@ def wo_edit(wo_id: int):
                     selected_tech_username = uname
                     break
 
-    # units payload (unchanged)
+    # --- units payload ---
     units = []
     for u in (getattr(wo, "units", []) or []):
         rows = []
         for p in (getattr(u, "parts", []) or []):
+            # --- ALT PN: берём и alt_numbers, и alt_part_numbers ---
+            alt_val = (
+                getattr(p, "alt_numbers", "") or
+                getattr(p, "alt_part_numbers", "") or
+                ""
+            )
+
+            # --- статусные флаги для раскраски ---
+            issued_qty = int(getattr(p, "issued_qty", 0) or 0)
+            # is_ordered свойство уже есть в модели
+            is_ordered = bool(getattr(p, "is_ordered", False))
+
             rows.append({
                 "id": getattr(p, "id", None),
                 "part_number": getattr(p, "part_number", "") or "",
                 "part_name": getattr(p, "part_name", "") or "",
                 "quantity": int(getattr(p, "quantity", 0) or 0),
-                "alt_numbers": getattr(p, "alt_numbers", "") or "",
+
+                # ALT PN для формы
+                "alt_numbers": alt_val,
+
                 "warehouse": getattr(p, "warehouse", "") or "",
                 "supplier": getattr(p, "supplier", "") or "",
                 "backorder_flag": bool(getattr(p, "backorder_flag", False)),
                 "line_status": getattr(p, "line_status", "") or "search_ordered",
                 "unit_cost": (
-                    float(getattr(p, "unit_cost")) if getattr(p, "unit_cost") is not None else None
+                    float(getattr(p, "unit_cost"))
+                    if getattr(p, "unit_cost") is not None else None
                 ),
+
+                # дополнительные поля для раскраски в шаблоне
+                "issued_qty": issued_qty,
+                "is_ordered": is_ordered,
             })
+
         if not rows:
             rows = [{
                 "id": None,
@@ -4899,7 +4920,10 @@ def wo_edit(wo_id: int):
                 "warehouse": "", "supplier": "",
                 "backorder_flag": False, "line_status": "search_ordered",
                 "unit_cost": 0.0,
+                "issued_qty": 0,
+                "is_ordered": False,
             }]
+
         units.append({
             "id": getattr(u, "id", None),
             "brand": getattr(u, "brand", "") or "",
@@ -4908,6 +4932,7 @@ def wo_edit(wo_id: int):
             "rows": rows,
         })
 
+    # если вообще нет юнитов — создаём один пустой с заготовленной строкой
     if not units:
         units = [{
             "brand":  wo.brand or "",
@@ -4920,6 +4945,8 @@ def wo_edit(wo_id: int):
                 "warehouse": "", "supplier": "",
                 "backorder_flag": False, "line_status": "search_ordered",
                 "unit_cost": 0.0,
+                "issued_qty": 0,
+                "is_ordered": False,
             }],
         }]
 
