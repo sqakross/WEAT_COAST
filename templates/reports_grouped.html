@@ -30,6 +30,18 @@
     gap: .25rem;
     margin-right: .5rem;
   }
+
+  /* Подсветка инвойса, на который пришли по номеру */
+  .focused-invoice {
+    box-shadow: 0 0 0 3px #0d6efd;
+    position: relative;
+    z-index: 5;
+    animation: pulse-focus 1.4s ease-out 1;
+  }
+  @keyframes pulse-focus {
+    0%   { box-shadow: 0 0 0 6px rgba(13,110,253,0.6); }
+    100% { box-shadow: 0 0 0 0 rgba(13,110,253,0); }
+  }
 </style>
 
 <div class="reports-grouped">
@@ -86,10 +98,14 @@
     <h3 class="mt-3">Results:</h3>
 
     {# ------------------ Invoice cards loop ------------------ #}
-    {% for inv in invoices %}
+    {# сортируем по issue_date в обратном порядке, чтобы новый был сверху #}
+    {% for inv in invoices|sort(attribute='issue_date', reverse=True) %}
       {% set lines = inv['items'] %}
       {% set inv_no_raw = inv.invoice_number %}
       {% set inv_no_str = ('%06d' % (inv_no_raw|int)) if inv_no_raw is not none else '—' %}
+
+      {# признак, что это "активный" инвойс (по номеру фильтра) #}
+      {% set is_focused = invoice and inv.invoice_number and (invoice|string == inv.invoice_number|string) %}
 
       {# batch, если это «новый» инвойс: берём у первой строки #}
       {% set batch = (lines and lines[0].batch) if lines else None %}
@@ -139,7 +155,9 @@
         {% set is_stock = (inv.reference_job and ((inv.reference_job|lower)[:5] == 'stock')) %}
       {% endif %}
 
-      <div class="card mb-4 p-3 {{ card_class }}" style="{{ card_bg }}">
+      <div class="card mb-4 p-3 {{ card_class }} invoice-card{% if is_focused %} focused-invoice{% endif %}"
+           style="{{ card_bg }}"
+           id="invoice-{{ inv.invoice_number or 'no-num-' ~ loop.index }}">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
           <div class="d-flex flex-wrap align-items-center gap-2">
             <div class="d-flex flex-wrap align-items-center gap-2">
@@ -401,4 +419,17 @@
     <p class="mt-3">No records found.</p>
   {% endif %}
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  // Если есть "активный" инвойс (по номеру в фильтре) – скроллим к нему
+  const focused = document.querySelector('.focused-invoice');
+  if (focused) {
+    const offset = 120; // чтобы не подлез под navbar
+    const rect = focused.getBoundingClientRect();
+    const top = rect.top + window.pageYOffset - offset;
+    window.scrollTo({ top: top, behavior: 'smooth' });
+  }
+});
+</script>
 {% endblock %}

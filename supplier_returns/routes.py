@@ -83,6 +83,7 @@ def new_return():
 
     return render_template("supplier_returns/new.html")
 
+
 # ДОБАВЬ это рядом с другими helper-ами
 def _get_action_from_form() -> str:
     """
@@ -173,6 +174,7 @@ def _save_rows_from_request(b: SupplierReturnBatch) -> dict[int, str]:
     db.session.commit()
     return errors_by_index
 
+
 @supplier_returns_bp.route("/<int:batch_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_return(batch_id: int):
@@ -226,8 +228,17 @@ def edit_return(batch_id: int):
                 errors_idx = {id_to_index[i] for i in svc_errs_by_id.keys() if i in id_to_index}
                 return render_template("supplier_returns/edit.html", b=b, errors_idx=errors_idx)
 
+            # УСПЕХ: сразу идём на отчёт по инвойсу за сегодня, по этому поставщику
+            from datetime import date
+            today_str = date.today().strftime("%Y-%m-%d")
+
             flash("Posted: stock decremented.", "success")
-            return redirect(url_for(".edit_return", batch_id=b.id))
+            return redirect(url_for(
+                "inventory.reports_grouped",
+                start_date=today_str,
+                end_date=today_str,
+                recipient=b.supplier_name or ""
+            ))
 
         if action == "unpost":
             try:
@@ -250,6 +261,7 @@ def edit_return(batch_id: int):
     # GET
     recalc_batch_totals(b)
     return render_template("supplier_returns/edit.html", b=b, errors_idx=set())
+
 
 @supplier_returns_bp.route("/<int:batch_id>/delete", methods=["POST"])
 @login_required

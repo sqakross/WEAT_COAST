@@ -16,8 +16,45 @@
   .wo-form .unit-table td.issue-cell{position:relative;}
   .wo-form .unit-table .issue-check{position:relative; z-index:3; pointer-events:auto!important; opacity:1!important; cursor:pointer;}
   .wo-form .unit-table td.issue-cell, .wo-form .unit-table td.issue-cell *{ pointer-events:auto!important; }
-  tr.issued-row{ background:#f1f3f5; color:#6c757d; }
   .unit-table .ordered-col{ display:none; }
+
+  /* ВИЗУАЛЬНАЯ ПОДСВЕТКА КАК В WORK ORDER */
+
+  /* Выданные (issued) – зелёные */
+  tr.issued-row{
+    background:#e6f4ea;
+  }
+  tr.issued-row .pn,
+  tr.issued-row .part-name,
+  tr.issued-row .qty,
+  tr.issued-row .unit-cost{
+    color:#198754;
+    font-weight:600;
+  }
+
+  /* Заказанные (ordered) – синие */
+  tr.row-ordered{
+    background:#e7f1ff;
+  }
+  tr.row-ordered .pn,
+  tr.row-ordered .part-name,
+  tr.row-ordered .qty,
+  tr.row-ordered .unit-cost{
+    color:#0d6efd;
+    font-weight:600;
+  }
+
+  /* Backorder – красные */
+  tr.row-backorder{
+    background:#fff5f5;
+  }
+  tr.row-backorder .pn,
+  tr.row-backorder .part-name,
+  tr.row-backorder .qty,
+  tr.row-backorder .unit-cost{
+    color:#c92a2a;
+    font-weight:600;
+  }
 
   .wo-header-line {
     display:flex;
@@ -176,7 +213,14 @@
               {% set is_ord = (rf in (True, 1, '1')) or
                                (r.status is defined and (r.status or '')|lower == 'ordered') or
                                (r.line_status is defined and (r.line_status or '')|lower == 'ordered') %}
-              <tr class="{{ 'issued-row' if issued_full else '' }}">
+
+              {# формируем css-классы строки #}
+              {% set row_class = '' %}
+              {% if issued_full %}{% set row_class = row_class + ' issued-row' %}{% endif %}
+              {% if is_ord %}{% set row_class = row_class + ' row-ordered' %}{% endif %}
+              {% if r.backorder_flag %}{% set row_class = row_class + ' row-backorder' %}{% endif %}
+
+              <tr class="{{ row_class|trim }}">
                 <td><input class="form-control pn" name="units[{{ ui }}][rows][{{ ri }}][part_number]" value="{{ r.part_number or '' }}" maxlength="80" {{ ro }} {{ dis }}></td>
                 <td><input class="form-control" name="units[{{ ui }}][rows][{{ ri }}][alt_numbers]" value="{{ r.alt_numbers or '' }}" {{ ro }} {{ dis }}></td>
                 <td><input class="form-control part-name" name="units[{{ ui }}][rows][{{ ri }}][part_name]" value="{{ r.part_name or '' }}" maxlength="120" {{ ro }} {{ dis }}></td>
