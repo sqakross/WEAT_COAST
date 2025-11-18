@@ -216,9 +216,15 @@
 
               {# формируем css-классы строки #}
               {% set row_class = '' %}
-              {% if issued_full %}{% set row_class = row_class + ' issued-row' %}{% endif %}
-              {% if is_ord %}{% set row_class = row_class + ' row-ordered' %}{% endif %}
-              {% if r.backorder_flag %}{% set row_class = row_class + ' row-backorder' %}{% endif %}
+              {% if issued_full %}
+                {% set row_class = row_class + ' issued-row' %}
+              {% elif is_ord %}
+                {# если уже выдано полностью, НЕ помечаем как ordered, только зелёный #}
+                {% set row_class = row_class + ' row-ordered' %}
+              {% endif %}
+              {% if r.backorder_flag %}
+                {% set row_class = row_class + ' row-backorder' %}
+              {% endif %}
 
               <tr class="{{ row_class|trim }}">
                 <td><input class="form-control pn" name="units[{{ ui }}][rows][{{ ri }}][part_number]" value="{{ r.part_number or '' }}" maxlength="80" {{ ro }} {{ dis }}></td>
@@ -823,7 +829,7 @@
     if(!btn) return;
 
     if(btn.classList.contains('del-unit')){
-      const card = btn.closest('.card');
+      const card = btn.closest('card');
       card?.remove();
 
       document.querySelectorAll('#unitsWrap .card').forEach((c, idx)=>{
@@ -853,7 +859,7 @@
 
     if(btn.classList.contains('del-row')){
       const tr   = btn.closest('tr');
-      const card = btn.closest('.card');
+      const card = btn.closest('card');
       tr?.remove();
       recomputeUnitSubtotal(card);
       // NEW: пересчёт после удаления строки
