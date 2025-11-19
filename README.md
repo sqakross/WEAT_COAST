@@ -150,6 +150,10 @@ python app.py
 
 sertify https://1.1.1.45:5000/_download_ca
 
+copy bd:
+$stamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+Copy-Item "instance\inventory.db" "instance\inventory_backup_$stamp.db"
+del branch git branch -d name
 
 
 

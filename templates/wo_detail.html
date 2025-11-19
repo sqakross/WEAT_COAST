@@ -412,20 +412,35 @@
               </a>
             </td>
 
-            {# ---- PRINT ---- #}
+            {# ---- PRINT: прямой вызов /invoice/pdf ---- #}
             <td>
               {% set print_href = None %}
+
               {% if invoice_num %}
                 {# обычный случай — по номеру #}
-                {% set print_href = url_for('inventory.view_invoice_pdf') ~
-                   '?invoice_number=' ~ invoice_num ~
-                   '&ref_job=' ~ (b.get('reference_job') or wo.canonical_job) %}
+                {% set print_href = url_for('inventory.view_invoice_pdf',
+                                            invoice_number=invoice_num,
+                                            ref_job=(b.get('reference_job') or wo.canonical_job)) %}
               {% else %}
-                {# НОВОЕ: когда номера ещё нет, просто открываем grouped-report по теху и job,
-                   чтобы не вызывать /invoice/pdf и не ловить "Invoice lines not found". #}
-                {% set print_href = url_for('inventory.reports_grouped') ~
-                   '?recipient=' ~ tech_for_links|urlencode ~
-                   '&reference_job=' ~ job_for_links|urlencode %}
+                {# новый инвойс без номера — legacy поиск по issued_to / ref_job / issued_by / issue_date #}
+                {% set issued_by_val = b.get('issued_by') or current_user.username %}
+                {% if b.get('issued_at_dt') %}
+                  {% set issue_dt_str = b.get('issued_at_dt').strftime('%Y-%m-%d %H:%M:%S') %}
+                {% else %}
+                  {% set raw = b.get('issued_at') or '' %}
+                  {% if raw and raw|length == 16 %}
+                    {# "YYYY-MM-DD HH:MM" → добавим секунды #}
+                    {% set issue_dt_str = raw ~ ':00' %}
+                  {% else %}
+                    {% set issue_dt_str = raw %}
+                  {% endif %}
+                {% endif %}
+
+                {% set print_href = url_for('inventory.view_invoice_pdf',
+                                            issued_to=tech_for_links,
+                                            reference_job=(b.get('reference_job') or wo.canonical_job),
+                                            issued_by=issued_by_val,
+                                            issue_date=issue_dt_str) %}
               {% endif %}
 
               {% if print_href %}

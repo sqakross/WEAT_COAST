@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+instance/
 *.py[cod]
 *.pyo
 *.pyd
