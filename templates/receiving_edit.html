@@ -53,15 +53,19 @@
               Supplier <span class="text-danger">*</span>
             </label>
             <input name="supplier_name"
+                   id="supplier_input"
                    class="form-control form-control-sm"
                    required
                    value="{{ batch.supplier_name if batch else '' }}">
           </div>
 
           <div class="col-md-4">
-            <label class="form-label fw-semibold" style="font-size:.9rem;">Invoice #</label>
+            <label class="form-label fw-semibold" style="font-size:.9rem;">
+              Invoice # <span class="text-danger">*</span>
+            </label>
             <input name="invoice_number"
                    class="form-control form-control-sm"
+                   required
                    value="{{ batch.invoice_number if batch else '' }}">
           </div>
 
@@ -311,6 +315,34 @@
 </div>
 
 <script>
+// ===== helper: get current supplier value =====
+function getSupplierValue() {
+  const supplierInput = document.getElementById('supplier_input');
+  return supplierInput ? supplierInput.value.trim() : '';
+}
+
+// ===== apply supplier to all EMPTY location cells =====
+function syncLocationsFromSupplier() {
+  const supplier = getSupplierValue();
+  if (!supplier) return;
+
+  document.querySelectorAll('.row-loc').forEach((inp) => {
+    if (!inp.value.trim()) {
+      inp.value = supplier;
+    }
+  });
+}
+
+// ===== apply supplier to a single row (for new rows) =====
+function applySupplierToRow(tr) {
+  const supplier = getSupplierValue();
+  if (!supplier || !tr) return;
+  const locInput = tr.querySelector('.row-loc');
+  if (locInput && !locInput.value.trim()) {
+    locInput.value = supplier;
+  }
+}
+
 function addRow() {
   const tbody = document.querySelector('#rowsTable tbody');
   const idx = tbody.querySelectorAll('tr').length;
@@ -368,6 +400,7 @@ function addRow() {
   `;
   tbody.appendChild(tr);
   hookRowInputs(tr);
+  applySupplierToRow(tr);   // автозаполнение Location из Supplier
   recalcTotals();
 }
 
@@ -445,8 +478,18 @@ document.addEventListener('DOMContentLoaded', () => {
   if (ee) {
     ee.addEventListener('input', recalcTotals);
   }
-  // initial calc
+
+  // supplier -> locations автозаполнение
+  const supplierInput = document.getElementById('supplier_input');
+  if (supplierInput) {
+    // когда закончил ввод (сменил фокус или поле изменилось)
+    supplierInput.addEventListener('change', syncLocationsFromSupplier);
+    supplierInput.addEventListener('blur', syncLocationsFromSupplier);
+  }
+
+  // initial calc + initial location fill (если Supplier уже задан)
   recalcTotals();
+  syncLocationsFromSupplier();
 });
 </script>
 

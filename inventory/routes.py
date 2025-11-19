@@ -7810,7 +7810,7 @@ def import_parts_upload():
             return None
 
     def _infer_invoice_number(norm_df, source_file: str, supplier_hint: str | None) -> str:
-        # unchanged from your code
+        # unchanged logic, но с правильным импортом pdfminer
         if norm_df is not None:
             for col in ("invoice_no", "invoice", "order_no", "ref", "reference"):
                 if col in norm_df.columns:
@@ -7839,6 +7839,7 @@ def import_parts_upload():
                         text += d[i].get_text() + "\n"
             except Exception:
                 try:
+                    # <<< ВАЖНО: правильный модуль pdfminer >>>
                     from pdfminer.high_level import extract_text
                     text = extract_text(source_file) or ""
                 except Exception:
@@ -7850,7 +7851,6 @@ def import_parts_upload():
         return ""
 
     def _ensure_norm_columns(df, default_loc: str, saved_path: str):
-        # your unchanged version
         import pandas as pd
         if df is None:
             cols = [
@@ -7956,7 +7956,7 @@ def import_parts_upload():
         return df
 
     def _detect_supplier_from_content(saved_path: str, df_hint):
-        # unchanged logic from your version
+        # та же логика, но с правильным pdfminer
         try:
             base = (saved_path or "").lower()
             if "reliable" in base:
@@ -8015,12 +8015,19 @@ def import_parts_upload():
                     out.append(t)
         return "/".join(out)
 
+    def _parse_invoice_date_from_form(field_name: str = "invoice_date") -> date:
+        raw = (request.form.get(field_name) or "").strip()
+        if not raw:
+            return date.today()
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except ValueError:
+                continue
+        return date.today()
+
     # -------- extra: применить ОДИН РАЗ --------------------------------------
     def _apply_extra_to_df_once(df, extra_expenses_float, eps=1e-6):
-        """
-        Применяет extra-траты к df ТОЛЬКО если они ещё не были применены.
-        Возвращает (df, subtotal_base, grand_total)
-        """
         import pandas as pd
 
         df = df.copy()
@@ -8035,19 +8042,12 @@ def import_parts_upload():
         extra = float(extra_expenses_float or 0.0)
         target_total = subtotal_base + extra
 
-        # если уже применено — выходим
         if abs(current_total - target_total) <= float(eps or 1e-6):
             return df, subtotal_base, target_total
 
         return _distribute_extra_and_adjust_costs(df, extra)
 
     def _distribute_extra_and_adjust_costs(df, extra_expenses_float):
-        """
-        df columns we rely on:
-          - quantity (int)
-          - unit_cost_base (float)  <-- чистая цена за штуку
-        We compute adjusted unit_cost per row with proportional distribution.
-        """
         import pandas as pd
 
         df = df.copy()
@@ -8080,7 +8080,6 @@ def import_parts_upload():
     enabled = int(current_app.config.get("WCCR_IMPORT_ENABLED", 0))
     dry     = int(current_app.config.get("WCCR_IMPORT_DRY_RUN", 1))
 
-    # debug flash
     if request.method == "POST":
         keys = list(request.form.keys())
         flash(
@@ -8105,10 +8104,16 @@ def import_parts_upload():
         except Exception:
             extra_expenses_val = 0.0
 
+        invoice_date_raw = (request.form.get("invoice_date") or "").strip()
+        invoice_date_val = _parse_invoice_date_from_form("invoice_date")
+
+        # НОВОЕ: читаем supplier из visible-поля или скрытого supplier_hint
+        supplier_from_form = (request.form.get("supplier") or
+                              request.form.get("supplier_hint") or "").strip()
+
         if not saved_path:
             flash("Saved path is empty. Upload the file again.", "warning")
 
-        # превью форма -> dict[] -> DataFrame
         rows = parse_preview_rows_relaxed(request.form)
         if not rows:
             flash("Нет данных в форме (пустая таблица).", "warning")
@@ -8116,21 +8121,25 @@ def import_parts_upload():
                 "import_preview.html",
                 rows=[],
                 saved_path=saved_path,
-                supplier_hint=request.form.get("supplier_hint",""),
+                supplier_hint=supplier_from_form,
                 extra_expenses=extra_expenses_val,
                 subtotal_base=0.0,
                 grand_total=extra_expenses_val,
+                invoice_date=invoice_date_raw,
             )
 
         norm = rows_to_norm_df(rows, saved_path)
         norm = _coerce_norm_df(norm)
 
-        # supplier_hint
+        # если юзер не ввёл supplier — пробуем угадать; если всё равно пусто, ругаемся
         supplier_hint = (
-            (request.form.get("supplier_hint") or "").strip()
-            or _detect_supplier_from_content(saved_path, norm)
+            supplier_from_form or
+            _detect_supplier_from_content(saved_path, norm) or ""
         )
-        default_loc   = _supplier_to_default_location(supplier_hint)
+        if not supplier_hint:
+            flash("Supplier is required. Please fill Supplier field.", "danger")
+
+        default_loc = _supplier_to_default_location(supplier_hint)
 
         if norm is None or norm.empty:
             flash("Нет данных для применения импорта (пустой набор строк).", "warning")
@@ -8138,19 +8147,15 @@ def import_parts_upload():
                 "import_preview.html",
                 rows=[],
                 saved_path=saved_path,
-                supplier_hint=supplier_hint or "",
+                supplier_hint=supplier_hint,
                 extra_expenses=extra_expenses_val,
                 subtotal_base=0.0,
                 grand_total=extra_expenses_val,
+                invoice_date=invoice_date_raw,
             )
 
-        # гарантированные столбцы (включая unit_cost_base)
-        # гарантированные столбцы (включая unit_cost_base)
         norm = _ensure_norm_columns(norm, default_loc, saved_path)
 
-        # ВАЖНО: мы пришли ИМЕННО из превью-формы (есть rows[...]),
-        # unit_cost в форме уже "с fee". НИЧЕГО не перераспределяем.
-        # Просто посчитаем totals для отображения/логов и СБРОСИМ extra.
         import pandas as pd
         norm["quantity"] = pd.to_numeric(norm["quantity"], errors="coerce").fillna(0).astype(int)
         norm["unit_cost"] = pd.to_numeric(norm["unit_cost"], errors="coerce").fillna(0.0)
@@ -8159,7 +8164,6 @@ def import_parts_upload():
         subtotal_base = float((norm["quantity"] * norm["unit_cost_base"]).sum() or 0.0)
         grand_total = float((norm["quantity"] * norm["unit_cost"]).sum() or 0.0)
 
-        # Чтобы нигде далее ничего не "добавилось", принудительно обнулим extra:
         extra_expenses_val = 0.0
 
         flash(
@@ -8169,19 +8173,21 @@ def import_parts_upload():
 
         invoice_guess = _infer_invoice_number(norm, saved_path, supplier_hint) or ""
 
-        # ---------- если пользователь нажал SAVE ----------
+        # ----- SAVE (остаться на превью) -----
         if "save" in request.form:
             return render_template(
                 "import_preview.html",
                 rows=norm.to_dict(orient="records"),
                 saved_path=saved_path,
-                supplier_hint=supplier_hint or "",
+                supplier_hint=supplier_hint,
                 extra_expenses=extra_expenses_val,
                 subtotal_base=subtotal_base,
-                grand_total=grand_total
+                grand_total=grand_total,
+                default_loc=default_loc or "MAIN",
+                invoice_date=invoice_date_raw,
             )
 
-        # ---------- APPLY ----------
+        # ----- APPLY (создать batch) -----
         if "apply" in request.form:
             if dry or not enabled:
                 flash("Импорт в режиме предпросмотра (DRY) или отключён конфигом.", "info")
@@ -8189,16 +8195,16 @@ def import_parts_upload():
                     "import_preview.html",
                     rows=norm.to_dict(orient="records"),
                     saved_path=saved_path,
-                    supplier_hint=supplier_hint or "",
+                    supplier_hint=supplier_hint,
                     extra_expenses=extra_expenses_val,
                     subtotal_base=subtotal_base,
                     grand_total=grand_total,
                     default_loc=default_loc or "MAIN",
+                    invoice_date=invoice_date_raw,
                 )
 
             session = db.session
 
-            # модели ReceivingBatch/ReceivingItem
             try:
                 from models import ReceivingBatch as BatchModel
             except Exception:
@@ -8215,7 +8221,6 @@ def import_parts_upload():
                 except Exception:
                     ItemModel = None
 
-            # создаём batch (GoodsReceipt)
             batch = None
             batch_id_field = None
             if BatchModel is not None:
@@ -8237,9 +8242,8 @@ def import_parts_upload():
                 batch_kwargs = {}
                 if B_SUP:   batch_kwargs[B_SUP]   = (supplier_hint or "Unknown")
                 if B_INV:   batch_kwargs[B_INV]   = invoice_guess
-                if B_DATE:  batch_kwargs[B_DATE]  = date.today()
+                if B_DATE:  batch_kwargs[B_DATE]  = invoice_date_val
                 if B_CURR:  batch_kwargs[B_CURR]  = "USD"
-                # сохраним сумму в заметке для аудита, но НЕ в числовом поле
                 note_extra = f" (extra applied: {extra_expenses_val:.2f})" if extra_expenses_val else ""
                 if B_NOTES: batch_kwargs[B_NOTES] = f"Imported from {os.path.basename(saved_path)}{note_extra}"
                 if B_STAT:  batch_kwargs[B_STAT]  = "new"
@@ -8248,7 +8252,6 @@ def import_parts_upload():
                 if B_P_AT:  batch_kwargs[B_P_AT]  = None
                 if B_P_BY:  batch_kwargs[B_P_BY]  = None
                 if B_ATTP:  batch_kwargs[B_ATTP]  = ""
-                # КРИТИЧЕСКОЕ: числовое поле extra в батче = 0.0 (уже включено в unit_cost строк)
                 if B_EXTRA: batch_kwargs[B_EXTRA] = 0.0
 
                 try:
@@ -8266,16 +8269,13 @@ def import_parts_upload():
                     logging.exception("Failed to create ReceivingBatch: %s", e)
                     flash("Не удалось создать ReceivingBatch. Продолжаю без батча.", "warning")
 
-            # вспомогательная: проверка дубликатов
             def duplicate_exists(rk: str) -> bool:
                 return has_key(rk)
 
-            # основной апдейтер склада
+            def _merge_locations_stable_local(old_loc: str | None, new_loc: str | None) -> str:
+                return _merge_locations_stable(old_loc, new_loc)
+
             def make_movement(m: dict) -> None:
-                """
-                Применяем одну строку приходной накладной к складу.
-                m["unit_cost"] УЖЕ скорректирована (adj cost).
-                """
                 PartModel = Part
 
                 PN_FIELDS   = ["part_number","number","sku","code","partnum","pn"]
@@ -8297,18 +8297,16 @@ def import_parts_upload():
 
                 incoming_pn   = m["part_number"]
                 incoming_qty  = int(m.get("qty") or m.get("quantity") or 0)
-                incoming_cost = m.get("unit_cost")  # это уже adj cost
+                incoming_cost = m.get("unit_cost")
                 incoming_name = m.get("part_name") or ""
                 incoming_loc  = (m.get("location") or "").strip().upper()
-                incoming_sup  = m.get("supplier") or ""
+                incoming_sup  = supplier_hint or (m.get("supplier") or "")
 
-                # ищем Part по PN
                 part = PartModel.query.filter(
                     getattr(PartModel, pn_field) == incoming_pn
                 ).first()
 
                 if not part:
-                    # создаём Part
                     kwargs = {
                         pn_field: incoming_pn,
                         qty_field: 0,
@@ -8337,28 +8335,23 @@ def import_parts_upload():
                 on_hand_before = int(getattr(part, qty_field) or 0)
                 old_loc_before = getattr(part, loc_field) if loc_field else None
 
-                # qty +
                 setattr(part, qty_field, on_hand_before + incoming_qty)
 
-                # last cost = incoming adj cost
                 if cost_field and (incoming_cost is not None):
                     setattr(part, cost_field, float(incoming_cost))
 
-                # name fill if empty
                 if name_field and incoming_name and not getattr(part, name_field):
                     setattr(part, name_field, incoming_name)
 
-                # smart merge location
                 if loc_field:
                     incoming_loc_up = incoming_loc
                     if incoming_loc_up:
                         if on_hand_before > 0:
-                            merged = _merge_locations_stable(old_loc_before, incoming_loc_up)
+                            merged = _merge_locations_stable_local(old_loc_before, incoming_loc_up)
                             setattr(part, loc_field, merged)
                         else:
                             setattr(part, loc_field, incoming_loc_up)
 
-                # create ReceivingItem / GoodsReceiptLine
                 if ItemModel is not None and batch is not None and batch_id_field is not None:
                     I_BATCH = _pick_field(ItemModel, ["goods_receipt_id","batch_id","receiving_id"])
                     I_PART  = _pick_field(ItemModel, ["part_id","item_part_id"])
@@ -8397,10 +8390,9 @@ def import_parts_upload():
                         logging.exception("Failed to create ReceivingItem: %s", e)
                         flash("Не удалось создать строку приёмки (см. лог).", "warning")
 
-                # register dedupe key
                 meta = {
                     "file": m.get("source_file"),
-                    "supplier": (m.get("supplier") or "").strip(),
+                    "supplier": supplier_hint,
                     "invoice": (invoice_guess or "").strip(),
                 }
                 try:
@@ -8410,14 +8402,12 @@ def import_parts_upload():
                     pass
                 add_key(m["row_key"], meta)
 
-            # построить движения и применить make_movement()
             built, errors = build_receive_movements(
                 norm,
                 duplicate_exists_func=duplicate_exists,
                 make_movement_func=make_movement
             )
 
-            # фиксируем всё
             try:
                 session.commit()
             except Exception as e:
@@ -8426,7 +8416,6 @@ def import_parts_upload():
                 flash("Ошибка при окончательной записи в базу. Изменения откатились.", "danger")
                 return redirect(url_for("inventory.import_parts_upload"))
 
-            # теперь отметить batch как posted
             bid = None
             if batch is not None and batch_id_field:
                 try:
@@ -8449,7 +8438,6 @@ def import_parts_upload():
                                 uid = 0
                             setattr(fresh_batch, B_P_BY, uid)
 
-                        # страхуемся: extra в батче = 0.0
                         if B_EXTRA and getattr(fresh_batch, B_EXTRA, 0) not in (0, 0.0, None):
                             setattr(fresh_batch, B_EXTRA, 0.0)
 
@@ -8495,7 +8483,6 @@ def import_parts_upload():
         ext = os.path.splitext(path)[1].lower()
         df  = dataframe_from_pdf(path, try_ocr=False) if ext == ".pdf" else load_table(path)
 
-        # до нормализации — угадать поставщика
         supplier_hint = _detect_supplier_from_content(path, df)
         default_loc   = _supplier_to_default_location(supplier_hint)
         flash(
@@ -8527,10 +8514,7 @@ def import_parts_upload():
         for msg in issues:
             flash(msg, "warning")
 
-        # гарантировать столбцы
         norm = _ensure_norm_columns(norm, default_loc, path)
-
-        # распределить extra_expenses=0 при первом показе (для отображения)
         norm, subtotal_base, grand_total = _distribute_extra_and_adjust_costs(norm, 0.0)
 
         rows = norm.to_dict(orient="records")

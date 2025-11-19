@@ -37,6 +37,24 @@
       <div class="card-body d-flex flex-wrap gap-3 align-items-start justify-content-between"
            style="padding:1rem 1.25rem;">
 
+        <!-- Supplier (required) -->
+        <div class="d-flex flex-column" style="min-width:200px; max-width:240px;">
+          <label class="form-label mb-1" style="font-size:.8rem; font-weight:600;">
+            Supplier <span class="text-danger">*</span>
+          </label>
+          <input class="form-control form-control-sm"
+                 style="border-radius:.5rem; font-size:.9rem;"
+                 type="text"
+                 name="supplier_hint"
+                 form="import-form"
+                 value="{{ supplier_hint or '' }}"
+                 placeholder="Reliable Parts / Marcone"
+                 required>
+          <small class="text-muted" style="font-size:.7rem; line-height:1.2;">
+            Will be saved on the Goods Receipt.
+          </small>
+        </div>
+
         <!-- Extra expenses -->
         <div class="d-flex flex-column" style="min-width:220px; max-width:260px;">
           <label class="form-label mb-1" style="font-size:.8rem; font-weight:600;">
@@ -54,7 +72,7 @@
           </small>
         </div>
 
-        <!-- Invoice date (привязан к форме через form="import-form") -->
+        <!-- Invoice date -->
         <div class="d-flex flex-column" style="min-width:200px; max-width:220px;">
           <label class="form-label mb-1" style="font-size:.8rem; font-weight:600;">
             Invoice date
@@ -145,7 +163,6 @@
             action="{{ url_for('inventory.import_parts_upload') }}"
             style="margin:0;">
         <input type="hidden" name="saved_path" value="{{ saved_path }}">
-        <input type="hidden" name="supplier_hint" value="{{ supplier_hint|default('') }}">
         <input type="hidden" name="extra_expenses" id="extra-expenses-hidden" value="{{ val(extra_expenses) }}">
 
         {# dummy block for parser expecting units[0] group #}
@@ -234,7 +251,7 @@
           </table>
         </div>
 
-        <!-- totals preview under table (mobile-friendly duplicate of header totals) -->
+        <!-- totals preview under table -->
         <div class="px-3 py-2 border-top" style="font-size:.8rem; background:#fcfcfc;">
           <div class="row gy-2">
             <div class="col-12 col-sm-4">
@@ -301,7 +318,6 @@
 </div>
 
 <script>
-  // === helpers ===
   function parseFloatSafe(v) {
     const x = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
     return isNaN(x) ? 0 : x;
@@ -317,9 +333,8 @@
     const extraHidden = document.getElementById('extra-expenses-hidden');
 
     const extraVal = parseFloatSafe(extraInput.value);
-    extraHidden.value = extraVal.toString(); // send to backend on submit
+    extraHidden.value = extraVal.toString();
 
-    // 1) collect base line totals
     let subtotalBase = 0.0;
     let perRowData = [];
 
@@ -330,18 +345,12 @@
       const qty        = parseFloatSafe(qtyEl.value);
       const baseCost   = parseFloatSafe(baseCostEl.value);
 
-      const lineBaseTotal = qty * baseCost; // qty * base cost
+      const lineBaseTotal = qty * baseCost;
       subtotalBase += lineBaseTotal;
 
-      perRowData.push({
-        tr,
-        qty,
-        baseCost,
-        lineBaseTotal
-      });
+      perRowData.push({ tr, qty, baseCost, lineBaseTotal });
     });
 
-    // 2) distribute extra proportionally by cost share
     perRowData.forEach((row) => {
       let adjCost = row.baseCost;
       if (row.qty > 0 && subtotalBase > 0) {
@@ -354,10 +363,8 @@
       adjCostEl.value = (Math.round(adjCost * 100) / 100).toFixed(2);
     });
 
-    // 3) grand total = subtotalBase + extraVal
     const grand = subtotalBase + extraVal;
 
-    // 4) update displays (top + bottom)
     document.getElementById('subtotal-display').textContent       = money(subtotalBase);
     document.getElementById('extra-display').textContent          = money(extraVal);
     document.getElementById('grand-display').textContent          = money(grand);
@@ -367,7 +374,43 @@
     document.getElementById('grand-display-bottom').textContent    = money(grand);
   }
 
-  // add blank row
+  function supplierDefaultFromHint(hint) {
+    const s = (hint || '').toLowerCase();
+    if (s.includes('reliable')) return 'REL';
+    if (s.includes('marcon'))   return 'MAR';
+    if (s.includes('sears'))    return 'SEARS';
+    return 'MAIN';
+  }
+  function looksLikeReliable(source, hint) {
+    return /reliable/i.test(source || '') || /reliable/i.test(hint || '');
+  }
+  function looksLikeMarcone(source, hint) {
+    return /marcon/i.test(source || '') || /marcon/i.test(hint || '');
+  }
+
+  function applySupplierDefaultToLocations() {
+    const supplierHint = (document.querySelector('input[name="supplier_hint"]')?.value || '').trim();
+    const savedPath    = (document.querySelector('input[name="saved_path"]')?.value || '').trim();
+    const defLoc       = supplierDefaultFromHint(supplierHint);
+
+    document.querySelectorAll('input[name^="units[0][rows]"][name$="[location]"]').forEach(inp => {
+      const cur = (inp.value || '').trim().toUpperCase();
+
+      if (!cur) {
+        inp.value = defLoc;
+        return;
+      }
+      if (looksLikeReliable(savedPath, supplierHint) && cur === 'MAR') {
+        inp.value = 'REL';
+        return;
+      }
+      if (looksLikeMarcone(savedPath, supplierHint) && cur === 'REL') {
+        inp.value = 'MAR';
+        return;
+      }
+    });
+  }
+
   function addBlankRow() {
     const tbody = document.querySelector('#edit-table tbody');
     const idx = tbody.children.length;
@@ -432,7 +475,6 @@
   document.getElementById('add-row')?.addEventListener('click', addBlankRow);
   document.getElementById('add-row-bottom')?.addEventListener('click', addBlankRow);
 
-  // delete row
   document.addEventListener('click', (e) => {
     if (e.target.classList.contains('del-row')) {
       e.preventDefault();
@@ -441,45 +483,6 @@
     }
   });
 
-  // auto default LOCATION based on supplier
-  function supplierDefaultFromHint(hint) {
-    const s = (hint || '').toLowerCase();
-    if (s.includes('reliable')) return 'REL';
-    if (s.includes('marcon'))   return 'MAR';
-    if (s.includes('sears'))    return 'SEARS';
-    return 'MAIN';
-  }
-  function looksLikeReliable(source, hint) {
-    return /reliable/i.test(source || '') || /reliable/i.test(hint || '');
-  }
-  function looksLikeMarcone(source, hint) {
-    return /marcon/i.test(source || '') || /marcon/i.test(hint || '');
-  }
-
-  function applySupplierDefaultToLocations() {
-    const supplierHint = (document.querySelector('input[name="supplier_hint"]')?.value || '').trim();
-    const savedPath    = (document.querySelector('input[name="saved_path"]')?.value || '').trim();
-    const defLoc       = supplierDefaultFromHint(supplierHint);
-
-    document.querySelectorAll('input[name^="units[0][rows]"][name$="[location]"]').forEach(inp => {
-      const cur = (inp.value || '').trim().toUpperCase();
-
-      if (!cur) {
-        inp.value = defLoc;
-        return;
-      }
-      if (looksLikeReliable(savedPath, supplierHint) && cur === 'MAR') {
-        inp.value = 'REL';
-        return;
-      }
-      if (looksLikeMarcone(savedPath, supplierHint) && cur === 'REL') {
-        inp.value = 'MAR';
-        return;
-      }
-    });
-  }
-
-  // recalc on edits
   document.addEventListener('input', (e) => {
     if (
       e.target.classList.contains('qty-input') ||
@@ -488,9 +491,11 @@
     ) {
       recalcTotalsAndAdjCosts();
     }
+    if (e.target.name === 'supplier_hint') {
+      applySupplierDefaultToLocations();
+    }
   });
 
-  // initial
   applySupplierDefaultToLocations();
   recalcTotalsAndAdjCosts();
 </script>
