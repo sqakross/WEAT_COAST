@@ -412,7 +412,7 @@
               </a>
             </td>
 
-            {# ---- PRINT: всегда ведём на /invoice/pdf ---- #}
+            {# ---- PRINT ---- #}
             <td>
               {% set print_href = None %}
               {% if invoice_num %}
@@ -421,23 +421,11 @@
                    '?invoice_number=' ~ invoice_num ~
                    '&ref_job=' ~ (b.get('reference_job') or wo.canonical_job) %}
               {% else %}
-                {# legacy: по issued_to / issued_by / reference_job / issue_date #}
-                {% set issued_at_dt = b.get('issued_at_dt') %}
-                {% if issued_at_dt %}
-                  {# локальное отображение; если без секунд, добавим :00 #}
-                  {% set issued_at_local = issued_at_dt|local_dt %}
-                  {% set issued_at_for_url = issued_at_local ~ (':00' if issued_at_local and (issued_at_local|length == 16) else '') %}
-                {% else %}
-                  {% set issued_at_raw = b.get('issued_at') or '' %}
-                  {% set issued_at_for_url = issued_at_raw ~ (':00' if issued_at_raw and (issued_at_raw|length == 16) else '') %}
-                {% endif %}
-                {% if issued_at_for_url and tech_for_links %}
-                  {% set print_href = url_for('inventory.view_invoice_pdf') ~
-                     '?issued_to=' ~ tech_for_links|urlencode ~
-                     '&reference_job=' ~ (b.get('reference_job') or wo.canonical_job)|urlencode ~
-                     '&issued_by=' ~ current_user.username|urlencode ~
-                     '&issue_date=' ~ issued_at_for_url|urlencode %}
-                {% endif %}
+                {# НОВОЕ: когда номера ещё нет, просто открываем grouped-report по теху и job,
+                   чтобы не вызывать /invoice/pdf и не ловить "Invoice lines not found". #}
+                {% set print_href = url_for('inventory.reports_grouped') ~
+                   '?recipient=' ~ tech_for_links|urlencode ~
+                   '&reference_job=' ~ job_for_links|urlencode %}
               {% endif %}
 
               {% if print_href %}

@@ -4843,6 +4843,14 @@ def wo_issue_instock(wo_id):
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
 @login_required
 def wo_edit(wo_id: int):
+    from flask import render_template, flash, redirect, url_for, session, request
+    from flask_login import current_user
+    from sqlalchemy import func, or_
+    from collections import defaultdict
+
+    from extensions import db
+    from models import WorkOrder, WorkUnit, WorkOrderPart, IssuedPartRecord, IssuedBatch
+
     role = (getattr(current_user, "role", "") or "").strip().lower()
     readonly_param = request.args.get("readonly", type=int) == 1
     readonly = (role not in ("admin", "superadmin")) or readonly_param
@@ -4872,28 +4880,75 @@ def wo_edit(wo_id: int):
                     selected_tech_username = uname
                     break
 
-    # --- units payload ---
+    # ==================================================
+    # 1) Фактическая выдача по этому WO (как в wo_detail)
+    # ==================================================
+    canon = (wo.canonical_job or "").strip()
+    issued_items = []
+    if canon:
+        base_q = (
+            db.session.query(IssuedPartRecord)
+            .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
+        ).filter(
+            or_(
+                func.trim(IssuedPartRecord.reference_job) == canon,
+                func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
+                func.trim(IssuedBatch.reference_job) == canon,
+            )
+        )
+        issued_items = base_q.all()
+
+    # qty по PN с учётом возвратов (отрицательные строки вычитаем)
+    issued_qty_by_pn = defaultdict(int)
+    for rec in issued_items:
+        pn = (getattr(rec.part, "part_number", "") or "").strip().upper()
+        if not pn:
+            continue
+        q = int(rec.quantity or 0)
+        if q == 0:
+            continue
+        issued_qty_by_pn[pn] += q  # возврат = минус
+
+    # будем "раздавать" выданное количество по строкам плана
+    remaining_issued = dict(issued_qty_by_pn)
+
+    # ==================================================
+    # 2) units payload c issued_qty + ALT PN
+    # ==================================================
     units = []
     for u in (getattr(wo, "units", []) or []):
         rows = []
         for p in (getattr(u, "parts", []) or []):
-            # --- ALT PN: берём и alt_numbers, и alt_part_numbers ---
+            # ALT PN: пробуем и alt_numbers, и alt_part_numbers
             alt_val = (
                 getattr(p, "alt_numbers", "") or
                 getattr(p, "alt_part_numbers", "") or
                 ""
             )
 
-            # --- статусные флаги для раскраски ---
-            issued_qty = int(getattr(p, "issued_qty", 0) or 0)
-            # is_ordered свойство уже есть в модели
-            is_ordered = bool(getattr(p, "is_ordered", False))
+            pn_upper = (getattr(p, "part_number", "") or "").strip().upper()
+            qty_plan = int(getattr(p, "quantity", 0) or 0)
+
+            # сколько ещё выдано по этому PN
+            issued_left = int(remaining_issued.get(pn_upper, 0) or 0)
+            assigned_issued = 0
+            if qty_plan > 0 and issued_left > 0:
+                assigned_issued = min(qty_plan, issued_left)
+                remaining_issued[pn_upper] = issued_left - assigned_issued
+
+            # is_ordered — как в модели/шаблоне
+            is_ordered_flag = getattr(p, "ordered_flag", None)
+            is_ordered = bool(
+                is_ordered_flag
+                or (str(getattr(p, "status", "")).strip().lower() == "ordered")
+                or (str(getattr(p, "line_status", "")).strip().lower() == "ordered")
+            )
 
             rows.append({
                 "id": getattr(p, "id", None),
                 "part_number": getattr(p, "part_number", "") or "",
                 "part_name": getattr(p, "part_name", "") or "",
-                "quantity": int(getattr(p, "quantity", 0) or 0),
+                "quantity": qty_plan,
 
                 # ALT PN для формы
                 "alt_numbers": alt_val,
@@ -4908,7 +4963,7 @@ def wo_edit(wo_id: int):
                 ),
 
                 # дополнительные поля для раскраски в шаблоне
-                "issued_qty": issued_qty,
+                "issued_qty": assigned_issued,
                 "is_ordered": is_ordered,
             })
 
