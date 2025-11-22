@@ -78,19 +78,37 @@
 
       {% if invoices %}
         <div class="d-flex flex-wrap gap-2 my-2">
-          <a
-            href="{{ url_for('inventory.download_report_pdf',
-                             start_date=start_date,
-                             end_date=end_date,
-                             recipient=recipient,
-                             reference_job=reference_job,
-                             invoice_number=invoice) }}"
-            class="btn btn-outline-secondary">🖨️ Print Report</a>
+        {# XLSX export #}
+        <a
+        href="{{ url_for('inventory.download_report_xlsx',
+                       start_date=start_date,
+                       end_date=end_date,
+                       recipient=recipient,
+                       reference_job=reference_job,
+                       invoice_number=invoice) }}"
+        class="btn btn-outline-secondary">
+        📊 Export to Excel (XLSX)
+        </a>
 
-          <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-primary">🏠 Dashboard</a>
-          <a href="{{ url_for('inventory.issue_part') }}" class="btn btn-outline-success">🧾 Issue Part</a>
+        {# если хочешь — можешь оставить и PDF рядом #}
+        {#
+        <a
+        href="{{ url_for('inventory.download_report_pdf',
+                       start_date=start_date,
+                       end_date=end_date,
+                       recipient=recipient,
+                       reference_job=reference_job,
+                       invoice_number=invoice) }}"
+        class="btn btn-outline-secondary">
+        🖨️ Print PDF
+        </a>
+        #}
+
+        <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-primary">🏠 Dashboard</a>
+        <a href="{{ url_for('inventory.issue_part') }}" class="btn btn-outline-success">🧾 Issue Part</a>
         </div>
-      {% endif %}
+    {% endif %}
+
     </form>
   </div> {# /.report-filters #}
 

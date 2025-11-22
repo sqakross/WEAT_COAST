@@ -76,9 +76,10 @@ _PN_TOKEN_RX = re.compile(r'^([A-Za-z0-9][A-Za-z0-9\-\/\._]*)\s+(.+)$')
 
 _units_re = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
 _rows_re  = re.compile(
-    r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|alt_numbers|supplier|backorder_flag|line_status|unit_cost|location)\]$")
+    r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|alt_numbers|supplier|backorder_flag|line_status|unit_cost|unit_cost_base|location)\]$"
+)
 _rows_flat_re = re.compile(
-    r"^rows\[(\d+)\]\[(part_number|part_name|quantity|alt_numbers|supplier|backorder_flag|line_status|unit_cost|location)\]$"
+    r"^rows\[(\d+)\]\[(part_number|part_name|quantity|alt_numbers|supplier|backorder_flag|line_status|unit_cost|unit_cost_base|location)\]$"
 )
 
 _PN_FIRST_TOKEN_RX = re.compile(r'^([A-Za-z0-9][A-Za-z0-9\-\/\._]*)\s+(.+)$')
@@ -714,153 +715,6 @@ def _coerce_norm_df(obj) -> pd.DataFrame:
         return pd.DataFrame([obj])
     return pd.DataFrame([])
 
-# def _ensure_norm_columns(df, default_loc: str, saved_path: str):
-#     """
-#     Гарантирует обязательные колонки и аккуратно заполняет только ПУСТЫЕ значения.
-#     НИЧЕГО не перезаписывает, если пользователь уже отредактировал ячейку.
-#     """
-#     import pandas as pd
-#     import os
-#
-#     if df is None:
-#         cols = [
-#             "part_number","part_name","qty","quantity","unit_cost",
-#             "location","row_key","source_file","supplier",
-#             "order_no","invoice_no","date"
-#         ]
-#         return pd.DataFrame(columns=cols)
-#
-#     df = df.copy()
-#
-#     need_cols = [
-#         "part_number","part_name","qty","quantity","unit_cost","location",
-#         "row_key","source_file","supplier","order_no","invoice_no","date"
-#     ]
-#     for c in need_cols:
-#         if c not in df.columns:
-#             df[c] = None
-#
-#     # qty / quantity — синхронизация и мягкая типизация
-#     qty = pd.to_numeric(df["qty"], errors="coerce")
-#     quantity = pd.to_numeric(df["quantity"], errors="coerce")
-#
-#     df.loc[qty.isna() & quantity.notna(), "qty"] = quantity
-#     df.loc[quantity.isna() & qty.notna(), "quantity"] = qty
-#
-#     df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
-#     df.loc[df["qty"] < 0, "qty"] = 0
-#     df["quantity"] = df["qty"].astype(int)
-#
-#     # unit_cost — float (пустые оставляем NaN)
-#     df["unit_cost"] = pd.to_numeric(df["unit_cost"], errors="coerce")
-#
-#     # source_file — только пустые
-#     sf_empty = df["source_file"].isna() | (df["source_file"].astype(str).str.strip() == "")
-#     df.loc[sf_empty, "source_file"] = saved_path
-#
-#     # location — только пустые; верхний регистр
-#     loc_empty = df["location"].isna() | (df["location"].astype(str).str.strip() == "")
-#     df.loc[loc_empty, "location"] = (default_loc or "MAIN")
-#
-#     df["location"] = (
-#         df["location"]
-#         .astype(str)
-#         .str.strip()
-#         .str.upper()
-#     )
-#
-#     # строковые служебные
-#     for col in ("part_number", "part_name", "supplier", "order_no", "invoice_no", "row_key", "source_file"):
-#         df[col] = (
-#             df[col]
-#             .astype(str)
-#             .replace({"None": ""})
-#             .fillna("")
-#             .str.strip()
-#         )
-#
-#     # row_key — только где пусто (делаем устойчиво-уникальным на строку файла)
-#     rk_empty = df["row_key"].isna() | (df["row_key"].astype(str).str.strip() == "")
-#     if rk_empty.any():
-#         df = df.reset_index(drop=False).rename(columns={"index": "__row_i"})
-#         file_id = os.path.basename(str(saved_path or ""))
-#
-#         def _mk_key(row):
-#             pn   = str(row.get("part_number", "")).strip().upper()
-#             loc  = str(row.get("location", "")).strip().upper()
-#             try:
-#                 qty_local = int(pd.to_numeric(row.get("qty", 0), errors="coerce") or 0)
-#             except Exception:
-#                 qty_local = 0
-#             cost = row.get("unit_cost", None)
-#             if pd.isna(cost):
-#                 cost = "NA"
-#             else:
-#                 try:
-#                     cost = float(cost)
-#                 except Exception:
-#                     cost = "NA"
-#             i = int(row.get("__row_i", 0) or 0)
-#             return f"{file_id}|{i}|{pn}|{loc}|{qty_local}|{cost}"
-#
-#         df.loc[rk_empty, "row_key"] = df[rk_empty].apply(_mk_key, axis=1)
-#         if "__row_i" in df.columns:
-#             del df["__row_i"]
-#
-#     # подчистить полностью пустые строки
-#     drop_mask = (
-#         (df["part_number"].astype(str).str.strip() == "") &
-#         (df["part_name"].astype(str).str.strip() == "") &
-#         (df["qty"] == 0) &
-#         (df["unit_cost"].fillna(0) == 0)
-#     )
-#     if drop_mask.any():
-#         df = df[~drop_mask].copy()
-#
-#     return df
-
-def parse_preview_rows_relaxed(form):
-    buckets = defaultdict(dict)
-
-    for key, val in form.items():
-        m = _rows_re.match(key)
-        if m:
-            _unit_idx, row_idx, field = m.groups()
-            buckets[int(row_idx)][field] = (val or "").strip()
-
-    for key, val in form.items():
-        m = _rows_flat_re.match(key)
-        if m:
-            row_idx, field = m.groups()
-            buckets[int(row_idx)][field] = (val or "").strip()
-
-    out = []
-    for i in sorted(buckets.keys()):
-        r = buckets[i]
-        try:
-            r["quantity"] = int((r.get("quantity") or "0").replace(",", ""))
-        except Exception:
-            r["quantity"] = 0
-        try:
-            r["unit_cost"] = float((r.get("unit_cost") or "0").replace("$", "").replace(",", ""))
-        except Exception:
-            r["unit_cost"] = 0.0
-
-        if not any([(r.get("part_number") or "").strip(),
-                    (r.get("part_name") or "").strip(),
-                    r.get("quantity", 0),
-                    r.get("unit_cost", 0.0)]):
-            continue
-
-        out.append({
-            "part_number": (r.get("part_number") or "").strip(),
-            "part_name":   (r.get("part_name") or "").strip(),
-            "quantity":    r["quantity"],
-            "unit_cost":   r["unit_cost"],
-            "location":    (r.get("location") or "").strip(),
-            "supplier":    (r.get("supplier") or "").strip(),
-        })
-    return out
 
 def rows_to_norm_df(rows: list[dict], source_file: str):
     import pandas as pd
@@ -898,59 +752,6 @@ def rows_to_norm_df(rows: list[dict], source_file: str):
         })
     return pd.DataFrame(out)
 
-def parse_preview_rows_relaxed(form):
-    """
-    Собирает строки из request.form в формат:
-    [{"part_number":..., "part_name":..., "quantity":..., "unit_cost":..., "location":...}, ...]
-    Поддерживает оба имени: units[0][rows][i][field] И rows[i][field].
-    Выкидывает пустые строки (без PN и Name и Qty и Cost).
-    """
-    buckets = defaultdict(dict)
-
-    # 1) units[0][rows][i][field]
-    for key, val in form.items():
-        m = _rows_re.match(key)
-        if m:
-            _unit_idx, row_idx, field = m.groups()
-            buckets[int(row_idx)][field] = (val or "").strip()
-
-    # 2) rows[i][field] (fallback)
-    for key, val in form.items():
-        m = _rows_flat_re.match(key)
-        if m:
-            row_idx, field = m.groups()
-            buckets[int(row_idx)][field] = (val or "").strip()
-
-    # Сборка/очистка
-    out = []
-    for i in sorted(buckets.keys()):
-        r = buckets[i]
-        # нормализация типов
-        try:
-            r["quantity"] = int((r.get("quantity") or "0").replace(",", ""))
-        except Exception:
-            r["quantity"] = 0
-        try:
-            r["unit_cost"] = float((r.get("unit_cost") or "0").replace("$", "").replace(",", ""))
-        except Exception:
-            r["unit_cost"] = 0.0
-
-        # пустые строки отбрасываем
-        if not any([(r.get("part_number") or "").strip(),
-                    (r.get("part_name") or "").strip(),
-                    r.get("quantity", 0),
-                    r.get("unit_cost", 0.0)]):
-            continue
-
-        out.append({
-            "part_number": (r.get("part_number") or "").strip(),
-            "part_name":   (r.get("part_name") or "").strip(),
-            "quantity":    r["quantity"],
-            "unit_cost":   r["unit_cost"],
-            "location":    (r.get("location") or "").strip(),
-            "supplier":    (r.get("supplier") or "").strip(),
-        })
-    return out
 
 def fix_norm_records(records: list[dict], default_loc: str = "MAIN") -> list[dict]:
     """Правит записи уже ПОСЛЕ normalize_table: разлепляет PN/NAME, чистит мусор/итоги, дописывает LOCATION."""
@@ -3386,6 +3187,140 @@ def wo_detail(wo_id):
         can_view_docs=can_view_docs,
         current_user=current_user,
     )
+@inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
+@login_required
+def download_report_xlsx():
+    from flask import request, send_file
+    from datetime import datetime
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    from extensions import db
+    from models import IssuedPartRecord, Part  # подставь реальные имена моделей
+
+    # --------- читаем фильтры из query ---------
+    recipient = request.args.get("recipient", "").strip() or None
+    reference_job = request.args.get("reference_job", "").strip() or None
+    invoice_number = request.args.get("invoice_number", "").strip() or None
+    start_date_str = request.args.get("start_date") or None
+    end_date_str = request.args.get("end_date") or None
+
+    # даты: берём только дату (без времени)
+    start_dt = None
+    end_dt = None
+    if start_date_str:
+        try:
+            start_dt = datetime.strptime(start_date_str, "%Y-%m-%d")
+        except ValueError:
+            start_dt = None
+    if end_date_str:
+        try:
+            # конец дня
+            end_dt = datetime.strptime(end_date_str, "%Y-%m-%d")
+        except ValueError:
+            end_dt = None
+
+    # --------- база запроса ---------
+    q = (
+        db.session.query(IssuedPartRecord)
+        .join(Part, IssuedPartRecord.part_id == Part.id)
+    )
+
+    if start_dt:
+        q = q.filter(IssuedPartRecord.issue_date >= start_dt)
+    if end_dt:
+        # +1 день чтобы включить весь день, если нужно
+        q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
+    if recipient:
+        q = q.filter(IssuedPartRecord.issued_to.ilike(f"%{recipient}%"))
+    if reference_job:
+        q = q.filter(IssuedPartRecord.reference_job.ilike(f"%{reference_job}%"))
+    if invoice_number:
+        q = q.filter(IssuedPartRecord.invoice_number == invoice_number)
+
+    # порядок как в PDF: по дате, по Invoice, по Issued To
+    q = q.order_by(
+        IssuedPartRecord.issue_date.asc(),
+        IssuedPartRecord.invoice_number.asc().nullsfirst(),
+        IssuedPartRecord.issued_to.asc(),
+    )
+
+    rows = q.all()
+
+    # --------- создаём Excel ---------
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Issued Parts"
+
+    # заголовок
+    header = [
+        "Date",
+        "Invoice #",
+        "Part #",
+        "Name",
+        "Qty",
+        "Unit Cost",
+        "Total",
+        "Issued To",
+        "Job Ref.",
+        "Location",
+    ]
+    ws.append(header)
+
+    total_sum = 0.0
+
+    for rec in rows:
+        part = rec.part
+        qty = rec.quantity or 0
+        unit_cost = rec.unit_cost_at_issue or 0
+        line_total = qty * unit_cost
+        total_sum += float(line_total)
+
+        ws.append([
+            rec.issue_date.date().isoformat() if rec.issue_date else "",
+            f"{int(rec.invoice_number):06d}" if rec.invoice_number is not None else "",
+            part.part_number if part else "",
+            part.name if part else "",
+            qty,
+            float(f"{unit_cost:.2f}"),
+            float(f"{line_total:.2f}"),
+            rec.issued_to or "",
+            rec.reference_job or "",
+            rec.location or (part.location if part else ""),
+        ])
+
+    # строка TOTAL внизу
+    last_row = ws.max_row + 1
+    ws.cell(row=last_row, column=1).value = "TOTAL:"
+    ws.cell(row=last_row, column=7).value = float(f"{total_sum:.2f}")
+
+    # немного ширины колонок
+    ws.column_dimensions["A"].width = 12   # Date
+    ws.column_dimensions["B"].width = 10   # Invoice
+    ws.column_dimensions["C"].width = 14   # Part #
+    ws.column_dimensions["D"].width = 32   # Name
+    ws.column_dimensions["H"].width = 18   # Issued To
+    ws.column_dimensions["I"].width = 16   # Job Ref.
+    ws.column_dimensions["J"].width = 12   # Location
+
+    # --------- отправляем файл ---------
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    # имя файла по датам, как у PDF
+    if start_date_str or end_date_str:
+        fname = f"issued_parts_{start_date_str or ''}_{end_date_str or ''}.xlsx"
+    else:
+        fname = "issued_parts_report.xlsx"
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=fname,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
 
 @inventory_bp.post("/work_orders/new", endpoint="wo_create")
 @login_required
@@ -7599,9 +7534,33 @@ def delete_part(part_id):
         return redirect(url_for('inventory.dashboard'))
 
     part = Part.query.get_or_404(part_id)
-    db.session.delete(part)
-    db.session.commit()
-    flash(f'Part {part.part_number} deleted.', 'success')
+
+    # 1) Проверяем, использовалась ли деталь в выдачах
+    issued_count = IssuedPartRecord.query.filter_by(part_id=part.id).count()
+    if issued_count:
+        flash(
+            f'Cannot delete part {part.part_number}: '
+            f'it is referenced in {issued_count} issued record(s). '
+            f'Set quantity to 0 or mark it as inactive instead.',
+            'danger'
+        )
+        # Вернёмся на дашборд с поиском по этой детали
+        return redirect(url_for('inventory.dashboard', search=part.part_number))
+
+    # 2) Пытаемся удалить (на случай других связей – подстрахуемся try/except)
+    try:
+        db.session.delete(part)
+        db.session.commit()
+        flash(f'Part {part.part_number} deleted.', 'success')
+    except IntegrityError as e:
+        db.session.rollback()
+        flash(
+            'Cannot delete this part because it is still referenced in other '
+            'receiving / stock / return records. '
+            'Please clear those references first.',
+            'danger'
+        )
+
     return redirect(url_for('inventory.dashboard'))
 
 @inventory_bp.route('/edit/<int:part_id>', methods=['GET', 'POST'])
@@ -7772,6 +7731,75 @@ def download_reliable_report():
     flash("❌ Reliable report generation failed!", "danger")
     return redirect(url_for("inventory.dashboard"))
 
+def parse_preview_rows_relaxed(form):
+    """
+    Собирает строки превью из request.form:
+    [{"part_number":..., "part_name":..., "quantity":..., "unit_cost_base":..., "unit_cost":..., "location":...}]
+    """
+    buckets = defaultdict(dict)
+
+    # 1) units[0][rows][i][field]
+    for key, val in form.items():
+        m = _rows_re.match(key)
+        if m:
+            unit_idx, row_idx, field = m.groups()
+            buckets[int(row_idx)][field] = (val or "").strip()
+
+    # 2) rows[i][field] fallback
+    for key, val in form.items():
+        m = _rows_flat_re.match(key)
+        if m:
+            row_idx, field = m.groups()
+            buckets[int(row_idx)][field] = (val or "").strip()
+
+    out = []
+
+    for i in sorted(buckets.keys()):
+        r = buckets[i]
+
+        # qty
+        try:
+            qty = int((r.get("quantity") or "0").replace(",", ""))
+        except Exception:
+            qty = 0
+
+        # base cost (editable)
+        try:
+            base = float((r.get("unit_cost_base") or "0").replace("$", "").replace(",", ""))
+        except Exception:
+            base = 0.0
+
+        # adjusted cost (readonly)
+        try:
+            adj = float((r.get("unit_cost") or "").replace("$", "").replace(",", ""))
+        except Exception:
+            adj = 0.0
+
+        # если adj пустой, а base есть → берём base
+        if adj <= 0 and base > 0:
+            adj = base
+
+        pn   = (r.get("part_number") or "").strip()
+        name = (r.get("part_name") or "").strip()
+
+        # выкидываем только реально пустые строки
+        if not pn and not name and qty <= 0 and base <= 0 and adj <= 0:
+            continue
+
+        loc = (r.get("location") or "").strip().upper() or "MAIN"
+
+        out.append({
+            "part_number":     pn,
+            "part_name":       name,
+            "quantity":        qty,
+            "unit_cost_base":  base,
+            "unit_cost":       adj,
+            "location":        loc,
+            "supplier":        (r.get("supplier") or "").strip(),
+        })
+
+    return out
+
 from datetime import datetime, date
 import os, logging
 from sqlalchemy.exc import IntegrityError
@@ -7852,26 +7880,32 @@ def import_parts_upload():
 
     def _ensure_norm_columns(df, default_loc: str, saved_path: str):
         import pandas as pd
+        import os
+
+        # если совсем нечего – вернём пустой df с нужными колонками
         if df is None:
             cols = [
-                "part_number", "part_name", "qty", "quantity", "unit_cost",
+                "part_number", "part_name", "qty", "quantity",
+                "unit_cost", "unit_cost_base",
                 "location", "row_key", "source_file", "supplier",
-                "order_no", "invoice_no", "date", "unit_cost_base"
+                "order_no", "invoice_no", "date",
             ]
             return pd.DataFrame(columns=cols)
 
         df = df.copy()
 
+        # гарантируем наличие всех колонок
         need_cols = [
-            "part_number", "part_name", "qty", "quantity", "unit_cost",
-            "unit_cost_base",
+            "part_number", "part_name", "qty", "quantity",
+            "unit_cost", "unit_cost_base",
             "location", "row_key", "source_file", "supplier",
-            "order_no", "invoice_no", "date"
+            "order_no", "invoice_no", "date",
         ]
         for c in need_cols:
             if c not in df.columns:
                 df[c] = None
 
+        # ----- qty / quantity -----
         qty = pd.to_numeric(df["qty"], errors="coerce")
         quantity = pd.to_numeric(df["quantity"], errors="coerce")
 
@@ -7882,7 +7916,7 @@ def import_parts_upload():
         df.loc[df["qty"] < 0, "qty"] = 0
         df["quantity"] = df["qty"].astype(int)
 
-        # unit_cost_base:
+        # ----- unit_cost / unit_cost_base -----
         df["unit_cost_base"] = pd.to_numeric(df["unit_cost_base"], errors="coerce")
         df["unit_cost"]      = pd.to_numeric(df["unit_cost"], errors="coerce")
 
@@ -7890,11 +7924,11 @@ def import_parts_upload():
         mask_no_base = df["unit_cost_base"].isna()
         df.loc[mask_no_base, "unit_cost_base"] = df.loc[mask_no_base, "unit_cost"]
 
-        # source_file
+        # ----- source_file -----
         sf_empty = df["source_file"].isna() | (df["source_file"].astype(str).str.strip() == "")
         df.loc[sf_empty, "source_file"] = saved_path
 
-        # location
+        # ----- location -----
         loc_empty = df["location"].isna() | (df["location"].astype(str).str.strip() == "")
         df.loc[loc_empty, "location"] = (default_loc or "MAIN")
         df["location"] = (
@@ -7904,8 +7938,9 @@ def import_parts_upload():
             .str.upper()
         )
 
-        # normalize strings
-        for col in ("part_number", "part_name", "supplier", "order_no", "invoice_no", "row_key", "source_file"):
+        # ----- нормализация строковых полей (БЕЗ row_key!) -----
+        for col in ("part_number", "part_name", "supplier",
+                    "order_no", "invoice_no", "source_file"):
             df[col] = (
                 df[col]
                 .astype(str)
@@ -7914,36 +7949,35 @@ def import_parts_upload():
                 .str.strip()
             )
 
-        # row_key generation if empty
-        rk_empty = df["row_key"].isna() | (df["row_key"].astype(str).str.strip() == "")
-        if rk_empty.any():
-            df = df.reset_index(drop=False).rename(columns={"index": "__row_i"})
-            file_id = os.path.basename(str(saved_path or ""))
+        # ===== ВСЕГДА пересчитываем row_key по новой схеме =====
+        # чтобы не использовать старые ключи вида "137292700/REL"
+        df = df.reset_index(drop=False).rename(columns={"index": "__row_i"})
+        file_id = os.path.basename(str(saved_path or ""))
 
-            def _mk_key(row):
-                pn = str(row.get("part_number", "")).strip().upper()
-                loc = str(row.get("location", "")).strip().upper()
+        def _mk_key(row):
+            pn = str(row.get("part_number", "")).strip().upper()
+            loc = str(row.get("location", "")).strip().upper()
+            try:
+                qty_local = int(pd.to_numeric(row.get("qty", 0), errors="coerce") or 0)
+            except Exception:
+                qty_local = 0
+            cost_base = row.get("unit_cost_base", None)
+            if pd.isna(cost_base):
+                cost_base = "NA"
+            else:
                 try:
-                    qty_local = int(pd.to_numeric(row.get("qty", 0), errors="coerce") or 0)
+                    cost_base = float(cost_base)
                 except Exception:
-                    qty_local = 0
-                cost_base = row.get("unit_cost_base", None)
-                if pd.isna(cost_base):
                     cost_base = "NA"
-                else:
-                    try:
-                        cost_base = float(cost_base)
-                    except Exception:
-                        cost_base = "NA"
-                i = int(row.get("__row_i", 0) or 0)
-                return f"{file_id}|{i}|{pn}|{loc}|{qty_local}|{cost_base}"
+            i = int(row.get("__row_i", 0) or 0)
+            return f"{file_id}|{i}|{pn}|{loc}|{qty_local}|{cost_base}"
 
-            df.loc[rk_empty, "row_key"] = df[rk_empty].apply(_mk_key, axis=1)
+        df["row_key"] = df.apply(_mk_key, axis=1)
 
-            if "__row_i" in df.columns:
-                del df["__row_i"]
+        if "__row_i" in df.columns:
+            df = df.drop(columns=["__row_i"])
 
-        # drop fully empty
+        # ----- выбрасываем полностью пустые строки -----
         drop_mask = (
             (df["part_number"].astype(str).str.strip() == "") &
             (df["part_name"].astype(str).str.strip() == "") &
@@ -7956,7 +7990,15 @@ def import_parts_upload():
         return df
 
     def _detect_supplier_from_content(saved_path: str, df_hint):
-        # та же логика, но с правильным pdfminer
+        """
+        Пытается определить поставщика:
+        1) по имени файла
+        2) по колонкам / значениям df_hint
+        3) по тексту PDF:
+           - сначала fitz (если установлен)
+           - потом pdfminer (если установлен)
+           - если оба недоступны, используем pdfplumber как fallback
+        """
         try:
             base = (saved_path or "").lower()
             if "reliable" in base:
@@ -7965,6 +8007,7 @@ def import_parts_upload():
                 return "Marcone"
 
             blob = ""
+            # --- 1) df_hint: заголовки + первые строки
             if df_hint is not None:
                 try:
                     blob = " ".join(df_hint.columns.astype(str))
@@ -7983,20 +8026,36 @@ def import_parts_upload():
             if "marcone" in blob_l or "marcon" in blob_l:
                 return "Marcone"
 
+            # --- 2) PDF текст
             text = ""
+            # 2a. fitz (PyMuPDF), если есть
             try:
-                import fitz
+                import fitz  # type: ignore
                 with fitz.open(saved_path) as d:
                     for i in range(min(3, d.page_count)):
                         text += d[i].get_text() + "\n"
             except Exception:
+                # 2b. pdfminer, если есть
                 try:
-                    from pdfminer.high_level import extract_text
+                    from pdfminer.high_level import extract_text  # type: ignore
                     text = extract_text(saved_path) or ""
                 except Exception:
                     text = ""
-            tl = text.lower()
-            if "reliable parts" in tl or "reliable parts inc" in tl:
+
+            # 2c. fallback через pdfplumber, если текст всё ещё пустой
+            if not text:
+                try:
+                    import pdfplumber  # type: ignore
+                    with pdfplumber.open(saved_path) as pdf:
+                        for page in pdf.pages[:3]:
+                            t = page.extract_text() or ""
+                            if t:
+                                text += t + "\n"
+                except Exception:
+                    pass
+
+            tl = (text or "").lower()
+            if "reliable parts" in tl or "reliable parts inc" in tl or "reliableparts" in tl:
                 return "Reliable Parts"
             if "marcone" in tl or "marcone supply" in tl:
                 return "Marcone"

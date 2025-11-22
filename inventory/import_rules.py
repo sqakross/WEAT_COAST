@@ -202,18 +202,22 @@ def _pick_pn_from_tokens(tokens: list[str]) -> str:
         return re.sub(r"[^A-Za-z0-9\-./]", "", t).upper()
 
     toks = [_clean(t) for t in tokens if t.strip()]
-    # 1) alphanumeric with both letters and digits
-    for t in toks:
-        if _looks_good_pn(t):
-            return t
-    # 2) numeric-only PN or dashy numeric PN (e.g., 240343803, 30-3132-48)
+
+    # 1) сначала чисто цифровые / цифровые с дефисами (30-3132-48, 134587700, 5303931775)
     for t in toks:
         if _token_is_numeric_pn(t):
             return t
-    # 3) try from the end
-    for t in reversed(toks):
-        if _looks_good_pn(t) or _token_is_numeric_pn(t):
+
+    # 2) затем обычные буквенно-цифровые PN (DA97-14474C и т.п.)
+    for t in toks:
+        if _looks_good_pn(t):
             return t
+
+    # 3) fallback с конца
+    for t in reversed(toks):
+        if _token_is_numeric_pn(t) or _looks_good_pn(t):
+            return t
+
     return ""
 
 def _cleanup_description(desc: str, pn: str = "") -> str:
@@ -224,9 +228,8 @@ def _cleanup_description(desc: str, pn: str = "") -> str:
     """
     s0 = str(desc or "")
 
-    # >>> FIX: убрать мусорные псевдостроки до любой другой обработки
+    # убрать мусорные псевдостроки до любой другой обработки
     s0 = re.sub(r'\b(?:nan|none|null|n/?a)\b', ' ', s0, flags=re.I)
-    # <<<
 
     # --- 1) Extract any fraction from text or PN (1/2", 1/2 in, 1/2)
     FRACTION_ANY = re.compile(r'\b(\d{1,3})\s*/\s*(\d{1,3})\s*(?:["”“″]|IN(?:CH(?:ES)?)?)?\b', re.I)
@@ -252,7 +255,7 @@ def _cleanup_description(desc: str, pn: str = "") -> str:
     s = re.sub(r'\b(?:EA|EACH|PC|PCS|PK|PKG|BOX|BG|CS)\b', ' ', s)
     s = re.sub(r'\b(?:GEN|WPL|WCI)\b(?:\s*\d+(?:\.\d{2})?)?', ' ', s)
 
-    # --- 3) DO remove plain leading qty like "1 " or "7 X 2 ", but not fractions (we already pulled them out)
+    # --- 3) DO remove plain leading qty like "1 " or "7 X 2 ", but not fractions (мы их уже вытащили)
     s = re.sub(r'^\s*\d{1,4}(?:\s*X\s*\d{1,4})?\b\s*', ' ', s)
 
     # --- 4) Normalize MXF -> M X F (also handles M/X/F or glued MXF)
@@ -263,16 +266,32 @@ def _cleanup_description(desc: str, pn: str = "") -> str:
     s = re.sub(r"\bF/?S\b", " ", s)             # drop F/S
     s = re.sub(r'(?<=\d/\d)"', "", s)           # 1/2" -> 1/2
 
+    # --- 4.5) Pre-tidy: сначала превращаем '_' в пробелы,
+    # чтобы `_GASDRYERCOILKIT` стал ` GASDRYERCOILKIT`
+    s = s.replace("_", " ")
+
+    # затем убираем всё не-словесное, кроме / + . -
+    s = re.sub(r'[^\w/+.-]+', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip(' -,')
+
     # --- 5) Unglue common tokens (extend list as needed)
     TOKENS = [
         "BLADE","EVAP","FAN","ASM","KNOB","THERMOSTAT","ICING","KIT","GROMMET",
         "ROUND","DUAL","RUN","CAP","CAPAC","CAPACITOR","TRAY","LID","LOCK",
         "VALVE","PROBE","OVEN","TEMP","SCREW","GAS","FLEX","SS","O-RING","OVN",
         "CRISPER","PAN","DRAWER","SHELF","RACK","BIN","DOOR","HANDLE",
+        # под конкретные кейсы:
+        "ALUMINUM", "PULLEY", "SPQ",
+        "LOWER", "DRYER", "COIL", "SWITCH", "SMALL",
     ]
+
     for w in TOKENS:
-        # insert a space before token if it's glued to previous letters
-        s = re.sub(rf'(?<=[A-Z]){w}(?=[A-Z])', f' {w}', s)
+        # 5.1: токен, прилепленный к предыдущим буквам, и за ним ещё слово или конец строки:
+        # LOWERRACK -> LOWER RACK, ALUMINUMPULLEYSPQ -> ALUMINUMPULLEY SPQ
+        s = re.sub(rf'(?<=[A-Z]){w}(?=(?:[A-Z]|$))', f' {w}', s)
+        # 5.2: токен в начале слова, приклеенный к следующим буквам:
+        # GASDRYER -> GAS DRYER, SWITCHSMALLE -> SWITCH SMALLE
+        s = re.sub(rf'\b{w}(?=(?:[A-Z]{{2,}}))', f'{w} ', s)
 
     # --- 6) Final tidy (keep '/', '+', '.', '-' so fractions survive)
     s = re.sub(r'[^\w/+.-]+', ' ', s)
@@ -351,19 +370,27 @@ def _parse_reliable_by_columns(df: pd.DataFrame, supplier_hint, default_location
     price_col = _find_col(df, ["PRICE","UNIT PRICE","UNIT COST","PRICE USD","UNIT $"])
 
     if not part_col and not desc_col:
-        return pd.DataFrame()  # уйдём в line-fallback
+        # уйдём в line-fallback
+        return pd.DataFrame()
 
+    # --- НОВОЕ: не брать денежные/total-колонки как описание ---
     if not desc_col and part_col:
         try:
             pi = df.columns.get_loc(part_col)
             for j in range(pi + 1, min(pi + 4, df.shape[1])):
                 h = _normh(df.columns[j])
+                # пропускаем явный мусор
                 if "MAKE" in h or "NARDA" in h:
                     continue
-                desc_col = df.columns[j]; break
+                # НОВОЕ: пропускаем колонки с ценами/суммами/лист-ценой
+                if any(tag in h for tag in ("PRICE", "LIST", "AMOUNT", "TOTAL", "MSRP", "SUGGEST")):
+                    continue
+                desc_col = df.columns[j]
+                break
         except Exception:
             pass
 
+    # если всё равно не нашли нормальный desc_col — будем строить описание из всей строки
     pre_cols = []
     if part_col:
         try:
@@ -381,7 +408,8 @@ def _parse_reliable_by_columns(df: pd.DataFrame, supplier_hint, default_location
 
         # PN из колонки или из строки
         pn_cell = _norm(df.at[i, part_col]) if part_col and i in df.index else ""
-        pn = pn_cell if (pn_cell and (_looks_good_pn(pn_cell) or _token_is_numeric_pn(pn_cell))) else _pick_pn_from_tokens(line_text.split())
+        pn = pn_cell if (pn_cell and (_looks_good_pn(pn_cell) or _token_is_numeric_pn(pn_cell))) \
+             else _pick_pn_from_tokens(line_text.split())
         if not pn:
             continue
 
@@ -403,9 +431,12 @@ def _parse_reliable_by_columns(df: pd.DataFrame, supplier_hint, default_location
             money = _row_money_values_strict(row_vals)
             unit_cost = min(money) if money else None
 
-        # DESCRIPTION: из колонки → если пусто/‘nan’ → из всей строки до первой суммы
+        # DESCRIPTION: из колонки → если мусор/число → из всей строки до первой суммы
         raw_desc = _norm(df.at[i, desc_col]) if desc_col and i in df.index else ""
-        if not raw_desc or raw_desc.lower() == "nan" or len(re.sub(r"[^A-Za-z0-9]+", "", raw_desc)) < 3:
+        if (not raw_desc or
+            raw_desc.lower() == "nan" or
+            len(re.sub(r"[^A-Za-z0-9]+", "", raw_desc)) < 3 or
+            MONEY_ANY.fullmatch(raw_desc or "")):   # чисто денежное значение
             s = re.sub(rf"\b{re.escape(pn)}\b", " ", line_text, flags=re.I)
             mfirst = MONEY_ANY.search(s)
             if mfirst:
@@ -431,9 +462,9 @@ def _parse_reliable_by_columns(df: pd.DataFrame, supplier_hint, default_location
         return pd.DataFrame()
 
     return pd.DataFrame(rows, columns=[
-        "part_number","part_name","quantity","unit_cost","supplier","location","order_no","date"
+        "part_number","part_name","quantity","unit_cost",
+        "supplier","location","order_no","date"
     ])
-
 
 def _parse_reliable_wide(df: pd.DataFrame, supplier_hint, default_location) -> pd.DataFrame:
     """
@@ -1071,16 +1102,18 @@ def _parse_reliable_lines(df: pd.DataFrame, *, supplier_hint: str,
             continue
 
         # --- description: scrub PN/money/units/qty and tidy
+        # --- description: scrub PN/money/units/qty and tidy
         desc = ln
         # remove every occurrence of the PN
         desc = re.sub(rf"\b{re.escape(pn)}\b", " ", desc, flags=re.I)
         # remove money and unit markers
         desc = MONEY_ANY.sub(" ", desc)
         desc = re.sub(rf"\b{UNIT_TOKENS}\b", " ", desc, flags=re.I)
-        # remove loose qtys
-        desc = re.sub(r"\b\d{1,4}\b", " ", desc)
-        # final cleanup via your normalizer (also de-glues tokens)
+        # ВАЖНО: НЕ удаляем все числа подряд, чтобы сохранить 'KIT 2', '3 POS' и т.п.
+        # desc = re.sub(r"\b\d{1,4}\b", " ", desc)   # ЭТУ СТРОКУ УДАЛЯЕМ
+        # финальная чистка + разлепление слов
         desc = _cleanup_description(desc, pn)
+
 
         # keep only meaningful descriptions
         if len(re.sub(r"[^A-Za-z0-9]+", "", desc)) < 3:
@@ -1341,6 +1374,7 @@ def normalize_table(df: pd.DataFrame, supplier_hint=None, *, source_file: str = 
             return parsed, issues
 
     # --- Fast path: RELIABLE (wide table or explicit hint)
+    # --- Fast path: RELIABLE (wide table или явный hint)
     try:
         is_reliable = bool(supplier_hint and "reliable" in str(supplier_hint).lower())
         has_total_col = any("TOTAL" in _normh(c) for c in df.columns)
@@ -1354,8 +1388,36 @@ def normalize_table(df: pd.DataFrame, supplier_hint=None, *, source_file: str = 
         # 1) wide-парсер
         parsed = _parse_reliable_wide(df, supplier_hint, default_location)
 
-        # 2) Если пусто ИЛИ подозрительно мало строк — безопасно пробуем строковый парсер
-        if parsed is None or parsed.empty or len(parsed) < 3:
+        def _is_bad_quality(p):
+            """
+            Считаем, что таблица «кривая», если:
+            - меньше 3 строк
+            - или доля строк с нормальным PN + QTY>0 + UNIT_COST>0 < 0.7
+            """
+            import pandas as pd
+            import numpy as np
+
+            if p is None or p.empty:
+                return True
+            if len(p) < 3:
+                return True
+
+            tmp = p.copy()
+            tmp["part_number"] = tmp.get("part_number", "").astype(str).str.strip()
+            tmp["quantity"] = pd.to_numeric(tmp.get("quantity"), errors="coerce").fillna(0).astype(int)
+            tmp["unit_cost"] = pd.to_numeric(tmp.get("unit_cost"), errors="coerce")
+
+            good = (
+                (tmp["part_number"] != "") &
+                (tmp["quantity"] > 0) &
+                tmp["unit_cost"].notna() &
+                (tmp["unit_cost"] > 0)
+            )
+            ratio = float(good.sum()) / float(len(tmp))
+            return ratio < 0.7
+
+        # 2) Если пусто ИЛИ «кривая» таблица — пробуем строковый парсер
+        if _is_bad_quality(parsed):
             try:
                 parsed2 = _parse_reliable_lines(
                     df,
@@ -1363,20 +1425,20 @@ def normalize_table(df: pd.DataFrame, supplier_hint=None, *, source_file: str = 
                     source_file=source_file,
                     default_location=default_location,
                 )
-                if parsed2 is not None and not parsed2.empty:
+                if parsed2 is not None and not parsed2.empty and not _is_bad_quality(parsed2):
                     parsed = parsed2
             except Exception:
                 pass
 
-        # 3) Если всё ещё пусто — для PDF читаем сырой текст
-        if (parsed is None or parsed.empty) and source_file and str(source_file).lower().endswith(".pdf"):
+        # 3) Если всё ещё пусто или «криво» — для PDF читаем сырой текст
+        if _is_bad_quality(parsed) and source_file and str(source_file).lower().endswith(".pdf"):
             try:
                 parsed_txt = _parse_reliable_from_pdf_text(
                     source_file,
                     supplier_hint=supplier_hint or "ReliableParts",
                     default_location=default_location,
                 )
-                if parsed_txt is not None and not parsed_txt.empty:
+                if parsed_txt is not None and not parsed_txt.empty and not _is_bad_quality(parsed_txt):
                     parsed = parsed_txt
             except Exception:
                 pass
@@ -1400,8 +1462,20 @@ def normalize_table(df: pd.DataFrame, supplier_hint=None, *, source_file: str = 
             payload = (src + "|" + pn_u + "|" + name_u + "|" + qty_s + "|" + cost_s + "|" + loc_u + "|" + sup_u)
             parsed["row_key"] = payload.apply(lambda s: hashlib.sha1(s.encode("utf-8")).hexdigest())
 
-            parsed = parsed[["part_number","part_name","quantity","unit_cost","supplier","location","order_no","date","source_file","row_key"]]
+            parsed = parsed[[
+                "part_number",
+                "part_name",
+                "quantity",
+                "unit_cost",
+                "supplier",
+                "location",
+                "order_no",
+                "date",
+                "source_file",
+                "row_key",
+            ]]
             return parsed, issues
+
 
     # --- Empty input guard
     if df is None or len(df) == 0:
@@ -1528,12 +1602,18 @@ def build_receive_movements(normalized: pd.DataFrame, *, duplicate_exists_func, 
     built, errors = [], []
     for i, r in normalized.iterrows():
         rk = str(r["row_key"])
+
+        # <<< НОВОЕ: если дубликат – явно добавляем сообщение
         if duplicate_exists_func(rk):
+            errors.append(f"Row {i+1}: skipped as duplicate (row_key={rk})")
             continue
+        # >>>
+
         qty = int(r["quantity"] or 0)
         if qty <= 0:
             errors.append(f"Row {i+1}: non-positive qty")
             continue
+
         mov = {
             "movement_type": "RECEIVE",
             "row_key": rk,
@@ -1553,5 +1633,6 @@ def build_receive_movements(normalized: pd.DataFrame, *, duplicate_exists_func, 
         except Exception as e:
             errors.append(f"Row {i+1}: DB error: {e}")
     return built, errors
+
 
 

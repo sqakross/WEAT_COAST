@@ -828,19 +828,24 @@
     const btn = e.target.closest('button');
     if(!btn) return;
 
+    // ---- УДАЛИТЬ АППЛАЙЕНС ----
     if(btn.classList.contains('del-unit')){
-      const card = btn.closest('card');
-      card?.remove();
+      const card = btn.closest('.card');
+      if (card) {
+        card.remove();
 
-      document.querySelectorAll('#unitsWrap .card').forEach((c, idx)=>{
-        const strong=c.querySelector('.card-header strong');
-        if(strong) strong.textContent = `Appliance #${idx+1}`;
-      });
+        // Перенумеровка Appliance #1, #2, ...
+        document.querySelectorAll('#unitsWrap .card').forEach((c, idx)=>{
+          const strong=c.querySelector('.card-header strong');
+          if(strong) strong.textContent = `Appliance #${idx+1}`;
+        });
 
-      recomputeGrandTotal();
+        recomputeGrandTotal();
+      }
       return;
     }
 
+    // ---- ДОБАВИТЬ СТРОКУ ----
     if(btn.classList.contains('add-row')){
       const card  = btn.closest('.card'); if(!card) return;
       const tbody = card.querySelector('tbody'); if(!tbody) return;
@@ -857,11 +862,16 @@
       return;
     }
 
+    // ---- УДАЛИТЬ СТРОКУ ----
     if(btn.classList.contains('del-row')){
       const tr   = btn.closest('tr');
-      const card = btn.closest('card');
-      tr?.remove();
-      recomputeUnitSubtotal(card);
+      const card = btn.closest('.card') || (tr && tr.closest('.card')) || null;
+      if (tr) {
+        tr.remove();
+      }
+      if (card) {
+        recomputeUnitSubtotal(card);
+      }
       // NEW: пересчёт после удаления строки
       reevaluateWOStatusFromOrd();
       return;
