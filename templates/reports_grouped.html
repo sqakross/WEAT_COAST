@@ -77,37 +77,49 @@
       </div>
 
       {% if invoices %}
-        <div class="d-flex flex-wrap gap-2 my-2">
-        {# XLSX export #}
-        <a
-        href="{{ url_for('inventory.download_report_xlsx',
+  <div class="d-flex flex-wrap gap-2 my-2">
+
+    {# Основной отчёт (Grouped + Flat, с Technician + Canonical Ref + Location) #}
+    <a
+      href="{{ url_for('inventory.download_report_xlsx',
                        start_date=start_date,
                        end_date=end_date,
                        recipient=recipient,
                        reference_job=reference_job,
                        invoice_number=invoice) }}"
-        class="btn btn-outline-secondary">
-        📊 Export to Excel (XLSX)
-        </a>
+      class="btn btn-outline-secondary">
+      📊 Export Issued (XLSX)
+    </a>
 
-        {# если хочешь — можешь оставить и PDF рядом #}
-        {#
-        <a
-        href="{{ url_for('inventory.download_report_pdf',
+    {# Только RETURNS #}
+    <a
+      href="{{ url_for('inventory.download_returns_xlsx',
                        start_date=start_date,
                        end_date=end_date,
                        recipient=recipient,
                        reference_job=reference_job,
                        invoice_number=invoice) }}"
-        class="btn btn-outline-secondary">
-        🖨️ Print PDF
-        </a>
-        #}
+      class="btn btn-outline-warning">
+      ↩️ Export Returns (XLSX)
+    </a>
 
-        <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-primary">🏠 Dashboard</a>
-        <a href="{{ url_for('inventory.issue_part') }}" class="btn btn-outline-success">🧾 Issue Part</a>
-        </div>
-    {% endif %}
+    {# Только STOCK movements #}
+    <a
+      href="{{ url_for('inventory.download_stock_xlsx',
+                       start_date=start_date,
+                       end_date=end_date,
+                       recipient=recipient,
+                       reference_job=reference_job,
+                       invoice_number=invoice) }}"
+      class="btn btn-outline-info">
+      📦 Export Stock (XLSX)
+    </a>
+
+    <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-primary">🏠 Dashboard</a>
+    <a href="{{ url_for('inventory.issue_part') }}" class="btn btn-outline-success">🧾 Issue Part</a>
+  </div>
+{% endif %}
+
 
     </form>
   </div> {# /.report-filters #}
