@@ -20,19 +20,26 @@
       </div>
 
       <!-- Header actions submit the main form as well -->
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 align-items-center">
+        <!-- Print -->
+        <button type="button"
+                class="btn btn-outline-secondary btn-sm"
+                onclick="window.print();">
+          Print
+        </button>
+
         {% if b.status == 'draft' %}
           <button id="btn-post-top" type="submit" form="editForm" name="action" value="post"
-                  class="btn btn-success"
+                  class="btn btn-success btn-sm"
                   data-disable-on-submit="true" data-action-label="Posting…"
                   title="Decrement stock">Post</button>
           <form method="post" action="{{ url_for('supplier_returns.delete_return', batch_id=b.id) }}"
                 onsubmit="return confirm('Delete draft?');">
-            <button class="btn btn-outline-danger">Delete</button>
+            <button class="btn btn-outline-danger btn-sm">Delete</button>
           </form>
         {% else %}
           <button id="btn-unpost-top" type="submit" form="editForm" name="action" value="unpost"
-                  class="btn btn-warning"
+                  class="btn btn-warning btn-sm"
                   data-disable-on-submit="true" data-action-label="Unposting…"
                   onclick="return confirm('Unpost? This will restore stock.');">
             Unpost
@@ -62,37 +69,102 @@
           <table class="table table-sm align-middle" id="items-table">
             <thead class="table-light">
               <tr>
-                <th style="width:170px;">Part #</th>
+                <th>Part #</th>
                 <th>Part name</th>
-                <th style="width:110px;">Qty</th>
-                <th style="width:140px;">Unit Cost</th>
-                <th style="width:130px;">Location</th>
-                <th style="width:120px;" class="text-end">Total</th>
-                <th style="width:70px;"></th>
+                <th>Qty</th>
+                <th>Unit Cost</th>
+                <th>Location</th>
+                <th>Tech / Job</th>
+                <th class="text-end">Total</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {% for it in b.items %}
               {% set bad = (loop.index0 in (errors_idx|default([]))) %}
               <tr class="{% if bad %}table-danger{% endif %}">
-                <td><input class="form-control form-control-sm" name="part_number[]" value="{{ it.part_number }}" placeholder="Scan or type Part #"></td>
-                <td><input class="form-control form-control-sm" name="part_name[]"  value="{{ it.part_name or '' }}"></td>
-                <td><input class="form-control form-control-sm qty"  name="qty_returned[]" type="number" min="1" step="1" value="{{ it.qty_returned or 1 }}"></td>
-                <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="{{ ('%.2f'|format(it.unit_cost or 0)) }}"></td>
-                <td><input class="form-control form-control-sm" name="location[]" value="{{ it.location or '' }}" placeholder="auto"></td>
-                <td class="text-end line-total">${{ '%.2f'|format(it.total_cost or 0) }}</td>
-                <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>
+                <td>
+                  <input class="form-control form-control-sm"
+                         name="part_number[]"
+                         value="{{ it.part_number }}"
+                         placeholder="Scan or type Part #">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm"
+                         name="part_name[]"
+                         value="{{ it.part_name or '' }}">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm qty"
+                         name="qty_returned[]"
+                         type="number" min="1" step="1"
+                         value="{{ it.qty_returned or 1 }}">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm cost"
+                         name="unit_cost[]"
+                         type="number" min="0" step="0.01"
+                         value="{{ ('%.2f'|format(it.unit_cost or 0)) }}">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm"
+                         name="location[]"
+                         value="{{ it.location or '' }}"
+                         placeholder="auto">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm"
+                         name="tech_note[]"
+                         value="{{ it.tech_note or '' }}"
+                         placeholder="Tech / Job #">
+                </td>
+                <td class="text-end line-total">
+                  ${{ '%.2f'|format(it.total_cost or 0) }}
+                </td>
+                <td>
+                  <button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button>
+                </td>
               </tr>
               {% endfor %}
+
               {% if not b.items %}
               <tr>
-                <td><input class="form-control form-control-sm" name="part_number[]" placeholder="Scan or type Part #"></td>
-                <td><input class="form-control form-control-sm" name="part_name[]"  placeholder=""></td>
-                <td><input class="form-control form-control-sm qty"  name="qty_returned[]" type="number" min="1" step="1" value="1"></td>
-                <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="0.00"></td>
-                <td><input class="form-control form-control-sm" name="location[]" placeholder="auto"></td>
+                <td>
+                  <input class="form-control form-control-sm"
+                         name="part_number[]"
+                         placeholder="Scan or type Part #">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm"
+                         name="part_name[]"
+                         placeholder="">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm qty"
+                         name="qty_returned[]"
+                         type="number" min="1" step="1"
+                         value="1">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm cost"
+                         name="unit_cost[]"
+                         type="number" min="0" step="0.01"
+                         value="0.00">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm"
+                         name="location[]"
+                         placeholder="auto">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm"
+                         name="tech_note[]"
+                         placeholder="Tech / Job #">
+                </td>
                 <td class="text-end line-total">$0.00</td>
-                <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>
+                <td>
+                  <button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button>
+                </td>
               </tr>
               {% endif %}
             </tbody>
@@ -135,6 +207,13 @@
           </button>
         {% endif %}
         <a href="{{ url_for('supplier_returns.list_returns') }}" class="btn btn-light">Cancel</a>
+
+        <!-- Print внизу -->
+        <button type="button"
+                class="btn btn-outline-secondary ms-auto"
+                onclick="window.print();">
+          Print
+        </button>
       </div>
     </form>
   </div>
@@ -145,6 +224,97 @@
   @keyframes flashOk { 0%{box-shadow:0 0 0 0 rgba(40,167,69,.7);} 100%{box-shadow:0 0 0 12px rgba(40,167,69,0);} }
   .cell-error input { border-color: #dc3545 !important; }
   .cell-error [title] { cursor: help; }
+
+  /* ======== ПЕЧАТЬ: LANDSCAPE, КРУПНЫЙ ТЕКСТ, ТАБЛИЦА НА ВСЮ ШИРИНУ ======== */
+  @media print {
+    @page {
+      size: A4 landscape;
+      margin: 10mm;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff !important;
+      font-size: 14px !important;
+      -webkit-print-color-adjust: exact;
+    }
+
+    nav.navbar,
+    .navbar,
+    .top-navbar,
+    .alert {
+      display: none !important;
+    }
+
+    .card-footer,
+    .btn,
+    a.btn {
+      display: none !important;
+    }
+
+    .container {
+      max-width: 100% !important;
+      width: 100% !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+
+    .card {
+      width: 100% !important;
+      box-shadow: none !important;
+      border: 1px solid #000 !important;
+      margin: 0 !important;
+    }
+
+    #items-table {
+      width: 100% !important;
+      table-layout: auto !important;
+    }
+
+    #items-table th,
+    #items-table td {
+      font-size: 13px !important;
+      padding: 4px 6px !important;
+      white-space: nowrap;
+    }
+
+    /* убираем любые inline-width */
+    #items-table th[style],
+    #items-table td[style] {
+      width: auto !important;
+      max-width: none !important;
+    }
+
+    /* Part name можно переносить */
+    #items-table th:nth-child(2),
+    #items-table td:nth-child(2) {
+      white-space: normal !important;
+    }
+
+    /* инпуты как текст */
+    #items-table input {
+      border: none !important;
+      background: transparent !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      box-shadow: none !important;
+      width: 100% !important;
+      font-size: 13px !important;
+    }
+
+      /* не рвём строки части между страницами */
+    #items-table tr {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+
+    /* саму карточку разрешаем делить по страницам */
+    .card {
+        page-break-inside: auto;
+        break-inside: auto;
+    }
+
+  }
 </style>
 
 <script>
@@ -169,17 +339,15 @@
     document.getElementById('grandtotal').textContent = fmt(sum);
   }
 
-  // normalize location on client before submit
   function normalizeLocation(s){
     if(!s) return '';
     let v = (s || '').trim();
     if (v.toLowerCase() === 'auto') return '';
-    v = v.replace(/\s*\/\s*/g, '/');  // A2 / B2 -> A2/B2
-    v = v.replace(/\s+/g, ' ');       // collapse spaces
+    v = v.replace(/\s*\/\s*/g, '/');
+    v = v.replace(/\s+/g, ' ');
     return v;
   }
 
-  // disable submit buttons to prevent double click
   let submitLock = false;
   function setLoading(btn, on){
     if(!btn) return;
@@ -194,13 +362,16 @@
     }
   }
   function disableAllSubmitButtons(){
-    document.querySelectorAll('[data-disable-on-submit="true"]').forEach(b=>setLoading(b,true));
+    document.querySelectorAll('[data-disable-on-submit="true"]').forEach(
+      b => setLoading(b, true)
+    );
   }
   function enableAllSubmitButtons(){
-    document.querySelectorAll('[data-disable-on-submit="true"]').forEach(b=>setLoading(b,false));
+    document.querySelectorAll('[data-disable-on-submit="true"]').forEach(
+      b => setLoading(b, false)
+    );
   }
 
-  // client-side inline errors
   function markCellError(input, msg){
     const td = input?.closest('td');
     if(!td) return;
@@ -216,7 +387,6 @@
     });
   }
 
-  // soft validation before POST
   function validateBeforePost(){
     let ok = true;
     let firstBadInput = null;
@@ -227,7 +397,7 @@
       const qty  = tr.querySelector('.qty');
       const cost = tr.querySelector('.cost');
 
-      if (!pn || !pn.value.trim()) return; // empty PN row ignored
+      if (!pn || !pn.value.trim()) return;
 
       if (qty && !(parseInt(qty.value,10) > 0)) {
         ok = false; markCellError(qty, 'Quantity must be > 0'); if(!firstBadInput) firstBadInput = qty;
@@ -244,7 +414,6 @@
     return ok;
   }
 
-  // lookup and auto-fill
   async function lookupAndFill(inputEl){
     const tr = inputEl.closest('tr');
     const pn = (inputEl.value || '').trim();
@@ -264,14 +433,26 @@
       const c = tr.querySelector('input[name="unit_cost[]"]');
       const l = tr.querySelector('input[name="location[]"]');
 
-      if(n && (!n.value || !n.value.trim())) { n.value = data.data.name || ''; n.classList.add('flash-ok'); setTimeout(()=>n.classList.remove('flash-ok'), 900); }
+      if(n && (!n.value || !n.value.trim())) {
+        n.value = data.data.name || '';
+        n.classList.add('flash-ok');
+        setTimeout(()=>n.classList.remove('flash-ok'), 900);
+      }
       if(c){
         const cur = parseFloat(c.value || '0');
-        if(!(cur>0)) { c.value = (data.data.unit_cost || 0).toFixed(2); c.classList.add('flash-ok'); setTimeout(()=>c.classList.remove('flash-ok'), 900); }
+        if(!(cur>0)) {
+          c.value = (data.data.unit_cost || 0).toFixed(2);
+          c.classList.add('flash-ok');
+          setTimeout(()=>c.classList.remove('flash-ok'), 900);
+        }
       }
       if(l){
         let cur = (l.value || '').trim().toLowerCase();
-        if(!cur || cur === 'auto') { l.value = data.data.location || ''; l.classList.add('flash-ok'); setTimeout(()=>l.classList.remove('flash-ok'), 900); }
+        if(!cur || cur === 'auto') {
+          l.value = data.data.location || '';
+          l.classList.add('flash-ok');
+          setTimeout(()=>l.classList.remove('flash-ok'), 900);
+        }
       }
       recalcRow(tr); recalcAll();
     }catch(e){
@@ -279,7 +460,6 @@
     }
   }
 
-  // ---------- events ----------
   let debounceTimer=null;
   const table = document.getElementById('items-table');
 
@@ -292,7 +472,6 @@
     if(t.classList.contains('qty')||t.classList.contains('cost')) recalcAll();
   });
 
-  // hotkeys
   table.addEventListener('keydown', e=>{
     const t = e.target;
     if(t.name==='part_number[]' && e.key==='Enter'){
@@ -308,7 +487,6 @@
     }
   });
 
-  // delete row
   table.addEventListener('click', e=>{
     if(e.target.classList.contains('btn-del-row')){
       const tr=e.target.closest('tr');
@@ -317,7 +495,6 @@
     }
   });
 
-  // add row
   document.getElementById('btn-add-row').addEventListener('click', ()=>{
     const tbody=document.querySelector('#items-table tbody');
     const tr=document.createElement('tr');
@@ -327,6 +504,7 @@
       <td><input class="form-control form-control-sm qty"  name="qty_returned[]" type="number" min="1" step="1" value="1"></td>
       <td><input class="form-control form-control-sm cost" name="unit_cost[]" type="number" min="0" step="0.01" value="0.00"></td>
       <td><input class="form-control form-control-sm" name="location[]" placeholder="auto"></td>
+      <td><input class="form-control form-control-sm" name="tech_note[]" placeholder="Tech / Job #"></td>
       <td class="text-end line-total">$0.00</td>
       <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>`;
     tbody.appendChild(tr);
@@ -334,7 +512,6 @@
     recalcAll();
   });
 
-  // фикс: всегда проставляем скрытому инпуту выбранное действие
   document.addEventListener('click', (e)=>{
     const btn = e.target.closest('button[name="action"]');
     if(!btn) return;
@@ -342,19 +519,17 @@
     if(hidden) hidden.value = btn.value || 'save';
   });
 
-  // normalize locations, validate, and protect against double submit
   const form = document.getElementById('editForm');
   form.addEventListener('submit', (e)=>{
     if(submitLock){ e.preventDefault(); return; }
 
-    // normalize all location[]
     form.querySelectorAll('input[name="location[]"]').forEach(inp=>{
       inp.value = normalizeLocation(inp.value);
     });
 
-    // прочитаем выбранное действие из скрытого поля (железно во всех браузерах)
     const hidden = document.getElementById('action-hidden');
-    const chosenAction = hidden ? (hidden.value || '') : ((e.submitter && e.submitter.value) ? e.submitter.value : '');
+    const chosenAction = hidden ? (hidden.value || '') :
+                        ((e.submitter && e.submitter.value) ? e.submitter.value : '');
 
     if (chosenAction === 'post') {
       if (!validateBeforePost()) {
@@ -368,7 +543,6 @@
     setTimeout(()=>{ submitLock=false; enableAllSubmitButtons(); }, 6000);
   });
 
-  // initial totals
   recalcAll();
 })();
 </script>

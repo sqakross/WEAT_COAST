@@ -110,6 +110,7 @@ def _save_rows_from_request(b: SupplierReturnBatch) -> dict[int, str]:
     Перечитывает строки из формы -> b.items.
     Возвращает {row_index: error_text} ТОЛЬКО по индексам (без ошибок сервиса).
     """
+    # Сначала очищаем старые строки этого батча
     SupplierReturnItem.query.filter_by(batch_id=b.id).delete()
     db.session.flush()
 
@@ -118,6 +119,7 @@ def _save_rows_from_request(b: SupplierReturnBatch) -> dict[int, str]:
     qtys  = request.form.getlist("qty_returned[]")
     costs = request.form.getlist("unit_cost[]")
     locs  = request.form.getlist("location[]")
+    techs = request.form.getlist("tech_note[]")   # 👈 ДОБАВИЛИ
 
     errors_by_index: dict[int, str] = {}
 
@@ -144,10 +146,13 @@ def _save_rows_from_request(b: SupplierReturnBatch) -> dict[int, str]:
         if loc_norm.lower() == "auto":
             loc_norm = ""
         else:
-            # A2 / B2 -> A2/B2 ; множественные пробелы -> один
             import re
-            loc_norm = re.sub(r"\s*/\s*", "/", loc_norm)
-            loc_norm = re.sub(r"\s+", " ", loc_norm)
+            loc_norm = re.sub(r"\s*\/\s*", "/", loc_norm)  # A2 / B2 -> A2/B2
+            loc_norm = re.sub(r"\s+", " ", loc_norm)       # множественные пробелы -> один
+
+        # Tech / Job (per row)
+        tech_raw = techs[idx] if idx < len(techs) else None
+        tech_note = (tech_raw or "").strip() or None
 
         # автозаполнение/нормализация
         if part:
@@ -161,19 +166,21 @@ def _save_rows_from_request(b: SupplierReturnBatch) -> dict[int, str]:
             errors_by_index[idx] = "Part not found"
             part_name = (nm or "").strip()
 
-        db.session.add(SupplierReturnItem(
-            batch_id=b.id,
-            part_number=pn,
-            part_name=part_name,
-            qty_returned=qv,
-            unit_cost=cv,
-            location=loc_norm
-        ))
+        db.session.add(
+            SupplierReturnItem(
+                batch_id=b.id,
+                part_number=pn,
+                part_name=part_name,
+                qty_returned=qv,
+                unit_cost=cv,
+                location=loc_norm,
+                tech_note=tech_note,   # 👈 СЮДА ЗАПИСЫВАЕМ
+            )
+        )
 
     # ВАЖНО: никаких recalc и смешивания ID-ошибок здесь.
     db.session.commit()
     return errors_by_index
-
 
 @supplier_returns_bp.route("/<int:batch_id>/edit", methods=["GET", "POST"])
 @login_required
@@ -186,10 +193,24 @@ def edit_return(batch_id: int):
 
     if request.method == "POST":
         action = _get_action_from_form()
+
+        # --- 0) supplier ---
         b.supplier_name = (request.form.get("supplier_name") or "").strip()
+
+        # --- 0.1) per-row Tech / Job (массив) ---
+        tech_notes_raw = request.form.getlist("tech_note[]")  # ["Tech 1", "Job 123", ...]
 
         # 1) сохраняем строки (получаем ТОЛЬКО индексные ошибки)
         errors_by_index = _save_rows_from_request(b)  # {0:"...", 2:"..."}
+
+        # 1.1) после того, как _save_rows_from_request актуализировал b.items,
+        #      развешиваем tech_note по строкам
+        if tech_notes_raw:
+            for idx, it in enumerate(b.items):
+                if idx >= len(tech_notes_raw):
+                    break
+                note = (tech_notes_raw[idx] or "").strip()
+                it.tech_note = note or None
 
         # 2) единоразово считаем агрегаты/валидацию сервиса (ошибки по ID)
         svc_errs_by_id = recalc_batch_totals(b) or {}  # {item_id: "..."}
@@ -205,63 +226,101 @@ def edit_return(batch_id: int):
 
         # ----- ветки действий -----
 
+        # SAVE (черновик) – просто сохранить текущие данные
         if action == "save":
-            flash("Draft saved." + (" Fix rows before posting." if errors_idx else ""),
-                  "warning" if errors_idx else "success")
+            from app import db  # если db уже импортирован выше модуля, эту строку не нужно
+            db.session.commit()
+            flash(
+                "Draft saved." + (" Fix rows before posting." if errors_idx else ""),
+                "warning" if errors_idx else "success",
+            )
             return redirect(url_for(".edit_return", batch_id=b.id))
 
+        # POST (списание со склада)
         if action == "post":
             if errors_idx:
                 # показать подсветку проблемных строк
-                return render_template("supplier_returns/edit.html", b=b, errors_idx=errors_idx)
+                return render_template(
+                    "supplier_returns/edit.html",
+                    b=b,
+                    errors_idx=errors_idx,
+                )
 
             try:
+                # Перед post_batch сделаем flush, чтобы tech_note тоже ушёл в БД
+                from app import db  # или убери, если db уже импортирован
+                db.session.flush()
+
                 res = post_batch(batch_id=b.id, actor=current_user.username)
             except SupplierReturnError as e:
                 flash(str(e), "danger")
-                return render_template("supplier_returns/edit.html", b=b, errors_idx=set())
+                return render_template(
+                    "supplier_returns/edit.html",
+                    b=b,
+                    errors_idx=set(),
+                )
 
             if not res.get("ok"):
                 # ошибки по ID → маппим в индексы
                 svc_errs_by_id = res.get("errors") or {}
                 id_to_index = {it.id: i for i, it in enumerate(b.items)}
-                errors_idx = {id_to_index[i] for i in svc_errs_by_id.keys() if i in id_to_index}
-                return render_template("supplier_returns/edit.html", b=b, errors_idx=errors_idx)
+                errors_idx = {
+                    id_to_index[i]
+                    for i in svc_errs_by_id.keys()
+                    if i in id_to_index
+                }
+                return render_template(
+                    "supplier_returns/edit.html",
+                    b=b,
+                    errors_idx=errors_idx,
+                )
 
-            # УСПЕХ: сразу идём на отчёт по инвойсу за сегодня, по этому поставщику
             from datetime import date
             today_str = date.today().strftime("%Y-%m-%d")
 
             flash("Posted: stock decremented.", "success")
-            return redirect(url_for(
-                "inventory.reports_grouped",
-                start_date=today_str,
-                end_date=today_str,
-                recipient=b.supplier_name or ""
-            ))
+            return redirect(
+                url_for(
+                    "inventory.reports_grouped",
+                    start_date=today_str,
+                    end_date=today_str,
+                    recipient=b.supplier_name or "",
+                )
+            )
 
+        # UNPOST (вернуть на склад)
         if action == "unpost":
             try:
                 res = unpost_batch(batch_id=b.id, actor=current_user.username)
             except SupplierReturnError as e:
                 flash(str(e), "danger")
-                return render_template("supplier_returns/edit.html", b=b, errors_idx=set())
+                return render_template(
+                    "supplier_returns/edit.html",
+                    b=b,
+                    errors_idx=set(),
+                )
 
             if not res.get("ok"):
-                flash("; ".join(res.get("errors", {}).values()) or "Cannot unpost", "danger")
+                flash(
+                    "; ".join(res.get("errors", {}).values()) or "Cannot unpost",
+                    "danger",
+                )
             else:
                 flash("Unposted: stock restored.", "success")
             return redirect(url_for(".edit_return", batch_id=b.id))
 
-        # fallback -> save
-        flash("Draft saved." + (" Fix rows before posting." if errors_idx else ""),
-              "warning" if errors_idx else "success")
+        # fallback -> save (на всякий случай)
+        from app import db  # или убери, если db уже импортирован
+        db.session.commit()
+        flash(
+            "Draft saved." + (" Fix rows before posting." if errors_idx else ""),
+            "warning" if errors_idx else "success",
+        )
         return redirect(url_for(".edit_return", batch_id=b.id))
 
     # GET
     recalc_batch_totals(b)
     return render_template("supplier_returns/edit.html", b=b, errors_idx=set())
-
 
 @supplier_returns_bp.route("/<int:batch_id>/delete", methods=["POST"])
 @login_required

@@ -530,6 +530,7 @@ class SupplierReturnBatch(db.Model):
     created_by = db.Column(db.String(120))
     posted_at = db.Column(db.DateTime)
     posted_by = db.Column(db.String(120))
+    tech_note = db.Column(db.String(255))  # NEW: technician + job note
 
     # агрегаты
     total_items = db.Column(db.Integer, nullable=False, default=0)
@@ -567,6 +568,7 @@ class SupplierReturnItem(db.Model):
     qty_returned = db.Column(db.Integer, nullable=False, default=0)
     unit_cost    = db.Column(db.Float,   nullable=False, default=0.0)
     total_cost   = db.Column(db.Float,   nullable=False, default=0.0)
+    tech_note = db.Column(db.String(255))  # Tech / Job per line
 
     batch = db.relationship("SupplierReturnBatch", back_populates="items", lazy="joined")
 

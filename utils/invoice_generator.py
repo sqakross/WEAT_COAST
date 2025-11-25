@@ -58,11 +58,12 @@ def generate_invoice_pdf(records, invoice_number=None):
     normal_style = styles["Normal"]
     right_style  = ParagraphStyle("right", parent=normal_style, alignment=TA_RIGHT)
 
-    # === ЛОГО (СТАРАЯ ПОЗИЦИЯ, как в самом первом варианте) ===
+    # === ЛОГО (СТАРАЯ ПОЗИЦИЯ) ===
     try:
         logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logo", "logo.png"))
         if os.path.exists(logo_path):
-            c.drawImage(logo_path, 40, height - 330, width=140, preserveAspectRatio=True, mask="auto")
+            c.drawImage(logo_path, 40, height - 330, width=140,
+                        preserveAspectRatio=True, mask="auto")
     except Exception:
         pass
 
@@ -99,18 +100,24 @@ def generate_invoice_pdf(records, invoice_number=None):
     c.rect(40, y, width - 80, 20, fill=1)
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 11)
-    headers = [(50, "Part Number"), (160, "Part Name"), (300, "Qty"),
-               (350, "Unit Cost"), (450, "Total"), (520, "Location")]
+    headers = [
+        (50,  "Part Number"),
+        (160, "Part Name"),
+        (300, "Qty"),
+        (350, "Unit Cost"),
+        (450, "Total"),
+        (520, "Location"),
+    ]
     for x, text in headers:
         c.drawString(x, y + 5, text)
 
-    # ---------- Строки (ровное выравнивание всех колонок) ----------
+    # ---------- Строки таблицы ----------
     c.setFillColor(colors.black)
     c.setFont("Helvetica", 10)
-    y -= 25
+    y -= 25  # y = верх первой строки после заголовка таблицы
     total_sum = 0.0
 
-    # координаты и ширины колонок (все как в твоём исходнике)
+    # координаты и ширины колонок
     COLS = {
         "pnum":  {"x": 50,  "w": 100, "style": normal_style},
         "pname": {"x": 160, "w": 130, "style": normal_style},
@@ -119,6 +126,9 @@ def generate_invoice_pdf(records, invoice_number=None):
         "total": {"x": 450, "w": 70,  "style": right_style},
         "loc":   {"x": 520, "w": 80,  "style": normal_style},
     }
+
+    BOTTOM_MARGIN = 80  # безопасный отступ снизу
+    ROW_PADDING = 5
 
     def _draw_table_header_only():
         c.setFont("Helvetica-Bold", 11)
@@ -130,7 +140,8 @@ def generate_invoice_pdf(records, invoice_number=None):
             c.drawString(x, yy + 5, text)
         c.setFillColor(colors.black)
         c.setFont("Helvetica", 10)
-        return height - 85  # новая рабочая Y после заголовка таблицы
+        # возвращаем "верх" первой строки под заголовком
+        return height - 85
 
     for r in records:
         pnum = getattr(getattr(r, "part", None), "part_number", "") or ""
@@ -143,38 +154,42 @@ def generate_invoice_pdf(records, invoice_number=None):
 
         line_total = (qty or 0) * float(ucost or 0.0)
 
-        # перенос страницы при нехватке места
-        min_row_h = 15
-        if y < (100 + min_row_h):
-            c.showPage()
-            y = _draw_table_header_only()
-
-        # готовим параграфы для всех колонок (чтобы высота считалась одинаково)
+        # 1) Параграфы для всех колонок
         cells = {
             "pnum":  Paragraph(str(pnum), COLS["pnum"]["style"]),
             "pname": Paragraph(pname,      COLS["pname"]["style"]),
             "qty":   Paragraph(str(qty),   COLS["qty"]["style"]),
-            "ucost": Paragraph(f"${float(ucost):.2f}", COLS["ucost"]["style"]),
+            "ucost": Paragraph(f"${float(ucost):.2f}",      COLS["ucost"]["style"]),
             "total": Paragraph(f"${float(line_total):.2f}", COLS["total"]["style"]),
             "loc":   Paragraph(str(loc),   COLS["loc"]["style"]),
         }
 
-        # вычисляем единую высоту строки
-        max_h = 15
+        # 2) Высота каждой ячейки + высота строки
+        min_row_h = 15
         sizes = {}
+        row_h = min_row_h
         for key, para in cells.items():
             _, h = para.wrap(COLS[key]["w"], 1000)
             sizes[key] = h
-            if h > max_h:
-                max_h = h
+            if h > row_h:
+                row_h = h
 
-        # рисуем ячейки, прижимая к верхней кромке строки
+        # 3) Проверка, помещается ли ВСЯ строка
+        if y - row_h < BOTTOM_MARGIN:
+            c.showPage()
+            y = _draw_table_header_only()
+
+        # 4) Рисуем ячейки: y — это ВЕРХ строки,
+        #    а Paragraph.drawOn ждёт координату НИЗА,
+        #    поэтому bottom = y - h
         for key, para in cells.items():
             x = COLS[key]["x"]
             h = sizes[key]
-            para.drawOn(c, x, y + (max_h - h))
+            bottom = y - h
+            para.drawOn(c, x, bottom)
 
-        y -= (max_h + 5)
+        # 5) Переход к следующей строке
+        y -= (row_h + ROW_PADDING)
         total_sum += float(line_total)
 
     # Итог
