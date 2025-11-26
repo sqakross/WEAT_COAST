@@ -84,7 +84,7 @@ def new_return():
     return render_template("supplier_returns/new.html")
 
 
-# ДОБАВЬ это рядом с другими helper-ами
+# ---------- helpers ----------
 def _get_action_from_form() -> str:
     """
     Возвращает 'post' | 'unpost' | 'save' на основе отправленной формы.
@@ -103,8 +103,6 @@ def _get_action_from_form() -> str:
     return "save"
 
 
-
-# ---------- helpers ----------
 def _save_rows_from_request(b: SupplierReturnBatch) -> dict[int, str]:
     """
     Перечитывает строки из формы -> b.items.
@@ -119,7 +117,7 @@ def _save_rows_from_request(b: SupplierReturnBatch) -> dict[int, str]:
     qtys  = request.form.getlist("qty_returned[]")
     costs = request.form.getlist("unit_cost[]")
     locs  = request.form.getlist("location[]")
-    techs = request.form.getlist("tech_note[]")   # 👈 ДОБАВИЛИ
+    techs = request.form.getlist("tech_note[]")   # per-row Tech / Job
 
     errors_by_index: dict[int, str] = {}
 
@@ -174,14 +172,15 @@ def _save_rows_from_request(b: SupplierReturnBatch) -> dict[int, str]:
                 qty_returned=qv,
                 unit_cost=cv,
                 location=loc_norm,
-                tech_note=tech_note,   # 👈 СЮДА ЗАПИСЫВАЕМ
+                tech_note=tech_note,
             )
         )
 
-    # ВАЖНО: никаких recalc и смешивания ID-ошибок здесь.
     db.session.commit()
     return errors_by_index
 
+
+# ---------- EDIT ----------
 @supplier_returns_bp.route("/<int:batch_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_return(batch_id: int):
@@ -193,6 +192,36 @@ def edit_return(batch_id: int):
 
     if request.method == "POST":
         action = _get_action_from_form()
+        # Запомним, был ли батч уже POSTED до любых действий
+        was_posted = (b.status or "draft") == "posted"
+
+        # Если батч был POSTED и жмём Save/Post —
+        # сначала делаем UNPOST, чтобы вернуть старые количества на склад,
+        # потом пересохраним строки и (для Save) заново POST.
+        if was_posted and action in ("save", "post"):
+            try:
+                res_un = unpost_batch(batch_id=b.id, actor=current_user.username)
+            except SupplierReturnError as e:
+                flash(str(e), "danger")
+                return render_template(
+                    "supplier_returns/edit.html",
+                    b=b,
+                    errors_idx=set(),
+                )
+
+            if not res_un.get("ok"):
+                flash(
+                    "; ".join(res_un.get("errors", {}).values()) or "Cannot unpost",
+                    "danger",
+                )
+                return render_template(
+                    "supplier_returns/edit.html",
+                    b=b,
+                    errors_idx=set(),
+                )
+
+            # обновим объект батча в сессии
+            db.session.refresh(b)
 
         # --- 0) supplier ---
         b.supplier_name = (request.form.get("supplier_name") or "").strip()
@@ -226,17 +255,60 @@ def edit_return(batch_id: int):
 
         # ----- ветки действий -----
 
-        # SAVE (черновик) – просто сохранить текущие данные
+        # SAVE
         if action == "save":
-            from app import db  # если db уже импортирован выше модуля, эту строку не нужно
-            db.session.commit()
-            flash(
-                "Draft saved." + (" Fix rows before posting." if errors_idx else ""),
-                "warning" if errors_idx else "success",
-            )
+            # Случай обычного черновика — логика как раньше
+            if not was_posted:
+                db.session.commit()
+                flash(
+                    "Draft saved." + (" Fix rows before posting." if errors_idx else ""),
+                    "warning" if errors_idx else "success",
+                )
+                return redirect(url_for(".edit_return", batch_id=b.id))
+
+            # Сюда попадаем, если батч БЫЛ posted и мы его редактируем.
+            # Мы уже сделали UNPOST выше. Теперь нам нужно:
+            #   - если есть ошибки — показать их, НЕ постить снова (батч остаётся draft)
+            #   - если ошибок нет — вызвать post_batch ещё раз, чтобы заново списать склад.
+            if errors_idx:
+                flash("Cannot re-post until you fix highlighted rows.", "danger")
+                return render_template(
+                    "supplier_returns/edit.html",
+                    b=b,
+                    errors_idx=errors_idx,
+                )
+
+            try:
+                db.session.flush()
+                res = post_batch(batch_id=b.id, actor=current_user.username)
+            except SupplierReturnError as e:
+                flash(str(e), "danger")
+                return render_template(
+                    "supplier_returns/edit.html",
+                    b=b,
+                    errors_idx=set(),
+                )
+
+            if not res.get("ok"):
+                # ошибки по ID → маппим в индексы
+                svc_errs_by_id = res.get("errors") or {}
+                id_to_index = {it.id: i for i, it in enumerate(b.items)}
+                errors_idx = {
+                    id_to_index[i]
+                    for i in svc_errs_by_id.keys()
+                    if i in id_to_index
+                }
+                flash("Cannot re-post until you fix highlighted rows.", "danger")
+                return render_template(
+                    "supplier_returns/edit.html",
+                    b=b,
+                    errors_idx=errors_idx,
+                )
+
+            flash("Posted supplier return updated: stock adjusted.", "success")
             return redirect(url_for(".edit_return", batch_id=b.id))
 
-        # POST (списание со склада)
+        # POST (списание со склада из draft-состояния)
         if action == "post":
             if errors_idx:
                 # показать подсветку проблемных строк
@@ -247,10 +319,7 @@ def edit_return(batch_id: int):
                 )
 
             try:
-                # Перед post_batch сделаем flush, чтобы tech_note тоже ушёл в БД
-                from app import db  # или убери, если db уже импортирован
                 db.session.flush()
-
                 res = post_batch(batch_id=b.id, actor=current_user.username)
             except SupplierReturnError as e:
                 flash(str(e), "danger")
@@ -288,7 +357,7 @@ def edit_return(batch_id: int):
                 )
             )
 
-        # UNPOST (вернуть на склад)
+        # UNPOST (вернуть на склад вручную кнопкой UNPOST)
         if action == "unpost":
             try:
                 res = unpost_batch(batch_id=b.id, actor=current_user.username)
@@ -310,7 +379,6 @@ def edit_return(batch_id: int):
             return redirect(url_for(".edit_return", batch_id=b.id))
 
         # fallback -> save (на всякий случай)
-        from app import db  # или убери, если db уже импортирован
         db.session.commit()
         flash(
             "Draft saved." + (" Fix rows before posting." if errors_idx else ""),
@@ -322,6 +390,8 @@ def edit_return(batch_id: int):
     recalc_batch_totals(b)
     return render_template("supplier_returns/edit.html", b=b, errors_idx=set())
 
+
+# ---------- DELETE ----------
 @supplier_returns_bp.route("/<int:batch_id>/delete", methods=["POST"])
 @login_required
 def delete_return(batch_id: int):
