@@ -2055,15 +2055,18 @@ def _recompute_batch_consumption(batch: "IssuedBatch") -> None:
     batch.consumed_by   = last_who
 
 @inventory_bp.post("/reports/consume/reset")
+@login_required
 def unconsume_invoice():
     """
     Сбрасывает consumed_* у выбранных строк инвойса, либо у всего инвойса (по группе).
-    Доступ: admin, superadmin, user.
+    Доступ: только superadmin.
     """
     from flask_login import current_user
     role = (getattr(current_user, "role", "") or "").strip().lower()
-    if role not in ("admin", "superadmin", "user"):
-        flash("Access denied", "danger")
+
+    # ❗ Теперь только супер-админ
+    if role != "superadmin":
+        flash("Only Superadmin can unconsume rows.", "danger")
         return redirect(url_for("inventory.reports_grouped"))
 
     # Группа
@@ -2117,7 +2120,6 @@ def unconsume_invoice():
     # вернёмся назад по тем же фильтрам
     return redirect(url_for("inventory.reports_grouped"))
 
-
 # ====== CONSUME (partial usage) ===============================================
 @inventory_bp.post("/invoices/consume")
 @login_required
@@ -2126,15 +2128,16 @@ def consume_invoice():
     Увеличивает consumed_qty по выбранным строкам (или по всему инвойсу — по radio apply_scope).
     Использует значения qty_<id> из формы. Никогда не превышает исходный quantity.
     Игнорирует возвраты (quantity < 0).
-    Доступно для admin/superadmin.
+    Доступно для admin/superadmin/user.
     """
+    from flask_login import current_user
+    from sqlalchemy import func
+    from models import IssuedPartRecord, IssuedBatch, IssuedConsumptionLog
+
     role = (getattr(current_user, "role", "") or "").strip().lower()
     if role not in ("admin", "superadmin", "user"):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.reports_grouped"))
-
-    from models import IssuedPartRecord, IssuedBatch
-    from sqlalchemy import func
 
     form = request.form
 
@@ -2145,20 +2148,28 @@ def consume_invoice():
     group_issue_date_s  = (form.get("group_issue_date") or "").strip()
     location            = (form.get("location") or "").strip()
 
+    # ⚠️ Job ОБЯЗАТЕЛЕН
+    job_ref_raw = (form.get("job_ref") or "").strip()
+    if not job_ref_raw:
+        flash("Job number is required to mark parts as consumed.", "warning")
+        return redirect(url_for("inventory.reports_grouped"))
+    job_ref = job_ref_raw
+
     # радиокнопка области: all | selected
     apply_scope = (form.get("apply_scope") or "all").strip().lower()
     # список выбранных записей для режима 'selected'
     selected_ids = [int(x) for x in form.getlist("record_ids[]") if str(x).isdigit()]
 
     # Собираем кандидатные строки
-    q = db.session.query(IssuedPartRecord).options(db.joinedload(IssuedPartRecord.part),
-                                                   db.joinedload(IssuedPartRecord.batch))
+    q = db.session.query(IssuedPartRecord).options(
+        db.joinedload(IssuedPartRecord.part),
+        db.joinedload(IssuedPartRecord.batch),
+    )
 
     if apply_scope == "selected" and selected_ids:
         q = q.filter(IssuedPartRecord.id.in_(selected_ids))
     else:
         # Entire invoice (legacy-группа по ключам)
-        # Матчим по trimmed-полям и дате (DATE(issue_date) == DATE(form))
         try:
             grp_dt = datetime.strptime(group_issue_date_s, "%Y-%m-%d %H:%M:%S")
         except Exception:
@@ -2179,7 +2190,7 @@ def consume_invoice():
         else:
             q = q.filter(func.coalesce(IssuedPartRecord.reference_job, "") == "")
 
-        # Если в карточке был location — берём его как скоп.
+        # Если в карточке был location — берём его как scope.
         if location:
             q = q.filter(func.trim(IssuedPartRecord.location) == location)
 
@@ -2212,52 +2223,42 @@ def consume_invoice():
             continue
 
         add_qty = min(add_qty, remain)
+
+        # Обновляем агрегат в IssuedPartRecord
         if r.apply_consume(add_qty, user=now_user, note="consume via reports_grouped"):
             changed += 1
             db.session.add(r)
 
+            # Логируем это частичное списание в IssuedConsumptionLog
+            log = IssuedConsumptionLog(
+                issued_part_id=r.id,
+                qty=add_qty,
+                job_ref=job_ref,
+                consumed_by=now_user,
+                note="consume via reports_grouped",
+            )
+            db.session.add(log)
+
     if changed:
-        # Синхронизируем флаг батча, если есть
-        _sync_batches_consumed_flag(rows)
+        # Пересчёт consumed_flag на батчах (как в unconsume_invoice)
+        touched_batches = set()
+        for r in rows:
+            if r.batch_id:
+                touched_batches.add(r.batch_id)
+
+        if touched_batches:
+            batches = IssuedBatch.query.filter(
+                IssuedBatch.id.in_(list(touched_batches))
+            ).all()
+            for b in batches:
+                _recompute_batch_consumption(b)
+
         db.session.commit()
         flash(f"Marked consumed on {changed} row(s).", "success")
     else:
         flash("Nothing to consume (all selected rows already fully consumed).", "info")
 
-    # Вернёмся туда же
     return redirect(url_for("inventory.reports_grouped"))
-
-
-def _sync_batches_consumed_flag(rows: list):
-    """
-    Если у строк есть batch — считаем для каждого: consumed_flag = all(item.consumed_qty >= item.quantity, quantity>0)
-    и ставим/снимаем batch.consumed_flag. Также обновляем consumed_at/by у батча.
-    """
-    from models import IssuedPartRecord, IssuedBatch
-
-    # Сгруппируем id батчей
-    batch_ids = {getattr(r, "batch_id", None) for r in rows if getattr(r, "batch_id", None)}
-    if not batch_ids:
-        return
-
-    for bid in batch_ids:
-        batch = db.session.query(IssuedBatch).options(db.selectinload(IssuedBatch.parts)).get(bid)
-        if not batch:
-            continue
-
-        # Только строки с quantity>0 участвуют в расчёте
-        items = [p for p in (batch.parts or []) if (p.quantity or 0) > 0]
-        if not items:
-            # Если в батче нет положительных строк — считаем не потреблённым
-            batch.consumed_flag = False
-        else:
-            all_consumed = all((int(p.consumed_qty or 0) >= int(p.quantity or 0)) for p in items)
-            batch.consumed_flag = bool(all_consumed)
-
-        batch.consumed_at = datetime.utcnow()
-        batch.consumed_by = (getattr(current_user, "username", "") or "").strip()
-
-        db.session.add(batch)
 
 # --- Confirm selected lines / whole invoice ---
 @inventory_bp.post("/work_orders/<int:wo_id>/confirm")
@@ -2855,6 +2856,7 @@ def wo_detail(wo_id):
 
     is_admin_like = role_raw in ("admin", "superadmin")
     is_technician = role_raw in ("technician", "tech")
+    is_user       = (role_raw == "user")  # <<< НОВОЕ
 
     is_my_wo = False
     if wo_tech_id and me_id and (wo_tech_id == me_id):
@@ -2862,12 +2864,19 @@ def wo_detail(wo_id):
     elif wo_tech_name and me_name and (wo_tech_name == me_name):
         is_my_wo = True
 
+    # Техник НЕ может смотреть чужие WO
     if is_technician and not is_my_wo:
         flash("You don't have access to this Work Order.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
+    # Кто может подтверждать — только superadmin (как и было)
     can_confirm_any = (role_raw == "superadmin")
-    can_view_docs = (is_admin_like or is_my_wo)
+
+    # Кто может видеть Open Report / Print:
+    #   - admin/superadmin
+    #   - техник на своём WO
+    #   - ЛЮБОЙ user (всегда)
+    can_view_docs = is_admin_like or is_my_wo or is_user  # <<< КЛЮЧЕВОЙ МОМЕНТ
 
     # 3) suppliers
     suppliers = [
@@ -2996,8 +3005,8 @@ def wo_detail(wo_id):
     batches = []
     for _, recs in grouped.items():
         b = recs[0].batch if recs and getattr(recs[0], "batch", None) else None
-        issued_at = (b.issue_date if b else recs[0].issue_date)  # <-- datetime
-        issued_at_str = _fmt(issued_at)  # строка для совместимости
+        issued_at = (b.issue_date if b else recs[0].issue_date)
+        issued_at_str = _fmt(issued_at)
         tech = recs[0].issued_to
         ref = (b.reference_job if b else (recs[0].reference_job or "")) or ""
         report_id = (b.invoice_number if b else recs[0].invoice_number)
@@ -3043,12 +3052,8 @@ def wo_detail(wo_id):
 
         batches.append(
             {
-                # НОВОЕ: отдаём datetime для шаблона (покажется через |local_dt)
                 "issued_at_dt": issued_at,
-
-                # Оставляем старую строку для бэк-совместимости (legacy печать и т.д.)
                 "issued_at": issued_at_str,
-
                 "technician": tech,
                 "canonical_ref": canon,
                 "reference_job": ref,
@@ -3187,6 +3192,7 @@ def wo_detail(wo_id):
         can_view_docs=can_view_docs,
         current_user=current_user,
     )
+
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
 def download_report_xlsx():

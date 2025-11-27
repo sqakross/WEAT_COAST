@@ -283,6 +283,16 @@ class IssuedPartRecord(db.Model):
     consumed_by   = db.Column(db.String(120), nullable=True)
     consumed_note = db.Column(db.String(500), nullable=True)
 
+    # На какой job № было помечено списание (для отчёта Grouped)
+    consumed_job_ref = db.Column(db.String(64), nullable=True, index=True)
+    # журнальные записи по частичным списаниям (по job)
+    consumption_logs = db.relationship(
+        "IssuedConsumptionLog",
+        back_populates="issued_part",
+        lazy="select",
+        cascade="all, delete-orphan",
+    )
+
     # --- Удобные свойства/методы ---
 
     @property
@@ -337,16 +347,63 @@ class IssuedPartRecord(db.Model):
 
     def unconsume_all(self) -> bool:
         """Сбросить списание по строке (для отката)."""
-        changed = bool(self.consumed_qty or self.consumed_flag or self.consumed_at or self.consumed_by or self.consumed_note)
+        changed = bool(
+            self.consumed_qty
+            or self.consumed_flag
+            or self.consumed_at
+            or self.consumed_by
+            or self.consumed_note
+            or (self.consumption_logs and len(self.consumption_logs) > 0)
+        )
         self.consumed_qty = None
         self.consumed_flag = False
         self.consumed_at = None
         self.consumed_by = None
         self.consumed_note = None
+
+        # сами объекты логов будут удалены через cascade="all, delete-orphan"
+        self.consumption_logs.clear()
         return changed
+
+
 
     def __repr__(self):
         return f"<IssuedPartRecord id={self.id} inv={self.invoice_number} batch={self.batch_id}>"
+
+class IssuedConsumptionLog(db.Model):
+    __tablename__ = "issued_consumption_log"
+    __table_args__ = {"extend_existing": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # какая строка инвойса (IssuedPartRecord) была частично списана
+    issued_part_id = db.Column(
+        db.Integer,
+        db.ForeignKey("issued_part_record.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # сколько штук списали этой операцией
+    qty = db.Column(db.Integer, nullable=False)
+
+    # на какой job-номер списали (например "987568", "9855" и т.д.)
+    job_ref = db.Column(db.String(64), nullable=True, index=True)
+
+    # мета-инфо
+    consumed_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    consumed_by = db.Column(db.String(120), nullable=True)
+    note = db.Column(db.String(500), nullable=True)
+
+    # связь обратно к строке инвойса
+    issued_part = db.relationship(
+        "IssuedPartRecord",
+        back_populates="consumption_logs",
+        lazy="joined",
+    )
+
+    def __repr__(self):
+        return f"<IssuedConsumptionLog id={self.id} part_id={self.issued_part_id} qty={self.qty} job={self.job_ref}>"
 
 # --------------------------------
 # External Order tracking

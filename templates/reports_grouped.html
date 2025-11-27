@@ -11,19 +11,33 @@
     padding: .75rem .75rem 0 .75rem;
     border-bottom: 1px solid #dee2e6;
   }
+
+  /* Аккуратная панель кнопок у инвойса */
   .invoice-toolbar {
     display: flex;
     flex-wrap: wrap;
-    justify-content: space-between; /* лево / право */
+    align-items: flex-start;
+    justify-content: space-between;
     gap: .5rem 1rem;
   }
-  .toolbar-left,
+
+  .toolbar-left {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem .75rem;
+    flex: 1 1 auto;
+  }
+
   .toolbar-right {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: .5rem;
+    flex: 0 0 auto;
+    justify-content: flex-end;
   }
+
   .apply-scope {
     display: inline-flex;
     align-items: center;
@@ -77,50 +91,48 @@
       </div>
 
       {% if invoices %}
-  <div class="d-flex flex-wrap gap-2 my-2">
+        <div class="d-flex flex-wrap gap-2 my-2">
 
-    {# Основной отчёт (Grouped + Flat, с Technician + Canonical Ref + Location) #}
-    <a
-      href="{{ url_for('inventory.download_report_xlsx',
-                       start_date=start_date,
-                       end_date=end_date,
-                       recipient=recipient,
-                       reference_job=reference_job,
-                       invoice_number=invoice) }}"
-      class="btn btn-outline-secondary">
-      📊 Export Issued (XLSX)
-    </a>
+          {# Основной отчёт (Grouped + Flat, с Technician + Canonical Ref + Location) #}
+          <a
+            href="{{ url_for('inventory.download_report_xlsx',
+                             start_date=start_date,
+                             end_date=end_date,
+                             recipient=recipient,
+                             reference_job=reference_job,
+                             invoice_number=invoice) }}"
+            class="btn btn-outline-secondary">
+            📊 Export Issued (XLSX)
+          </a>
 
-    {# Только RETURNS #}
-    <a
-      href="{{ url_for('inventory.download_returns_xlsx',
-                       start_date=start_date,
-                       end_date=end_date,
-                       recipient=recipient,
-                       reference_job=reference_job,
-                       invoice_number=invoice) }}"
-      class="btn btn-outline-warning">
-      ↩️ Export Returns (XLSX)
-    </a>
+          {# Только RETURNS #}
+          <a
+            href="{{ url_for('inventory.download_returns_xlsx',
+                             start_date=start_date,
+                             end_date=end_date,
+                             recipient=recipient,
+                             reference_job=reference_job,
+                             invoice_number=invoice) }}"
+            class="btn btn-outline-warning">
+            ↩️ Export Returns (XLSX)
+          </a>
 
-    {# Только STOCK movements #}
-    <a
-      href="{{ url_for('inventory.download_stock_xlsx',
-                       start_date=start_date,
-                       end_date=end_date,
-                       recipient=recipient,
-                       reference_job=reference_job,
-                       invoice_number=invoice) }}"
-      class="btn btn-outline-info">
-      📦 Export Stock (XLSX)
-    </a>
+          {# Только STOCK movements #}
+          <a
+            href="{{ url_for('inventory.download_stock_xlsx',
+                             start_date=start_date,
+                             end_date=end_date,
+                             recipient=recipient,
+                             reference_job=reference_job,
+                             invoice_number=invoice) }}"
+            class="btn btn-outline-info">
+            📦 Export Stock (XLSX)
+          </a>
 
-    <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-primary">🏠 Dashboard</a>
-    <a href="{{ url_for('inventory.issue_part') }}" class="btn btn-outline-success">🧾 Issue Part</a>
-  </div>
-{% endif %}
-
-
+          <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-primary">🏠 Dashboard</a>
+          <a href="{{ url_for('inventory.issue_part') }}" class="btn btn-outline-success">🧾 Issue Part</a>
+        </div>
+      {% endif %}
     </form>
   </div> {# /.report-filters #}
 
@@ -262,9 +274,19 @@
               </div>
             {% endif %}
 
+            {# СВОБОДНЫЙ ВВОД JOB ДЛЯ CONSUME #}
+            <div class="apply-scope">
+              <span class="me-1 small text-muted">Consumed for job:</span>
+              <input type="text"
+                     name="job_ref"
+                     class="form-control form-control-sm"
+                     style="width: 140px;"
+                     placeholder="Job # (required)">
+            </div>
+
             {# КНОПКИ СЛЕВА: consume / unconsume / return #}
             <button type="submit"
-                    class="btn btn-outline-primary"
+                    class="btn btn-outline-primary btn-sm"
                     name="do_consume" value="1"
                     formaction="{{ url_for('inventory.consume_invoice') }}"
                     formmethod="post"
@@ -272,17 +294,19 @@
               Mark Consumed
             </button>
 
-            <button type="submit"
-                    class="btn btn-outline-secondary"
-                    name="do_unconsume" value="1"
-                    formaction="{{ url_for('inventory.unconsume_invoice') }}"
-                    formmethod="post"
-                    title="Reset consumed_qty for chosen scope">
-              Unconsume Selected
-            </button>
+            {% if current_user.role == 'superadmin' %}
+              <button type="submit"
+                      class="btn btn-outline-secondary btn-sm"
+                      name="do_unconsume" value="1"
+                      formaction="{{ url_for('inventory.unconsume_invoice') }}"
+                      formmethod="post"
+                      title="Reset consumed_qty for chosen scope">
+                Unconsume Selected
+              </button>
+            {% endif %}
 
             {% if not is_return and has_selectable %}
-              <button type="submit" class="btn btn-warning"
+              <button type="submit" class="btn btn-warning btn-sm"
                       name="do_return" value="1"
                       onclick="return confirm('Create RETURN invoice from selected rows?');">
                 Return Selected
@@ -292,12 +316,12 @@
 
           <div class="toolbar-right">
             {# СПРАВА: сохранить и удалить #}
-            <button type="submit" class="btn btn-success" name="do_return" value="0">
+            <button type="submit" class="btn btn-success btn-sm" name="do_return" value="0">
               Save Invoice
             </button>
 
             {% if current_user.role == 'superadmin' and is_return %}
-              <button type="submit" class="btn btn-outline-danger"
+              <button type="submit" class="btn btn-outline-danger btn-sm"
                       name="delete_return" value="1"
                       onclick="return confirm('Delete this RETURN invoice and adjust stock?');">
                 Delete Return
@@ -305,7 +329,7 @@
             {% endif %}
 
             {% if current_user.role == 'superadmin' and not is_return and inv.invoice_number %}
-              <button type="submit" class="btn btn-outline-danger"
+              <button type="submit" class="btn btn-outline-danger btn-sm"
                       name="delete_invoice" value="{{ inv.invoice_number }}"
                       onclick="return confirm('Delete ENTIRE invoice (all rows) and adjust stock?');">
                 Delete Invoice
@@ -388,7 +412,18 @@
                         <input type="number" step="1" class="form-control form-control-sm text-end"
                                name="edit_qty_{{ it.id }}" value="{{ it_qty }}" form="form-{{ inv.id }}">
                       </td>
-                      <td class="text-end">{{ it_used }}</td>
+                      <td class="text-end">
+                        {{ it_used }}
+                        {% if it.consumption_logs %}
+                          <div class="text-muted small mt-1">
+                            {% for log in it.consumption_logs %}
+                              <div>
+                                Job {{ log.job_ref or 'N/A' }}: {{ log.qty }}
+                              </div>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
+                      </td>
                       <td class="text-end">{{ it_rem }}</td>
                       <td class="text-end">
                         <input type="number" step="0.01" class="form-control form-control-sm text-end"
@@ -405,7 +440,18 @@
                       </td>
                     {% else %}
                       <td class="text-end">{{ it_qty }}</td>
-                      <td class="text-end">{{ it_used }}</td>
+                      <td class="text-end">
+                        {{ it_used }}
+                        {% if it.consumption_logs %}
+                          <div class="text-muted small mt-1">
+                            {% for log in it.consumption_logs %}
+                              <div>
+                                Job {{ log.job_ref or 'N/A' }}: {{ log.qty }}
+                              </div>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
+                      </td>
                       <td class="text-end">{{ it_rem }}</td>
                       <td class="text-end">{{ '%.2f'|format(it.unit_cost_at_issue or 0) }}</td>
                       <td class="text-end">{{ '%.2f'|format(it_qty*(it.unit_cost_at_issue or 0)) }}</td>
