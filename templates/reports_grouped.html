@@ -384,6 +384,9 @@
                   {% set it_rem = it_qty - it_used %}
                   {% if it_rem < 0 %}{% set it_rem = 0 %}{% endif %}
 
+                  {# SNAPSHOT: сначала берем it.location; если пусто — текущую part.location #}
+                  {% set effective_loc = it.location or (it.part.location if it.part else '') %}
+
                   <tr class="{{ 'table-warning' if row_is_return else '' }}">
                     <td>
                       <div class="d-flex align-items-center gap-2">
@@ -460,7 +463,8 @@
                     {% endif %}
 
                     <td>{{ it.issue_date.strftime('%Y-%m-%d') if it.issue_date }}</td>
-                    <td>{{ it.location or (it.part.location if it.part else '') }}</td>
+                    <td>{{ effective_loc }}</td>
+
                   </tr>
                 {% endfor %}
               </tbody>

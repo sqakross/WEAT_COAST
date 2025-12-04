@@ -4392,36 +4392,40 @@ def wo_save():
         for ri in sorted(u_blk.get("rows", {}).keys()):
             r = u_blk["rows"][ri]
 
-            pn  = (r.get("part_number") or "").strip().upper()
+            pn = (r.get("part_number") or "").strip().upper()
             qty = _i(r.get("quantity") or 0, 0)
 
-            alt_raw  = (r.get("alt_numbers") or r.get("alt_part_numbers") or "").strip()
-            wh_raw   = (r.get("warehouse")  or r.get("unit_label") or "").strip()
-            sup_raw  = (r.get("supplier")   or r.get("supplier_name") or "").strip()
+            alt_raw = (r.get("alt_numbers") or r.get("alt_part_numbers") or "").strip()
+            wh_raw = (r.get("warehouse") or r.get("unit_label") or "").strip()
+            sup_raw = (r.get("supplier") or r.get("supplier_name") or "").strip()
 
-            ucost    = _f(r.get("unit_cost"), None)
-            bo_flag  = _b(r.get("backorder_flag"))
-            lstatus  = (r.get("status") or "search_ordered").strip()
+            ucost   = _f(r.get("unit_cost"), None)
+            bo_flag = _b(r.get("backorder_flag"))
+            lstatus = (r.get("status") or "search_ordered").strip()
             ord_flag = _b(r.get("ordered_flag"))
+
+            # отдельно берём обрезанное имя и эффективное количество
+            part_name_clip = _clip(r.get("part_name"), 120)
+            qty_eff = qty if qty else 1
 
             row_dict = {
                 "id": None,
-                "part_number":    _clip(pn, 80),
-                "part_name":      _clip(r.get("part_name"), 120),
-                "quantity":       qty if qty else 1,
-                "alt_numbers":    _clip(alt_raw, 200),
-                "warehouse":      _clip(wh_raw, 120),
-                "supplier":       _clip(sup_raw, 80),
+                "part_number": _clip(pn, 80),
+                "part_name": part_name_clip,
+                "quantity": qty_eff,
+                "alt_numbers": _clip(alt_raw, 200),
+                "warehouse": _clip(wh_raw, 120),
+                "supplier": _clip(sup_raw, 80),
                 "backorder_flag": bo_flag,
-                "line_status":    lstatus if lstatus in ("search_ordered", "ordered", "done") else "search_ordered",
-                "unit_cost":      (ucost if (ucost is not None) else 0.0),
-                "ordered_flag":   ord_flag,
+                "line_status": lstatus if lstatus in ("search_ordered", "ordered", "done") else "search_ordered",
+                "unit_cost": (ucost if (ucost is not None) else 0.0),
+                "ordered_flag": ord_flag,
             }
 
-            if pn and qty > 0:
+            # считаем и добавляем только непустые строки
+            if (pn or part_name_clip) and qty_eff > 0:
                 new_rows_count += 1
-
-            rows_payload.append(row_dict)
+                rows_payload.append(row_dict)
 
         units_payload.append({
             "brand":  (u_blk.get("brand")  or "").strip(),
@@ -6455,10 +6459,12 @@ def issue_part():
         reference_job = (first.get('reference_job') or '').strip() or None
         issued_by = current_user.username
         issue_dt = datetime.utcnow()
-        location = None  # при наличии — подставь
+
+        # batch-level location (опционально — по первой строке)
+        batch_location = None
 
         # 1) валидируем сток и создаём строки выдачи
-        for item in all_parts:
+        for idx, item in enumerate(all_parts):
             part = Part.query.get(item['part_id'])
             qty  = int(item.get('quantity') or 0)
 
@@ -6466,7 +6472,11 @@ def issue_part():
                 flash(f"Not enough stock for {item.get('part_number', 'UNKNOWN')}", 'danger')
                 return redirect(url_for('.issue_part'))
 
+            # уменьшаем сток
             part.quantity -= qty
+
+            # СНИМОК локации на момент выдачи
+            loc_snapshot = (getattr(part, "location", "") or "").strip()
 
             rec = IssuedPartRecord(
                 part_id=part.id,
@@ -6476,10 +6486,14 @@ def issue_part():
                 issued_by=issued_by,
                 issue_date=issue_dt,
                 unit_cost_at_issue=part.unit_cost,
-                location=location,
+                location=loc_snapshot,   # ВАЖНО: сохраняем snapshot
             )
             db.session.add(rec)
             new_records.append(rec)
+
+            # для батча можно взять локацию первой строки (если нужна)
+            if batch_location is None and loc_snapshot:
+                batch_location = loc_snapshot
 
         # 2) сразу создаём батч + номер инвойса
         try:
@@ -6489,7 +6503,7 @@ def issue_part():
                 issued_by=issued_by,
                 reference_job=reference_job,
                 issue_date=issue_dt,
-                location=location,
+                location=batch_location,  # можно None, но так логичнее
             )
             db.session.commit()
         except Exception as e:

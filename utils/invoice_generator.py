@@ -3,6 +3,12 @@ def generate_invoice_pdf(records, invoice_number=None):
     Групповая печать инвойса (read-only).
     Приоритет номера: param -> records[0].invoice_number -> legacy id.
     НИЧЕГО в БД не меняет.
+
+    Location:
+      - Если в IssuedPartRecord.location что-то есть — считаем, что это snapshot
+        и используем ТОЛЬКО его.
+      - Если IssuedPartRecord.location пустой/None (старые строки) —
+        показываем текущий Part.location (актуальный сток).
     """
     from io import BytesIO
     from reportlab.pdfgen import canvas
@@ -62,8 +68,14 @@ def generate_invoice_pdf(records, invoice_number=None):
     try:
         logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logo", "logo.png"))
         if os.path.exists(logo_path):
-            c.drawImage(logo_path, 40, height - 330, width=140,
-                        preserveAspectRatio=True, mask="auto")
+            c.drawImage(
+                logo_path,
+                40,
+                height - 330,
+                width=140,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
     except Exception:
         pass
 
@@ -150,7 +162,15 @@ def generate_invoice_pdf(records, invoice_number=None):
         ucost = getattr(r, "unit_cost_at_issue", None)
         if ucost is None:
             ucost = getattr(getattr(r, "part", None), "unit_cost", 0.0) or 0.0
-        loc   = getattr(r, "location", None) or getattr(getattr(r, "part", None), "location", "") or ""
+
+        # --- ЛОГИКА LOCATION ---
+        stored_loc = getattr(r, "location", None)
+        if stored_loc not in (None, "", " ", "  "):
+            # Новый инвойс / уже зафриженная локация → используем её
+            loc = stored_loc
+        else:
+            # Старые строки без snapshot → берём актуальное местоположение из Part
+            loc = getattr(getattr(r, "part", None), "location", "") or ""
 
         line_total = (qty or 0) * float(ucost or 0.0)
 
