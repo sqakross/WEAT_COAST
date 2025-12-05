@@ -147,14 +147,36 @@
       </thead>
       <tbody>
         {% set curr = batch|attr('currency')|default('USD', true) %}
-        {% set grand = 0.0 %}
+
+        {# subtotal по base cost — как в Preview & Edit Import #}
+        {% set subtotal_base = 0.0 %}
+        {# на всякий случай считаем и “старый” grand по unit_cost — для fallback #}
+        {% set grand_by_unit = 0.0 %}
+
         {% for it in lines %}
           {% set pn   = (it|attr('part') and (it.part|attr('number')|default('', true))) or (it|attr('part_number')|default('', true)) %}
           {% set name = (it|attr('part') and (it.part|attr('name')|default('', true)))   or (it|attr('part_name')|default('', true)) %}
           {% set qty  = (it|attr('qty')|default(it|attr('quantity'), true)|default(0, true)) | int %}
-          {% set ucost = (it|attr('unit_cost')|default(it|attr('unit_cost_at_issue'), true)|default(0.0, true)) | float %}
-          {% set line_total = (qty * ucost) %}
-          {% set grand = grand + line_total %}
+
+          {# базовая цена (без fee), как она была в превью.
+             Если unit_cost_base нет (старые данные) — используем unit_cost / unit_cost_at_issue. #}
+          {% set base_cost =
+              (it|attr('unit_cost_base')|default(
+                it|attr('unit_cost')|default(it|attr('unit_cost_at_issue'), true),
+              true)) | float
+          %}
+
+          {# текущий unit_cost (скорректированный) — то, что реально лежит в партии #}
+          {% set ucost =
+              (it|attr('unit_cost')|default(it|attr('unit_cost_at_issue'), true)|default(0.0, true)) | float
+          %}
+
+          {% set line_base_total = (qty * base_cost) %}
+          {% set line_total      = (qty * ucost) %}
+
+          {% set subtotal_base = subtotal_base + line_base_total %}
+          {% set grand_by_unit = grand_by_unit + line_total %}
+
           <tr>
             <td class="text-muted small">{{ loop.index }}</td>
             <td class="fw-semibold">{{ pn }}</td>
@@ -167,10 +189,21 @@
         {% endfor %}
       </tbody>
       <tfoot class="table-light">
+        {# extra_expenses пришли из Preview & Edit Import;
+           если они есть — считаем total ровно как в превью (subtotal_base + extra). #}
+        {% set extra_raw = batch|attr('extra_expenses')|default(None, true) %}
+        {% if extra_raw is not none %}
+          {% set extra_val = extra_raw|float %}
+          {% set total_to_show = subtotal_base + extra_val %}
+        {% else %}
+          {# fallback для старых партий без extra_expenses:
+             оставляем старое поведение (batch_total / сумма по unit_cost) #}
+          {% set total_to_show = (batch_total if batch_total is not none else grand_by_unit) %}
+        {% endif %}
         <tr>
           <th colspan="5" class="text-end">Total:</th>
           <th class="text-end">
-            {{ curr }} {{ '%.2f' % (batch_total if batch_total is not none else grand) }}
+            {{ curr }} {{ '%.2f' % total_to_show }}
           </th>
           <th></th>
         </tr>
