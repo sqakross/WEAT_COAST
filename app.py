@@ -42,31 +42,45 @@ LOG_DIR = os.path.join(Config.BASE_DIR, 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # -------------------------------------------------------------------
-# 3) Логирование в файл + в консоль (UTF-8)
+# DEBUG-флаг из окружения (используем и для логирования, и для run)
+# -------------------------------------------------------------------
+DEBUG_ENV = os.getenv("DEBUG", "true").lower() == "true"
+
+# -------------------------------------------------------------------
+# 3) Логирование (DEV: только консоль, PROD: файл + ротация)
 # -------------------------------------------------------------------
 formatter = logging.Formatter('[%(asctime)s] %(levelname)s %(name)s: %(message)s')
-root = logging.getLogger()
-root.setLevel(logging.INFO)
 
-logging.getLogger().setLevel(logging.INFO)
+root = logging.getLogger()
+
+# если код вдруг импортировали повторно (reloader) — очищаем обработчики
+if root.handlers:
+    for h in list(root.handlers):
+        root.removeHandler(h)
+
+root.setLevel(logging.INFO)
 logging.getLogger("app").setLevel(logging.INFO)
 logging.getLogger("inventory").setLevel(logging.INFO)
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
-fh = RotatingFileHandler(
-    os.path.join(LOG_DIR, 'app.log'),
-    maxBytes=2_000_000,
-    backupCount=3,
-    encoding='utf-8'
-)
-fh.setFormatter(formatter)
-
+# Всегда логируем в консоль
 sh = logging.StreamHandler(sys.stdout)
 sh.setFormatter(formatter)
+root.addHandler(sh)
 
-if not root.handlers:
+if not DEBUG_ENV:
+    # В production — ещё и файл с ротацией
+    fh = RotatingFileHandler(
+        os.path.join(LOG_DIR, 'app.log'),
+        maxBytes=2_000_000,
+        backupCount=3,
+        encoding='utf-8',
+        delay=True,  # файл откроется только при первой записи
+    )
+    fh.setFormatter(formatter)
     root.addHandler(fh)
-    root.addHandler(sh)
+else:
+    logging.info("DEBUG mode detected: file logging disabled (console only).")
 
 # -------------------------------------------------------------------
 # 4) Flask app init
@@ -144,15 +158,15 @@ logging.info(
 # 7) Jinja-фильтры локального времени
 # -------------------------------------------------------------------
 def _to_local(dt: datetime, fmt: str):
-    if not dt:
-        return "—"
-    tzname = app.config.get("DISPLAY_TZ", "America/Los_Angeles")
-    try:
-        dt_utc = dt.replace(tzinfo=ZoneInfo("UTC"))
-        dt_local = dt_utc.astimezone(ZoneInfo(tzname))
-        return dt_local.strftime(fmt)
-    except Exception:
-        return dt.strftime(fmt)
+  if not dt:
+      return "—"
+  tzname = app.config.get("DISPLAY_TZ", "America/Los_Angeles")
+  try:
+      dt_utc = dt.replace(tzinfo=ZoneInfo("UTC"))
+      dt_local = dt_utc.astimezone(ZoneInfo(tzname))
+      return dt_local.strftime(fmt)
+  except Exception:
+      return dt.strftime(fmt)
 
 @app.template_filter("local_dt")
 def jinja_local_dt(dt: datetime, fmt: str = "%Y-%m-%d %H:%M"):
@@ -161,6 +175,30 @@ def jinja_local_dt(dt: datetime, fmt: str = "%Y-%m-%d %H:%M"):
 @app.template_filter("local_date")
 def jinja_local_date(dt: datetime, fmt: str = "%Y-%m-%d"):
     return _to_local(dt, fmt)
+
+# -------------------------------------------------------------------
+# 7.1) Глобальные флаги ролей для шаблонов
+# -------------------------------------------------------------------
+@app.context_processor
+def inject_role_flags():
+    """
+    Делаем роль пользователя доступной в шаблонах:
+    IS_SUPERADMIN, IS_ADMIN, IS_TECHNICIAN, IS_VIEWER, current_role.
+    """
+    try:
+        role_raw = getattr(current_user, "role", "") or ""
+    except Exception:
+        role_raw = ""
+
+    role = role_raw.strip().lower()
+
+    return {
+        "current_role": role,
+        "IS_SUPERADMIN": role == "superadmin",
+        "IS_ADMIN": role in ("admin", "superadmin"),
+        "IS_TECHNICIAN": role == "technician",
+        "IS_VIEWER": role == "viewer",
+    }
 
 # -------------------------------------------------------------------
 # 8) Blueprints
@@ -398,7 +436,7 @@ if __name__ == "__main__":
         logging.info("Old .docx cleanup complete.")
 
     port = int(os.environ.get("PORT", 5000))
-    debug = os.getenv("DEBUG", "true").lower() == "true"
+    debug = DEBUG_ENV
     use_ssl = os.getenv("USE_SSL", "1").lower() in ("1", "true", "yes")
 
     if use_ssl:

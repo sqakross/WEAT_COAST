@@ -7707,11 +7707,36 @@ def import_parts():
         flash("Nothing parsed from PDF. Try OCR option.", "warning")
         return redirect(url_for("inventory.import_parts"))
 
+    # --- хелпер разбора даты + валидация ---
+    def _parse_invoice_date(raw: str | None):
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except Exception:
+                continue
+        return None
+
     # Метаданные заголовка (можно править на превью)
     supplier = (request.form.get("supplier") or rows[0].get("supplier") or "").strip()
     invoice  = (request.form.get("invoice_number") or "").strip()
     date_s   = (request.form.get("invoice_date") or "").strip()
     notes    = (request.form.get("notes") or f"Imported from {src_name}").strip()
+
+    # ---- НЕ ДАЁМ использовать дату из будущего ----
+    today = datetime.utcnow().date()
+    inv_date_val = _parse_invoice_date(date_s)
+    if inv_date_val and inv_date_val > today:
+        # удаляем сохранённый pdf, чтобы не копить мусор
+        try:
+            os.remove(pdf_path)
+        except OSError:
+            pass
+
+        flash("Invoice date cannot be in the future. Please correct it and try again.", "danger")
+        return redirect(url_for("inventory.import_parts"))
 
     # Рендер превью, ПЕРЕДАЁМ путь скрытым полем
     return render_template(
@@ -7720,7 +7745,7 @@ def import_parts():
         meta=dict(
             supplier=supplier,
             invoice=invoice,
-            date=date_s,
+            date=date_s,          # покажем как ввёл, можно исправить на превью
             notes=notes,
             currency="USD",
             attachment_path=pdf_path,        # ← тут путь для hidden
@@ -8854,6 +8879,7 @@ def import_parts_upload():
         subtotal_base = float((norm["quantity"] * norm["unit_cost_base"]).sum() or 0.0)
         grand_total = float((norm["quantity"] * norm["unit_cost"]).sum() or 0.0)
 
+        # extra не распределяем здесь – пока 0
         extra_expenses_val = 0.0
 
         flash(
@@ -8861,7 +8887,29 @@ def import_parts_upload():
             "info"
         )
 
-        invoice_guess = _infer_invoice_number(norm, saved_path, supplier_hint) or ""
+        # <<< НОВОЕ: пробуем взять Invoice # из формы, а если пусто — авто-парсим >>>
+        invoice_guess = (request.form.get("invoice_number") or "").strip()
+        if not invoice_guess:
+            invoice_guess = _infer_invoice_number(norm, saved_path, supplier_hint) or ""
+
+
+        # --- ВАЛИДАЦИЯ: дата не может быть в будущем ---
+        today = date.today()
+        if invoice_date_val and invoice_date_val > today:
+            flash("Invoice date cannot be in the future. Please correct Invoice Date.", "danger")
+            # Возвращаемся на превью, ничего не создаём в базе
+            return render_template(
+                "import_preview.html",
+                rows=norm.to_dict(orient="records"),
+                saved_path=saved_path,
+                supplier_hint=supplier_hint,
+                extra_expenses=extra_expenses_val,
+                subtotal_base=subtotal_base,
+                grand_total=grand_total,
+                default_loc=default_loc or "MAIN",
+                invoice_date=invoice_date_raw,   # показываем то, что он ввёл (даже если будущее)
+            )
+
 
         # ----- SAVE (остаться на превью) -----
         if "save" in request.form:
@@ -8875,7 +8923,9 @@ def import_parts_upload():
                 grand_total=grand_total,
                 default_loc=default_loc or "MAIN",
                 invoice_date=invoice_date_raw,
+                invoice_number=invoice_guess,
             )
+
 
         # ----- APPLY (создать batch) -----
         if "apply" in request.form:
@@ -8891,7 +8941,9 @@ def import_parts_upload():
                     grand_total=grand_total,
                     default_loc=default_loc or "MAIN",
                     invoice_date=invoice_date_raw,
+                    invoice_number=invoice_guess,
                 )
+
 
             session = db.session
 
@@ -9210,6 +9262,9 @@ def import_parts_upload():
         rows = norm.to_dict(orient="records")
         rows = fix_norm_records(rows, default_loc)
 
+        # НОВОЕ: авто-догадка Invoice #
+        invoice_guess = _infer_invoice_number(norm, path, supplier_hint) or ""
+
         return render_template(
             "import_preview.html",
             rows=rows,
@@ -9218,7 +9273,9 @@ def import_parts_upload():
             extra_expenses=0.0,
             subtotal_base=subtotal_base,
             grand_total=grand_total,
+            invoice_number=invoice_guess,
         )
+
 
     # ===== C) GET → показать форму загрузки ===================================
     return render_template("import_parts.html")
@@ -9859,7 +9916,6 @@ def receiving_unpost(batch_id: int):
         current_app.logger.exception("Unpost failed")
         flash(f"Unpost failed: {e}", "danger")
     return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
-
 @inventory_bp.post("/receiving/save", endpoint="receiving_save")
 @login_required
 def receiving_save():
@@ -9879,6 +9935,19 @@ def receiving_save():
     from extensions import db
     from models import ReceivingBatch, ReceivingItem, Part
     from sqlalchemy import func
+
+    today = datetime.utcnow().date()
+
+    def _parse_invoice_date(raw: str | None):
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except Exception:
+                continue
+        return None
 
     f = request.form
     batch_id = (f.get("batch_id") or "").strip()
@@ -9928,7 +9997,10 @@ def receiving_save():
     # 1) новый батч может создать admin / superadmin
     # 2) существующий батч:
     #    - draft: admin или superadmin может редактировать
-    #    - posted: нельзя редактировать здесь
+    #    - posted:
+    #         обычные админы редактировать не могут;
+    #         superadmin может править ТОЛЬКО шапку (supplier, invoice, date, notes, currency)
+    #         без изменения строк.
     if is_new_batch:
         if not user_is_adminish:
             flash("Access denied. Only admin or superadmin can create receiving.", "danger")
@@ -9942,15 +10014,11 @@ def receiving_save():
         batch.supplier_name = (f.get("supplier_name") or "").strip() or "UNKNOWN"
         batch.invoice_number = (f.get("invoice_number") or "").strip() or None
 
-        inv_date_raw = (f.get("invoice_date") or "").strip()
-        inv_date_val = None
-        if inv_date_raw:
-            for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
-                try:
-                    inv_date_val = datetime.strptime(inv_date_raw, fmt).date()
-                    break
-                except Exception:
-                    pass
+        # --- Валидация даты: не позволяем будущее ---
+        inv_date_val = _parse_invoice_date(f.get("invoice_date"))
+        if inv_date_val and inv_date_val > today:
+            flash("Invoice date cannot be in the future.", "danger")
+            return redirect(url_for("inventory.receiving_new"))
         batch.invoice_date = inv_date_val
 
         batch.currency = (f.get("currency") or "USD").strip()[:8] or "USD"
@@ -9968,33 +10036,38 @@ def receiving_save():
             return redirect(url_for("inventory.receiving_list"))
 
         status_low = (getattr(batch, "status", "") or "").strip().lower()
-        if status_low == "posted":
-            flash("Batch is posted. Unpost first, then edit.", "danger")
-            return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
-        if not user_is_adminish:
-            flash("Access denied. Only admin or superadmin can edit a draft batch.", "danger")
-            return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+        # режим "только шапка" для superadmin, когда партия уже posted
+        header_only_mode = False
+        if status_low == "posted":
+            if not user_is_super:
+                flash("Batch is posted. Unpost first, then edit.", "danger")
+                return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+            header_only_mode = True
 
         # update header fields from form
         batch.supplier_name  = (f.get("supplier_name") or "").strip() or (batch.supplier_name or "UNKNOWN")
         batch.invoice_number = (f.get("invoice_number") or "").strip() or None
 
-        inv_date_raw = (f.get("invoice_date") or "").strip()
-        inv_date_val = None
-        if inv_date_raw:
-            for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
-                try:
-                    inv_date_val = datetime.strptime(inv_date_raw, fmt).date()
-                    break
-                except Exception:
-                    pass
+        # --- Валидация даты: не позволяем будущее ---
+        inv_date_val = _parse_invoice_date(f.get("invoice_date"))
+        if inv_date_val and inv_date_val > today:
+            flash("Invoice date cannot be in the future.", "danger")
+            return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
         batch.invoice_date = inv_date_val
 
         batch.currency = ((f.get("currency") or "USD").strip()[:8] or "USD")
         batch.notes    = (f.get("notes") or "").strip() or None
 
-        # now rebuild lines
+        # Если superadmin редактирует уже posted партию — меняем только шапку,
+        # строки НЕ трогаем.
+        if header_only_mode:
+            db.session.add(batch)
+            db.session.commit()
+            flash("Batch header updated.", "success")
+            return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+
+        # draft-режим: можно править всё, перестраиваем строки
         batch.items.clear()
 
     # ------------- ПАРСИМ СТРОКИ И СЧИТАЕМ РАСПРЕДЕЛЕНИЕ ----------------
@@ -10092,65 +10165,6 @@ def receiving_save():
         flash("Draft saved.", "success")
 
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
-
-def _batch_has_been_consumed(batch):
-    """
-    True = из этого прихода уже что-то УШЛО техникам после того, как мы его провели.
-    Значит:
-      - нельзя менять количества строк
-      - нельзя делать UNPOST
-    False = приход ещё девственно чистый, его можно откатить/править.
-    """
-    # Если батч вообще не posted -> значит он ещё не попал на склад
-    status_low = (getattr(batch, "status", "") or "").strip().lower()
-    if status_low != "posted":
-        return False
-
-    posted_at = getattr(batch, "posted_at", None)
-    if not posted_at:
-        # теоретически не должно быть, но на всякий случай
-        return False
-
-    # Возьмём строки из batch (lines или items)
-    lines = (getattr(batch, "lines", None)
-             or getattr(batch, "items", None)
-             or [])
-
-    # Соберём part_numbers из строк прихода
-    part_numbers = []
-    for it in lines:
-        pn = (getattr(it, "part_number", "") or "").strip()
-        if pn:
-            part_numbers.append(pn.upper())
-
-    if not part_numbers:
-        return False  # нечего проверять
-
-    # Теперь найдём все Part.id, у которых Part.part_number in part_numbers
-    # (сравниваем в верхнем регистре, как ты делаешь в других местах)
-    # ВНИМАНИЕ: func.upper(Part.part_number).in_(...) не всегда красиво оптимизировано SQLite,
-    # но для нас это ок.
-    parts_q = (
-        db.session.query(Part.id)
-        .filter(func.upper(Part.part_number).in_(part_numbers))
-        .all()
-    )
-    part_ids = [row[0] for row in parts_q]
-
-    if not part_ids:
-        return False  # строки прихода какие-то странные, но ок, считаем не потребляли
-
-    # Проверяем: есть ли запись выдачи IssuedPartRecord по ЛЮБОМУ из этих part_id
-    # с issue_date >= posted_at  (issue_date = когда отдали технику)
-    used = (
-        db.session.query(IssuedPartRecord.id)
-        .filter(IssuedPartRecord.part_id.in_(part_ids))
-        .filter(IssuedPartRecord.issue_date >= posted_at)
-        .limit(1)
-        .first()
-    )
-
-    return used is not None
 
 @inventory_bp.get("/receiving/<int:batch_id>", endpoint="receiving_detail")
 @login_required

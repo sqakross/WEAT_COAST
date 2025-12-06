@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 
+{# ----- статус батча + флаг супер-админа из контекста ----- #}
+{% set is_posted = batch and (batch.status or '')|lower == 'posted' %}
+{% set is_superadmin = IS_SUPERADMIN %}
+
 <div class="container-fluid py-4 d-flex justify-content-center">
   <div style="width:100%; max-width:1100px;">
 
@@ -56,7 +60,8 @@
                    id="supplier_input"
                    class="form-control form-control-sm"
                    required
-                   value="{{ batch.supplier_name if batch else '' }}">
+                   value="{{ batch.supplier_name if batch else '' }}"
+                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
           </div>
 
           <div class="col-md-4">
@@ -66,7 +71,8 @@
             <input name="invoice_number"
                    class="form-control form-control-sm"
                    required
-                   value="{{ batch.invoice_number if batch else '' }}">
+                   value="{{ batch.invoice_number if batch else '' }}"
+                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
           </div>
 
           <div class="col-md-4">
@@ -74,14 +80,17 @@
             <input name="invoice_date"
                    type="date"
                    class="form-control form-control-sm"
-                   value="{{ batch.invoice_date if batch else today }}">
+                   max="{{ today }}"
+                   value="{{ batch.invoice_date if batch else today }}"
+                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
           </div>
 
           <div class="col-md-2">
             <label class="form-label fw-semibold" style="font-size:.9rem;">Currency</label>
             <input name="currency"
                    class="form-control form-control-sm"
-                   value="{{ batch.currency if batch else 'USD' }}">
+                   value="{{ batch.currency if batch else 'USD' }}"
+                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
           </div>
 
           <div class="col-md-5">
@@ -90,7 +99,8 @@
             </label>
             <input name="notes"
                    class="form-control form-control-sm"
-                   value="{{ batch.notes if batch else '' }}">
+                   value="{{ batch.notes if batch else '' }}"
+                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
           </div>
 
           <div class="col-md-5">
@@ -106,7 +116,8 @@
                    min="0"
                    step="0.01"
                    class="form-control form-control-sm text-end"
-                   value="{{ '%.2f' % (batch.extra_expenses or 0) if batch else '0.00' }}">
+                   value="{{ '%.2f' % (batch.extra_expenses or 0) if batch else '0.00' }}"
+                   {% if is_posted %}readonly{% endif %}>
           </div>
 
         </div>
@@ -114,12 +125,14 @@
         <!-- Items header row -->
         <div class="d-flex flex-wrap justify-content-between align-items-center mb-2">
           <h5 class="mb-0 fw-semibold" style="font-size:1rem;">Items</h5>
+          {% if not is_posted %}
           <button class="btn btn-outline-secondary btn-sm"
                   type="button"
                   onclick="addRow()"
                   style="min-width:100px;">
             + Add Row
           </button>
+          {% endif %}
         </div>
 
         <!-- Items table -->
@@ -145,12 +158,14 @@
                     <input name="rows[{{i}}][part_number]"
                            class="form-control form-control-sm row-pn"
                            value="{{ it.part_number }}"
-                           required>
+                           required
+                           {% if is_posted %}readonly tabindex="-1"{% endif %}>
                   </td>
                   <td>
                     <input name="rows[{{i}}][part_name]"
                            class="form-control form-control-sm row-name"
-                           value="{{ it.part_name or '' }}">
+                           value="{{ it.part_name or '' }}"
+                           {% if is_posted %}readonly tabindex="-1"{% endif %}>
                   </td>
                   <td style="width:80px;">
                     <input name="rows[{{i}}][quantity]"
@@ -158,7 +173,8 @@
                            min="0"
                            class="form-control form-control-sm text-end row-qty"
                            value="{{ it.quantity }}"
-                           required>
+                           required
+                           {% if is_posted %}readonly tabindex="-1"{% endif %}>
                   </td>
                   <td style="width:120px;">
                     <input name="rows[{{i}}][unit_cost]"
@@ -166,7 +182,8 @@
                            step="0.01"
                            min="0"
                            class="form-control form-control-sm text-end row-basecost"
-                           value="{{ it.unit_cost or 0 }}">
+                           value="{{ it.unit_cost or 0 }}"
+                           {% if is_posted %}readonly tabindex="-1"{% endif %}>
                   </td>
                   <td style="width:120px;">
                     <input type="text"
@@ -175,7 +192,6 @@
                            readonly
                            tabindex="-1"
                            style="background:#f8f9fa;">
-                    <!-- we still submit adj cost explicitly -->
                     <input type="hidden"
                            name="rows[{{i}}][adj_cost]"
                            class="row-adjcost-hidden"
@@ -184,15 +200,18 @@
                   <td>
                     <input name="rows[{{i}}][location]"
                            class="form-control form-control-sm row-loc"
-                           value="{{ it.location or '' }}">
+                           value="{{ it.location or '' }}"
+                           {% if is_posted %}readonly tabindex="-1"{% endif %}>
                   </td>
                   <td class="text-end" style="width:70px;">
+                    {% if not is_posted %}
                     <button type="button"
                             class="btn btn-outline-danger btn-sm"
                             onclick="this.closest('tr').remove(); recalcTotals();"
                             style="font-size:.75rem; line-height:1;">
                       Delete
                     </button>
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}
@@ -284,22 +303,31 @@
         <!-- Action buttons -->
         <div class="d-flex flex-wrap gap-2 mt-4">
 
-          <!-- Receive & Post Stock immediately -->
-          <button class="btn btn-primary"
-                  type="submit"
-                  name="action"
-                  value="post"
-                  style="min-width:180px; font-weight:500;">
-            Receive &amp; Post Stock
-          </button>
+          {% if not is_posted %}
+            <button class="btn btn-primary"
+                    type="submit"
+                    name="action"
+                    value="post"
+                    style="min-width:180px; font-weight:500;">
+              Receive &amp; Post Stock
+            </button>
 
-          <button class="btn btn-outline-secondary"
-                  type="submit"
-                  name="action"
-                  value="draft"
-                  style="min-width:140px; font-weight:500;">
-            Save Draft (do not post)
-          </button>
+            <button class="btn btn-outline-secondary"
+                    type="submit"
+                    name="action"
+                    value="draft"
+                    style="min-width:140px; font-weight:500;">
+              Save Draft (do not post)
+            </button>
+          {% else %}
+            <button class="btn btn-outline-secondary"
+                    type="submit"
+                    name="action"
+                    value="draft"
+                    style="min-width:160px; font-weight:500;">
+              Save Changes
+            </button>
+          {% endif %}
 
           <a class="btn btn-outline-secondary"
              href="{{ url_for('inventory.receiving_list') }}"
@@ -400,7 +428,7 @@ function addRow() {
   `;
   tbody.appendChild(tr);
   hookRowInputs(tr);
-  applySupplierToRow(tr);   // автозаполнение Location из Supplier
+  applySupplierToRow(tr);
   recalcTotals();
 }
 
@@ -410,7 +438,6 @@ function recalcTotals() {
 
   let subtotal = 0.0;
 
-  // first pass: compute subtotal of base cost
   rows.forEach(tr => {
     const qtyEl  = tr.querySelector('.row-qty');
     const baseEl = tr.querySelector('.row-basecost');
@@ -424,7 +451,6 @@ function recalcTotals() {
   const extraInput = document.getElementById('extra_expenses_input');
   let extraVal = parseFloat(extraInput?.value || '0') || 0;
 
-  // second pass: for each row compute adj cost per unit
   rows.forEach(tr => {
     const qtyEl   = tr.querySelector('.row-qty');
     const baseEl  = tr.querySelector('.row-basecost');
@@ -438,7 +464,7 @@ function recalcTotals() {
 
     if (subtotal > 0 && qty > 0) {
       const lineBaseTotal = qty * base;
-      const share = lineBaseTotal / subtotal; // fraction of subtotal
+      const share = lineBaseTotal / subtotal;
       const extraForLine = extraVal * share;
       const extraPerUnit = extraForLine / qty;
       adjPerUnit = base + extraPerUnit;
@@ -450,20 +476,17 @@ function recalcTotals() {
     if (adjHid) adjHid.value = adjStr;
   });
 
-  // update totals box
   const grand = subtotal + extraVal;
   document.getElementById('subtotal_span').textContent = subtotal.toFixed(2);
   document.getElementById('extra_span').textContent    = extraVal.toFixed(2);
   document.getElementById('grand_span').textContent    = grand.toFixed(2);
 
-  // sync hidden field (to actually submit to backend)
   const hidden = document.getElementById('extra_expenses_hidden');
   if (hidden) {
     hidden.value = extraVal.toFixed(2);
   }
 }
 
-// hook inputs so that whenever user changes qty / base cost / extra -> we recalc
 function hookRowInputs(scope) {
   (scope || document).querySelectorAll('.row-qty, .row-basecost').forEach(inp => {
     inp.addEventListener('input', recalcTotals);
@@ -471,23 +494,18 @@ function hookRowInputs(scope) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // hook existing rows
   hookRowInputs(document);
-  // hook extra_expenses_input
   const ee = document.getElementById('extra_expenses_input');
   if (ee) {
     ee.addEventListener('input', recalcTotals);
   }
 
-  // supplier -> locations автозаполнение
   const supplierInput = document.getElementById('supplier_input');
   if (supplierInput) {
-    // когда закончил ввод (сменил фокус или поле изменилось)
     supplierInput.addEventListener('change', syncLocationsFromSupplier);
     supplierInput.addEventListener('blur', syncLocationsFromSupplier);
   }
 
-  // initial calc + initial location fill (если Supplier уже задан)
   recalcTotals();
   syncLocationsFromSupplier();
 });
