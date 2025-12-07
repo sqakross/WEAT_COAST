@@ -36,7 +36,7 @@ from extensions import db
 from utils.invoice_generator import generate_invoice_pdf
 # from models.order_items import OrderItem
 from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER,ROLE_TECHNICIAN, Part, WorkOrder, WorkOrderPart
-from sqlalchemy import or_
+# from sqlalchemy import or_
 from pathlib import Path
 import logging
 
@@ -9615,27 +9615,32 @@ def _already_returned_qty_for_source(src) -> int:
     # total_neg отрицательный или 0 → возвращаем модуль
     return abs(int(total_neg))
 
+from sqlalchemy import func, or_   # <- добавь or_
+
 @inventory_bp.get("/receiving", endpoint="receiving_list")
 @login_required
 def receiving_list():
-    from sqlalchemy import func
-    current_app.logger.debug("### DEBUG receiving_list USING MODEL %s FROM %s TABLENAME=%s", ReceivingBatch, __file__,
-                               getattr(ReceivingBatch, "__tablename__", "?"))
+    from sqlalchemy import func  # or_ можно удалить, если больше не нужен
+
+    current_app.logger.debug(
+        "### DEBUG receiving_list USING MODEL %s FROM %s TABLENAME=%s",
+        ReceivingBatch, __file__, getattr(ReceivingBatch, "__tablename__", "?")
+    )
 
     q = ReceivingBatch.query
-    supplier = (request.args.get("supplier") or "").strip()
-    inv = (request.args.get("invoice") or "").strip()
-    d1 = (request.args.get("date_from") or "").strip()
-    d2 = (request.args.get("date_to") or "").strip()
+
+    # ОДНА строка поиска
+    global_q = (request.args.get("q") or "").strip()
+
+    d1     = (request.args.get("date_from") or "").strip()
+    d2     = (request.args.get("date_to") or "").strip()
     status = (request.args.get("status") or "").strip()
 
-    if supplier:
-        q = q.filter(ReceivingBatch.supplier_name.ilike(f"%{supplier}%"))
-    if inv:
-        q = q.filter(ReceivingBatch.invoice_number.ilike(f"%{inv}%"))
+    # --- статус ---
     if status in ("draft", "posted"):
         q = q.filter(ReceivingBatch.status == status)
 
+    # --- даты ---
     def _parse_date(s):
         try:
             return datetime.strptime(s, "%Y-%m-%d").date()
@@ -9648,19 +9653,58 @@ def receiving_list():
     if d2p:
         q = q.filter(ReceivingBatch.invoice_date <= d2p)
 
+    # Забираем батчи из БД (без текстового фильтра)
     batches = q.order_by(
         ReceivingBatch.invoice_date.desc().nullslast(),
         ReceivingBatch.id.desc()
     ).all()
 
-    # compute totals per batch (works with both schemas)
+    # --- текстовый поиск по Supplier / Invoice / Part # / Part Name ---
+    if global_q:
+        needle = global_q.lower()
+        filtered = []
+
+        for b in batches:
+            # supplier / invoice
+            sup = (getattr(b, "supplier_name", "") or "").lower()
+            inv = (getattr(b, "invoice_number", "") or "").lower()
+
+            match_batch = (needle in sup) or (needle in inv)
+
+            # если по заголовку не нашли — ищем в строках
+            if not match_batch:
+                lines = getattr(b, "items", None) or getattr(b, "lines", None) or []
+                for ln in lines:
+                    pn = (
+                        getattr(ln, "part_number", None)
+                        or getattr(ln, "pn", None)
+                        or ""
+                    )
+                    name = (
+                        getattr(ln, "part_name", None)
+                        or (
+                            getattr(getattr(ln, "part", None), "name", None)
+                            if getattr(ln, "part", None) is not None
+                            else None
+                        )
+                        or ""
+                    )
+                    if needle in str(pn).lower() or needle in str(name).lower():
+                        match_batch = True
+                        break
+
+            if match_batch:
+                filtered.append(b)
+
+        batches = filtered
+
+    # --- Totals ---
     totals = {}
     for b in batches:
         try:
             lines = getattr(b, "items", []) or getattr(b, "lines", []) or []
             total = 0.0
             for ln in lines:
-                # flexible attr names
                 qty  = getattr(ln, "qty", None) or getattr(ln, "quantity", 0) or 0
                 cost = getattr(ln, "unit_cost", None) or getattr(ln, "price", None) or 0.0
                 try:
@@ -9671,7 +9715,7 @@ def receiving_list():
         except Exception:
             totals[b.id] = 0.0
 
-    # pass a superadmin flag; be defensive with attribute names
+    # --- права админа ---
     can_admin = bool(
         getattr(current_user, "is_superadmin", False) or
         getattr(current_user, "is_super_admin", False) or
@@ -9684,8 +9728,10 @@ def receiving_list():
         totals=totals,
         can_admin=can_admin,
         filters={
-            "supplier": supplier, "invoice": inv,
-            "date_from": d1, "date_to": d2, "status": status
+            "q": global_q,
+            "date_from": d1,
+            "date_to": d2,
+            "status": status,
         }
     )
 

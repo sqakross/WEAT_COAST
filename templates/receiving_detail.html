@@ -32,7 +32,7 @@
         {% endif %}
       </span>
 
-      {# наш новый индикатор состояния склада #}
+      {# индикатор, применён ли приход к стоку #}
       {% if stock_applied %}
         <span class="badge bg-success" style="font-size:.7rem;">
           Stock Applied
@@ -45,7 +45,7 @@
     </div>
   </div>
 
-  {# ----- ACTION BUTTONS (admin or superadmin) ----- #}
+  {# ----- ACTION BUTTONS (admin или superadmin) ----- #}
   {% set role = (current_user.role if current_user.is_authenticated else '')|lower %}
   {% set can_super = current_user.is_authenticated and (
     role in ['admin','superadmin']
@@ -53,18 +53,21 @@
     or (current_user.is_superadmin|default(false))
     or (current_user.is_super_admin|default(false))
   ) %}
+  {% set is_superadmin = current_user.is_authenticated and (
+    role == 'superadmin'
+    or (current_user.is_superadmin|default(false))
+    or (current_user.is_super_admin|default(false))
+  ) %}
+
+  {# шапку можно редактировать, если это admin/superadmin ИЛИ can_edit из контроллера #}
+  {% set can_edit_header = can_super or can_edit %}
 
   <div class="text-end">
     <a class="btn btn-outline-secondary me-2" href="{{ url_for('inventory.receiving_list') }}">
       ‹ Back
     </a>
 
-    {# Post / Unpost кнопка через toggle:
-       - показываем только суперюзеру (can_super)
-       - и только если can_unpost из контроллера говорит, что это безопасно
-       - если партия уже частично выдана, мы дизейблим анпост
-    #}
-
+    {# Post / Unpost #}
     {% if can_super and can_unpost %}
       <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
             method="post" class="d-inline">
@@ -74,14 +77,12 @@
       </form>
 
     {% elif can_super and (not can_unpost) and is_posted %}
-      {# батч posted, но уже потреблён техниками -> обычный unpost запрещён #}
       <button class="btn btn-warning" type="button" disabled
               title="Batch already issued to technicians. Cannot unpost.">
         Unpost
       </button>
 
     {% elif can_super and (not is_posted) %}
-      {# DRAFT состояние: пост разрешён #}
       <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
             method="post" class="d-inline">
         <button class="btn btn-primary" type="submit">
@@ -90,13 +91,7 @@
       </form>
     {% endif %}
 
-    {# Delete:
-       Правило безопасности:
-       - только суперюзер (can_super)
-       - НО если stock_applied == True (то есть склад ещё держит этот приход),
-         то блокируем Delete (нельзя удалять батч, который всё ещё в стоке).
-       Это защищает от случайного удаления без отката остатков.
-    #}
+    {# Delete запрещаем, если stock_applied == True #}
     {% if can_super %}
       <form action="{{ url_for('inventory.receiving_delete', batch_id=batch.id) }}"
             method="post" class="d-inline"
@@ -113,7 +108,6 @@
   </div>
 </div>
 
-{# предупреждение, если партия уже потреблена (consumed == True) #}
 {% if consumed %}
   <div class="alert alert-warning small" style="line-height:1.3;">
     This batch has already been partially issued to technicians.
@@ -147,34 +141,19 @@
       </thead>
       <tbody>
         {% set curr = batch|attr('currency')|default('USD', true) %}
-
-        {# subtotal по base cost — как в Preview & Edit Import #}
-        {% set subtotal_base = 0.0 %}
-        {# на всякий случай считаем и “старый” grand по unit_cost — для fallback #}
         {% set grand_by_unit = 0.0 %}
 
         {% for it in lines %}
+          {# part # и name с fallback на Part relationship #}
           {% set pn   = (it|attr('part') and (it.part|attr('number')|default('', true))) or (it|attr('part_number')|default('', true)) %}
           {% set name = (it|attr('part') and (it.part|attr('name')|default('', true)))   or (it|attr('part_name')|default('', true)) %}
+
+          {# количество #}
           {% set qty  = (it|attr('qty')|default(it|attr('quantity'), true)|default(0, true)) | int %}
 
-          {# базовая цена (без fee), как она была в превью.
-             Если unit_cost_base нет (старые данные) — используем unit_cost / unit_cost_at_issue. #}
-          {% set base_cost =
-              (it|attr('unit_cost_base')|default(
-                it|attr('unit_cost')|default(it|attr('unit_cost_at_issue'), true),
-              true)) | float
-          %}
-
-          {# текущий unit_cost (скорректированный) — то, что реально лежит в партии #}
-          {% set ucost =
-              (it|attr('unit_cost')|default(it|attr('unit_cost_at_issue'), true)|default(0.0, true)) | float
-          %}
-
-          {% set line_base_total = (qty * base_cost) %}
-          {% set line_total      = (qty * ucost) %}
-
-          {% set subtotal_base = subtotal_base + line_base_total %}
+          {# простая цена для GoodsReceiptLine: unit_cost #}
+          {% set ucost = (it|attr('unit_cost')|default(0.0, true)) | float %}
+          {% set line_total = qty * ucost %}
           {% set grand_by_unit = grand_by_unit + line_total %}
 
           <tr>
@@ -189,17 +168,8 @@
         {% endfor %}
       </tbody>
       <tfoot class="table-light">
-        {# extra_expenses пришли из Preview & Edit Import;
-           если они есть — считаем total ровно как в превью (subtotal_base + extra). #}
-        {% set extra_raw = batch|attr('extra_expenses')|default(None, true) %}
-        {% if extra_raw is not none %}
-          {% set extra_val = extra_raw|float %}
-          {% set total_to_show = subtotal_base + extra_val %}
-        {% else %}
-          {# fallback для старых партий без extra_expenses:
-             оставляем старое поведение (batch_total / сумма по unit_cost) #}
-          {% set total_to_show = (batch_total if batch_total is not none else grand_by_unit) %}
-        {% endif %}
+        {# Total: либо batch_total из контроллера, либо сумма по unit_cost #}
+        {% set total_to_show = (batch_total if batch_total is not none else grand_by_unit) %}
         <tr>
           <th colspan="5" class="text-end">Total:</th>
           <th class="text-end">
@@ -220,13 +190,6 @@
 </div>
 
 {# ---------- EDIT CARD (Admin / Superadmin) ---------- #}
-
-{# Вместо чистого is_posted мы используем can_edit:
-   - can_edit приходит из контроллера
-   - True: супер/админ и партия не consumed
-   - False: либо не супер, либо партия уже потреблена
-#}
-
 {% if can_super %}
 <div class="card shadow-sm">
   <div class="card-header d-flex justify-content-between align-items-center py-2">
@@ -239,7 +202,7 @@
         </span>
       {% elif is_posted %}
         <span class="text-muted small">
-          Batch is posted — Unpost to enable editing.
+          Batch is posted — Unpost to enable editing of quantities and costs.
         </span>
       {% else %}
         <span class="text-muted small">
@@ -261,32 +224,32 @@
           <label class="form-label small text-muted">Supplier</label>
           <input name="supplier_name" class="form-control form-control-sm"
                  value="{{ batch|attr('supplier_name')|default('', true) }}"
-                 {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
+                 {% if not can_edit_header %}readonly style="background:#eee; color:#666;"{% endif %}>
         </div>
         <div class="col-md-3">
           <label class="form-label small text-muted">Invoice #</label>
           <input name="invoice_number" class="form-control form-control-sm"
                  value="{{ batch|attr('invoice_number')|default('', true) }}"
-                 {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
+                 {% if not can_edit_header %}readonly style="background:#eee; color:#666;"{% endif %}>
         </div>
         <div class="col-md-3">
           <label class="form-label small text-muted">Invoice Date</label>
           <input type="date" name="invoice_date" class="form-control form-control-sm"
                  value="{{ batch.invoice_date and batch.invoice_date.strftime('%Y-%m-%d') or '' }}"
-                 {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
+                 {% if not can_edit_header %}readonly style="background:#eee; color:#666;"{% endif %}>
         </div>
         <div class="col-md-3">
           <label class="form-label small text-muted">Currency</label>
           <input name="currency" class="form-control form-control-sm"
                  value="{{ batch|attr('currency')|default('USD', true) }}"
-                 {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>
+                 {% if not can_edit_header %}readonly style="background:#eee; color:#666;"{% endif %}>
         </div>
       </div>
 
       <div class="mb-3">
         <label class="form-label small text-muted">Notes</label>
         <textarea name="notes" class="form-control form-control-sm" rows="2"
-                  {% if not can_edit %}readonly disabled style="background:#eee; color:#666;"{% endif %}>{{ batch|attr('notes')|default('', true) }}</textarea>
+                  {% if not can_edit_header %}readonly style="background:#eee; color:#666;"{% endif %}>{{ batch|attr('notes')|default('', true) }}</textarea>
       </div>
 
       <div class="table-responsive border rounded mb-3">
@@ -341,8 +304,7 @@
 
       <div class="d-flex flex-wrap gap-2">
         <button class="btn btn-outline-primary btn-sm"
-                type="submit" name="action" value="save"
-                {% if not can_edit %}disabled{% endif %}>
+                type="submit" name="action" value="save">
           Save Draft
         </button>
 

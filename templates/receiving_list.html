@@ -4,18 +4,23 @@
 <h3>Receiving Batches</h3>
 
 <form class="row g-2 mb-3" method="get">
-  <div class="col-auto">
-    <input name="supplier" class="form-control" placeholder="Supplier" value="{{ filters.supplier }}">
+  <div class="col-md-4 col-sm-6">
+    <input name="q"
+           class="form-control"
+           placeholder="Supplier / Invoice # / Part # / Part Name"
+           value="{{ filters.q }}">
   </div>
+
   <div class="col-auto">
-    <input name="invoice" class="form-control" placeholder="Invoice #" value="{{ filters.invoice }}">
+    <input name="date_from" type="date" class="form-control"
+           value="{{ filters.date_from }}">
   </div>
+
   <div class="col-auto">
-    <input name="date_from" type="date" class="form-control" value="{{ filters.date_from }}">
+    <input name="date_to" type="date" class="form-control"
+           value="{{ filters.date_to }}">
   </div>
-  <div class="col-auto">
-    <input name="date_to" type="date" class="form-control" value="{{ filters.date_to }}">
-  </div>
+
   <div class="col-auto">
     <select name="status" class="form-select">
       <option value="">Any status</option>
@@ -23,13 +28,15 @@
       <option value="posted" {{ 'selected' if filters.status=='posted' }}>Posted</option>
     </select>
   </div>
+
   <div class="col-auto">
     <button class="btn btn-primary">Search</button>
-    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_new') }}">+ New Batch</a>
+    <a class="btn btn-outline-secondary"
+       href="{{ url_for('inventory.receiving_new') }}">+ New Batch</a>
   </div>
 </form>
 
-{# Только супер-админ (или эквивалент) #}
+{# Роль / права #}
 {% set role = current_user.role if current_user.is_authenticated else '' %}
 {% set can_super = current_user.is_authenticated and (
   role == 'superadmin'
@@ -45,7 +52,6 @@
       <th>Supplier</th>
       <th style="width:160px;">Invoice #</th>
       <th style="width:100px;">Status</th>
-      {# Индикатор состояния склада #}
       <th style="width:80px;">Stock</th>
       <th style="width:80px;" class="text-end">Qty</th>
       <th style="width:140px;" class="text-end">Total Cost</th>
@@ -57,7 +63,6 @@
   <tbody>
 
   {% for b in batches %}
-    {# безопасно считаем количество и total для партии #}
     {% set lines = (b.lines if (b.lines is defined) else (b.items if (b.items is defined) else [])) %}
     {% set ns = namespace(qty=0, total=0.0) %}
     {% for it in lines %}
@@ -67,10 +72,7 @@
       {% set ns.total = ns.total + (q * u) %}
     {% endfor %}
 
-    {# posted для кнопки Post/Unpost #}
     {% set is_posted = (b.status|default('', true)) == 'posted' %}
-
-    {# stock_applied: пробрасывается из контроллера в stock_flags[b.id] #}
     {% set stock_applied = (stock_flags[b.id] if stock_flags is defined and b.id in stock_flags else false) %}
 
     <tr onclick="location.href='{{ url_for('inventory.receiving_detail', batch_id=b.id) }}'"
@@ -88,7 +90,6 @@
         {% endif %}
       </td>
 
-      {# Stock Applied vs Cleared #}
       <td>
         {% if stock_applied %}
           <span class="text-success" style="font-size:.8rem; white-space:nowrap;">● stock</span>
@@ -108,10 +109,7 @@
       </td>
 
       {% if can_super %}
-      {# Не кликаем всю строку при нажатии на кнопки #}
       <td onclick="event.stopPropagation();">
-
-        {# Post / Unpost через toggle #}
         <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}"
               method="post" style="display:inline;">
           <button class="btn btn-sm {{ 'btn-warning' if is_posted else 'btn-primary' }}" type="submit">
@@ -119,14 +117,12 @@
           </button>
         </form>
 
-        {# Clear keys #}
         <form action="{{ url_for('inventory.receiving_clear_keys', batch_id=b.id) }}"
               method="post" style="display:inline;"
               onsubmit="return confirm('Clear import keys for batch #{{ b.id }}? This allows re-import from the same file.');">
           <button class="btn btn-sm btn-outline-secondary" type="submit">Clear keys</button>
         </form>
 
-        {# Delete: блокируем, если партия висит на складе #}
         <form action="{{ url_for('inventory.receiving_delete', batch_id=b.id) }}"
               method="post" style="display:inline;"
               onsubmit="return confirm('Delete batch #{{ b.id }}? This will also clear its import keys.');">
@@ -135,7 +131,6 @@
             Delete
           </button>
         </form>
-
       </td>
       {% endif %}
     </tr>
