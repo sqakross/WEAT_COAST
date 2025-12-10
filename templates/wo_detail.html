@@ -18,7 +18,6 @@
         ✏️ Edit
       </a>
     {% else %}
-      {# для не-админов — открыть форму в режиме просмотра #}
       <a class="btn btn-sm btn-outline-primary"
          href="{{ url_for('inventory.wo_edit', wo_id=wo.id, readonly=1) }}">
         Form view
@@ -40,10 +39,9 @@
 {% set role_low = (current_user.role or '')|lower %}
 {% set is_adminlike = role_low in ['admin','superadmin'] %}
 {% set is_tech      = role_low in ['technician','tech'] %}
-{# these two come from routes.py context: #}
 {% set can_view_docs   = can_view_docs %}
 {% set can_confirm_any = can_confirm_any %}
-{# is_my_wo also passed from routes.py #}
+{# is_my_wo тоже приходит из routes #}
 
 {# ---------- main WO info ---------- #}
 {% set u0 = (wo.units|first) %}
@@ -126,7 +124,7 @@
 </div>
 
 {# =========================================================
-   PARTS TABLE (plan) - blended pricing
+   PARTS TABLE (plan)
    ========================================================= #}
 
 {% if display_parts and (display_parts|length) > 0 %}
@@ -135,6 +133,7 @@
   .num { text-align:right; font-variant-numeric: tabular-nums; }
   .name-ordered  { color:#0d6efd; font-weight:600; }
   .name-invoiced { color:#198754; font-weight:600; }
+  .name-ins      { color:#fd7e14; font-weight:600; }  /* INS – оранжевый */
 </style>
 
 <div class="table-responsive mb-4">
@@ -161,9 +160,20 @@
           <td>{{ row.alt_part_numbers or '—' }}</td>
 
           <td>
-            <span class="{% if row.is_invoiced %}name-invoiced{% elif row.is_ordered %}name-ordered{% endif %}">
+            <span class="
+              {% if row.is_invoiced %}
+                name-invoiced
+              {% elif row.is_insurance_supplied %}
+                name-ins
+              {% elif row.is_ordered %}
+                name-ordered
+              {% endif %}
+            ">
               {{ row.part_name or '—' }}
             </span>
+            {% if row.is_insurance_supplied %}
+              <span class="badge bg-warning text-dark ms-1">INS</span>
+            {% endif %}
           </td>
 
           <td class="num">{{ row.qty or 0 }}</td>
@@ -210,7 +220,7 @@
 {% endif %}
 
 {# =========================================================
-   ISSUED ITEMS (flat list for this WO)
+   ISSUED ITEMS
    ========================================================= #}
 
 <h5 class="mt-4">Issued Items (this WO)</h5>
@@ -403,7 +413,6 @@
           </td>
 
           {% if can_view_docs %}
-            {# ---- REPORT: делаем доступным всегда (фильтры работают без номера) ---- #}
             <td class="text-nowrap">
               <a class="btn btn-sm btn-outline-secondary"
                  href="{{ url_for('inventory.reports_grouped') }}?issued_to={{ tech_for_links|urlencode }}&technician={{ tech_for_links|urlencode }}&company={{ tech_for_links|urlencode }}&tech={{ tech_for_links|urlencode }}&reference_job={{ job_for_links|urlencode }}&ref_job={{ job_for_links|urlencode }}&ref={{ job_for_links|urlencode }}&job={{ job_for_links|urlencode }}&jobs={{ job_for_links|urlencode }}"
@@ -412,24 +421,20 @@
               </a>
             </td>
 
-            {# ---- PRINT: прямой вызов /invoice/pdf ---- #}
             <td>
               {% set print_href = None %}
 
               {% if invoice_num %}
-                {# обычный случай — по номеру #}
                 {% set print_href = url_for('inventory.view_invoice_pdf',
                                             invoice_number=invoice_num,
                                             ref_job=(b.get('reference_job') or wo.canonical_job)) %}
               {% else %}
-                {# новый инвойс без номера — legacy поиск по issued_to / ref_job / issued_by / issue_date #}
                 {% set issued_by_val = b.get('issued_by') or current_user.username %}
                 {% if b.get('issued_at_dt') %}
                   {% set issue_dt_str = b.get('issued_at_dt').strftime('%Y-%m-%d %H:%M:%S') %}
                 {% else %}
                   {% set raw = b.get('issued_at') or '' %}
                   {% if raw and raw|length == 16 %}
-                    {# "YYYY-MM-DD HH:MM" → добавим секунды #}
                     {% set issue_dt_str = raw ~ ':00' %}
                   {% else %}
                     {% set issue_dt_str = raw %}
@@ -509,7 +514,6 @@
 
 {% block extra_js %}
 <script>
-// technician one-way confirm without page redirect, + live badge update
 async function confirmIssuedPart(checkbox) { console.log("[confirmIssuedPart] legacy call"); }
 
 document.addEventListener("DOMContentLoaded", () => {

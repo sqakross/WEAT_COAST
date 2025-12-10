@@ -180,6 +180,7 @@ class WorkOrderPart(db.Model):
     ordered_flag = db.Column(db.Boolean, default=False, index=True)
     ordered_date = db.Column(db.Date, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_insurance_supplied = db.Column(db.Boolean, nullable=False, default=False, index=True)
 
     @property
     def warehouse_or_label(self) -> str:
@@ -275,6 +276,8 @@ class IssuedPartRecord(db.Model):
     batch = db.relationship("IssuedBatch", back_populates="parts", lazy="joined")
 
     part  = db.relationship('Part', backref=db.backref('issued_records', lazy=True))
+
+    is_insurance_supplied = db.Column(db.Boolean, nullable=False, default=False, index=True)
 
     # --- НОВЫЕ ПОЛЯ (соответствуют миграции) ---
     consumed_qty  = db.Column(db.Integer, nullable=True)             # 0..quantity

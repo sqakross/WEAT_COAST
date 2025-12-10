@@ -1328,6 +1328,70 @@ def issued_confirm_toggle():
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
     return ("", 204)
 
+# ---------- STOCK HINT API ----------
+from flask import jsonify, request
+from sqlalchemy import func
+
+# ...
+
+@inventory_bp.get("/api/stock_hint", endpoint="api_stock_hint")
+@login_required
+def api_stock_hint():
+    """
+    Простой API для подсказки наличия:
+    принимает pn, qty, wh и возвращает JSON с количеством и подсказкой.
+    """
+    pn = (request.args.get("pn") or "").strip().upper()
+    qty_needed_raw = (request.args.get("qty") or "").strip()
+    wh = (request.args.get("wh") or "").strip()
+
+    try:
+        qty_needed = int(qty_needed_raw or 0)
+    except ValueError:
+        qty_needed = 0
+
+    if not pn:
+        return jsonify({
+            "ok": False,
+            "error": "NO_PN",
+            "hint": "WAIT",
+            "qty_available": 0
+        }), 400
+
+    # базовый запрос по Part
+    q = db.session.query(Part).filter(Part.part_number == pn)
+
+    # если указан склад – фильтруем по location (регистр не важен)
+    if wh:
+        q = q.filter(func.lower(Part.location) == func.lower(wh))
+
+    part = q.first()
+
+    if not part:
+        return jsonify({
+            "ok": True,
+            "part_number": pn,
+            "qty_available": 0,
+            "hint": "WAIT",
+            "location": None,
+            "unit_cost": None,
+            "name": None,
+        })
+
+    qty_available = int(part.quantity or 0)
+    is_stock = qty_available >= qty_needed if qty_needed > 0 else qty_available > 0
+    hint = "STOCK" if is_stock else "WAIT"
+
+    return jsonify({
+        "ok": True,
+        "part_number": pn,
+        "qty_available": qty_available,
+        "hint": hint,
+        "location": part.location,
+        "unit_cost": part.unit_cost,
+        "name": part.name,
+    })
+
 @inventory_bp.get("/debug/db_objects")
 def debug_db_objects():
     import os, sqlite3
@@ -1518,66 +1582,109 @@ def compute_availability_multi(wo: "WorkOrder"):
 
     return all_rows
 
-def _issue_records_bulk(issued_to: str, reference_job: str, items: list, billed_price_per_item: float | None = None):
+def _issue_records_bulk(
+    issued_to: str,
+    reference_job: str,
+    items: list,
+    billed_price_per_item: float | None = None
+):
     """
-    items: list of dicts: { "part_id": int, "qty": int, ["unit_price": float] }
-      - если unit_price передан в item — используем его как billed price (с учётом fee/markup),
-        иначе возьмём текущий part.unit_cost.
+    items: список словарей вида:
+      {
+        "part_id": int | None,
+        "qty": int,
+        "unit_price": float | None,
+        "is_ins": bool (опционально)  # insurance supplied
+      }
 
-    Возвращает (issue_date: datetime, created_count: int).
+    Обычные строки (is_ins=False):
+      - qty ограничивается складом (on_hand)
+      - уменьшаем Part.quantity
+      - цена берётся из unit_price / billed_price_per_item / part.unit_cost
+
+    INS-строки (is_ins=True):
+      - ВСЕГДА создаём запись, даже если нет Part или 0 на складе
+      - Part.quantity НЕ меняем
+      - цена фиксируется как unit_price (или 0.0, если не передана)
+
+    Возвращает: (issue_date: datetime, records: list[IssuedPartRecord])
     """
+    from datetime import datetime
+    from flask_login import current_user
+    from extensions import db
+    from models import Part, IssuedPartRecord
+
     if not items:
         raise ValueError("No items to issue")
 
     issue_date = datetime.utcnow()
-    created = 0
+    created_records: list[IssuedPartRecord] = []
 
     for it in items:
-        part_id = int(it["part_id"])
-        qty     = max(0, int(it["qty"] or 0))
+        qty = max(0, int(it.get("qty") or 0))
         if qty <= 0:
             continue
 
-        part = Part.query.get(part_id)
-        if not part:
-            continue
+        is_ins = bool(it.get("is_ins"))
+        part_id = it.get("part_id")
+        part = Part.query.get(part_id) if part_id else None
 
-        on_hand = int(part.quantity or 0)
-        issue_now = min(qty, on_hand)
-        if issue_now <= 0:
-            continue
+        # ---------- INSURANCE-SUPPLIED ----------
+        if is_ins:
+            # страховая поставляет — не смотрим на склад вообще
+            issue_now = qty
 
-        # цена к фиксации — либо из item["unit_price"], либо текущая в складе
-        price_to_fix = None
-        if "unit_price" in it and it["unit_price"] is not None:
-            price_to_fix = float(it["unit_price"])
-        elif billed_price_per_item is not None:
-            price_to_fix = float(billed_price_per_item)
+            # цена = переданная unit_price (обычно 0.0 для INS)
+            if "unit_price" in it and it["unit_price"] is not None:
+                price_to_fix = float(it["unit_price"])
+            elif billed_price_per_item is not None:
+                price_to_fix = float(billed_price_per_item)
+            else:
+                # по умолчанию 0
+                price_to_fix = 0.0
+
+            # ВАЖНО: склад не трогаем
+
+        # ---------- Обычная складская выдача ----------
         else:
-            price_to_fix = float(part.unit_cost or 0.0)
+            if not part:
+                # без привязки к Part обычную строку не выдаём
+                continue
 
-        # уменьшаем склад
-        part.quantity = on_hand - issue_now
+            on_hand = int(part.quantity or 0)
+            issue_now = min(qty, on_hand)
+            if issue_now <= 0:
+                continue
 
-        # создаём запись выдачи (твоя модель уже есть)
+            if "unit_price" in it and it["unit_price"] is not None:
+                price_to_fix = float(it["unit_price"])
+            elif billed_price_per_item is not None:
+                price_to_fix = float(billed_price_per_item)
+            else:
+                price_to_fix = float(part.unit_cost or 0.0)
+
+            # уменьшаем склад
+            part.quantity = on_hand - issue_now
+            db.session.add(part)
+
+        # создаём запись выдачи
         rec = IssuedPartRecord(
-            part_id=part.id,
+            part_id=part.id if part else None,
             quantity=issue_now,
-            issued_to=issued_to.strip(),
+            issued_to=(issued_to or "").strip(),
             reference_job=(reference_job or "").strip(),
-            issued_by=current_user.username,
+            issued_by=getattr(current_user, "username", "system"),
             issue_date=issue_date,
-            unit_cost_at_issue=price_to_fix,  # фиксируем "billed" цену
+            unit_cost_at_issue=price_to_fix,
         )
         db.session.add(rec)
-        created += 1
+        created_records.append(rec)
 
-    if created == 0:
+    if not created_records:
         raise ValueError("Nothing available to issue")
 
     db.session.commit()
-    return issue_date, created
-
+    return issue_date, created_records
 
 # ==== RETURN HELPERS (без миграций) ====
 
@@ -2846,7 +2953,7 @@ def wo_detail(wo_id):
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # 2) доступы (улучшенная логика)
+    # 2) доступы
     role_raw = (getattr(current_user, "role", "") or "").strip().lower()
     me_id = getattr(current_user, "id", None)
     me_name = (getattr(current_user, "username", "") or "").strip().lower()
@@ -2856,7 +2963,7 @@ def wo_detail(wo_id):
 
     is_admin_like = role_raw in ("admin", "superadmin")
     is_technician = role_raw in ("technician", "tech")
-    is_user       = (role_raw == "user")  # <<< НОВОЕ
+    is_user = (role_raw == "user")
 
     is_my_wo = False
     if wo_tech_id and me_id and (wo_tech_id == me_id):
@@ -2864,19 +2971,12 @@ def wo_detail(wo_id):
     elif wo_tech_name and me_name and (wo_tech_name == me_name):
         is_my_wo = True
 
-    # Техник НЕ может смотреть чужие WO
     if is_technician and not is_my_wo:
         flash("You don't have access to this Work Order.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # Кто может подтверждать — только superadmin (как и было)
     can_confirm_any = (role_raw == "superadmin")
-
-    # Кто может видеть Open Report / Print:
-    #   - admin/superadmin
-    #   - техник на своём WO
-    #   - ЛЮБОЙ user (всегда)
-    can_view_docs = is_admin_like or is_my_wo or is_user  # <<< КЛЮЧЕВОЙ МОМЕНТ
+    can_view_docs = is_admin_like or is_my_wo or is_user
 
     # 3) suppliers
     suppliers = [
@@ -3071,7 +3171,7 @@ def wo_detail(wo_id):
 
     invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
 
-    # 5) BLENDED PRICING with fallback
+    # 5) BLENDED PRICING + INS-строки
     all_rows = []
     if wo.units:
         for u in wo.units:
@@ -3120,6 +3220,8 @@ def wo_detail(wo_id):
         pn = (getattr(r, "part_number", "") or "").strip().upper()
         qty_planned = int(getattr(r, "quantity", 0) or 0)
 
+        is_ins = bool(getattr(r, "is_insurance_supplied", False))
+
         ii = issued_info_by_pn.get(pn)
         issued_qty_raw = int(ii["qty"] or 0) if ii else 0
         issued_val_raw = float(ii["value"] or 0.0) if ii else 0.0
@@ -3127,16 +3229,23 @@ def wo_detail(wo_id):
         issued_qty_eff = issued_qty_raw if issued_qty_raw > 0 else 0
         issued_val_eff = issued_val_raw if issued_qty_raw > 0 else 0.0
 
-        inv_cost = inv_cost_map.get(pn, 0.0)
-        if inv_cost == 0.0:
+        inv_cost = inv_cost_map.get(pn)
+        if inv_cost is None:
             inv_cost = float(getattr(r, "unit_cost", 0.0) or 0.0)
 
-        not_issued_qty = max(0, qty_planned - issued_qty_eff)
-        not_issued_val = not_issued_qty * inv_cost
-        blended_total_val = issued_val_eff + not_issued_val
-        blended_unit_price = (
-            blended_total_val / qty_planned if qty_planned > 0 else 0.0
-        )
+        if qty_planned > 0:
+            not_issued_qty = max(0, qty_planned - issued_qty_eff)
+            not_issued_val = not_issued_qty * inv_cost
+            blended_total_val = issued_val_eff + not_issued_val
+            blended_unit_price = blended_total_val / qty_planned
+        else:
+            blended_total_val = 0.0
+            blended_unit_price = 0.0
+
+        # страховые строки в страховой работе — клиент = 0$
+        if wo.job_type == "INSURANCE" and is_ins:
+            blended_total_val = 0.0
+            blended_unit_price = 0.0
 
         grand_total_display += blended_total_val
 
@@ -3167,6 +3276,7 @@ def wo_detail(wo_id):
                 "ordered_date": getattr(r, "ordered_date", None) or getattr(r, "ordered_on", None),
                 "backorder_flag": bool(getattr(r, "backorder_flag", False)),
                 "is_invoiced": is_invoiced,
+                "is_insurance_supplied": is_ins,
             }
         )
 
@@ -4288,7 +4398,6 @@ def wo_save():
     # ---------- ВАЛИДАЦИЯ заголовка ----------
     if not tech_name_val:
         if is_new:
-            # ниже есть универсальный ререндер, используем его
             pass
         else:
             db.session.rollback()
@@ -4297,17 +4406,15 @@ def wo_save():
 
     if not wo.job_numbers:
         if is_new:
-            # ниже есть универсальный ререндер, используем его
             pass
         else:
             db.session.rollback()
             flash("Job number is required.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
-    # === DUP GUARD: строгая проверка пересечения job_numbers до любых модификаций ===
+    # === DUP GUARD ===
     input_jobs = _parse_jobs(wo.job_numbers)
     if not input_jobs:
-        # пойдём через универсальный ререндер с сообщением
         def _rerender(msg_text: str):
             db.session.rollback()
             flash(msg_text, "warning")
@@ -4325,6 +4432,7 @@ def wo_save():
                     "supplier": "", "backorder_flag": False,
                     "line_status": "search_ordered", "unit_cost": 0.0,
                     "ordered_flag": False,
+                    "is_insurance_supplied": False,
                 }],
             }]
             return render_template(
@@ -4345,11 +4453,14 @@ def wo_save():
     for existing in possibles:
         exist_set = _jobs_set_from_wo(existing)
         if exist_set & input_set:
-            flash(f"Work Order for job(s) {', '.join(sorted(exist_set & input_set))} already exists (#{existing.id}).", "warning")
+            flash(
+                f"Work Order for job(s) {', '.join(sorted(exist_set & input_set))} "
+                f"already exists (#{existing.id}).",
+                "warning",
+            )
             return redirect(url_for("inventory.wo_detail", wo_id=existing.id))
     # === /DUP GUARD ===
 
-    # На новых нужно id — добавляем в сессию пораньше
     if is_new:
         db.session.add(wo)
 
@@ -4358,7 +4469,7 @@ def wo_save():
     re_row  = re.compile(
         r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|"
         r"alt_numbers|alt_part_numbers|warehouse|unit_label|supplier|supplier_name|"
-        r"backorder_flag|status|unit_cost|ordered_flag)\]$"
+        r"backorder_flag|status|unit_cost|ordered_flag|is_insurance_supplied)\]$"
     )
 
     units_map = {}
@@ -4374,7 +4485,7 @@ def wo_save():
             ui, ri, name = int(m.group(1)), int(m.group(2)), m.group(3)
             units_map.setdefault(ui, {"rows": {}})
             units_map[ui]["rows"].setdefault(ri, {})
-            if name in ("ordered_flag", "backorder_flag"):
+            if name in ("ordered_flag", "backorder_flag", "is_insurance_supplied"):
                 vals = request.form.getlist(key)
                 val  = vals[-1] if vals else f.get(key)
             else:
@@ -4403,8 +4514,8 @@ def wo_save():
             bo_flag = _b(r.get("backorder_flag"))
             lstatus = (r.get("status") or "search_ordered").strip()
             ord_flag = _b(r.get("ordered_flag"))
+            ins_flag = _b(r.get("is_insurance_supplied"))
 
-            # отдельно берём обрезанное имя и эффективное количество
             part_name_clip = _clip(r.get("part_name"), 120)
             qty_eff = qty if qty else 1
 
@@ -4420,9 +4531,9 @@ def wo_save():
                 "line_status": lstatus if lstatus in ("search_ordered", "ordered", "done") else "search_ordered",
                 "unit_cost": (ucost if (ucost is not None) else 0.0),
                 "ordered_flag": ord_flag,
+                "is_insurance_supplied": ins_flag,
             }
 
-            # считаем и добавляем только непустые строки
             if (pn or part_name_clip) and qty_eff > 0:
                 new_rows_count += 1
                 rows_payload.append(row_dict)
@@ -4452,6 +4563,7 @@ def wo_save():
                     "ord_raw": r_blk.get("ordered_flag"),
                     "bo_raw": r_blk.get("backorder_flag"),
                     "status": r_blk.get("status"),
+                    "ins_raw": r_blk.get("is_insurance_supplied"),
                 })
         current_app.logger.debug("WO_SAVE DEBUG rows before validation: %s", dbg_rows)
     except Exception as _e:
@@ -4484,6 +4596,7 @@ def wo_save():
                 "line_status": "search_ordered",
                 "unit_cost": 0.0,
                 "ordered_flag": False,
+                "is_insurance_supplied": False,
             }],
         }]
 
@@ -4515,7 +4628,6 @@ def wo_save():
             flash("Job number is required.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
-    # если шапка без строк
     if is_new:
         db.session.add(wo)
 
@@ -4583,7 +4695,6 @@ def wo_save():
         flash(f"Failed to refresh units on Work Order: {e}", "danger")
         return _safe_detail_redirect(wo)
 
-    # синхронизируем заголовок WO с первым юнитом
     if units_payload:
         first_unit = units_payload[0]
         wo.brand  = (first_unit.get("brand")  or "").strip() or None
@@ -4621,8 +4732,8 @@ def wo_save():
             pn_upper = (r.get("part_number") or "").strip().upper()
             sup_norm = _norm_supplier(sup)
 
-            ord_in_raw = r.get("ordered_flag")
-            ord_in     = _b(ord_in_raw)
+            ord_in   = bool(r.get("ordered_flag"))
+            ins_flag = bool(r.get("is_insurance_supplied"))
 
             prev_state = old_index.get((uk, pn_upper, sup_norm))
             prev_was_ordered, prev_date = (prev_state if prev_state else (False, None))
@@ -4637,8 +4748,9 @@ def wo_save():
                 ord_in   = False
 
             current_app.logger.debug(
-                "WO_SAVE DEBUG build part row pn=%s sup=%s ord_in_raw=%r -> ord_in=%r prev_was_ordered=%r prev_date=%r final_date=%r",
-                pn_upper, sup_norm, ord_in_raw, ord_in, prev_was_ordered, prev_date, ord_date
+                "WO_SAVE DEBUG build part row pn=%s sup=%s ord_in=%r prev_was_ordered=%r "
+                "prev_date=%r final_date=%r ins=%r",
+                pn_upper, sup_norm, ord_in, prev_was_ordered, prev_date, ord_date, ins_flag
             )
 
             wop = WorkOrderPart(
@@ -4651,6 +4763,7 @@ def wo_save():
                 supplier=(sup or None),
                 backorder_flag=bool(r.get("backorder_flag")),
                 status=("ordered" if ord_in else "search_ordered"),
+                is_insurance_supplied=ins_flag,
             )
 
             if hasattr(wop, "warehouse"):
@@ -4697,199 +4810,6 @@ def wo_save():
         session.modified = True
 
     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
-
-@inventory_bp.get("/api/stock_hint", endpoint="api_stock_hint")
-@login_required
-def api_stock_hint():
-    from flask import request, jsonify
-    from sqlalchemy import func
-    from models import Part  # подстрой импорт, если у тебя другой путь
-
-    # --- вход ---
-    pn = (request.args.get("pn") or "").strip().upper()
-    try:
-        qty = int(request.args.get("qty") or 0)
-    except Exception:
-        qty = 0
-
-    wh = (request.args.get("wh") or request.args.get("warehouse") or "").strip()
-
-    if not pn or qty <= 0:
-        return jsonify({"hint": "—", "available_qty": 0})
-
-    # --- хелперы ---
-    def pick_int(obj, names, default=0):
-        for n in names:
-            if hasattr(obj, n):
-                v = getattr(obj, n)
-                if v is None:
-                    continue
-                try:
-                    return int(v)
-                except Exception:
-                    try:
-                        return int(float(v))
-                    except Exception:
-                        continue
-        return int(default)
-
-    def pick_num(obj, names):
-        for n in names:
-            if hasattr(obj, n):
-                v = getattr(obj, n)
-                if v is None:
-                    continue
-                try:
-                    return float(v)
-                except Exception:
-                    try:
-                        return float(str(v).strip().replace(",", ""))
-                    except Exception:
-                        continue
-        return None
-
-    def pick_str(obj, names):
-        for n in names:
-            if hasattr(obj, n):
-                v = getattr(obj, n)
-                if v is None:
-                    continue
-                s = str(v).strip()
-                if s:
-                    return s
-        return None
-
-    # ----------------------------------------------------------------------
-    # 1. Собираем ВСЕ записи Part с таким PN (без фильтра по wh),
-    #    чтобы посчитать общий остаток по компании.
-    # ----------------------------------------------------------------------
-    all_parts_q = Part.query.filter(func.upper(Part.part_number) == pn)
-    all_parts = all_parts_q.all()
-
-    if not all_parts:
-        # ничего вообще не нашли по PN
-        return jsonify({
-            "hint": "WAIT: unknown PN",
-            "available_qty": 0,
-            "on_hand": 0,
-            "ordered": 0,
-            "part_name": "",
-            "unit_cost": None,
-            "warehouse": wh or "",
-            "pn": pn,
-            "requested_qty": qty
-        })
-
-    # просуммируем on_hand по всем записям
-    total_on_hand = 0
-    total_ordered = 0
-
-    # заодно возьмём "эталонную" запись part_for_details
-    # (чтобы вытащить имя, цену, локацию и т.д.)
-    # приоритет:
-    #   1) запись с тем WH, который пользователь указал в форме
-    #   2) иначе просто первая запись
-    part_for_details = None
-
-    for p in all_parts:
-        # суммируем остаток
-        total_on_hand += pick_int(
-            p,
-            ("on_hand", "quantity", "qty_on_hand", "stock", "in_stock"),
-            default=0
-        )
-        total_ordered += pick_int(
-            p,
-            ("ordered_qty", "on_order", "ordered", "po_qty"),
-            default=0
-        )
-
-        # выбираем "лучшую" запись для данных
-        if part_for_details is None:
-            part_for_details = p
-
-        # если склад совпадает с wh — используем её как приоритетную
-        if wh:
-            # попробуем сравнить wh с тем, что хранится в p
-            cand_loc = None
-            if hasattr(p, "location") and getattr(p, "location"):
-                cand_loc = str(getattr(p, "location")).strip()
-            elif hasattr(p, "warehouse") and getattr(p, "warehouse"):
-                cand_loc = str(getattr(p, "warehouse")).strip()
-            elif hasattr(p, "wh") and getattr(p, "wh"):
-                cand_loc = str(getattr(p, "wh")).strip()
-
-            if cand_loc and cand_loc == wh:
-                part_for_details = p
-
-    # ----------------------------------------------------------------------
-    # 2. Теперь у нас есть total_on_hand по ВСЕМ складам.
-    #    Определяем hint на основе total_on_hand, НЕ только по конкретному складу.
-    # ----------------------------------------------------------------------
-    if total_on_hand >= qty:
-        hint = "STOCK"
-    else:
-        hint = "WAIT"
-
-    # ----------------------------------------------------------------------
-    # 3. Достаём красивые поля (имя, цена, склад и т.д.) из part_for_details.
-    #    Это важно для автозаполнения формы во фронте.
-    # ----------------------------------------------------------------------
-    p = part_for_details
-
-    eta_val = None
-    for n in ("eta", "expected_date", "arrival_date", "due_date"):
-        if hasattr(p, n):
-            eta_val = getattr(p, n)
-            if eta_val:
-                break
-
-    part_name = pick_str(
-        p,
-        ("part_name", "name", "title", "description")
-    ) or ""
-
-    unit_cost = pick_num(
-        p,
-        ("unit_cost", "price", "unit_price", "cost", "last_price", "avg_cost")
-    )
-    if unit_cost is not None:
-        unit_cost = round(unit_cost, 2)
-
-    warehouse_guess = pick_str(
-        p,
-        ("warehouse", "location", "wh")
-    ) or (wh or "")
-
-    # ----------------------------------------------------------------------
-    # 4. Возвращаем ответ.
-    #    ВАЖНО: оставляем те же ключи, которые фронт уже ждёт:
-    #    - "available_qty": теперь это ОБЩИЙ остаток total_on_hand
-    #    - "on_hand": тоже можно отдать общий остаток
-    # ----------------------------------------------------------------------
-    payload = {
-        "hint": hint,
-        "available_qty": total_on_hand,   # раньше было on_hand конкретной записи
-        "on_hand": total_on_hand,         # тоже общий запас
-        "ordered": total_ordered,         # просто суммарно по всем Part
-        "eta": (
-            eta_val.isoformat()
-            if hasattr(eta_val, "isoformat")
-            else (str(eta_val).strip() if eta_val else None)
-        ),
-
-        # Это то, что фронт может использовать чтобы автозаполнить поля
-        "location": warehouse_guess or None,
-        "warehouse": warehouse_guess,
-        "part_name": part_name,
-        "unit_cost": unit_cost,
-
-        # инфо запроса
-        "pn": pn,
-        "requested_qty": qty,
-    }
-
-    return jsonify(payload)
 
 @inventory_bp.get("/work_orders")
 @login_required
@@ -5045,6 +4965,7 @@ def wo_list():
 @inventory_bp.post("/work_orders/<int:wo_id>/issue_instock", endpoint="wo_issue_instock")
 @login_required
 def wo_issue_instock(wo_id):
+    # доступ
     if getattr(current_user, "role", "") not in ("admin", "superadmin"):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
@@ -5056,9 +4977,10 @@ def wo_issue_instock(wo_id):
     from flask import request, session
 
     from extensions import db
-    from models import WorkOrder, WorkOrderPart, Part  # Part — складская позиция
+    from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord
 
     wo = WorkOrder.query.get_or_404(wo_id)
+    is_ins_job = (wo.job_type or "").strip().upper() == "INSURANCE"
 
     # ===== флаг автосмены статуса (done или нет) =====
     set_status = (request.form.get("set_status") or "").strip().lower()
@@ -5069,15 +4991,19 @@ def wo_issue_instock(wo_id):
     except Exception:
         avail_rows = []
 
-    stock_map = {}  # PN -> on_hand (по расчёту)
-    hint_map  = {}  # PN -> hint/status
+    stock_map: dict[str, int] = {}  # PN -> on_hand (по расчёту)
+    hint_map: dict[str, str] = {}   # PN -> hint/status
     for r in avail_rows:
         pn = (r.get("part_number") or "").strip().upper()
         if not pn:
             continue
         on_hand = int(r.get("on_hand") or 0)
         stock_map[pn] = stock_map.get(pn, 0) + on_hand
-        hint_map[pn]  = (r.get("status_hint") or r.get("hint") or ("STOCK" if on_hand > 0 else "WAIT"))
+        hint_map[pn] = (
+            r.get("status_hint")
+            or r.get("hint")
+            or ("STOCK" if on_hand > 0 else "WAIT")
+        )
 
     def can_issue(pn: str, qty: int) -> bool:
         pn = (pn or "").strip().upper()
@@ -5091,9 +5017,11 @@ def wo_issue_instock(wo_id):
 
     # === 2) Режим “выбрано” — выдаём конкретные строки по их ID ===
     raw_ids = (request.form.get("part_ids") or "").strip()
-    items_to_issue = []
-    issued_row_ids = []
+    items_to_issue = []        # для обычных складских строк (используем helper)
+    issued_row_ids: list[int] = []
     skipped_rows = []
+    new_records: list[IssuedPartRecord] = []   # ВСЕ созданные IssuedPartRecord (stock + INS)
+    issue_date = datetime.utcnow()
 
     if raw_ids:
         ids = [int(tok) for tok in raw_ids.split(",") if tok.strip().isdigit()]
@@ -5115,13 +5043,16 @@ def wo_issue_instock(wo_id):
 
         part_has_location = hasattr(Part, "location")
 
+        # --- сначала обрабатываем КАЖДУЮ строку: INS отдельно, обычные отдельно ---
         for line in wops:
             pn = (line.part_number or "").strip().upper()
             qty_req = int(line.quantity or 0)
             if not pn or qty_req <= 0:
                 continue
 
-            # найдём конкретный складской Part
+            is_ins_line = bool(getattr(line, "is_insurance_supplied", False))
+
+            # базовый запрос по Part
             q_base = Part.query.filter(func.upper(Part.part_number) == pn)
             part = None
             if part_has_location and getattr(line, "warehouse", None):
@@ -5130,6 +5061,69 @@ def wo_issue_instock(wo_id):
                 ).first()
             if not part:
                 part = q_base.first()
+
+            # нормализуем подсказку
+            hint_norm = (hint_map.get(pn) or "STOCK").upper()
+            if hasattr(line, "stock_hint"):
+                try:
+                    line.stock_hint = hint_norm
+                except Exception:
+                    pass
+
+            # ========== A) INS-строки для страховых работ ==========
+            if is_ins_job and is_ins_line:
+                # Для INS:
+                #   * не трогаем склад (quantity в Part не изменяем)
+                #   * всегда разрешаем "выдать" (создать запись)
+                #   * цена в инвойсе = 0.00
+                if not part:
+                    # вообще нет Part — просто покажем в "skipped"
+                    skipped_rows.append({
+                        "id": line.id,
+                        "pn": pn,
+                        "name": getattr(line, "part_name", "") or "—",
+                        "qty": qty_req,
+                        "hint": "NO PART FOR INS",
+                    })
+                    continue
+
+                rec = IssuedPartRecord(
+                    part_id=part.id,
+                    quantity=qty_req,
+                    issued_to=(wo.technician_name or "").strip(),
+                    reference_job=(wo.canonical_job or "").strip(),
+                    issued_by=getattr(current_user, "username", "system"),
+                    issue_date=issue_date,
+                    unit_cost_at_issue=0.0,   # <--- страховая, для нас 0
+                )
+                db.session.add(rec)
+                new_records.append(rec)
+                issued_row_ids.append(line.id)
+
+                # помечаем строку как полностью выданную (для UX в WO)
+                issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
+                line.issued_qty = issued_so_far + qty_req
+                try:
+                    line.status = "done"
+                except Exception:
+                    pass
+                if hasattr(line, "last_issued_at"):
+                    line.last_issued_at = issue_date
+                db.session.add(line)
+
+                # переходим к следующей строке, не используя склад
+                continue
+
+            # ========== B) Обычные складские строки ==========
+            if not part:
+                skipped_rows.append({
+                    "id": line.id,
+                    "pn": pn,
+                    "name": getattr(line, "part_name", "") or "—",
+                    "qty": qty_req,
+                    "hint": hint_norm,
+                })
+                continue
 
             ok = can_issue(pn, qty_req)
 
@@ -5152,73 +5146,69 @@ def wo_issue_instock(wo_id):
                 except Exception:
                     pass
 
-            if not part or not ok:
-                # не смогли выдать эту строку
+            if not ok:
                 skipped_rows.append({
                     "id": line.id,
                     "pn": pn,
                     "name": getattr(line, "part_name", "") or "—",
                     "qty": qty_req,
-                    "hint": hint_norm
+                    "hint": hint_norm,
                 })
                 continue
 
-            # ✅ ВАЖНО:
-            # Фиксируем ЦЕНУ ДЛЯ ИНВОЙСА с реального склада, а не из WorkOrderPart.
+            # реальная себестоимость из склада
             try:
                 real_cost = float(part.unit_cost or 0.0)
             except Exception:
                 real_cost = 0.0
 
+            # склад будем списывать ЧЕРЕЗ _issue_records_bulk,
+            # здесь только накапливаем items_to_issue
             items_to_issue.append({
                 "part_id": part.id,
                 "qty": qty_req,
-                "unit_price": real_cost,   # <-- вот это уйдёт в unit_cost_at_issue
+                "unit_price": real_cost,
+                "is_ins": bool(getattr(line, "is_ins", False))
             })
+
             issued_row_ids.append(line.id)
 
-        if not items_to_issue:
-            if skipped_rows:
-                session["wo_skip_info"] = skipped_rows
-                flash("Nothing available to issue (selected lines are not in stock).", "warning")
-            else:
-                flash("Nothing available to issue.", "warning")
-            return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+        # --- выдаём обычные складские строки пачкой ---
+        if items_to_issue:
+            try:
+                issue_date_stock, created_records = _issue_records_bulk(
+                    issued_to=wo.technician_name,
+                    reference_job=wo.canonical_job,
+                    items=items_to_issue,
+                )
+                issue_date = issue_date_stock or issue_date
+                # created_records может быть count или списком — поддерживаем оба варианта
+                if isinstance(created_records, list):
+                    new_records.extend(created_records)
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Error issuing stock items: {e}", "danger")
+                return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-        # --- создаём записи выдачи ---
-        issue_result = _issue_records_bulk(
-            issued_to=wo.technician_name,
-            reference_job=wo.canonical_job,
-            items=items_to_issue
-        )
+            # обновляем issued_qty / status / last_issued_at для складских строк
+            now = datetime.utcnow()
+            for line in WorkOrderPart.query.filter(
+                WorkOrderPart.id.in_(issued_row_ids)
+            ).all():
+                qty_needed = int(line.quantity or 0)
+                issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
+                issue_now = max(qty_needed - issued_so_far, 0)
+                if issue_now > 0:
+                    line.issued_qty = issued_so_far + issue_now
+                    if line.issued_qty >= qty_needed:
+                        try:
+                            line.status = "done"
+                        except Exception:
+                            pass
+                    if hasattr(line, "last_issued_at"):
+                        line.last_issued_at = now
+                    db.session.add(line)
 
-        # поддержка обеих сигнатур: (dt, records) ИЛИ (dt, created_bool)
-        issue_date = None
-        new_records = None
-        try:
-            issue_date, new_records = issue_result  # новая сигнатура
-        except Exception:
-            issue_date, _created = issue_result     # старая сигнатура
-
-        # отметим, сколько реально выдали в WorkOrderPart
-        now = datetime.utcnow()
-        for line in WorkOrderPart.query.filter(WorkOrderPart.id.in_(issued_row_ids)).all():
-            qty_needed = int(line.quantity or 0)
-            issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
-            issue_now = max(qty_needed - issued_so_far, 0)
-
-            if issue_now > 0:
-                line.issued_qty = issued_so_far + issue_now
-                if line.issued_qty >= qty_needed:
-                    try:
-                        line.status = "done"
-                    except Exception:
-                        pass
-
-            if hasattr(line, "last_issued_at"):
-                line.last_issued_at = now
-
-            db.session.add(line)
         db.session.commit()
 
         # автосмена статуса WO -> done (если попросили)
@@ -5229,7 +5219,7 @@ def wo_issue_instock(wo_id):
             except Exception:
                 db.session.rollback()
 
-        # --- если есть новые записи - делаем инвойс и редиректим на него ---
+        # --- если есть новые записи - создаём/подвешиваем инвойс ---
         if new_records:
             try:
                 batch = _ensure_invoice_number_for_records(
@@ -5237,11 +5227,12 @@ def wo_issue_instock(wo_id):
                     issued_to=wo.technician_name,
                     issued_by=getattr(current_user, "username", "system"),
                     reference_job=wo.canonical_job,
-                    issue_date=issue_date or datetime.utcnow(),
-                    location=None
+                    issue_date=issue_date,
+                    location=None,
                 )
                 db.session.commit()
-                return redirect(f"/reports/{batch.invoice_number}", code=303)
+                if batch and getattr(batch, "invoice_number", None):
+                    return redirect(f"/reports/{batch.invoice_number}", code=303)
             except Exception:
                 db.session.rollback()
                 # если не удалось - пойдём в общий отчёт ниже
@@ -5252,7 +5243,7 @@ def wo_issue_instock(wo_id):
             "start_date": d,
             "end_date": d,
             "recipient": wo.technician_name,
-            "reference_job": wo.canonical_job
+            "reference_job": wo.canonical_job,
         })
         link = f"/reports_grouped?{params}"
 
@@ -5270,8 +5261,7 @@ def wo_issue_instock(wo_id):
             issued_ids=",".join(map(str, issued_row_ids))
         ))
 
-    # === 3) Режим “ничего не выбрано” — массовая выдача in-stock ===
-    # строим pn_issue_map и items_to_issue на основе avail_rows
+    # === 3) Режим “ничего не выбрано” — массовая выдача in-stock (как раньше) ===
     pn_issue_map = {}
     items_to_issue.clear()
 
@@ -5290,7 +5280,6 @@ def wo_issue_instock(wo_id):
         if not part:
             continue
 
-        # ✅ тоже фиксируем реальную себестоимость склада
         try:
             real_cost = float(part.unit_cost or 0.0)
         except Exception:
@@ -5299,7 +5288,7 @@ def wo_issue_instock(wo_id):
         items_to_issue.append({
             "part_id": part.id,
             "qty": issue_now,
-            "unit_price": real_cost,  # фиксируем правильную цену
+            "unit_price": real_cost,
         })
 
     if not items_to_issue:
@@ -5309,7 +5298,7 @@ def wo_issue_instock(wo_id):
     issue_date, _created_or_records = _issue_records_bulk(
         issued_to=wo.technician_name,
         reference_job=wo.canonical_job,
-        items=items_to_issue
+        items=items_to_issue,
     )
 
     # распределяем выданное количество по строкам этого WO (issued_qty / status / last_issued_at)
@@ -5385,7 +5374,7 @@ def wo_issue_instock(wo_id):
         "start_date": d,
         "end_date": d,
         "recipient": wo.technician_name,
-        "reference_job": wo.canonical_job
+        "reference_job": wo.canonical_job,
     })
     link = f"/reports_grouped?{params}"
 
@@ -5454,7 +5443,6 @@ def wo_edit(wo_id: int):
         )
         issued_items = base_q.all()
 
-    # qty по PN с учётом возвратов (отрицательные строки вычитаем)
     issued_qty_by_pn = defaultdict(int)
     for rec in issued_items:
         pn = (getattr(rec.part, "part_number", "") or "").strip().upper()
@@ -5463,19 +5451,17 @@ def wo_edit(wo_id: int):
         q = int(rec.quantity or 0)
         if q == 0:
             continue
-        issued_qty_by_pn[pn] += q  # возврат = минус
+        issued_qty_by_pn[pn] += q
 
-    # будем "раздавать" выданное количество по строкам плана
     remaining_issued = dict(issued_qty_by_pn)
 
     # ==================================================
-    # 2) units payload c issued_qty + ALT PN
+    # 2) units payload c issued_qty + ALT PN + INS-флагом
     # ==================================================
     units = []
     for u in (getattr(wo, "units", []) or []):
         rows = []
         for p in (getattr(u, "parts", []) or []):
-            # ALT PN: пробуем и alt_numbers, и alt_part_numbers
             alt_val = (
                 getattr(p, "alt_numbers", "") or
                 getattr(p, "alt_part_numbers", "") or
@@ -5485,14 +5471,12 @@ def wo_edit(wo_id: int):
             pn_upper = (getattr(p, "part_number", "") or "").strip().upper()
             qty_plan = int(getattr(p, "quantity", 0) or 0)
 
-            # сколько ещё выдано по этому PN
             issued_left = int(remaining_issued.get(pn_upper, 0) or 0)
             assigned_issued = 0
             if qty_plan > 0 and issued_left > 0:
                 assigned_issued = min(qty_plan, issued_left)
                 remaining_issued[pn_upper] = issued_left - assigned_issued
 
-            # is_ordered — как в модели/шаблоне
             is_ordered_flag = getattr(p, "ordered_flag", None)
             is_ordered = bool(
                 is_ordered_flag
@@ -5506,7 +5490,6 @@ def wo_edit(wo_id: int):
                 "part_name": getattr(p, "part_name", "") or "",
                 "quantity": qty_plan,
 
-                # ALT PN для формы
                 "alt_numbers": alt_val,
 
                 "warehouse": getattr(p, "warehouse", "") or "",
@@ -5518,9 +5501,12 @@ def wo_edit(wo_id: int):
                     if getattr(p, "unit_cost") is not None else None
                 ),
 
-                # дополнительные поля для раскраски в шаблоне
                 "issued_qty": assigned_issued,
                 "is_ordered": is_ordered,
+
+                "is_insurance_supplied": bool(
+                    getattr(p, "is_insurance_supplied", False)
+                ),
             })
 
         if not rows:
@@ -5533,6 +5519,7 @@ def wo_edit(wo_id: int):
                 "unit_cost": 0.0,
                 "issued_qty": 0,
                 "is_ordered": False,
+                "is_insurance_supplied": False,
             }]
 
         units.append({
@@ -5543,7 +5530,6 @@ def wo_edit(wo_id: int):
             "rows": rows,
         })
 
-    # если вообще нет юнитов — создаём один пустой с заготовленной строкой
     if not units:
         units = [{
             "brand":  wo.brand or "",
@@ -5558,6 +5544,7 @@ def wo_edit(wo_id: int):
                 "unit_cost": 0.0,
                 "issued_qty": 0,
                 "is_ordered": False,
+                "is_insurance_supplied": False,
             }],
         }]
 
@@ -6437,6 +6424,7 @@ def issue_part():
     from extensions import db
     from models import Part, IssuedPartRecord
 
+    # этот список для отдельной страницы issue_part, можно оставить как есть
     parts = Part.query.filter(Part.quantity > 0).all()
 
     if request.method == 'POST':
@@ -6465,11 +6453,62 @@ def issue_part():
 
         # 1) валидируем сток и создаём строки выдачи
         for idx, item in enumerate(all_parts):
-            part = Part.query.get(item['part_id'])
-            qty  = int(item.get('quantity') or 0)
+            part_id = item.get('part_id')
+            part = Part.query.get(part_id) if part_id else None
+            qty = int(item.get('quantity') or 0)
 
-            if not part or qty <= 0 or part.quantity < qty:
-                flash(f"Not enough stock for {item.get('part_number', 'UNKNOWN')}", 'danger')
+            # тип работы и INS-флаг (если не придут — будет False и логика как раньше)
+            job_type = (item.get('job_type') or '').strip().upper()
+            is_ins_flag = bool(
+                item.get('is_ins')
+                or item.get('is_insurance_supplied')
+                or item.get('ins_flag')
+            )
+            is_insurance_case = (job_type == 'INSURANCE') and is_ins_flag
+
+            if not part or qty <= 0:
+                flash(f"Invalid part or quantity for item #{idx + 1}.", 'danger')
+                return redirect(url_for('.issue_part'))
+
+            # --- ОСОБЫЙ СЛУЧАЙ: страховая работа + INS-строка ---
+            if is_insurance_case:
+                # НИКАКИХ проверок склада и НИКАКОГО списания количества
+                loc_snapshot = (getattr(part, "location", "") or "").strip()
+
+                loc = None
+                if it.get("is_ins"):
+                    loc = "INS"
+                else:
+                    loc = (getattr(part, "location", None) or "").strip() or None
+
+                rec = IssuedPartRecord(
+                    part_id=part.id,
+                    quantity=issue_now,
+                    issued_to=issued_to.strip(),
+                    reference_job=(reference_job or "").strip(),
+                    issued_by=current_user.username,
+                    issue_date=issue_date,
+                    unit_cost_at_issue=price_to_fix,
+                    location=loc
+                )
+
+                db.session.add(rec)
+                new_records.append(rec)
+
+                # локация батча — из первой INS-строки, если ещё не установлена
+                if batch_location is None and loc_snapshot:
+                    batch_location = loc_snapshot
+
+                # переходим к следующей строке, склад не трогаем
+                continue
+
+            # --- Обычный случай: не страховая/не INS-строка ---
+            if part.quantity < qty:
+                flash(
+                    f"Not enough stock for {item.get('part_number', 'UNKNOWN')}: "
+                    f"need {qty}, have {part.quantity}.",
+                    'danger'
+                )
                 return redirect(url_for('.issue_part'))
 
             # уменьшаем сток
@@ -6486,7 +6525,7 @@ def issue_part():
                 issued_by=issued_by,
                 issue_date=issue_dt,
                 unit_cost_at_issue=part.unit_cost,
-                location=loc_snapshot,   # ВАЖНО: сохраняем snapshot
+                location=loc_snapshot,  # ВАЖНО: сохраняем snapshot
             )
             db.session.add(rec)
             new_records.append(rec)

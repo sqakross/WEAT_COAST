@@ -18,6 +18,14 @@
   .wo-form .unit-table td.issue-cell, .wo-form .unit-table td.issue-cell *{ pointer-events:auto!important; }
   .unit-table .ordered-col{ display:none; }
 
+  /* INS колонка прячется по умолчанию, показываем только при INSURANCE */
+  /*.ins-col{ display:none; }*/
+
+  /* Чуть уменьшаем чекбоксы, сами поля не трогаем */
+  .unit-table .form-check-input{
+    transform: scale(.9);
+  }
+
   /* ВИЗУАЛЬНАЯ ПОДСВЕТКА КАК В WORK ORDER */
 
   /* Выданные (issued) – зелёные */
@@ -198,6 +206,7 @@
                 <th class="text-end col-money">Total ($)</th>
                 <th class="col-narrow">WH</th>
                 <th style="width:80px;" title="Backorder">B/O</th>
+                <th class="ins-col" style="width:70px;">INS</th>
                 <th class="col-narrow">Sup</th>
                 <th class="ordered-col" style="width:70px;">Ord</th>
                 <th style="width:140px;">Stock hint</th>
@@ -237,6 +246,13 @@
                 <td class="text-center">
                   <div class="form-check d-flex justify-content-center m-0">
                     <input class="form-check-input" type="checkbox" name="units[{{ ui }}][rows][{{ ri }}][backorder_flag]" {% if r.backorder_flag %}checked{% endif %} {{ dis }}>
+                  </div>
+                </td>
+                <td class="text-center ins-col">
+                  <div class="form-check d-flex justify-content-center m-0">
+                    <input class="form-check-input ins-check" type="checkbox"
+                           name="units[{{ ui }}][rows][{{ ri }}][is_insurance_supplied]"
+                           {% if r.is_insurance_supplied %}checked{% endif %} {{ dis }}>
                   </div>
                 </td>
                 <td><input class="form-control supplier-input" name="units[{{ ui }}][rows][{{ ri }}][supplier]" list="suppliers_datalist" value="{{ r.supplier or '' }}" {{ ro }} {{ dis }}></td>
@@ -363,6 +379,7 @@
 
 <script>
 (function(){
+  // STOCK API
   const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
   const API_DUP   = "{{ url_for('inventory.api_job_duplicate_check') }}";
   const IS_EDIT   = {{ 'true' if IS_EDIT else 'false' }};
@@ -370,6 +387,7 @@
 
   const form         = document.getElementById('woForm');
   const unitsWrap    = document.getElementById('unitsWrap');
+
   const grandTotalEl = document.getElementById('grandTotal');
   const deliveryEl   = document.getElementById('deliveryFee');
   const markupEl     = document.getElementById('markupPercent');
@@ -377,6 +395,19 @@
   const selectAllBtn = document.getElementById('selectAllInStockBtn');
   const statusSel    = document.querySelector('select[name="status"]');
   const addUnitBtn   = document.getElementById('addUnit');
+  const jobTypeSel   = document.querySelector('select[name="job_type"]');
+
+  // --- helpers для INS-логики ---
+  function isInsuranceJob(){
+    return jobTypeSel && jobTypeSel.value === 'INSURANCE';
+  }
+
+  function isRowInsuranceSupplied(tr){
+    if (!tr) return false;
+    const cb = tr.querySelector('.ins-check');
+    return !!(cb && cb.checked);
+  }
+
 
   // --- UNSAVED CHANGES GUARD ---
   let isDirty = false;
@@ -433,6 +464,15 @@
   }
   statusSel?.addEventListener('change', toggleOrderedCols);
 
+  // === NEW: показ/скрытие INS-колонки в зависимости от Job type
+  function updateInsColumns(){
+    const show = jobTypeSel && jobTypeSel.value === 'INSURANCE';
+    document.querySelectorAll('.ins-col').forEach(el=>{
+      el.style.display = show ? 'table-cell' : 'none';
+    });
+  }
+  jobTypeSel?.addEventListener('change', updateInsColumns);
+
   // === NEW: есть ли хотя бы один отмеченный Ord
   function hasAnyOrderedChecked(){
     return Array.from(document.querySelectorAll('.unit-table .ordered-check'))
@@ -470,7 +510,7 @@
     });
   }
 
-  // DUPLICATE CHECK LOGIC (без изменений) ...
+  // DUPLICATE CHECK LOGIC ...
   async function handleDuplicateCheckBeforeSubmit(){
     if (IS_EDIT) return true;
 
@@ -543,29 +583,34 @@
   const toMoney = (n)=> (Math.round((Number(n||0)+Number.EPSILON)*100)/100).toFixed(2);
 
   function recomputeUnitSubtotal(card){
-    const markup   = parseFloat(markupEl?.value||'0')||0;
-    const delivery = parseFloat(deliveryEl?.value||'0')||0;
-    let unitSum = 0;
+  const markup   = parseFloat(markupEl?.value || '0') || 0;
+  const delivery = parseFloat(deliveryEl?.value || '0') || 0;
+  let unitSum = 0;
 
-    card.querySelectorAll('tbody tr').forEach(tr=>{
-      const q = parseFloat(tr.querySelector('.qty')?.value||'0')||0;
-      const c = parseFloat(tr.querySelector('.unit-cost')?.value||'0')||0;
-      const line = (q*c)*(1+markup/100) + delivery;
+  card.querySelectorAll('tbody tr').forEach(tr => {
+    const q = parseFloat(tr.querySelector('.qty')?.value || '0') || 0;
+    const baseCost = parseFloat(tr.querySelector('.unit-cost')?.value || '0') || 0;
 
-      const cell = tr.querySelector('.line-total');
-      if (cell){
-        const v = toMoney(line);
-        cell.textContent = v;
-        cell.dataset.value = v;
-      }
-      unitSum += line;
-    });
+    // ПЛАНОВАЯ ЦЕНА:
+    // billed_unit_price = (cost + delivery_fee) * (1 + markup)
+    const perUnit = (baseCost + delivery) * (1 + markup / 100);
+    const line    = q * perUnit;
 
-    const us = card.querySelector('.unit-subtotal');
-    if (us) us.textContent = toMoney(unitSum);
+    const cell = tr.querySelector('.line-total');
+    if (cell){
+      const v = toMoney(line);
+      cell.textContent = v;
+      cell.dataset.value = v;
+    }
+    unitSum += line;
+  });
 
-    recomputeGrandTotal();
-  }
+  const us = card.querySelector('.unit-subtotal');
+  if (us) us.textContent = toMoney(unitSum);
+
+  recomputeGrandTotal();
+}
+
 
   function recomputeGrandTotal(){
     let g = 0;
@@ -585,77 +630,111 @@
   });
 
   function setIssueEnabled(tr, enabled){
-    const cb = tr.querySelector('.issue-check');
-    if (!cb) return;
+  const cb = tr.querySelector('.issue-check');
+  if (!cb) return;
 
-    if (tr.classList.contains('issued-row')){
-      cb.checked = false;
-      cb.disabled = true;
-      cb.setAttribute('disabled','disabled');
-      return;
-    }
-
-    if (enabled){
-      cb.disabled = !IS_EDIT;
-      cb.removeAttribute('disabled');
-    } else {
-      cb.checked=false;
-      cb.disabled=true;
-      cb.setAttribute('disabled','disabled');
-    }
+  // если уже выдано — всегда запрещено
+  if (tr.classList.contains('issued-row')){
+    cb.checked = false;
+    cb.disabled = true;
+    cb.setAttribute('disabled','disabled');
+    return;
   }
 
-  function extractQtySmart(flat){
+  // INS логика
+  const isINSJob =
+    jobTypeSel &&
+    jobTypeSel.value === 'INSURANCE';
+
+  const insCheckbox = tr.querySelector('.ins-check');
+  const isINSLine = !!(insCheckbox && insCheckbox.checked);
+
+  // ✅ РАЗРЕШАЕМ issue если:
+  // - есть STOCK
+  // - ИЛИ INSURANCE + INS
+  const allowIssue = enabled || (isINSJob && isINSLine);
+
+  if (allowIssue){
+    cb.disabled = !IS_EDIT;
+    cb.removeAttribute('disabled');
+  } else {
+    cb.checked = false;
+    cb.disabled = true;
+    cb.setAttribute('disabled','disabled');
+  }
+}
+
+
+  // Рекурсивно выдёргиваем количество из любого уровня вложенности (здесь не используется, но пусть будет)
+  function extractQtySmart(root){
     const keys = [
       'qty_available','available_qty','available','on_hand','onhand',
       'stock','in_stock','qty','count','quantity'
     ];
-    for (const k of keys){
-      const v = flat[k];
-      if (v !== undefined && v !== null && !isNaN(Number(v))) {
-        return Number(v);
-      }
-    }
 
-    function sumObj(o){
-      if (!o) return 0;
-      if (Array.isArray(o)){
-        return o.reduce((s,x)=>s+sumObj(x),0);
+    let best = 0;
+
+    function dfs(node, depth){
+      if (!node || depth > 5) return;
+
+      if (Array.isArray(node)){
+        node.forEach(x => dfs(x, depth + 1));
+        return;
       }
-      if (typeof o === 'object'){
-        let total=0;
-        for (const kk in o){
-          const vv = o[kk];
-          if (!isNaN(Number(vv))) total += Number(vv);
+      if (typeof node === 'object'){
+        for (const [k, v] of Object.entries(node)){
+          const key = String(k || '').toLowerCase();
+          if (keys.includes(key) && v !== null && v !== undefined && !isNaN(Number(v))){
+            const n = Number(v);
+            if (n > best) best = n;
+          }
+          if (v && typeof v === 'object'){
+            dfs(v, depth + 1);
+          }
         }
-        return total;
       }
-      return 0;
     }
 
-    return (
-      sumObj(flat.rows) ||
-      sumObj(flat.items) ||
-      sumObj(flat.data && flat.data.rows)
-    );
+    dfs(root, 0);
+    return best;
   }
 
-  function pick(flat, variants){
-    for(const k of variants){
-      if(flat && flat[k] !== undefined && flat[k] !== null && String(flat[k]).trim()!==""){
-        return flat[k];
+  // Рекурсивно ищем первую непустую строку по списку вариантов ключей
+  function pickDeep(root, variants){
+    let result;
+
+    function dfs(node, depth){
+      if (result !== undefined || !node || depth > 5) return;
+
+      if (Array.isArray(node)){
+        node.forEach(x => dfs(x, depth + 1));
+        return;
+      }
+      if (typeof node === 'object'){
+        for (const [k, v] of Object.entries(node)){
+          const key = String(k || '').toLowerCase();
+          if (variants.includes(key) && v !== null && v !== undefined && String(v).trim() !== ''){
+            result = v;
+            return;
+          }
+          if (v && typeof v === 'object'){
+            dfs(v, depth + 1);
+            if (result !== undefined) return;
+          }
+        }
       }
     }
-    return undefined;
+
+    dfs(root, 0);
+    return result;
   }
 
   function fetchHint(tr){
     const pnInput  = tr.querySelector('.pn');
-    const altInput = tr.querySelector('.alt-pn');   // NEW: поле Alt PN
+    const altInput = tr.querySelector('.alt-pn');   // Alt PN
     const qtyInput = tr.querySelector('.qty');
     const whInput  = tr.querySelector('.wh-input');
-    theNameInput   = tr.querySelector('.part-name');
-    const nameInp  = theNameInput;
+    const nameInp  = tr.querySelector('.part-name');
     const costInp  = tr.querySelector('.unit-cost');
     const hintEl   = tr.querySelector('.hint');
 
@@ -671,24 +750,29 @@
       return;
     }
 
-    const whNow = (whInput?.value || '').trim();
+    // ВАЖНО: не фильтруем по WH из Work Order.
+    // В колонке WH у тебя "B2", а реальная локация в инвентаре "MAR/REL/...".
+    // Поэтому сюда WH НЕ отправляем, чтобы не терять наличие.
     const url = API_STOCK
       + '?pn=' + encodeURIComponent(pn)
-      + '&qty=' + qty
-      + (whNow ? ('&wh=' + encodeURIComponent(whNow)) : '');
+      + '&qty=' + qty;
 
     fetch(url)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(j => {
-        const flat = Object.assign({}, j, j?.data || {}, j?.result || {});
-        const qa = extractQtySmart(flat) || 0;
+        const flat = Object.assign({}, j, j.data || {}, j.result || {});
 
-        const tRaw = String(flat.hint || flat.status || '').toUpperCase();
-        let isStock = /\b(STOCK|IN[-\s]?STOCK|ON HAND|AVAILABLE)\b/.test(tRaw);
+        const qa = Number(
+          flat.qty_available ||
+          flat.available_qty ||
+          flat.available ||
+          flat.qty ||
+          flat.quantity ||
+          0
+        ) || 0;
 
-        if (!isStock && qa >= qty) {
-          isStock = true;
-        }
+        const okFlag  = !!flat.ok;
+        let isStock   = okFlag && qa > 0;
 
         const label = isStock ? 'STOCK' : 'WAIT';
         if (hintEl) {
@@ -697,46 +781,55 @@
 
         setIssueEnabled(tr, isStock);
 
-        const nameGuess = pick(flat, ['part_name','name','title','description']);
+        const nameGuess =
+          flat.part_name ||
+          flat.name ||
+          flat.title ||
+          flat.description;
+
         if (nameInp && (!nameInp.value || !nameInp.value.trim()) && nameGuess){
           nameInp.value = String(nameGuess).trim().slice(0,120);
         }
 
         const curCost = parseFloat(costInp?.value || '0') || 0;
-        const costGuess = pick(flat, ['unit_cost','price','unit_price','cost','last_price','avg_cost']);
-        if (costInp){
-          if ((curCost === 0 || !costInp.value) && costGuess !== undefined && !isNaN(Number(costGuess))){
-            const newCost = (
-              Math.round((Number(costGuess)+Number.EPSILON)*100)/100
-            ).toFixed(2);
-            costInp.value = newCost;
-            const card = tr.closest('.card');
-            if (card) {
-              recomputeUnitSubtotal(card);
-            }
+        const costGuess =
+          flat.unit_cost ||
+          flat.price ||
+          flat.unit_price ||
+          flat.cost ||
+          flat.last_price ||
+          flat.avg_cost;
+
+        if (costInp &&
+            (curCost === 0 || !costInp.value) &&
+            costGuess !== undefined &&
+            !isNaN(Number(costGuess))) {
+
+          const newCost = (
+            Math.round((Number(costGuess)+Number.EPSILON)*100)/100
+          ).toFixed(2);
+
+          costInp.value = newCost;
+          const card = tr.closest('.card');
+          if (card) {
+            recomputeUnitSubtotal(card);
           }
         }
 
-        const whGuess = pick(flat, ['warehouse','location','wh']);
+        const whGuess =
+          flat.warehouse ||
+          flat.location ||
+          flat.wh;
+
         if (whInput && (!whInput.value || !whInput.value.trim()) && whGuess){
           whInput.value = String(whGuess).trim().slice(0,120);
         }
       })
-      .catch(()=>{
-        if (hintEl) hintEl.textContent='—';
-        setIssueEnabled(tr,false);
+      .catch(() => {
+        if (hintEl) hintEl.textContent = '—';
+        setIssueEnabled(tr, false);
       });
   }
-
-  // при изменении чекбокса Ord — синхронизируем hidden и статус WO
-  unitsWrap.addEventListener('change', (e)=>{
-    if (e.target.classList.contains('ordered-check')){
-      const td  = e.target.closest('td');
-      const hid = td && td.querySelector('.ordered-val');
-      if (hid) hid.value = e.target.checked ? '1' : '0';
-      reevaluateWOStatusFromOrd();
-    }
-  });
 
   function rowTemplate(ui, ri){
     const ro = IS_RO ? 'disabled readonly' : '';
@@ -754,6 +847,12 @@
     <div class="form-check d-flex justify-content-center m-0">
       <input class="form-check-input" type="checkbox"
              name="units[${ui}][rows][${ri}][backorder_flag]" ${thebo}>
+    </div>
+  </td>
+  <td class="text-center ins-col">
+    <div class="form-check d-flex justify-content-center m-0">
+      <input class="form-check-input ins-check" type="checkbox"
+             name="units[${ui}][rows][${ri}][is_insurance_supplied]" ${thebo}>
     </div>
   </td>
   <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
@@ -809,6 +908,7 @@
             <th class="text-end col-money">Total ($)</th>
             <th class="col-narrow">WH</th>
             <th style="width:80px;" title="Backorder">B/O</th>
+            <th class="ins-col" style="width:70px;">INS</th>
             <th class="col-narrow">Sup</th>
             <th class="ordered-col" style="width:70px;">Ord</th>
             <th style="width:140px;">Stock hint</th>
@@ -854,13 +954,27 @@
     }
     if(tr && (
       e.target.classList.contains('pn') ||
-      e.target.classList.contains('alt-pn') ||   // NEW: реагируем на Alt PN
+      e.target.classList.contains('alt-pn') ||
       e.target.classList.contains('qty') ||
       e.target.classList.contains('wh-input')
     )){
       fetchHint(tr);
     }
   });
+      // Когда переключаем INS на строке – заново решаем, можно ли её issue
+  unitsWrap.addEventListener('change', (e)=>{
+    if (!e.target.classList.contains('ins-check')) return;
+
+    const tr = e.target.closest('tr');
+    if (!tr) return;
+
+    const raw   = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
+    const status = raw.split('/')[0];
+    const isStock = (status === 'STOCK');
+
+    setIssueEnabled(tr, isStock);
+  });
+
 
   unitsWrap.addEventListener('click', (e)=>{
     const btn = e.target.closest('button');
@@ -897,6 +1011,7 @@
       recomputeUnitSubtotal(card);
       fetchHint(tbody.lastElementChild);
       toggleOrderedCols();
+      updateInsColumns();
       // NEW: после добавления строки – пересчёт статуса
       reevaluateWOStatusFromOrd();
       return;
@@ -925,53 +1040,80 @@
     updateSupplierRequired();
     recomputeUnitSubtotal(card);
     toggleOrderedCols();
+    updateInsColumns();
     // NEW: пересчёт после добавления юнита
     reevaluateWOStatusFromOrd();
   });
 
-  selectAllBtn?.addEventListener('click', ()=>{
+    selectAllBtn?.addEventListener('click', ()=>{
     const rows = [...document.querySelectorAll('#unitsWrap tbody tr')].filter(tr=>{
       if (tr.classList.contains('issued-row')) return false;
+
       const cb = tr.querySelector('.issue-check');
-      const raw = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
-      return cb && !cb.disabled && raw.split('/')[0] === 'STOCK';
+      if (!cb || cb.disabled) return false;
+
+      const raw    = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
+      const status = raw.split('/')[0];
+      const isStock = (status === 'STOCK');
+
+      // INS-строка в INSURANCE-job тоже считается "доступной"
+      const isInsEligible = isInsuranceJob() && isRowInsuranceSupplied(tr);
+
+      return isStock || isInsEligible;
     });
 
-    const needCheck = rows.some(tr=> !tr.querySelector('.issue-check').checked);
+    const needCheck = rows.some(tr => !tr.querySelector('.issue-check').checked);
     rows.forEach(tr=>{
       tr.querySelector('.issue-check').checked = needCheck;
     });
   });
 
   issueBtn?.addEventListener('click', ()=>{
-    const selected=[];
-    document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
-      if (tr.classList.contains('issued-row')) return;
-      const cb = tr.querySelector('.issue-check');
-      const raw = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
-      const status = raw.split('/')[0];
-      if (cb && cb.checked && status==='STOCK'){
-        selected.push(cb.value);
-      }
-    });
+  const selected = [];
+  const isINSJob = isInsuranceJob(); // уже объявлена выше
 
-    if (selected.length===0){
-      alert('Select at least one in-stock part (hint must be STOCK).');
-      return;
+  document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
+    if (tr.classList.contains('issued-row')) return;
+
+    const cb = tr.querySelector('.issue-check');
+    if (!cb || !cb.checked) return;
+
+    const raw    = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
+    const status = raw.split('/')[0];
+
+    // INS-строка?
+    const insLine = isRowInsuranceSupplied(tr); // функция уже есть выше
+
+    // Разрешаем:
+    //  - обычные STOCK
+    //  - ИЛИ INSURANCE job + строка с INS
+    if (status === 'STOCK' || (isINSJob && insLine)) {
+      selected.push(cb.value);
     }
-
-    if (statusSel) statusSel.value = 'done';
-
-    document.getElementById('issue_set_status').value = 'done';
-    document.getElementById('issue_part_ids').value  = selected.join(',');
-    document.getElementById('issueForm').submit();
   });
+
+  if (selected.length === 0) {
+    const msg = isINSJob
+      ? 'Select at least one in-stock or INS part.'
+      : 'Select at least one in-stock part (hint must be STOCK).';
+    alert(msg);
+    return;
+  }
+
+  if (statusSel) statusSel.value = 'done';
+
+  document.getElementById('issue_set_status').value = 'done';
+  document.getElementById('issue_part_ids').value  = selected.join(',');
+  document.getElementById('issueForm').submit();
+});
+
 
   // initial calc / hints
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
   document.querySelectorAll('#unitsWrap tbody tr').forEach(fetchHint);
   updateSupplierRequired();
   toggleOrderedCols();
+  updateInsColumns();
   // NEW: первичный пересчёт статуса по уже отмеченным Ord
   reevaluateWOStatusFromOrd();
 })();
