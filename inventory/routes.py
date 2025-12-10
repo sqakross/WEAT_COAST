@@ -1586,105 +1586,74 @@ def _issue_records_bulk(
     issued_to: str,
     reference_job: str,
     items: list,
-    billed_price_per_item: float | None = None
+    billed_price_per_item: float | None = None,
 ):
     """
-    items: список словарей вида:
+    items: list of dicts:
       {
-        "part_id": int | None,
+        "part_id": int,
         "qty": int,
         "unit_price": float | None,
-        "is_ins": bool (опционально)  # insurance supplied
+        # "is_ins": bool (опционально, сейчас не используем, но можно в будущем)
       }
 
-    Обычные строки (is_ins=False):
-      - qty ограничивается складом (on_hand)
-      - уменьшаем Part.quantity
-      - цена берётся из unit_price / billed_price_per_item / part.unit_cost
+    Для обычных строк:
+      - выдаём min(qty, on_hand)
+      - уменьшаем склад
 
-    INS-строки (is_ins=True):
-      - ВСЕГДА создаём запись, даже если нет Part или 0 на складе
-      - Part.quantity НЕ меняем
-      - цена фиксируется как unit_price (или 0.0, если не передана)
-
-    Возвращает: (issue_date: datetime, records: list[IssuedPartRecord])
+    Страховые строки мы уже обрабатываем в wo_issue_instock вручную,
+    поэтому здесь работаем только с обычным складом.
     """
-    from datetime import datetime
-    from flask_login import current_user
-    from extensions import db
-    from models import Part, IssuedPartRecord
-
     if not items:
         raise ValueError("No items to issue")
 
     issue_date = datetime.utcnow()
-    created_records: list[IssuedPartRecord] = []
+    created = 0
 
     for it in items:
+        part_id = int(it["part_id"])
         qty = max(0, int(it.get("qty") or 0))
         if qty <= 0:
             continue
 
-        is_ins = bool(it.get("is_ins"))
-        part_id = it.get("part_id")
-        part = Part.query.get(part_id) if part_id else None
+        part = Part.query.get(part_id)
+        if not part:
+            continue
 
-        # ---------- INSURANCE-SUPPLIED ----------
-        if is_ins:
-            # страховая поставляет — не смотрим на склад вообще
-            issue_now = qty
+        on_hand = int(part.quantity or 0)
+        issue_now = min(qty, on_hand)
+        if issue_now <= 0:
+            continue
 
-            # цена = переданная unit_price (обычно 0.0 для INS)
-            if "unit_price" in it and it["unit_price"] is not None:
-                price_to_fix = float(it["unit_price"])
-            elif billed_price_per_item is not None:
-                price_to_fix = float(billed_price_per_item)
-            else:
-                # по умолчанию 0
-                price_to_fix = 0.0
-
-            # ВАЖНО: склад не трогаем
-
-        # ---------- Обычная складская выдача ----------
+        # цена к фиксации — либо из item["unit_price"], либо billed_price_per_item,
+        # либо себестоимость склада
+        if "unit_price" in it and it["unit_price"] is not None:
+            price_to_fix = float(it["unit_price"])
+        elif billed_price_per_item is not None:
+            price_to_fix = float(billed_price_per_item)
         else:
-            if not part:
-                # без привязки к Part обычную строку не выдаём
-                continue
+            price_to_fix = float(part.unit_cost or 0.0)
 
-            on_hand = int(part.quantity or 0)
-            issue_now = min(qty, on_hand)
-            if issue_now <= 0:
-                continue
+        # уменьшаем склад
+        part.quantity = on_hand - issue_now
 
-            if "unit_price" in it and it["unit_price"] is not None:
-                price_to_fix = float(it["unit_price"])
-            elif billed_price_per_item is not None:
-                price_to_fix = float(billed_price_per_item)
-            else:
-                price_to_fix = float(part.unit_cost or 0.0)
-
-            # уменьшаем склад
-            part.quantity = on_hand - issue_now
-            db.session.add(part)
-
-        # создаём запись выдачи
         rec = IssuedPartRecord(
-            part_id=part.id if part else None,
+            part_id=part.id,
             quantity=issue_now,
-            issued_to=(issued_to or "").strip(),
+            issued_to=issued_to.strip(),
             reference_job=(reference_job or "").strip(),
-            issued_by=getattr(current_user, "username", "system"),
+            issued_by=current_user.username,
             issue_date=issue_date,
             unit_cost_at_issue=price_to_fix,
         )
         db.session.add(rec)
-        created_records.append(rec)
+        created += 1
 
-    if not created_records:
+    if created == 0:
         raise ValueError("Nothing available to issue")
 
     db.session.commit()
-    return issue_date, created_records
+    return issue_date, created
 
 # ==== RETURN HELPERS (без миграций) ====
 
@@ -4980,7 +4949,8 @@ def wo_issue_instock(wo_id):
     from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord
 
     wo = WorkOrder.query.get_or_404(wo_id)
-    is_ins_job = (wo.job_type or "").strip().upper() == "INSURANCE"
+    # страховая ли это работа
+    is_ins_job = ((wo.job_type or "").upper() == "INSURANCE")
 
     # ===== флаг автосмены статуса (done или нет) =====
     set_status = (request.form.get("set_status") or "").strip().lower()
@@ -5168,7 +5138,6 @@ def wo_issue_instock(wo_id):
                 "part_id": part.id,
                 "qty": qty_req,
                 "unit_price": real_cost,
-                "is_ins": bool(getattr(line, "is_ins", False))
             })
 
             issued_row_ids.append(line.id)

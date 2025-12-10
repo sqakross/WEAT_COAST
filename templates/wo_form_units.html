@@ -961,19 +961,40 @@
       fetchHint(tr);
     }
   });
-      // Когда переключаем INS на строке – заново решаем, можно ли её issue
+       // Когда переключаем INS или ORD на строке – пересчитываем доступность и статус WO
   unitsWrap.addEventListener('change', (e)=>{
-    if (!e.target.classList.contains('ins-check')) return;
+    const target = e.target;
 
-    const tr = e.target.closest('tr');
-    if (!tr) return;
+    // --- INS чекбокс ---
+    if (target.classList.contains('ins-check')) {
+      const tr = target.closest('tr');
+      if (!tr) return;
 
-    const raw   = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
-    const status = raw.split('/')[0];
-    const isStock = (status === 'STOCK');
+      const raw    = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
+      const status = raw.split('/')[0];
+      const isStock = (status === 'STOCK');
 
-    setIssueEnabled(tr, isStock);
+      // INS-строка в INSURANCE-job тоже может быть доступной (эта логика уже есть в selectAll/issueBtn),
+      // здесь просто обновляем кнопку Issue.
+      setIssueEnabled(tr, isStock);
+    }
+
+    // --- ORD чекбокс ---
+    if (target.classList.contains('ordered-check')) {
+      const cell = target.closest('.ordered-col');
+      const hid  = cell && cell.querySelector('.ordered-val');
+
+      // сразу синхронизируем скрытое поле ordered_flag
+      if (hid) {
+        hid.value = target.checked ? '1' : '0';
+      }
+
+      // пересчёт статуса WO и required на Sup
+      reevaluateWOStatusFromOrd();
+      updateSupplierRequired();
+    }
   });
+
 
 
   unitsWrap.addEventListener('click', (e)=>{
