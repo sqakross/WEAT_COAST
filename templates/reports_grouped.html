@@ -294,7 +294,7 @@
               Mark Consumed
             </button>
 
-            {% if current_user.role == 'superadmin' %}
+            {% if current_user.role in ['superadmin', 'admin', 'user'] %}
               <button type="submit"
                       class="btn btn-outline-secondary btn-sm"
                       name="do_unconsume" value="1"

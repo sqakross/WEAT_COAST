@@ -587,6 +587,16 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+
+  // 👇 ДОБАВЛЕННЫЙ КУСОК: автоматически открыть инвойс в новом окне
+  {% if last_invoice_url %}
+  try {
+    window.open("{{ last_invoice_url }}", "_blank");
+  } catch (e) {
+    console.error("Cannot open invoice window", e);
+  }
+  {% endif %}
 });
 </script>
 {% endblock %}
+

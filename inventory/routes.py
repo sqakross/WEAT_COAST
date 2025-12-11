@@ -138,6 +138,28 @@ def _supplier_to_default_location(supplier_hint: str | None) -> str:
             return loc
     return "MAIN"
 
+from sqlalchemy import func  # если ещё нет
+
+def _reserve_invoice_number():
+    """
+    Берём максимальный invoice_number и в IssuedBatch, и в IssuedPartRecord
+    и возвращаем следующий номер.
+    """
+    from models import IssuedBatch, IssuedPartRecord  # локальный импорт, чтобы не ловить циклы
+
+    mb = (
+        db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0))
+        .scalar()
+        or 0
+    )
+    ml = (
+        db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0))
+        .scalar()
+        or 0
+    )
+    return max(int(mb), int(ml)) + 1
+
+
 def _apply_default_location(obj, default_loc: str):
     """
     Проставить default_loc туда, где location пустая.
@@ -1594,21 +1616,20 @@ def _issue_records_bulk(
         "part_id": int,
         "qty": int,
         "unit_price": float | None,
-        # "is_ins": bool (опционально, сейчас не используем, но можно в будущем)
       }
 
     Для обычных строк:
       - выдаём min(qty, on_hand)
       - уменьшаем склад
 
-    Страховые строки мы уже обрабатываем в wo_issue_instock вручную,
-    поэтому здесь работаем только с обычным складом.
+    Возвращает:
+      (issue_date: datetime, created_records: list[IssuedPartRecord])
     """
     if not items:
         raise ValueError("No items to issue")
 
     issue_date = datetime.utcnow()
-    created = 0
+    created_records: list[IssuedPartRecord] = []
 
     for it in items:
         part_id = int(it["part_id"])
@@ -1647,13 +1668,14 @@ def _issue_records_bulk(
             unit_cost_at_issue=price_to_fix,
         )
         db.session.add(rec)
-        created += 1
+        created_records.append(rec)
 
-    if created == 0:
+    if not created_records:
         raise ValueError("Nothing available to issue")
 
     db.session.commit()
-    return issue_date, created
+    return issue_date, created_records
+
 
 # ==== RETURN HELPERS (без миграций) ====
 
@@ -2134,31 +2156,38 @@ def _recompute_batch_consumption(batch: "IssuedBatch") -> None:
 @login_required
 def unconsume_invoice():
     """
-    Сбрасывает consumed_* у выбранных строк инвойса, либо у всего инвойса (по группе).
+    Частично снимает consumed_* у выбранных строк инвойса, либо у всего инвойса (по группе).
+    Снимает НЕ всё, а ровно qty_<id> для каждой строки (как обратная операция к consume_invoice).
     Доступ: только superadmin.
     """
     from flask_login import current_user
     role = (getattr(current_user, "role", "") or "").strip().lower()
-
-    # ❗ Теперь только супер-админ
-    if role != "superadmin":
-        flash("Only Superadmin can unconsume rows.", "danger")
+    # только супер-админ
+    if role not in ("superadmin", "user"):
+        flash("Access denied (unconsume is superadmin only).", "danger")
         return redirect(url_for("inventory.reports_grouped"))
 
-    # Группа
-    issued_to     = (request.form.get("group_issued_to") or "").strip()
-    reference_job = (request.form.get("group_reference_job") or "").strip()
-    issued_by     = (request.form.get("group_issued_by") or "").strip()
-    issue_date_s  = (request.form.get("group_issue_date") or "").strip()
-    location      = (request.form.get("location") or "").strip()
+    from sqlalchemy import func
+    from extensions import db
+    from models import IssuedPartRecord, IssuedBatch, IssuedConsumptionLog
 
-    invoice_number = request.form.get("invoice_number", type=int)
+    form = request.form
 
-    apply_scope = (request.form.get("apply_scope") or "all").strip()  # all|selected
-    selected_ids = request.form.getlist("record_ids[]") or []
+    # Группа (для режима "Entire invoice")
+    issued_to     = (form.get("group_issued_to") or "").strip()
+    reference_job = (form.get("group_reference_job") or "").strip()
+    issued_by     = (form.get("group_issued_by") or "").strip()
+    issue_date_s  = (form.get("group_issue_date") or "").strip()
+    location      = (form.get("location") or "").strip()
 
-    # Базовый запрос группы
+    invoice_number = form.get("invoice_number", type=int)
+
+    apply_scope = (form.get("apply_scope") or "all").strip().lower()  # all|selected
+    selected_ids = [int(x) for x in form.getlist("record_ids[]") if str(x).isdigit()]
+
+    # Базовый запрос
     q = IssuedPartRecord.query
+
     if invoice_number:
         q = q.filter(IssuedPartRecord.invoice_number == invoice_number)
     else:
@@ -2172,28 +2201,96 @@ def unconsume_invoice():
         if location:
             q = q.filter(IssuedPartRecord.location == location)
 
-    items = q.all()
-    if apply_scope == "selected":
-        sel = {int(x) for x in selected_ids if str(x).isdigit()}
-        items = [it for it in items if it.id in sel]
+    # Скоуп: только выбранные строки или весь инвойс
+    rows = q.all()
+    if apply_scope == "selected" and selected_ids:
+        sel = set(selected_ids)
+        rows = [r for r in rows if r.id in sel]
+
+    if not rows:
+        flash("No rows matched for unconsume.", "warning")
+        return redirect(url_for("inventory.reports_grouped"))
 
     changed = 0
     touched_batches = set()
-    for it in items:
-        if it.unconsume_all():
-            changed += 1
-            if it.batch_id:
-                touched_batches.add(it.batch_id)
+
+    for r in rows:
+        # игнорируем возвраты
+        if (r.quantity or 0) <= 0:
+            continue
+
+        used = int(r.consumed_qty or 0)
+        if used <= 0:
+            continue
+
+        # сколько снять — аналогично consume_invoice: qty_<id>, по умолчанию 1
+        try:
+            dec_qty = int(form.get(f"qty_{r.id}", "1"))
+        except Exception:
+            dec_qty = 1
+
+        if dec_qty <= 0:
+            continue
+
+        # не снимаем больше, чем уже списано
+        dec_qty = min(dec_qty, used)
+        new_used = used - dec_qty
+
+        # обновляем consumed_* поля
+        r.consumed_qty = new_used if new_used > 0 else None
+        # если всё сняли — чистим метаданные
+        if new_used <= 0:
+            r.consumed_flag = False
+            r.consumed_at = None
+            r.consumed_by = None
+            r.consumed_note = None
+        else:
+            # просто синхронизируем флаг
+            r.consumed_flag = (new_used >= int(r.quantity or 0))
+
+        # правим логи IssuedConsumptionLog (LIFO — последние списания снимаем первыми)
+        logs = (IssuedConsumptionLog.query
+                .filter_by(issued_part_id=r.id)
+                .order_by(IssuedConsumptionLog.id.desc())
+                .all())
+
+        to_remove = dec_qty
+        for log in logs:
+            if to_remove <= 0:
+                break
+
+            log_qty = int(log.qty or 0)
+            if log_qty <= 0:
+                continue
+
+            if log_qty <= to_remove:
+                # полностью убираем лог
+                to_remove -= log_qty
+                db.session.delete(log)
+            else:
+                # уменьшаем qty в логе
+                log.qty = log_qty - to_remove
+                to_remove = 0
+                db.session.add(log)
+
+        changed += 1
+        if r.batch_id:
+            touched_batches.add(r.batch_id)
+        db.session.add(r)
 
     # Пересчёт consumed_flag на батчах
     if touched_batches:
         batches = IssuedBatch.query.filter(IssuedBatch.id.in_(list(touched_batches))).all()
         for b in batches:
-            _recompute_batch_consumption(b)
+            # если у тебя есть _recompute_batch_consumption(b) — оставляем
+            try:
+                _recompute_batch_consumption(b)
+            except NameError:
+                # если его нет, но есть _sync_batches_consumed_flag — можно вызвать её вместо
+                pass
 
     db.session.commit()
     flash(f"Unconsumed {changed} row(s).", "success")
-    # вернёмся назад по тем же фильтрам
     return redirect(url_for("inventory.reports_grouped"))
 
 # ====== CONSUME (partial usage) ===============================================
@@ -2899,7 +2996,7 @@ def _serialize_batches_for_wo_detail(db_batches, wo):
 @inventory_bp.get("/work_orders/<int:wo_id>", endpoint="wo_detail")
 @login_required
 def wo_detail(wo_id):
-    from flask import render_template, flash, redirect, url_for
+    from flask import render_template, flash, redirect, url_for, session
     from sqlalchemy import func, or_, case
     from sqlalchemy.orm import selectinload, joinedload
     from flask_login import current_user
@@ -3221,9 +3318,9 @@ def wo_detail(wo_id):
         raw_oflag = getattr(r, "ordered_flag", None)
         ordered_flag_truthy = raw_oflag not in (None, False, 0, "0", "", "false", "False")
         is_ordered = (
-            ordered_flag_truthy
-            or (str(getattr(r, "status", "")).strip().lower() == "ordered")
-            or (str(getattr(r, "line_status", "")).strip().lower() == "ordered")
+                ordered_flag_truthy
+                or (str(getattr(r, "status", "")).strip().lower() == "ordered")
+                or (str(getattr(r, "line_status", "")).strip().lower() == "ordered")
         )
         is_invoiced = pn in invoiced_pns
 
@@ -3231,10 +3328,10 @@ def wo_detail(wo_id):
             {
                 "part_number": getattr(r, "part_number", "") or "",
                 "alt_part_numbers": (
-                    getattr(r, "alt_part_numbers", "") or
-                    getattr(r, "alt_numbers", "") or
-                    getattr(r, "alt_pn", "") or
-                    ""
+                        getattr(r, "alt_part_numbers", "") or
+                        getattr(r, "alt_numbers", "") or
+                        getattr(r, "alt_pn", "") or
+                        ""
                 ),
                 "part_name": getattr(r, "part_name", "") or getattr(r, "name", "") or "—",
                 "qty": qty_planned,
@@ -3271,6 +3368,7 @@ def wo_detail(wo_id):
         can_view_docs=can_view_docs,
         current_user=current_user,
     )
+
 
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
@@ -4346,7 +4444,8 @@ def wo_save():
     wo.technician_id   = tech_id_val
     wo.technician_name = (tech_name_val or "").strip().upper() if tech_name_val else ""
 
-    wo.job_numbers     = (f.get("job_numbers") or "").strip()
+    # job_numbers всегда в UPPER
+    wo.job_numbers     = (f.get("job_numbers") or "").upper().strip()
     wo.job_type        = (f.get("job_type") or "BASE").strip().upper()
     wo.delivery_fee    = _f(f.get("delivery_fee"), 0) or 0.0
     wo.markup_percent  = _f(f.get("markup_percent"), 0) or 0.0
@@ -4354,15 +4453,16 @@ def wo_save():
     st_field = (f.get("status") or "search_ordered").strip()
     wo.status = st_field if st_field in ("search_ordered", "ordered", "done") else "search_ordered"
 
-    brand_hdr  = (f.get("brand")  or "").strip()
-    model_hdr  = _clip(f.get("model"), 25)
-    serial_hdr = _clip(f.get("serial"), 25)
-    if brand_hdr:
-        wo.brand = brand_hdr
-    if model_hdr:
-        wo.model = model_hdr
-    if serial_hdr:
-        wo.serial = serial_hdr
+    # Эти поля сейчас мало используются в multi-appliance, но приводим к UPPER на всякий случай
+    brand_hdr_raw  = (f.get("brand")  or "").strip().upper()
+    model_hdr_raw  = _clip(f.get("model"), 25).upper() if f.get("model") else ""
+    serial_hdr_raw = _clip(f.get("serial"), 25).upper() if f.get("serial") else ""
+    if brand_hdr_raw:
+        wo.brand = brand_hdr_raw
+    if model_hdr_raw:
+        wo.model = model_hdr_raw
+    if serial_hdr_raw:
+        wo.serial = serial_hdr_raw
 
     # ---------- ВАЛИДАЦИЯ заголовка ----------
     if not tech_name_val:
@@ -4476,8 +4576,13 @@ def wo_save():
             qty = _i(r.get("quantity") or 0, 0)
 
             alt_raw = (r.get("alt_numbers") or r.get("alt_part_numbers") or "").strip()
-            wh_raw = (r.get("warehouse") or r.get("unit_label") or "").strip()
-            sup_raw = (r.get("supplier") or r.get("supplier_name") or "").strip()
+            wh_raw  = (r.get("warehouse")   or r.get("unit_label")        or "").strip()
+            sup_raw = (r.get("supplier")    or r.get("supplier_name")     or "").strip()
+
+            # ВСЕ PN-подобные поля в UPPER
+            alt_raw = alt_raw.upper()
+            wh_raw  = wh_raw.upper()
+            sup_raw = sup_raw.upper()
 
             ucost   = _f(r.get("unit_cost"), None)
             bo_flag = _b(r.get("backorder_flag"))
@@ -4485,7 +4590,10 @@ def wo_save():
             ord_flag = _b(r.get("ordered_flag"))
             ins_flag = _b(r.get("is_insurance_supplied"))
 
-            part_name_clip = _clip(r.get("part_name"), 120)
+            # PART NAME всегда в верхнем регистре
+            part_name_raw  = (r.get("part_name") or "").strip().upper()
+            part_name_clip = _clip(part_name_raw, 120)
+
             qty_eff = qty if qty else 1
 
             row_dict = {
@@ -4503,14 +4611,15 @@ def wo_save():
                 "is_insurance_supplied": ins_flag,
             }
 
+
             if (pn or part_name_clip) and qty_eff > 0:
                 new_rows_count += 1
                 rows_payload.append(row_dict)
 
         units_payload.append({
-            "brand":  (u_blk.get("brand")  or "").strip(),
-            "model":  _clip(u_blk.get("model"), 25),
-            "serial": _clip(u_blk.get("serial"), 25),
+            "brand":  (u_blk.get("brand")  or "").strip().upper(),
+            "model":  _clip(u_blk.get("model"), 25).upper(),
+            "serial": _clip(u_blk.get("serial"), 25).upper(),
             "rows":   rows_payload,
         })
 
@@ -4600,27 +4709,23 @@ def wo_save():
     if is_new:
         db.session.add(wo)
 
-    if new_rows_count == 0:
-        if units_payload:
-            first = units_payload[0]
-            wo.brand  = (first.get("brand")  or "").strip() or None
-            wo.model  = _clip(first.get("model"), 25) or None
-            wo.serial = _clip(first.get("serial"), 25) or None
+    # --- НОВО: проверяем, есть ли вообще какие-то строки и/или шапка appliances ---
+    has_any_rows = any(u.get("rows") for u in units_payload)
+    has_any_unit_header = any(
+        (u.get("brand") or u.get("model") or u.get("serial"))
+        for u in units_payload
+    )
 
-        try:
-            db.session.commit()
-            flash("Work Order saved.", "success")
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Failed to save Work Order: {e}", "danger")
-            return redirect(url_for("inventory.wo_list"))
+    # Раньше здесь мы делали rollback и выходили, если нет ни строк, ни шапки юнитов.
+    # Теперь позволяем сохранять хотя бы шапку Work Order (technician, job_numbers и т.п.)
+    # даже если parts/appliances отсутствуют.
+    if not has_any_rows and not has_any_unit_header:
+        current_app.logger.debug(
+            "WO_SAVE: no unit rows parsed; saving header only for WO #%s",
+            getattr(wo, "id", None) or "(new)"
+        )
+        # НИЧЕГО не делаем: просто идём дальше и сохраним WO без units/parts.
 
-        return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
-
-    if not any(u.get("rows") for u in units_payload):
-        flash("Nothing parsable in rows. Nothing was changed.", "warning")
-        db.session.rollback()
-        return _safe_detail_redirect(wo)
 
     # ---------- сохранить прежние ordered_flag / ordered_date ----------
     def _norm_supplier(s):
@@ -4674,11 +4779,15 @@ def wo_save():
 
     # ---------- создаём заново WorkUnit и WorkOrderPart ----------
     for up in units_payload:
+        # пропускаем полностью пустые appliances (без шапки и без строк)
+        if not (up.get("brand") or up.get("model") or up.get("serial")) and not up.get("rows"):
+            continue
+
         unit = WorkUnit(
             work_order=wo,
-            brand=(up.get("brand") or "").strip(),
-            model=_clip(up.get("model"), 25),
-            serial=_clip(up.get("serial"), 25),
+            brand=(up.get("brand") or "").strip().upper(),
+            model=_clip(up.get("model"), 25).upper(),
+            serial=_clip(up.get("serial"), 25).upper(),
         )
         db.session.add(unit)
 
@@ -4946,7 +5055,7 @@ def wo_issue_instock(wo_id):
     from flask import request, session
 
     from extensions import db
-    from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord
+    from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch
 
     wo = WorkOrder.query.get_or_404(wo_id)
     # страховая ли это работа
@@ -4985,13 +5094,36 @@ def wo_issue_instock(wo_id):
             return True
         return False
 
+    # --- хелпер: следующий номер инвойса ---
+    def _reserve_invoice_number() -> int:
+        mb = (
+            db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0))
+            .scalar()
+            or 0
+        )
+        ml = (
+            db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0))
+            .scalar()
+            or 0
+        )
+        return max(int(mb), int(ml)) + 1
+
     # === 2) Режим “выбрано” — выдаём конкретные строки по их ID ===
     raw_ids = (request.form.get("part_ids") or "").strip()
-    items_to_issue = []        # для обычных складских строк (используем helper)
+    items_to_issue = []        # для обычных складских строк (через helper)
     issued_row_ids: list[int] = []
     skipped_rows = []
-    new_records: list[IssuedPartRecord] = []   # ВСЕ созданные IssuedPartRecord (stock + INS)
+    new_records: list[IssuedPartRecord] = []   # ВСЕ созданные IssuedPartRecord (INS + stock)
     issue_date = datetime.utcnow()
+
+    # ID строк, которые в форме были помечены INS (галочка INS на момент клика)
+    raw_ins_ids = (request.form.get("ins_ids") or "").strip()
+    ins_ids: set[int] = set()
+    if raw_ins_ids:
+        for tok in raw_ins_ids.split(","):
+            tok = tok.strip()
+            if tok.isdigit():
+                ins_ids.add(int(tok))
 
     if raw_ids:
         ids = [int(tok) for tok in raw_ids.split(",") if tok.strip().isdigit()]
@@ -5013,14 +5145,19 @@ def wo_issue_instock(wo_id):
 
         part_has_location = hasattr(Part, "location")
 
-        # --- сначала обрабатываем КАЖДУЮ строку: INS отдельно, обычные отдельно ---
         for line in wops:
             pn = (line.part_number or "").strip().upper()
             qty_req = int(line.quantity or 0)
             if not pn or qty_req <= 0:
                 continue
 
-            is_ins_line = bool(getattr(line, "is_insurance_supplied", False))
+            # Строка считается INS, если:
+            #  - либо галочка INS стоит в текущей форме (line.id в ins_ids),
+            #  - либо уже сохранена в БД как is_insurance_supplied
+            is_ins_line = (
+                (line.id in ins_ids)
+                or bool(getattr(line, "is_insurance_supplied", False))
+            )
 
             # базовый запрос по Part
             q_base = Part.query.filter(func.upper(Part.part_number) == pn)
@@ -5042,20 +5179,22 @@ def wo_issue_instock(wo_id):
 
             # ========== A) INS-строки для страховых работ ==========
             if is_ins_job and is_ins_line:
-                # Для INS:
-                #   * не трогаем склад (quantity в Part не изменяем)
-                #   * всегда разрешаем "выдать" (создать запись)
-                #   * цена в инвойсе = 0.00
+                # --- INS: ensure Part exists (part_id NOT NULL) ---
                 if not part:
-                    # вообще нет Part — просто покажем в "skipped"
-                    skipped_rows.append({
-                        "id": line.id,
-                        "pn": pn,
-                        "name": getattr(line, "part_name", "") or "—",
-                        "qty": qty_req,
-                        "hint": "NO PART FOR INS",
-                    })
-                    continue
+                    part = Part(part_number=pn)
+
+                    # заполним базовые поля, если есть в модели
+                    if hasattr(part, "name"):
+                        part.name = getattr(line, "part_name", "") or pn
+                    if hasattr(Part, "location"):
+                        setattr(part, "location", "0.00INS")
+                    if hasattr(Part, "quantity"):
+                        setattr(part, "quantity", 0)
+                    if hasattr(Part, "unit_cost"):
+                        setattr(part, "unit_cost", 0.0)
+
+                    db.session.add(part)
+                    db.session.flush()  # теперь у Part есть id
 
                 rec = IssuedPartRecord(
                     part_id=part.id,
@@ -5064,13 +5203,20 @@ def wo_issue_instock(wo_id):
                     reference_job=(wo.canonical_job or "").strip(),
                     issued_by=getattr(current_user, "username", "system"),
                     issue_date=issue_date,
-                    unit_cost_at_issue=0.0,   # <--- страховая, для нас 0
+                    unit_cost_at_issue=0.0,
+                    is_insurance_supplied=True,
+                    location=getattr(part, "location", "INS"),
                 )
+                # безопасно дозададим поля, если они есть в модели
+                if hasattr(rec, "part_number"):
+                    rec.part_number = pn
+                if hasattr(rec, "name_at_issue"):
+                    rec.name_at_issue = getattr(line, "part_name", "") or "—"
+
                 db.session.add(rec)
                 new_records.append(rec)
                 issued_row_ids.append(line.id)
 
-                # помечаем строку как полностью выданную (для UX в WO)
                 issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
                 line.issued_qty = issued_so_far + qty_req
                 try:
@@ -5081,7 +5227,7 @@ def wo_issue_instock(wo_id):
                     line.last_issued_at = issue_date
                 db.session.add(line)
 
-                # переходим к следующей строке, не используя склад
+                # для INS-строки склад не трогаем
                 continue
 
             # ========== B) Обычные складские строки ==========
@@ -5132,8 +5278,6 @@ def wo_issue_instock(wo_id):
             except Exception:
                 real_cost = 0.0
 
-            # склад будем списывать ЧЕРЕЗ _issue_records_bulk,
-            # здесь только накапливаем items_to_issue
             items_to_issue.append({
                 "part_id": part.id,
                 "qty": qty_req,
@@ -5150,9 +5294,9 @@ def wo_issue_instock(wo_id):
                     reference_job=wo.canonical_job,
                     items=items_to_issue,
                 )
-                issue_date = issue_date_stock or issue_date
-                # created_records может быть count или списком — поддерживаем оба варианта
-                if isinstance(created_records, list):
+                if issue_date_stock:
+                    issue_date = issue_date_stock
+                if created_records:
                     new_records.extend(created_records)
             except Exception as e:
                 db.session.rollback()
@@ -5188,23 +5332,41 @@ def wo_issue_instock(wo_id):
             except Exception:
                 db.session.rollback()
 
-        # --- если есть новые записи - создаём/подвешиваем инвойс ---
+        # --- если есть новые записи - создаём батч и инвойс ---
         if new_records:
             try:
-                batch = _ensure_invoice_number_for_records(
-                    records=new_records,
+                inv_no = _reserve_invoice_number()
+                batch = IssuedBatch(
+                    invoice_number=inv_no,
                     issued_to=wo.technician_name,
                     issued_by=getattr(current_user, "username", "system"),
                     reference_job=wo.canonical_job,
                     issue_date=issue_date,
                     location=None,
                 )
+                db.session.add(batch)
+                db.session.flush()
+
+                for r in new_records:
+                    r.batch_id = batch.id
+                    r.invoice_number = inv_no
+
                 db.session.commit()
-                if batch and getattr(batch, "invoice_number", None):
-                    return redirect(f"/reports/{batch.invoice_number}", code=303)
+
+                params = urlencode({
+                    "invoice_number": inv_no,
+                    "ref_job": (wo.canonical_job or "").strip(),
+                })
+                session["last_invoice_url"] = f"/invoice/pdf?{params}"
+
+                return redirect(url_for(
+                    "inventory.wo_detail",
+                    wo_id=wo.id,
+                    issued_ids=",".join(map(str, issued_row_ids))
+                ))
             except Exception:
                 db.session.rollback()
-                # если не удалось - пойдём в общий отчёт ниже
+                # пойдём в grouped fallback ниже
 
         # --- fallback: сгруппированный отчёт за день ---
         d = (issue_date or datetime.utcnow()).date().isoformat()
@@ -5264,7 +5426,7 @@ def wo_issue_instock(wo_id):
         flash("Nothing available to issue (all WAIT).", "warning")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    issue_date, _created_or_records = _issue_records_bulk(
+    issue_date, _created_records = _issue_records_bulk(
         issued_to=wo.technician_name,
         reference_job=wo.canonical_job,
         items=items_to_issue,
@@ -5321,7 +5483,6 @@ def wo_issue_instock(wo_id):
         except Exception:
             db.session.rollback()
     else:
-        # иначе попробуем автоматически закрыть если ничего не ждём
         try:
             still_wait = any(
                 (row.get("on_hand", 0) < row.get("requested", 0))
@@ -5337,7 +5498,7 @@ def wo_issue_instock(wo_id):
             except Exception:
                 db.session.rollback()
 
-    # сгруппированный отчёт за день
+    # сгруппированный отчёт за день (массовый режим как раньше)
     d = (issue_date or datetime.utcnow()).date().isoformat()
     params = urlencode({
         "start_date": d,
@@ -5765,10 +5926,12 @@ def wo_issue_instock_unit(wo_id, unit_id):
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     from datetime import datetime, timedelta
-    from sqlalchemy import and_
-    from flask import request
+    from sqlalchemy import and_, func
+    from urllib.parse import urlencode
+    from flask import request, session
     from extensions import db
-    from models import WorkOrder, Part, IssuedPartRecord
+
+    from models import WorkOrder, Part, IssuedPartRecord, IssuedBatch
 
     wo = WorkOrder.query.get_or_404(wo_id)
     unit = next((u for u in (wo.units or []) if u.id == unit_id), None)
@@ -5843,16 +6006,25 @@ def wo_issue_instock_unit(wo_id, unit_id):
         flash("Issued items saved, but could not collect records for invoice.", "warning")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # --- формируем инвойс/батч ---
+    # --- формируем инвойс/батч БЕЗ внешних хелперов ---
     try:
-        batch = _ensure_invoice_number_for_records(
-            records=new_records,
+        inv_no = _reserve_invoice_number()
+
+        batch = IssuedBatch(
+            invoice_number=inv_no,
             issued_to=wo.technician_name,
             issued_by=getattr(current_user, "username", "system"),
             reference_job=wo.canonical_job,
-            issue_date=datetime.utcnow(),
-            location=None
+            issue_date=issue_date,
+            location=None,
         )
+        db.session.add(batch)
+        db.session.flush()  # чтобы появился batch.id
+
+        for r in new_records:
+            r.batch_id = batch.id
+            r.invoice_number = inv_no
+
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -5885,8 +6057,14 @@ def wo_issue_instock_unit(wo_id, unit_id):
         except Exception:
             db.session.rollback()
 
-    # --- редирект прямо на отчёт по инвойсу ---
-    return redirect(f"/reports/{batch.invoice_number}", code=303)
+    # --- сохраняем URL инвойса и возвращаемся на страницу WO ---
+    params = urlencode({
+        "invoice_number": batch.invoice_number,
+        "ref_job": (wo.canonical_job or "").strip(),
+    })
+    session["last_invoice_url"] = f"/invoice/pdf?{params}"
+
+    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
 @inventory_bp.post("/work_orders/<int:wo_id>/status")
 @login_required
