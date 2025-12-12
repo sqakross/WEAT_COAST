@@ -673,33 +673,35 @@
   const toMoney = (n)=> (Math.round((Number(n||0)+Number.EPSILON)*100)/100).toFixed(2);
 
   function recomputeUnitSubtotal(card){
-    const markup   = parseFloat(markupEl?.value || '0') || 0;
-    const delivery = parseFloat(deliveryEl?.value || '0') || 0;
-    let unitSum = 0;
+  const markup   = parseFloat(markupEl?.value || '0') || 0;
+  const delivery = parseFloat(deliveryEl?.value || '0') || 0;
+  let unitSum = 0;
 
-    card.querySelectorAll('tbody tr').forEach(tr => {
-      const q        = parseFloat(tr.querySelector('.qty')?.value || '0') || 0;
-      const baseCost = parseFloat(tr.querySelector('.unit-cost')?.value || '0') || 0;
+  card.querySelectorAll('tbody tr').forEach(tr => {
+    const q        = parseFloat(tr.querySelector('.qty')?.value || '0') || 0;
+    const baseCost = parseFloat(tr.querySelector('.unit-cost')?.value || '0') || 0;
 
-      // ПЛАНОВАЯ ЦЕНА:
-      // billed_unit_price = (cost + delivery_fee) * (1 + markup)
-      const perUnit = (baseCost + delivery) * (1 + markup / 100);
-      const line    = q * perUnit;
+    // ✅ Delivery fee ОДИН РАЗ на позицию:
+    // raw = qty * unit + delivery
+    // markup накручиваем на всю сумму строки
+    const rawLine = (q * baseCost) + delivery;
+    const line    = rawLine * (1 + markup / 100);
 
-      const cell = tr.querySelector('.line-total');
-      if (cell){
-        const v = toMoney(line);
-        cell.textContent = v;
-        cell.dataset.value = v;
-      }
-      unitSum += line;
-    });
+    const cell = tr.querySelector('.line-total');
+    if (cell){
+      const v = toMoney(line);
+      cell.textContent = v;
+      cell.dataset.value = v;
+    }
+    unitSum += line;
+  });
 
-    const us = card.querySelector('.unit-subtotal');
-    if (us) us.textContent = toMoney(unitSum);
+  const us = card.querySelector('.unit-subtotal');
+  if (us) us.textContent = toMoney(unitSum);
 
-    recomputeGrandTotal();
-  }
+  recomputeGrandTotal();
+}
+
 
 
   function recomputeGrandTotal(){
