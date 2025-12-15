@@ -7,6 +7,10 @@
 {% set ro  = 'readonly' if RO else '' %}
 
 <style>
+    .col-wh{width:58px}
+  .col-inv{width:90px}
+  .col-hint{width:78px}
+
   .col-narrow{width:90px}
   .col-money{width:90px;text-align:right}
   .col-qty{width:64px;text-align:right}
@@ -139,6 +143,7 @@
     <div class="col-md-2">
       <label class="form-label">Job type</label>
       {% set jt = (IS_EDIT and wo.job_type or 'BASE') %}
+      {% set IS_INS = (jt == 'INSURANCE') %}
       <select name="job_type" class="form-select" {{ dis }}>
         <option value="BASE" {{ 'selected' if jt=='BASE' else '' }}>BASE</option>
         <option value="INSURANCE" {{ 'selected' if jt=='INSURANCE' else '' }}>INSURANCE</option>
@@ -166,6 +171,17 @@
         <option value="done" {{ 'selected' if st=='done' else '' }}>done</option>
       </select>
     </div>
+
+    <div class="col-md-3" id="poWrap" style="{% if not IS_INS %}display:none{% endif %}">
+      <label class="form-label">Customer PO # <span class="text-danger">*</span></label>
+      <input name="customer_po"
+             class="form-control"
+             placeholder="PO#"
+             value="{{ (IS_EDIT and wo.customer_po or '')|upper }}"
+             {% if IS_INS %}required{% endif %}
+             {{ ro }} {{ dis }}>
+    </div>
+
   </div>
 
   <div id="unitsWrap" class="d-flex flex-column gap-4">
@@ -208,8 +224,10 @@
                 <th class="text-end col-qty">Qty</th>
                 <th class="text-end col-money">Unit ($)</th>
                 <th class="text-end col-money">Total ($)</th>
-                <th class="col-narrow">WH</th>
+                <th class="col-wh">WH</th>
+                <th class="col-inv">INV#</th>
                 <th style="width:80px;" title="Backorder">B/O</th>
+
                 <th class="ins-col" style="width:70px;">INS</th>
                 <th class="col-narrow">Sup</th>
                 <th class="ordered-col" style="width:70px;">Ord</th>
@@ -280,6 +298,17 @@
                          value="{{ (r.warehouse or r.unit_label or '')|upper }}"
                          maxlength="120" {{ ro }} {{ dis }}>
                 </td>
+
+                <td class="col-inv">
+                  <input class="form-control inv-input"
+                         name="units[{{ ui }}][rows][{{ ri }}][invoice_number]"
+                         value="{{ (r.invoice_number or '')|upper }}"
+                         maxlength="32"
+                         placeholder="INV#"
+                         required {{ ro }} {{ dis }}>
+                </td>
+
+
                 <td class="text-center">
                   <div class="form-check d-flex justify-content-center m-0">
                     <input class="form-check-input" type="checkbox"
@@ -308,7 +337,7 @@
                   <input type="checkbox" class="form-check-input ordered-check"
                          {% if is_ord %}checked{% endif %} {{ dis }}>
                 </td>
-                <td class="hint">—</td>
+                <td class="hint col-hint">—</td>
                 <td class="text-center issue-cell">
                   {% if not RO %}
                     <div class="form-check d-flex justify-content-center m-0">
@@ -562,6 +591,20 @@
     });
   }
   jobTypeSel?.addEventListener('change', updateInsColumns);
+
+    function updatePOField(){
+    const wrap = document.getElementById('poWrap');
+    const inp  = document.querySelector('input[name="customer_po"]');
+    const show = jobTypeSel && jobTypeSel.value === 'INSURANCE';
+
+    if (wrap) wrap.style.display = show ? '' : 'none';
+    if (inp){
+      inp.required = show;
+      if (!show) inp.value = '';
+    }
+  }
+  jobTypeSel?.addEventListener('change', updatePOField);
+
 
   // === NEW: есть ли хотя бы один отмеченный Ord
   function hasAnyOrderedChecked(){
@@ -935,6 +978,8 @@
   <td class="num"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${ro}></td>
   <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
   <td><input class="form-control wh-input" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
+  <td><input class="form-control inv-input" name="units[${ui}][rows][${ri}][invoice_number]" maxlength="32" placeholder="INV#" required ${ro}></td>
+
   <td class="text-center">
     <div class="form-check d-flex justify-content-center m-0">
       <input class="form-check-input" type="checkbox"
@@ -1003,7 +1048,7 @@
             <th class="ins-col" style="width:70px;">INS</th>
             <th class="col-narrow">Sup</th>
             <th class="ordered-col" style="width:70px;">Ord</th>
-            <th style="width:140px;">Stock hint</th>
+            <th class="col-hint">Stock hint</th>
             <th class="col-issue">Issue?</th>
             <th style="width:60px;"></th>
           </tr>
@@ -1125,6 +1170,8 @@
       fetchHint(tbody.lastElementChild);
       toggleOrderedCols();
       updateInsColumns();
+      updatePOField();
+
       // NEW: после добавления строки – пересчёт статуса
       reevaluateWOStatusFromOrd();
       return;

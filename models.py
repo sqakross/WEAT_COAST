@@ -109,6 +109,7 @@ class WorkOrder(db.Model):
     created_at      = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     ordered_date    = db.Column(db.Date, nullable=True)
+    customer_po = db.Column(db.String(64), nullable=True, index=True)
 
     @property
     def canonical_job(self) -> str:
@@ -181,6 +182,7 @@ class WorkOrderPart(db.Model):
     ordered_date = db.Column(db.Date, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_insurance_supplied = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    invoice_number = db.Column(db.String(32), nullable=True, index=True)
 
     @property
     def warehouse_or_label(self) -> str:
