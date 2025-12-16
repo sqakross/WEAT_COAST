@@ -164,13 +164,18 @@ def generate_invoice_pdf(records, invoice_number=None):
             ucost = getattr(getattr(r, "part", None), "unit_cost", 0.0) or 0.0
 
         # --- ЛОГИКА LOCATION ---
+        # --- ЛОГИКА LOCATION + INV# ---
         stored_loc = getattr(r, "location", None)
         if stored_loc not in (None, "", " ", "  "):
-            # Новый инвойс / уже зафриженная локация → используем её
-            loc = stored_loc
+            loc = str(stored_loc).strip()
         else:
-            # Старые строки без snapshot → берём актуальное местоположение из Part
-            loc = getattr(getattr(r, "part", None), "location", "") or ""
+            loc = (getattr(getattr(r, "part", None), "location", "") or "").strip()
+
+        # --- INV# (ТОЛЬКО из IssuedPartRecord.inv_ref) ---
+        inv_ref = (getattr(r, "inv_ref", None) or "").strip()
+
+        if inv_ref:
+            loc = f"{loc} / INV# {inv_ref}" if loc else f"INV# {inv_ref}"
 
         line_total = (qty or 0) * float(ucost or 0.0)
 

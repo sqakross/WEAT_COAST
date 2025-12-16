@@ -79,6 +79,11 @@
     margin-bottom:.5rem;
   }
   .wo-header-line h3 { margin:0; }
+
+  .inv-missing {
+    outline: 2px solid #dc3545 !important;
+    box-shadow: 0 0 0 .2rem rgba(220,53,69,.25) !important;
+  }
 </style>
 
 <div class="wo-header-line">
@@ -305,7 +310,7 @@
                          value="{{ (r.invoice_number or '')|upper }}"
                          maxlength="32"
                          placeholder="INV#"
-                         required {{ ro }} {{ dis }}>
+                         {{ ro }} {{ dis }}>
                 </td>
 
 
@@ -978,7 +983,7 @@
   <td class="num"><input class="form-control unit-cost" name="units[${ui}][rows][${ri}][unit_cost]" type="number" step="0.01" min="0" value="0.00" ${ro}></td>
   <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
   <td><input class="form-control wh-input" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
-  <td><input class="form-control inv-input" name="units[${ui}][rows][${ri}][invoice_number]" maxlength="32" placeholder="INV#" required ${ro}></td>
+  <td><input class="form-control inv-input" name="units[${ui}][rows][${ri}][invoice_number]" maxlength="32" placeholder="INV#" ${ro}></td>
 
   <td class="text-center">
     <div class="form-check d-flex justify-content-center m-0">
@@ -1229,50 +1234,100 @@
   });
 
   issueBtn?.addEventListener('click', ()=>{
-    const selected    = [];
-    const insSelected = [];            // НОВОЕ — ID строк, помеченных INS
-    const isINSJob    = isInsuranceJob();
+  const selected    = [];
+  const insSelected = [];
+  const isINSJob    = isInsuranceJob();
 
-    document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
-      if (tr.classList.contains('issued-row')) return;
+  // 1) собираем только те строки, которые реально можно выписывать (STOCK или INS eligible)
+  document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
+    if (tr.classList.contains('issued-row')) return;
+
+    const cb = tr.querySelector('.issue-check');
+    if (!cb || !cb.checked) return;
+
+    const raw    = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
+    const status = raw.split('/')[0];
+
+    const insLine = isRowInsuranceSupplied(tr);
+
+    if (status === 'STOCK' || (isINSJob && insLine)) {
+      selected.push(cb.value);
+      if (isINSJob && insLine) insSelected.push(cb.value);
+    }
+  });
+
+  if (selected.length === 0) {
+    const msg = isINSJob
+      ? 'Select at least one in-stock or INS part.'
+      : 'Select at least one in-stock part (hint must be STOCK).';
+    alert(msg);
+    return;
+  }
+
+  // ✅ ПУНКТ 2: требуем INV# ТОЛЬКО ДЛЯ ВЫБРАННЫХ (selected) строк
+  let missingInv = false;
+
+  document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
+    if (tr.classList.contains('issued-row')) return;
+
+    const cb = tr.querySelector('.issue-check');
+    if (!cb) return;
+
+    // важно: проверяем только те строки, которые реально идут в invoice (selected)
+    if (!selected.includes(cb.value)) return;
+
+    const inv = (tr.querySelector('.inv-input')?.value || '').trim();
+    if (!inv) missingInv = true;
+  });
+
+  if (missingInv){
+  alert('Invoice # is required for all selected lines before issuing.');
+
+  // фокус на первое пустое INV# среди выбранных строк
+  const firstEmpty = Array.from(document.querySelectorAll('#unitsWrap tbody tr'))
+    .find(tr => {
+      if (tr.classList.contains('issued-row')) return false;
 
       const cb = tr.querySelector('.issue-check');
-      if (!cb || !cb.checked) return;
+      if (!cb) return false;
+      if (!selected.includes(cb.value)) return false;
 
-      const raw    = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
-      const status = raw.split('/')[0];
-
-      const insLine = isRowInsuranceSupplied(tr); // чекбокс INS в этой строке
-
-      // Разрешаем:
-      //  - обычные STOCK
-      //  - ИЛИ INSURANCE job + строка с INS
-      if (status === 'STOCK' || (isINSJob && insLine)) {
-        selected.push(cb.value);
-
-        // Если это INS-строка в страховой работе — запомним её ID отдельно
-        if (isINSJob && insLine) {
-          insSelected.push(cb.value);
-        }
-      }
+      const inv = (tr.querySelector('.inv-input')?.value || '').trim();
+      return !inv;
     });
 
-    if (selected.length === 0) {
-      const msg = isINSJob
-        ? 'Select at least one in-stock or INS part.'
-        : 'Select at least one in-stock part (hint must be STOCK).';
-      alert(msg);
-      return;
-    }
+  const inp = firstEmpty?.querySelector('.inv-input');
+  if (inp){
+  inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  inp.focus();
 
-    if (statusSel) statusSel.value = 'done';
+  inp.classList.add('inv-missing');
+  setTimeout(() => inp.classList.remove('inv-missing'), 2000);
+}
 
-    document.getElementById('issue_set_status').value = 'done';
-    document.getElementById('issue_part_ids').value  = selected.join(',');
-    // НОВОЕ: какие ID были INS
-    document.getElementById('issue_ins_ids').value   = insSelected.join(',');
-    document.getElementById('issueForm').submit();
+
+  return;
+}
+
+
+  // ✅ ПУНКТ 3 (опционально, но полезно): ставим required визуально только на selected строки
+  document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
+    const cb  = tr.querySelector('.issue-check');
+    const inv = tr.querySelector('.inv-input');
+    if (!cb || !inv) return;
+
+    if (selected.includes(cb.value)) inv.setAttribute('required','required');
+    else inv.removeAttribute('required');
   });
+
+  if (statusSel) statusSel.value = 'done';
+
+  document.getElementById('issue_set_status').value = 'done';
+  document.getElementById('issue_part_ids').value  = selected.join(',');
+  document.getElementById('issue_ins_ids').value   = insSelected.join(',');
+  document.getElementById('issueForm').submit();
+});
+
 
 
 

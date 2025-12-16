@@ -287,6 +287,7 @@ class IssuedPartRecord(db.Model):
     consumed_at   = db.Column(db.DateTime, nullable=True)
     consumed_by   = db.Column(db.String(120), nullable=True)
     consumed_note = db.Column(db.String(500), nullable=True)
+    inv_ref = db.Column(db.String(32), nullable=True, index=True)  # INV# из WorkOrderPart
 
     # На какой job № было помечено списание (для отчёта Grouped)
     consumed_job_ref = db.Column(db.String(64), nullable=True, index=True)

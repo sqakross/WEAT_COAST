@@ -1616,11 +1616,8 @@ def _issue_records_bulk(
         "part_id": int,
         "qty": int,
         "unit_price": float | None,
+        "inv_ref": str | None,   # <-- NEW: INV# from WorkOrderPart.invoice_number
       }
-
-    Для обычных строк:
-      - выдаём min(qty, on_hand)
-      - уменьшаем склад
 
     Возвращает:
       (issue_date: datetime, created_records: list[IssuedPartRecord])
@@ -1646,8 +1643,7 @@ def _issue_records_bulk(
         if issue_now <= 0:
             continue
 
-        # цена к фиксации — либо из item["unit_price"], либо billed_price_per_item,
-        # либо себестоимость склада
+        # цена к фиксации
         if "unit_price" in it and it["unit_price"] is not None:
             price_to_fix = float(it["unit_price"])
         elif billed_price_per_item is not None:
@@ -1658,6 +1654,8 @@ def _issue_records_bulk(
         # уменьшаем склад
         part.quantity = on_hand - issue_now
 
+        inv_ref = (it.get("inv_ref") or "").strip()[:32] or None
+
         rec = IssuedPartRecord(
             part_id=part.id,
             quantity=issue_now,
@@ -1666,6 +1664,7 @@ def _issue_records_bulk(
             issued_by=current_user.username,
             issue_date=issue_date,
             unit_cost_at_issue=price_to_fix,
+            inv_ref=inv_ref,  # <-- NEW
         )
         db.session.add(rec)
         created_records.append(rec)
@@ -1675,7 +1674,6 @@ def _issue_records_bulk(
 
     db.session.commit()
     return issue_date, created_records
-
 
 # ==== RETURN HELPERS (без миграций) ====
 
@@ -4405,6 +4403,28 @@ def wo_save():
         return redirect(url_for("inventory.wo_list"))
 
     f = request.form
+
+    # --- DEBUG FILE (form keys with invoice_number) ---
+    import os
+    from datetime import datetime
+    dbg_path = os.path.join(current_app.instance_path, "wo_save_debug.txt")
+    inv_keys = [k for k in f.keys() if "invoice_number" in k]
+    with open(dbg_path, "a", encoding="utf-8") as fp:
+        fp.write("\n" + "=" * 60 + "\n")
+        fp.write("TS: " + datetime.now().isoformat() + "\n")
+        fp.write("PATH: /work_orders/save hit\n")
+        fp.write("INV_KEYS_COUNT: " + str(len(inv_keys)) + "\n")
+        fp.write("INV_KEYS_SAMPLE:\n")
+        for k in inv_keys[:20]:
+            fp.write(f"  {k} = {f.get(k)!r}\n")
+
+        pn_keys = [k for k in f.keys() if k.endswith("[part_number]")]
+        fp.write("PN_KEYS_COUNT: " + str(len(pn_keys)) + "\n")
+        fp.write("PN+INV SAMPLE:\n")
+        for k in pn_keys[:20]:
+            inv_k = k.replace("[part_number]", "[invoice_number]")
+            fp.write(f"  {k} = {f.get(k)!r} | {inv_k} = {f.get(inv_k)!r}\n")
+
     log_keys = sorted(f.keys())
     current_app.logger.debug("WO_SAVE keys (%s): %s", len(log_keys), log_keys[:200])
 
@@ -4452,6 +4472,13 @@ def wo_save():
 
     st_field = (f.get("status") or "search_ordered").strip()
     wo.status = st_field if st_field in ("search_ordered", "ordered", "done") else "search_ordered"
+
+    # Customer PO (только для INSURANCE, иначе чистим)
+    po = (f.get("customer_po") or "").strip().upper()
+    if (wo.job_type or "").upper() == "INSURANCE":
+        wo.customer_po = po or None
+    else:
+        wo.customer_po = None
 
     # Эти поля сейчас мало используются в multi-appliance, но приводим к UPPER на всякий случай
     brand_hdr_raw  = (f.get("brand")  or "").strip().upper()
@@ -4502,6 +4529,7 @@ def wo_save():
                     "line_status": "search_ordered", "unit_cost": 0.0,
                     "ordered_flag": False,
                     "is_insurance_supplied": False,
+                    "invoice_number": "",
                 }],
             }]
             return render_template(
@@ -4535,9 +4563,10 @@ def wo_save():
 
     # ---------- собрать units[...] и их rows[...] ----------
     re_unit = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
-    re_row  = re.compile(
+    re_row = re.compile(
         r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|"
         r"alt_numbers|alt_part_numbers|warehouse|unit_label|supplier|supplier_name|"
+        r"invoice_number|"
         r"backorder_flag|status|unit_cost|ordered_flag|is_insurance_supplied)\]$"
     )
 
@@ -4584,6 +4613,9 @@ def wo_save():
             wh_raw  = wh_raw.upper()
             sup_raw = sup_raw.upper()
 
+            inv_raw = (r.get("invoice_number") or "").strip().upper()
+            inv_raw = inv_raw[:32] if inv_raw else ""
+
             ucost   = _f(r.get("unit_cost"), None)
             bo_flag = _b(r.get("backorder_flag"))
             lstatus = (r.get("status") or "search_ordered").strip()
@@ -4604,6 +4636,7 @@ def wo_save():
                 "alt_numbers": _clip(alt_raw, 200),
                 "warehouse": _clip(wh_raw, 120),
                 "supplier": _clip(sup_raw, 80),
+                "invoice_number": inv_raw,
                 "backorder_flag": bo_flag,
                 "line_status": lstatus if lstatus in ("search_ordered", "ordered", "done") else "search_ordered",
                 "unit_cost": (ucost if (ucost is not None) else 0.0),
@@ -4611,10 +4644,11 @@ def wo_save():
                 "is_insurance_supplied": ins_flag,
             }
 
-
             if (pn or part_name_clip) and qty_eff > 0:
                 new_rows_count += 1
                 rows_payload.append(row_dict)
+                with open(dbg_path, "a", encoding="utf-8") as fp:
+                    fp.write(f"ROWS_PARSED: ui={ui} ri={ri} pn={pn!r} inv={inv_raw!r}\n")
 
         units_payload.append({
             "brand":  (u_blk.get("brand")  or "").strip().upper(),
@@ -4628,24 +4662,6 @@ def wo_save():
         len(units_payload),
         sum(len(u.get('rows') or []) for u in units_payload)
     )
-
-    # DEBUG dump
-    try:
-        dbg_rows = []
-        for u_i, u_blk in sorted(units_map.items()):
-            for r_i, r_blk in sorted((u_blk.get("rows") or {}).items()):
-                dbg_rows.append({
-                    "u": u_i,
-                    "r": r_i,
-                    "pn": (r_blk.get("part_number") or "").strip().upper(),
-                    "ord_raw": r_blk.get("ordered_flag"),
-                    "bo_raw": r_blk.get("backorder_flag"),
-                    "status": r_blk.get("status"),
-                    "ins_raw": r_blk.get("is_insurance_supplied"),
-                })
-        current_app.logger.debug("WO_SAVE DEBUG rows before validation: %s", dbg_rows)
-    except Exception as _e:
-        current_app.logger.debug("WO_SAVE DEBUG build dbg_rows failed: %r", _e)
 
     # ---------- ререндер формы при ошибке ----------
     def _rerender_same_screen(msg_text: str):
@@ -4675,6 +4691,7 @@ def wo_save():
                 "unit_cost": 0.0,
                 "ordered_flag": False,
                 "is_insurance_supplied": False,
+                "invoice_number": "",
             }],
         }]
 
@@ -4709,23 +4726,17 @@ def wo_save():
     if is_new:
         db.session.add(wo)
 
-    # --- НОВО: проверяем, есть ли вообще какие-то строки и/или шапка appliances ---
+    # --- allow header-only save ---
     has_any_rows = any(u.get("rows") for u in units_payload)
     has_any_unit_header = any(
         (u.get("brand") or u.get("model") or u.get("serial"))
         for u in units_payload
     )
-
-    # Раньше здесь мы делали rollback и выходили, если нет ни строк, ни шапки юнитов.
-    # Теперь позволяем сохранять хотя бы шапку Work Order (technician, job_numbers и т.п.)
-    # даже если parts/appliances отсутствуют.
     if not has_any_rows and not has_any_unit_header:
         current_app.logger.debug(
             "WO_SAVE: no unit rows parsed; saving header only for WO #%s",
             getattr(wo, "id", None) or "(new)"
         )
-        # НИЧЕГО не делаем: просто идём дальше и сохраним WO без units/parts.
-
 
     # ---------- сохранить прежние ordered_flag / ordered_date ----------
     def _norm_supplier(s):
@@ -4779,7 +4790,6 @@ def wo_save():
 
     # ---------- создаём заново WorkUnit и WorkOrderPart ----------
     for up in units_payload:
-        # пропускаем полностью пустые appliances (без шапки и без строк)
         if not (up.get("brand") or up.get("model") or up.get("serial")) and not up.get("rows"):
             continue
 
@@ -4825,11 +4835,9 @@ def wo_save():
                 ord_date = None
                 ord_in   = False
 
-            current_app.logger.debug(
-                "WO_SAVE DEBUG build part row pn=%s sup=%s ord_in=%r prev_was_ordered=%r "
-                "prev_date=%r final_date=%r ins=%r",
-                pn_upper, sup_norm, ord_in, prev_was_ordered, prev_date, ord_date, ins_flag
-            )
+            # ✅ invoice_number: нормализуем ОДИН РАЗ
+            inv = (r.get("invoice_number") or "").strip().upper()
+            inv = inv[:32] if inv else None
 
             wop = WorkOrderPart(
                 work_order=wo,
@@ -4842,6 +4850,7 @@ def wo_save():
                 backorder_flag=bool(r.get("backorder_flag")),
                 status=("ordered" if ord_in else "search_ordered"),
                 is_insurance_supplied=ins_flag,
+                invoice_number=inv,
             )
 
             if hasattr(wop, "warehouse"):
@@ -4865,10 +4874,27 @@ def wo_save():
 
             db.session.add(wop)
 
+            # --- DEBUG write (no flush inside loop) ---
+            with open(dbg_path, "a", encoding="utf-8") as fp:
+                fp.write(
+                    f"BEFORE COMMIT: wo={getattr(wo,'id',None)} pn={pn_upper} inv={inv!r} obj_inv={getattr(wop,'invoice_number',None)!r}\n"
+                )
+
     # ---------- commit ----------
     try:
         db.session.commit()
         flash("Work Order saved.", "success")
+
+        rows = (WorkOrderPart.query
+                .filter_by(work_order_id=wo.id)
+                .with_entities(WorkOrderPart.part_number, WorkOrderPart.invoice_number)
+                .all())
+
+        with open(dbg_path, "a", encoding="utf-8") as fp:
+            fp.write("AFTER COMMIT DB:\n")
+            for pn, inv in rows:
+                fp.write(f"  pn={pn} inv={inv!r}\n")
+
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to save Work Order: {e}", "danger")
@@ -5637,6 +5663,8 @@ def wo_edit(wo_id: int):
                 "is_insurance_supplied": bool(
                     getattr(p, "is_insurance_supplied", False)
                 ),
+                "invoice_number": (getattr(p, "invoice_number", "") or ""),
+
             })
 
         if not rows:
@@ -5931,7 +5959,8 @@ def wo_issue_instock_unit(wo_id, unit_id):
     from flask import request, session
     from extensions import db
 
-    from models import WorkOrder, Part, IssuedPartRecord, IssuedBatch
+    from models import WorkOrder, Part, IssuedPartRecord, IssuedBatch, WorkOrderPart
+
 
     wo = WorkOrder.query.get_or_404(wo_id)
     unit = next((u for u in (wo.units or []) if u.id == unit_id), None)
@@ -5945,6 +5974,14 @@ def wo_issue_instock_unit(wo_id, unit_id):
     rows = compute_availability_unit(unit, wo.status)
 
     items = []
+    # --- map PN -> INV# из WorkOrderPart.invoice_number ---
+    pn_to_inv = {}
+    for p in (wo.parts or []):
+        pn_key = (getattr(p, "part_number", "") or "").strip().upper()
+        inv = (getattr(p, "invoice_number", "") or "").strip()
+        if pn_key and inv:
+            pn_to_inv[pn_key] = inv[:32]
+
     for r in rows:
         if int(r.get("issue_now", 0)) > 0:
             pn = (r.get("part_number") or "").strip().upper()
@@ -5964,7 +6001,8 @@ def wo_issue_instock_unit(wo_id, unit_id):
             items.append({
                 "part_id": part.id,
                 "qty": int(r["issue_now"]),
-                "unit_price": real_cost,   # пробрасываем стоимость склада
+                "unit_price": real_cost,
+                "inv_ref": pn_to_inv.get(pn),  # ✅ INV# попадёт в issued_part_record.inv_ref
             })
 
     if not items:
