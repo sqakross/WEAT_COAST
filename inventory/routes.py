@@ -1654,7 +1654,16 @@ def _issue_records_bulk(
         # уменьшаем склад
         part.quantity = on_hand - issue_now
 
-        inv_ref = (it.get("inv_ref") or "").strip()[:32] or None
+        base_loc = (getattr(part, "location", "") or "").strip()
+
+        inv_ref = str(it.get("inv_ref") or "").strip()
+
+        loc_snap = base_loc
+        if inv_ref:
+            loc_snap = f"{base_loc} / INV# {inv_ref}" if base_loc else f"INV# {inv_ref}"
+
+        inv_ref = str(it.get("inv_ref") or "").strip()[:32] or None
+        base_loc = (getattr(part, "location", "") or "").strip()
 
         rec = IssuedPartRecord(
             part_id=part.id,
@@ -1664,8 +1673,10 @@ def _issue_records_bulk(
             issued_by=current_user.username,
             issue_date=issue_date,
             unit_cost_at_issue=price_to_fix,
-            inv_ref=inv_ref,  # <-- NEW
+            location=(base_loc or None),  # snapshot location
+            inv_ref=inv_ref,  # ✅ INV# сохраняем ОТДЕЛЬНО
         )
+
         db.session.add(rec)
         created_records.append(rec)
 
@@ -5323,7 +5334,14 @@ def wo_issue_instock(wo_id):
                 if issue_date_stock:
                     issue_date = issue_date_stock
                 if created_records:
+                    for r in created_records:
+                        # сопоставляем по part_number
+                        for line in wops:
+                            if (line.part_number or "").strip().upper() == (r.part.part_number or "").strip().upper():
+                                r.inv_ref = (line.invoice_number or "").strip()
+                                break
                     new_records.extend(created_records)
+
             except Exception as e:
                 db.session.rollback()
                 flash(f"Error issuing stock items: {e}", "danger")
@@ -5998,11 +6016,35 @@ def wo_issue_instock_unit(wo_id, unit_id):
             except Exception:
                 real_cost = 0.0
 
+            # берём INV# прямо из WorkOrderPart для этой unit + pn
+            wop_inv = ""
+            try:
+                wop = next(
+                    (p for p in (wo.parts or [])
+                     if p.unit_id == unit_id and (p.part_number or "").strip().upper() == pn),
+                    None
+                )
+                wop_inv = (getattr(wop, "invoice_number", "") or "").strip()
+            except Exception:
+                wop_inv = ""
+
+            # INV# берём из WorkOrderPart.invoice_number по unit_id + part_number
+            wop_inv = ""
+            try:
+                wop = next(
+                    (p for p in (wo.parts or [])
+                     if p.unit_id == unit_id and (p.part_number or "").strip().upper() == pn),
+                    None
+                )
+                wop_inv = (getattr(wop, "invoice_number", "") or "").strip()
+            except Exception:
+                wop_inv = ""
+
             items.append({
                 "part_id": part.id,
                 "qty": int(r["issue_now"]),
                 "unit_price": real_cost,
-                "inv_ref": pn_to_inv.get(pn),  # ✅ INV# попадёт в issued_part_record.inv_ref
+                "inv_ref": wop_inv,  # ✅ вот это критично
             })
 
     if not items:
@@ -6676,6 +6718,8 @@ def issue_part():
                     unit_cost_at_issue=price_to_fix,
                     location=loc
                 )
+                # --- INV# snapshot из WorkOrderPart ---
+                rec.inv_ref = (line.invoice_number or "").strip() if hasattr(line, "invoice_number") else None
 
                 db.session.add(rec)
                 new_records.append(rec)

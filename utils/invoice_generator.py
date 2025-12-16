@@ -1,37 +1,38 @@
 def generate_invoice_pdf(records, invoice_number=None):
     """
-    Групповая печать инвойса (read-only).
-    Приоритет номера: param -> records[0].invoice_number -> legacy id.
-    НИЧЕГО в БД не меняет.
+    Read-only invoice PDF. Does not write anything to DB.
 
     Location:
-      - Если в IssuedPartRecord.location что-то есть — считаем, что это snapshot
-        и используем ТОЛЬКО его.
-      - Если IssuedPartRecord.location пустой/None (старые строки) —
-        показываем текущий Part.location (актуальный сток).
+      - If IssuedPartRecord.location exists => use it (snapshot)
+      - Else => use current Part.location
+
+    INV#:
+      - separate column from IssuedPartRecord.inv_ref
     """
     from io import BytesIO
+    import os
+    from datetime import datetime as _dt
+
     from reportlab.pdfgen import canvas
     from reportlab.lib.pagesizes import LETTER
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import Paragraph
-    from reportlab.lib.enums import TA_RIGHT
-    import os
-    from datetime import datetime as _dt
+    from reportlab.lib.enums import TA_RIGHT, TA_LEFT
 
     if not records:
         return b""
 
     first = records[0]
 
-    # ---------- resolve number ----------
+    # ---------- resolve invoice number ----------
     inv_no = None
     if invoice_number is not None:
         try:
             inv_no = int(invoice_number)
         except Exception:
             inv_no = None
+
     if inv_no is None:
         n = getattr(first, "invoice_number", None)
         if n is not None:
@@ -39,6 +40,7 @@ def generate_invoice_pdf(records, invoice_number=None):
                 inv_no = int(n)
             except Exception:
                 inv_no = None
+
     if inv_no is None:
         try:
             inv_no = int(getattr(first, "id"))
@@ -60,18 +62,34 @@ def generate_invoice_pdf(records, invoice_number=None):
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=LETTER)
     width, height = LETTER
-    styles = getSampleStyleSheet()
-    normal_style = styles["Normal"]
-    right_style  = ParagraphStyle("right", parent=normal_style, alignment=TA_RIGHT)
 
-    # === ЛОГО (СТАРАЯ ПОЗИЦИЯ) ===
+    styles = getSampleStyleSheet()
+    base = styles["Normal"]
+
+    left_style = ParagraphStyle(
+        "left", parent=base, alignment=TA_LEFT,
+        fontName="Helvetica", fontSize=9, leading=11,
+        spaceBefore=0, spaceAfter=0
+    )
+    right_style = ParagraphStyle(
+        "right", parent=base, alignment=TA_RIGHT,
+        fontName="Helvetica", fontSize=9, leading=11,
+        spaceBefore=0, spaceAfter=0
+    )
+    small_left = ParagraphStyle(
+        "small_left", parent=left_style, fontSize=8.5, leading=10
+    )
+    small_right = ParagraphStyle(
+        "small_right", parent=right_style, fontSize=8.5, leading=10
+    )
+
+    # ---------- logo ----------
     try:
         logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logo", "logo.png"))
         if os.path.exists(logo_path):
             c.drawImage(
                 logo_path,
-                40,
-                height - 330,
+                40, height - 330,
                 width=140,
                 preserveAspectRatio=True,
                 mask="auto",
@@ -79,7 +97,7 @@ def generate_invoice_pdf(records, invoice_number=None):
     except Exception:
         pass
 
-    # Company block (справа вверху)
+    # ---------- company block ----------
     c.setFont("Helvetica-Bold", 12)
     c.drawRightString(width - 40, height - 40, "WEST COAST CHIEF REPAIR")
     c.setFont("Helvetica", 10)
@@ -89,12 +107,12 @@ def generate_invoice_pdf(records, invoice_number=None):
     c.drawRightString(width - 40, height - 100, "parts@chiafappliance.com")
     c.drawRightString(width - 40, height - 115, "Phone:(323) 782-3922")
 
-    # Заголовок
+    # ---------- title ----------
     c.setFont("Helvetica-Bold", 20)
     c.drawCentredString(width / 2, height - 140, inv_title)
     c.line(width / 2 - 80, height - 143, width / 2 + 80, height - 143)
 
-    # Шапка данных
+    # ---------- header info ----------
     c.setFont("Helvetica", 11)
     y = height - 160
     for line in [
@@ -106,123 +124,144 @@ def generate_invoice_pdf(records, invoice_number=None):
         c.drawString(40, y, line)
         y -= 15
 
-    # Заголовок таблицы
-    y -= 40
-    c.setFillColor(colors.grey)
-    c.rect(40, y, width - 80, 20, fill=1)
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 11)
-    headers = [
-        (50,  "Part Number"),
-        (160, "Part Name"),
-        (300, "Qty"),
-        (350, "Unit Cost"),
-        (450, "Total"),
-        (520, "Location"),
+    # ================================================================
+    # TABLE LAYOUT (fits on page — no overlaps, pro alignment)
+    # ================================================================
+    TABLE_X = 40
+    TABLE_W = width - 80
+    HEADER_H = 20
+
+    PAD = 6   # inner padding in each cell
+    GAP = 4   # space between columns (prevents "TotalLOC" glue)
+
+    # IMPORTANT: these widths + gaps MUST FIT in TABLE_W
+    # widths sum = 480, gaps = 6*4=24 => 504, plus left padding margin fits into 532
+    # widths sum = 480, gaps = 24 => 504 (fits)
+    col_defs = [
+        ("pnum", "Part Number", 75, left_style, "L"),
+        ("pname", "Part Name", 135, left_style, "L"),  # было 150 -> стало 135 (минус 15)
+        ("qty", "Qty", 30, right_style, "R"),
+        ("ucost", "Unit Cost", 60, right_style, "R"),
+        ("total", "Total", 60, right_style, "R"),
+        ("loc", "LOC", 55, small_left, "L"),  # было 40 -> стало 55 (плюс 15)
+        ("inv", "INV#", 80, small_right, "R"),  # было 65 -> стало 80 (плюс 15)
     ]
-    for x, text in headers:
-        c.drawString(x, y + 5, text)
 
-    # ---------- Строки таблицы ----------
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica", 10)
-    y -= 25  # y = верх первой строки после заголовка таблицы
+    # x positions
+    COLS = []
+    x_cursor = TABLE_X
+    for key, label, w, style, align in col_defs:
+        COLS.append({
+            "key": key, "label": label, "x": x_cursor, "w": w, "style": style, "align": align
+        })
+        x_cursor += w + GAP
+
+    def _draw_table_header(y_top):
+        c.setFillColor(colors.grey)
+        c.rect(TABLE_X, y_top, TABLE_W, HEADER_H, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 9)
+
+        for col in COLS:
+            x = col["x"]
+            w = col["w"]
+            label = col["label"]
+
+            # headers: text left, numeric right (with padding) => looks "invoice-like"
+            # headers: INV# по центру, остальные numeric можно оставить справа
+            if col["key"] == "inv":
+                c.drawCentredString(x + (w / 2), y_top + 5, label)
+            elif col["align"] == "R":
+                c.drawRightString(x + w - PAD, y_top + 5, label)
+            else:
+                c.drawString(x + PAD, y_top + 5, label)
+
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica", 9)
+
+    # header row
+    y -= 40
+    _draw_table_header(y)
+
+    y -= 25
     total_sum = 0.0
-
-    # координаты и ширины колонок
-    COLS = {
-        "pnum":  {"x": 50,  "w": 100, "style": normal_style},
-        "pname": {"x": 160, "w": 130, "style": normal_style},
-        "qty":   {"x": 300, "w": 40,  "style": right_style},
-        "ucost": {"x": 350, "w": 70,  "style": right_style},
-        "total": {"x": 450, "w": 70,  "style": right_style},
-        "loc":   {"x": 520, "w": 80,  "style": normal_style},
-    }
-
-    BOTTOM_MARGIN = 80  # безопасный отступ снизу
+    BOTTOM_MARGIN = 80
     ROW_PADDING = 5
 
-    def _draw_table_header_only():
-        c.setFont("Helvetica-Bold", 11)
-        yy = height - 60
-        c.setFillColor(colors.grey)
-        c.rect(40, yy, width - 80, 20, fill=1)
-        c.setFillColor(colors.white)
-        for x, text in headers:
-            c.drawString(x, yy + 5, text)
-        c.setFillColor(colors.black)
-        c.setFont("Helvetica", 10)
-        # возвращаем "верх" первой строки под заголовком
-        return height - 85
+    def _new_page_header():
+        c.showPage()
+        yy = height - 80
+        _draw_table_header(yy)
+        return yy - 25
 
     for r in records:
-        pnum = getattr(getattr(r, "part", None), "part_number", "") or ""
-        pname = getattr(getattr(r, "part", None), "name", "") or ""
-        qty   = getattr(r, "quantity", 0) or 0
+        part = getattr(r, "part", None)
+
+        pnum = (getattr(part, "part_number", "") or "").strip()
+        pname = (getattr(part, "name", "") or "").strip()
+
+        qty = getattr(r, "quantity", 0) or 0
+
         ucost = getattr(r, "unit_cost_at_issue", None)
         if ucost is None:
-            ucost = getattr(getattr(r, "part", None), "unit_cost", 0.0) or 0.0
+            ucost = getattr(part, "unit_cost", 0.0) or 0.0
 
-        # --- ЛОГИКА LOCATION ---
-        # --- ЛОГИКА LOCATION + INV# ---
         stored_loc = getattr(r, "location", None)
         if stored_loc not in (None, "", " ", "  "):
             loc = str(stored_loc).strip()
         else:
-            loc = (getattr(getattr(r, "part", None), "location", "") or "").strip()
+            loc = (getattr(part, "location", "") or "").strip()
 
-        # --- INV# (ТОЛЬКО из IssuedPartRecord.inv_ref) ---
         inv_ref = (getattr(r, "inv_ref", None) or "").strip()
-
-        if inv_ref:
-            loc = f"{loc} / INV# {inv_ref}" if loc else f"INV# {inv_ref}"
 
         line_total = (qty or 0) * float(ucost or 0.0)
 
-        # 1) Параграфы для всех колонок
-        cells = {
-            "pnum":  Paragraph(str(pnum), COLS["pnum"]["style"]),
-            "pname": Paragraph(pname,      COLS["pname"]["style"]),
-            "qty":   Paragraph(str(qty),   COLS["qty"]["style"]),
-            "ucost": Paragraph(f"${float(ucost):.2f}",      COLS["ucost"]["style"]),
-            "total": Paragraph(f"${float(line_total):.2f}", COLS["total"]["style"]),
-            "loc":   Paragraph(str(loc),   COLS["loc"]["style"]),
+        cell_map = {
+            "pnum":  Paragraph(pnum, left_style),
+            "pname": Paragraph(pname, left_style),
+            "qty":   Paragraph(str(qty), right_style),
+            "ucost": Paragraph(f"${float(ucost):.2f}", right_style),
+            "total": Paragraph(f"${float(line_total):.2f}", right_style),
+            "loc":   Paragraph(loc, small_left),
+            "inv":   Paragraph(inv_ref or "—", small_right),
         }
 
-        # 2) Высота каждой ячейки + высота строки
-        min_row_h = 15
-        sizes = {}
+        # row height
+        min_row_h = 14
         row_h = min_row_h
-        for key, para in cells.items():
-            _, h = para.wrap(COLS[key]["w"], 1000)
+        sizes = {}
+        for col in COLS:
+            key = col["key"]
+            para = cell_map[key]
+            # wrap inside width minus padding
+            ww = max(10, col["w"] - (PAD * 2))
+            _, h = para.wrap(ww, 1000)
             sizes[key] = h
             if h > row_h:
                 row_h = h
 
-        # 3) Проверка, помещается ли ВСЯ строка
         if y - row_h < BOTTOM_MARGIN:
-            c.showPage()
-            y = _draw_table_header_only()
+            y = _new_page_header()
 
-        # 4) Рисуем ячейки: y — это ВЕРХ строки,
-        #    а Paragraph.drawOn ждёт координату НИЗА,
-        #    поэтому bottom = y - h
-        for key, para in cells.items():
-            x = COLS[key]["x"]
+        # draw cells with padding
+        for col in COLS:
+            key = col["key"]
+            para = cell_map[key]
+            x = col["x"] + PAD
+            ww = max(10, col["w"] - (PAD * 2))
             h = sizes[key]
-            bottom = y - h
-            para.drawOn(c, x, bottom)
+            para.wrap(ww, 1000)
+            para.drawOn(c, x, y - h)
 
-        # 5) Переход к следующей строке
         y -= (row_h + ROW_PADDING)
         total_sum += float(line_total)
 
-    # Итог
+    # total
     y -= 20
     c.setFont("Helvetica-Bold", 12)
     c.drawRightString(width - 40, max(y, 60), f"TOTAL: ${total_sum:.2f}")
 
-    # Спасибо
+    # footer
     y -= 50
     c.setFont("Helvetica-Oblique", 10)
     c.drawCentredString(width / 2, max(y, 40), "Thank you for your business!")
@@ -232,6 +271,3 @@ def generate_invoice_pdf(records, invoice_number=None):
     pdf = buf.getvalue()
     buf.close()
     return pdf
-
-
-
