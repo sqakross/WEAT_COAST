@@ -41,7 +41,6 @@
 {% set is_tech      = role_low in ['technician','tech'] %}
 {% set can_view_docs   = can_view_docs %}
 {% set can_confirm_any = can_confirm_any %}
-{# is_my_wo тоже приходит из routes #}
 
 {# ---------- main WO info ---------- #}
 {% set u0 = (wo.units|first) %}
@@ -51,6 +50,13 @@
     <div><strong>Technician:</strong></div>
     <div>{{ wo.technician_username or wo.technician_name or '—' }}</div>
   </div>
+
+  {% if wo.job_type == 'INSURANCE' %}
+  <div class="col-md-3">
+    <div><strong>Customer PO #:</strong></div>
+    <div>{{ wo.customer_po or '—' }}</div>
+  </div>
+  {% endif %}
 
   <div class="col-md-4">
     <div class="d-flex align-items-start flex-wrap gap-2">
@@ -133,7 +139,16 @@
   .num { text-align:right; font-variant-numeric: tabular-nums; }
   .name-ordered  { color:#0d6efd; font-weight:600; }
   .name-invoiced { color:#198754; font-weight:600; }
-  .name-ins      { color:#fd7e14; font-weight:600; }  /* INS – оранжевый */
+  .name-ins      { color:#fd7e14; font-weight:600; }
+
+  /* widths */
+  .col-supplier { width: 88px; }
+  .col-inv      { width: 120px; }  /* wider */
+  .col-ord      { width: 60px; }
+  .col-orddate  { width: 110px; }
+  .col-bo       { width: 56px; }
+
+  .cell-tight { padding-left:.35rem !important; padding-right:.35rem !important; }
 </style>
 
 <div class="table-responsive mb-4">
@@ -146,10 +161,11 @@
         <th class="text-end">Qty</th>
         <th class="text-end">Unit ($)</th>
         <th class="text-end">Total ($)</th>
-        <th>Supplier</th>
-        <th class="text-center" title="Ordered">Ordered</th>
-        <th class="text-center">Ordered on</th>
-        <th title="Backorder">B/O</th>
+        <th class="col-supplier cell-tight">Sup.</th>
+        <th class="text-center text-nowrap col-inv cell-tight">INV#</th>
+        <th class="text-center text-nowrap col-ord cell-tight">Ord</th>
+        <th class="text-center text-nowrap col-orddate cell-tight">Ord date</th>
+        <th class="text-center text-nowrap col-bo cell-tight">B/O</th>
       </tr>
     </thead>
 
@@ -179,14 +195,40 @@
           <td class="num">{{ row.qty or 0 }}</td>
           <td class="num">{{ '%.2f'|format(row.unit_price_display or 0) }}</td>
           <td class="num">{{ '%.2f'|format(row.total_display or 0) }}</td>
-          <td>{{ row.supplier or '' }}</td>
 
-          <td class="text-center">
-            <input type="checkbox" class="form-check-input" disabled
-                   {% if row.is_ordered %}checked{% endif %}>
+          <td class="col-supplier cell-tight text-truncate" title="{{ row.supplier or '' }}">
+            {{ row.supplier or '' }}
           </td>
 
-          <td class="text-center">
+          {# INV# robust: mapping -> row.get(), object -> attr() #}
+          {% if row is mapping %}
+            {% set inv_val = row.get('invoice_number') or row.get('inv_ref') or row.get('inv_number') or row.get('inv_no') or row.get('inv') %}
+          {% else %}
+            {% set inv_val = (row|attr('invoice_number')) or (row|attr('inv_ref')) or (row|attr('inv_number')) or (row|attr('inv_no')) or (row|attr('inv')) %}
+          {% endif %}
+
+          <td class="text-center text-nowrap col-inv cell-tight">
+              {% if inv_val %}
+                <a href="{{ url_for('inventory.receiving_list', q=inv_val) }}"
+                   target="_blank" rel="noopener"
+                   class="text-decoration-none">
+                  {{ inv_val }}
+                </a>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
+
+          <td class="text-center text-nowrap col-ord cell-tight">
+            {% if row.is_ordered %}
+              <span class="badge bg-info text-dark">YES</span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+
+          <td class="text-center text-nowrap col-orddate cell-tight">
             {% if row.ordered_date %}
               {{ row.ordered_date|local_date }}
             {% else %}
@@ -194,7 +236,7 @@
             {% endif %}
           </td>
 
-          <td class="text-center">
+          <td class="text-center text-nowrap col-bo cell-tight">
             {% if row.backorder_flag %}
               <span class="badge bg-warning text-dark">B/O</span>
             {% else %}
@@ -209,7 +251,7 @@
       <tr class="table-light">
         <th colspan="5" class="text-end">Grand total (plan):</th>
         <th class="num">{{ '%.2f'|format(grand_total_display or 0) }}</th>
-        <th colspan="4"></th>
+        <th colspan="5"></th>
       </tr>
     </tfoot>
   </table>
@@ -423,29 +465,10 @@
 
             <td>
               {% set print_href = None %}
-
               {% if invoice_num %}
                 {% set print_href = url_for('inventory.view_invoice_pdf',
                                             invoice_number=invoice_num,
                                             ref_job=(b.get('reference_job') or wo.canonical_job)) %}
-              {% else %}
-                {% set issued_by_val = b.get('issued_by') or current_user.username %}
-                {% if b.get('issued_at_dt') %}
-                  {% set issue_dt_str = b.get('issued_at_dt').strftime('%Y-%m-%d %H:%M:%S') %}
-                {% else %}
-                  {% set raw = b.get('issued_at') or '' %}
-                  {% if raw and raw|length == 16 %}
-                    {% set issue_dt_str = raw ~ ':00' %}
-                  {% else %}
-                    {% set issue_dt_str = raw %}
-                  {% endif %}
-                {% endif %}
-
-                {% set print_href = url_for('inventory.view_invoice_pdf',
-                                            issued_to=tech_for_links,
-                                            reference_job=(b.get('reference_job') or wo.canonical_job),
-                                            issued_by=issued_by_val,
-                                            issue_date=issue_dt_str) %}
               {% endif %}
 
               {% if print_href %}
@@ -514,65 +537,7 @@
 
 {% block extra_js %}
 <script>
-async function confirmIssuedPart(checkbox) { console.log("[confirmIssuedPart] legacy call"); }
-
 document.addEventListener("DOMContentLoaded", () => {
-  document.querySelectorAll(".tech-confirm").forEach(cb => {
-    cb.addEventListener("change", async (e) => {
-      const box  = e.target;
-      const recId = box.dataset.recordId;
-      const woId  = box.dataset.woid;
-      if (!box.checked) return;
-
-      const params = new URLSearchParams();
-      params.set("record_id", recId);
-      params.set("wo_id",    woId);
-      params.set("state",    "1");
-
-      try {
-        const resp = await fetch("{{ url_for('inventory.issued_confirm_toggle') }}", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: params.toString(),
-          credentials: "same-origin"
-        });
-        if (!resp.ok) { alert("Error saving confirmation: HTTP " + resp.status); box.checked = false; return; }
-        box.disabled = true;
-
-        const li = box.closest("li[data-item-id]");
-        if (li) li.querySelectorAll(".confirm-meta").forEach(metaEl => { metaEl.innerHTML = "✔ confirmed"; });
-
-        const tr = box.closest("tr");
-        if (tr) {
-          const holder = tr.querySelector(".batch-badge-holder");
-          const statusCol = tr.querySelector(".batch-status-col");
-          const techBoxes = tr.querySelectorAll(".tech-confirm");
-          const confirmedCount = Array.from(techBoxes).filter(el => el.checked).length;
-          const totalCount     = techBoxes.length;
-
-          if (holder) {
-            holder.innerHTML = "";
-            if (totalCount > 0 && confirmedCount === totalCount) {
-              holder.innerHTML = '<span class="badge bg-success inv-badge">All confirmed</span>';
-            } else if (confirmedCount > 0) {
-              holder.innerHTML = '<span class="badge bg-info text-dark inv-badge">Partly confirmed</span>';
-            }
-          }
-
-          if (statusCol) {
-            statusCol.textContent =
-              (totalCount > 0 && confirmedCount === totalCount) ? "✅" :
-              (confirmedCount > 0 ? "☑️" : "☐");
-          }
-        }
-      } catch (err) {
-        console.error("Network error while confirming part.", err);
-        alert("Network error while confirming part.");
-        box.checked = false;
-      }
-    });
-  });
-
   const btnCopy = document.getElementById('copyJobs');
   if (btnCopy) {
     btnCopy.addEventListener('click', async () => {
@@ -588,15 +553,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // 👇 ДОБАВЛЕННЫЙ КУСОК: автоматически открыть инвойс в новом окне
   {% if last_invoice_url %}
-  try {
-    window.open("{{ last_invoice_url }}", "_blank");
-  } catch (e) {
-    console.error("Cannot open invoice window", e);
-  }
+  try { window.open("{{ last_invoice_url }}", "_blank"); } catch (e) {}
   {% endif %}
 });
 </script>
 {% endblock %}
-

@@ -3352,8 +3352,13 @@ def wo_detail(wo_id):
                 "backorder_flag": bool(getattr(r, "backorder_flag", False)),
                 "is_invoiced": is_invoiced,
                 "is_insurance_supplied": is_ins,
+
+                # ✅ INV# from WorkOrderPart.invoice_number
+                "invoice_number": (getattr(r, "invoice_number", "") or "").strip(),
+                "inv_ref": (getattr(r, "invoice_number", "") or "").strip(),
             }
         )
+
 
     # 6) отдаём в шаблон
     return render_template(
@@ -4521,56 +4526,27 @@ def wo_save():
 
     # === DUP GUARD ===
     input_jobs = _parse_jobs(wo.job_numbers)
-    if not input_jobs:
-        def _rerender(msg_text: str):
-            db.session.rollback()
-            flash(msg_text, "warning")
-            technicians = _query_technicians()
-            recent_suppliers = session.get("recent_suppliers", []) or []
-            sel_tid   = wo.technician_id
-            sel_tname = wo.technician_name or None
-            safe_units = [{
-                "brand":  wo.brand or "",
-                "model":  wo.model or "",
-                "serial": wo.serial or "",
-                "rows": [{
-                    "id": None, "part_number": "", "part_name": "",
-                    "quantity": 1, "alt_numbers": "", "warehouse": "",
-                    "supplier": "", "backorder_flag": False,
-                    "line_status": "search_ordered", "unit_cost": 0.0,
-                    "ordered_flag": False,
-                    "is_insurance_supplied": False,
-                    "invoice_number": "",
-                }],
-            }]
-            return render_template(
-                "wo_form_units.html",
-                wo=wo, units=safe_units, recent_suppliers=recent_suppliers,
-                readonly=False, technicians=technicians,
-                selected_tech_id=sel_tid, selected_tech_username=sel_tname,
-            )
-        return _rerender("Job number is required.")
 
-    input_set = set(input_jobs)
-    like_filters = [WorkOrder.job_numbers.ilike(f"%{j}%") for j in input_jobs]
-    q = WorkOrder.query.filter(or_(*like_filters))
-    if not is_new:
-        q = q.filter(WorkOrder.id != wo.id)
+    # ✅ ВАЖНО: если job_numbers пустой — НЕ делаем dup-guard сейчас.
+    # Пусть дальше соберётся units_payload и сработает _rerender_same_screen(),
+    # чтобы НЕ потерять введённые данные.
+    if input_jobs:
+        input_set = set(input_jobs)
+        like_filters = [WorkOrder.job_numbers.ilike(f"%{j}%") for j in input_jobs]
+        q = WorkOrder.query.filter(or_(*like_filters))
+        if not is_new:
+            q = q.filter(WorkOrder.id != wo.id)
 
-    possibles = q.order_by(WorkOrder.created_at.desc()).limit(50).all()
-    for existing in possibles:
-        exist_set = _jobs_set_from_wo(existing)
-        if exist_set & input_set:
-            flash(
-                f"Work Order for job(s) {', '.join(sorted(exist_set & input_set))} "
-                f"already exists (#{existing.id}).",
-                "warning",
-            )
-            return redirect(url_for("inventory.wo_detail", wo_id=existing.id))
-    # === /DUP GUARD ===
-
-    if is_new:
-        db.session.add(wo)
+        possibles = q.order_by(WorkOrder.created_at.desc()).limit(50).all()
+        for existing in possibles:
+            exist_set = _jobs_set_from_wo(existing)
+            if exist_set & input_set:
+                flash(
+                    f"Work Order for job(s) {', '.join(sorted(exist_set & input_set))} "
+                    f"already exists (#{existing.id}).",
+                    "warning",
+                )
+                return redirect(url_for("inventory.wo_detail", wo_id=existing.id))
 
     # ---------- собрать units[...] и их rows[...] ----------
     re_unit = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
@@ -4674,20 +4650,19 @@ def wo_save():
         sum(len(u.get('rows') or []) for u in units_payload)
     )
 
-    # ---------- ререндер формы при ошибке ----------
-    def _rerender_same_screen(msg_text: str):
+    def _rerender_same_screen(msg_text: str, errors=None):
         db.session.rollback()
         flash(msg_text, "warning")
 
         technicians = _query_technicians()
         recent_suppliers = session.get("recent_suppliers", []) or []
 
-        sel_tid   = wo.technician_id
+        sel_tid = wo.technician_id
         sel_tname = wo.technician_name or None
 
         safe_units = units_payload if units_payload else [{
-            "brand":  wo.brand or "",
-            "model":  wo.model or "",
+            "brand": wo.brand or "",
+            "model": wo.model or "",
             "serial": wo.serial or "",
             "rows": [{
                 "id": None,
@@ -4715,7 +4690,8 @@ def wo_save():
             technicians=technicians,
             selected_tech_id=sel_tid,
             selected_tech_username=sel_tname,
-        )
+            errors=(errors or {}),
+        ), 400
 
     # ---------- ВАЛИДАЦИЯ (продолжение) ----------
     if not tech_name_val:
@@ -4728,7 +4704,10 @@ def wo_save():
 
     if not wo.job_numbers:
         if is_new:
-            return _rerender_same_screen("Job number is required.")
+            return _rerender_same_screen(
+                "Job number is required.",
+                errors={"job_numbers": "Job number is required."}
+            )
         else:
             db.session.rollback()
             flash("Job number is required.", "warning")
@@ -4941,7 +4920,8 @@ def wo_list():
       status  - search_ordered | ordered | done
     """
     from datetime import datetime, timedelta
-    from sqlalchemy import and_, or_, func
+    from sqlalchemy import and_, or_, func, String
+    from models import IssuedBatch, IssuedPartRecord
 
     # ---- incoming params ----
     qtext = (request.args.get("q") or "").strip()
@@ -4984,17 +4964,70 @@ def wo_list():
     # ---- free-text search ----
     if qtext:
         like = f"%{qtext}%"
+
+        # join parts
         q = q.outerjoin(WorkOrderPart, WorkOrderPart.work_order_id == WorkOrder.id)
         joined_parts = True
-        filters.append(or_(
+
+        conds = [
             WorkOrder.technician_name.ilike(like),
             WorkOrder.job_numbers.ilike(like),
             WorkOrder.brand.ilike(like),
             WorkOrder.model.ilike(like),
+
             WorkOrderPart.part_number.ilike(like),
             WorkOrderPart.alt_part_numbers.ilike(like),
             WorkOrderPart.part_name.ilike(like),
-        ))
+
+            # Customer PO
+            func.coalesce(WorkOrder.customer_po, "").ilike(like),
+
+            # Supplier/Receiving INV# shown in WO detail table (usually stored on WorkOrderPart)
+            func.coalesce(WorkOrderPart.invoice_number, "").ilike(like),
+        ]
+
+        qnorm = qtext.strip()
+
+        # ---- Issued INV# search (handles "000918" and "918") ----
+        if qnorm.isdigit():
+            inv_raw = qnorm
+            inv_trim = inv_raw.lstrip("0") or "0"
+            inv_z6 = inv_trim.zfill(6)
+            inv_variants = {inv_raw, inv_trim, inv_z6}
+            inv_int = int(inv_trim) if inv_trim.isdigit() else None
+
+            ref_jobs = set()
+
+            # IssuedBatch.invoice_number can be int OR string -> compare as string + (optional) as int
+            qb = db.session.query(IssuedBatch.reference_job).filter(
+                or_(
+                    func.trim(func.cast(IssuedBatch.invoice_number, String)).in_(list(inv_variants)),
+                    (IssuedBatch.invoice_number == inv_int) if inv_int is not None else False,
+                )
+            )
+            for (ref,) in qb.all():
+                if ref:
+                    ref_jobs.add(str(ref).strip())
+
+            # fallback: IssuedPartRecord.invoice_number (old rows)
+            qr = db.session.query(IssuedPartRecord.reference_job).filter(
+                or_(
+                    func.trim(func.cast(IssuedPartRecord.invoice_number, String)).in_(list(inv_variants)),
+                    (IssuedPartRecord.invoice_number == inv_int) if inv_int is not None else False,
+                )
+            )
+            for (ref,) in qr.all():
+                if ref:
+                    ref_jobs.add(str(ref).strip())
+
+            # map found reference_job -> WorkOrder
+            for ref in ref_jobs:
+                if ref:
+                    conds.append(func.trim(WorkOrder.canonical_job) == ref)
+                    conds.append(WorkOrder.job_numbers.ilike(f"%{ref}%"))
+
+        filters.append(or_(*conds))
+
 
     # ---- created_at date range (inclusive) ----
     if dfrom:
@@ -5831,138 +5864,6 @@ def api_part_lookup():
     stock_hint = "STOCK" if on_hand > 0 else "WAIT"
     wh = getattr(part, "location", None) or getattr(part, "wh", None) or ""
     return jsonify({"found": True, "name": getattr(part, "name", "") or "", "wh": wh, "stock_hint": stock_hint})
-
-
-# @inventory_bp.post("/work_orders/savex")
-# @login_required
-# def wo_savex():
-#     if getattr(current_user, "role", "") not in ("admin", "superadmin"):
-#         flash("Access denied", "danger")
-#         return redirect(url_for("inventory.wo_list"))
-#
-#     from models import WorkOrder, WorkUnit, WorkOrderPart, Part
-#     from extensions import db
-#     from sqlalchemy import func
-#     from datetime import date
-#
-#     f = request.form
-#
-#     def _f(x, default=0.0):
-#         try: return float(x)
-#         except: return float(default)
-#
-#     def _i(x, default=0):
-#         try: return int(x)
-#         except: return int(default)
-#
-#     def _clip(s: str, n: int) -> str:
-#         return (s or "").strip()[:n]
-#
-#     wo_id = (f.get("wo_id") or "").strip()
-#     tech  = (f.get("technician_name") or "").strip().upper()
-#     job_numbers = (f.get("job_numbers") or "").strip()
-#     job_type = (f.get("job_type") or "BASE").strip().upper()
-#     status_hdr = (f.get("status") or "search_ordered").strip()
-#     delivery_fee   = _f(f.get("delivery_fee"), 0)
-#     markup_percent = _f(f.get("markup_percent"), 0)
-#
-#     # Парсим форму
-#     try:
-#         from inventory.utils import _parse_units_form
-#         units_payload = _parse_units_form(f) or []
-#     except Exception:
-#         units_payload = []
-#
-#     if not units_payload:
-#         flash("Invalid or empty form submission.", "danger")
-#         return redirect(url_for("inventory.wo_list"))
-#
-#     # Проверка supplier
-#     missing_pns = []
-#     for u in units_payload:
-#         for r in (u.get("rows") or []):
-#             if (r.get("part_number") or "").strip() and not (r.get("supplier") or "").strip():
-#                 missing_pns.append(r["part_number"])
-#     if missing_pns:
-#         flash(f"Supplier is required for: {', '.join(set(missing_pns))}", "danger")
-#         if wo_id:
-#             return redirect(url_for("inventory.wo_edit", wo_id=int(wo_id)))
-#         else:
-#             return redirect(url_for("inventory.wo_new"))
-#
-#     # Создание/обновление WO
-#     if wo_id:
-#         wo = WorkOrder.query.get_or_404(int(wo_id))
-#     else:
-#         wo = WorkOrder()
-#         db.session.add(wo)
-#
-#     wo.technician_name = tech
-#     wo.job_numbers = job_numbers
-#     wo.job_type = job_type
-#     wo.status = status_hdr if status_hdr in ("search_ordered", "ordered", "done") else "search_ordered"
-#     wo.delivery_fee = delivery_fee
-#     wo.markup_percent = markup_percent
-#
-#     # Удаляем старые юниты
-#     if wo_id:
-#         for u in list(getattr(wo, "units", []) or []):
-#             db.session.delete(u)
-#         db.session.flush()
-#
-#     # Пересоздание юнитов
-#     for u in units_payload:
-#         unit = WorkUnit(
-#             work_order=wo,
-#             brand=(u.get("brand") or "").strip(),
-#             model=_clip(u.get("model"), 25),
-#             serial=_clip(u.get("serial"), 25),
-#         )
-#         db.session.add(unit)
-#         db.session.flush()
-#
-#         for r in (u.get("rows") or []):
-#             pn = _clip((r.get("part_number") or "").upper(), 80)
-#             if not pn:
-#                 continue
-#             qty = _i(r.get("quantity") or 0)
-#             supplier_val = _clip((r.get("supplier") or "").strip(), 80)
-#
-#             part_rec = Part.query.filter(func.upper(Part.part_number) == pn).first()
-#             part_name = _clip(r.get("part_name") or getattr(part_rec, "name", "") or "", 120)
-#             warehouse = _clip(r.get("warehouse") or getattr(part_rec, "location", "") or "", 120)
-#             unit_cost = _f(r.get("unit_cost") or 0)
-#             alt_raw = (r.get("alt_numbers") or "").strip()
-#
-#             wop = WorkOrderPart(
-#                 work_order=wo,
-#                 unit=unit,
-#                 part_number=pn,
-#                 part_name=part_name,
-#                 quantity=qty,
-#                 supplier=supplier_val,
-#                 warehouse=warehouse,
-#                 backorder_flag=bool(r.get("backorder_flag")),
-#             )
-#
-#             # 🔹 ORD: флаг и дата
-#             ord_on = bool(r.get("ordered_flag")) or ((r.get("line_status") or "").lower() == "ordered")
-#             if hasattr(wop, "line_status"):
-#                 wop.line_status = "ordered" if ord_on else "search_ordered"
-#             if hasattr(wop, "status"):
-#                 wop.status = "ordered" if ord_on else "search_ordered"
-#             if hasattr(wop, "ordered_date"):
-#                 # при установке ORD — ставим сегодняшнюю дату
-#                 wop.ordered_date = date.today() if ord_on else None
-#
-#             if hasattr(wop, "unit_cost"):
-#                 wop.unit_cost = unit_cost
-#
-#             db.session.add(wop)
-#
-#     db.session.commit()
-#     flash("Work Order saved.", "success")
-#     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
 @inventory_bp.post("/work_orders/<int:wo_id>/units/<int:unit_id>/issue_instock")
 @login_required
@@ -9884,6 +9785,38 @@ def _already_returned_qty_for_source(src) -> int:
     return abs(int(total_neg))
 
 from sqlalchemy import func, or_   # <- добавь or_
+
+@inventory_bp.get("/receiving/by-invoice/<path:inv>", endpoint="receiving_by_invoice")
+@login_required
+def receiving_by_invoice(inv):
+    from flask import redirect, url_for, flash, request
+    from sqlalchemy import func
+    from extensions import db
+    from models import GoodsReceipt  # или ReceivingBatch (как у тебя модель называется)
+
+    inv = (inv or "").strip()
+    if not inv:
+        return redirect(url_for("inventory.receiving_list"))
+
+    # ищем самый свежий batch по invoice_number (строкой)
+    batch = (
+        db.session.query(GoodsReceipt)
+        .filter(func.trim(GoodsReceipt.invoice_number) == inv)
+        .order_by(
+            GoodsReceipt.invoice_date.desc().nullslast(),
+            GoodsReceipt.id.desc()
+        )
+        .first()
+    )
+
+    if not batch:
+        flash(f"Receiving invoice not found: {inv}", "warning")
+        # удобно вернуть в список receiving уже с поиском
+        return redirect(url_for("inventory.receiving_list", q=inv))
+
+    # ⚠️ имя endpoint может отличаться: receiving_detail / receiving_view / receiving_edit
+    return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+
 
 @inventory_bp.get("/receiving", endpoint="receiving_list")
 @login_required

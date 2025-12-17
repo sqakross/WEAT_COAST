@@ -132,11 +132,18 @@
 
     <div class="col-md-3">
       <label class="form-label">Job number(s) (comma separated)</label>
+
+      {% set job_err = (errors and errors.get('job_numbers')) %}
       <input name="job_numbers"
-             class="form-control"
+             class="form-control {{ 'is-invalid' if job_err else '' }}"
              placeholder=""
-             value="{{ (IS_EDIT and wo.job_numbers or '')|upper }}"
+             value="{{ (IS_EDIT and wo.job_numbers or wo.job_numbers or '')|upper }}"
              {{ ro }} {{ dis }}>
+
+      {% if job_err %}
+        <div class="invalid-feedback">{{ job_err }}</div>
+      {% endif %}
+
       {% if not IS_EDIT %}
       <div class="form-text text-warning">
         Duplicate protection: if this job already has a Work Order,
