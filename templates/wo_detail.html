@@ -208,17 +208,16 @@
           {% endif %}
 
           <td class="text-center text-nowrap col-inv cell-tight">
-              {% if inv_val %}
-                <a href="{{ url_for('inventory.receiving_list', q=inv_val) }}"
-                   target="_blank" rel="noopener"
-                   class="text-decoration-none">
-                  {{ inv_val }}
-                </a>
-              {% else %}
-                <span class="text-muted">—</span>
-              {% endif %}
-            </td>
-
+            {% if inv_val %}
+              <a href="{{ url_for('inventory.receiving_list', q=inv_val) }}"
+                 target="_blank" rel="noopener"
+                 class="text-decoration-none">
+                {{ inv_val }}
+              </a>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
 
           <td class="text-center text-nowrap col-ord cell-tight">
             {% if row.is_ordered %}
@@ -398,6 +397,9 @@
             {% if items and (items|length) > 0 %}
               <ul class="mb-0 ps-3">
                 {% for it in items %}
+                  {# robust confirmed flag: supports it.confirmed or it.confirmed_by_tech #}
+                  {% set is_confirmed = (it.confirmed if it.confirmed is defined else (it.confirmed_by_tech if it.confirmed_by_tech is defined else False)) %}
+
                   <li class="inv-item {% if it.negative %}inv-item-neg{% endif %}"
                       data-item-id="{{ it.id }}">
                     <code>{{ it.pn }}</code> × {{ it.qty }} — {{ it.name }}
@@ -411,12 +413,13 @@
                             style="display:inline">
                         <input type="hidden" name="record_id" value="{{ it.id }}">
                         <input type="hidden" name="wo_id" value="{{ wo.id }}">
-                        <input type="checkbox" name="state" value="1"
+                        <input type="hidden" name="state" value="{{ 1 if is_confirmed else 0 }}" class="state-hidden">
+                        <input type="checkbox"
                                class="form-check-input ms-2"
-                               {% if it.confirmed %}checked{% endif %}
-                               onchange="this.form.submit()">
+                               {% if is_confirmed %}checked{% endif %}
+                               onchange="this.closest('form').querySelector('.state-hidden').value = this.checked ? '1':'0'; this.form.submit();">
                         <span class="small text-muted ms-1 confirm-meta">
-                          {% if it.confirmed %}✔ confirmed{% else %}unchecked{% endif %}
+                          {% if is_confirmed %}✔ confirmed{% else %}unchecked{% endif %}
                         </span>
                       </form>
 
@@ -426,15 +429,15 @@
                                class="form-check-input ms-2 tech-confirm"
                                data-record-id="{{ it.id }}"
                                data-woid="{{ wo.id }}"
-                               {% if it.confirmed %}checked disabled{% endif %}>
+                               {% if is_confirmed %}checked disabled{% endif %}>
                         <span class="small text-muted ms-1 confirm-meta">
-                          {% if it.confirmed %}✔ confirmed{% else %}unchecked{% endif %}
+                          {% if is_confirmed %}✔ confirmed{% else %}unchecked{% endif %}
                         </span>
                       </span>
 
                     {% else %}
                       <span class="small text-muted ms-2 confirm-meta">
-                        {% if it.confirmed %}✔ confirmed{% else %}unchecked{% endif %}
+                        {% if is_confirmed %}✔ confirmed{% else %}unchecked{% endif %}
                       </span>
                     {% endif %}
                   </li>
@@ -538,6 +541,7 @@
 {% block extra_js %}
 <script>
 document.addEventListener("DOMContentLoaded", () => {
+  // ---- Copy Jobs ----
   const btnCopy = document.getElementById('copyJobs');
   if (btnCopy) {
     btnCopy.addEventListener('click', async () => {
@@ -552,6 +556,55 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+
+  // ---- Technician one-way confirm via fetch ----
+  const API_CONFIRM = "{{ url_for('inventory.issued_confirm_toggle') }}";
+
+  async function postJSON(url, data){
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      body: JSON.stringify(data || {})
+    });
+    let j = {};
+    try { j = await r.json(); } catch(e) {}
+    return { ok: r.ok, status: r.status, json: j };
+  }
+
+  document.querySelectorAll("input.tech-confirm").forEach(cb => {
+    cb.addEventListener("change", async () => {
+      // one-way: can't uncheck
+      if (!cb.checked) { cb.checked = false; return; }
+
+      cb.disabled = true;
+
+      const recordId = parseInt(cb.dataset.recordId || "0", 10) || 0;
+      const woId     = parseInt(cb.dataset.woid || "0", 10) || 0;
+
+      const {ok, json} = await postJSON(API_CONFIRM, {
+        record_id: recordId,
+        wo_id: woId,
+        state: true
+      });
+
+      if (!ok || !json || !json.ok) {
+        cb.checked = false;
+        cb.disabled = false;
+        if (window.showToast) showToast("Confirm failed", {delay: 2200});
+        else alert("Confirm failed");
+        return;
+      }
+
+      // update meta text
+      const meta = cb.closest(".tech-confirm-wrapper")?.querySelector(".confirm-meta");
+      if (meta) meta.textContent = "✔ confirmed";
+
+      if (window.showToast) showToast("Confirmed", {delay: 1200});
+    });
+  });
 
   {% if last_invoice_url %}
   try { window.open("{{ last_invoice_url }}", "_blank"); } catch (e) {}

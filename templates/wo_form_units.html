@@ -313,11 +313,13 @@
 
                 <td class="col-inv">
                   <input class="form-control inv-input"
-                         name="units[{{ ui }}][rows][{{ ri }}][invoice_number]"
-                         value="{{ (r.invoice_number or '')|upper }}"
-                         maxlength="32"
-                         placeholder="INV#"
-                         {{ ro }} {{ dis }}>
+                       name="units[{{ ui }}][rows][{{ ri }}][invoice_number]"
+                       value="{{ (r.invoice_number or '')|upper }}"
+                       data-wop-id="{{ r.id or '' }}"
+                       maxlength="32"
+                       placeholder="INV#"
+                       {{ ro }} {{ dis }}>
+
                 </td>
 
 
@@ -331,8 +333,10 @@
                 <td class="text-center ins-col">
                   <div class="form-check d-flex justify-content-center m-0">
                     <input class="form-check-input ins-check" type="checkbox"
-                           name="units[{{ ui }}][rows][{{ ri }}][is_insurance_supplied]"
-                           {% if r.is_insurance_supplied %}checked{% endif %} {{ dis }}>
+                       name="units[{{ ui }}][rows][{{ ri }}][is_insurance_supplied]"
+                       data-wop-id="{{ r.id or '' }}"
+                       {% if r.is_insurance_supplied %}checked{% endif %} {{ dis }}>
+
                   </div>
                 </td>
                 <td>
@@ -354,8 +358,11 @@
                   {% if not RO %}
                     <div class="form-check d-flex justify-content-center m-0">
                       <input type="checkbox" class="form-check-input issue-check"
-                             name="issue_ids" value="{{ r.id or (ui ~ '_' ~ ri) }}"
-                             {% if issued_full %}disabled{% endif %}>
+                       name="issue_ids" value="{{ r.id or '' }}"
+                       data-wop-id="{{ r.id or '' }}"
+                       {% if not r.id %}disabled title="Save WO first"{% endif %}
+                       {% if issued_full %}disabled{% endif %}>
+
                     </div>
                   {% else %}
                     <span class="text-muted">—</span>
@@ -1245,88 +1252,92 @@
   const insSelected = [];
   const isINSJob    = isInsuranceJob();
 
-  // 1) собираем только те строки, которые реально можно выписывать (STOCK или INS eligible)
+  // 1) collect ONLY numeric WorkOrderPart IDs
   document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
     if (tr.classList.contains('issued-row')) return;
 
     const cb = tr.querySelector('.issue-check');
     if (!cb || !cb.checked) return;
 
+    const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
+    if (!/^\d+$/.test(wopId)) return; // <-- critical: skip non-saved rows
+
     const raw    = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
     const status = raw.split('/')[0];
-
     const insLine = isRowInsuranceSupplied(tr);
 
+    // allow only STOCK or (INS job + INS line)
     if (status === 'STOCK' || (isINSJob && insLine)) {
-      selected.push(cb.value);
-      if (isINSJob && insLine) insSelected.push(cb.value);
+      selected.push(wopId);
+      if (isINSJob && insLine) insSelected.push(wopId);
     }
   });
 
   if (selected.length === 0) {
-    const msg = isINSJob
-      ? 'Select at least one in-stock or INS part.'
-      : 'Select at least one in-stock part (hint must be STOCK).';
-    alert(msg);
+    alert(isINSJob
+      ? 'Select at least one in-stock or INS part (saved rows only).'
+      : 'Select at least one in-stock part (saved rows only).'
+    );
     return;
   }
 
-  // ✅ ПУНКТ 2: требуем INV# ТОЛЬКО ДЛЯ ВЫБРАННЫХ (selected) строк
-  let missingInv = false;
-
+  // 2) require INV# for selected rows
+  let firstEmpty = null;
   document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
     if (tr.classList.contains('issued-row')) return;
 
     const cb = tr.querySelector('.issue-check');
     if (!cb) return;
 
-    // важно: проверяем только те строки, которые реально идут в invoice (selected)
-    if (!selected.includes(cb.value)) return;
+    const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
+    if (!selected.includes(wopId)) return;
 
     const inv = (tr.querySelector('.inv-input')?.value || '').trim();
-    if (!inv) missingInv = true;
+    if (!inv && !firstEmpty) firstEmpty = tr;
   });
 
-  if (missingInv){
-  alert('Invoice # is required for all selected lines before issuing.');
+  if (firstEmpty){
+    alert('Invoice # is required for all selected lines before issuing.');
+    const inp = firstEmpty.querySelector('.inv-input');
+    if (inp){
+      inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      inp.focus();
+      inp.classList.add('inv-missing');
+      setTimeout(() => inp.classList.remove('inv-missing'), 2000);
+    }
+    return;
+  }
+    // --- FIX: copy INV# of selected lines into issueForm ---
+  const issueFormEl = document.getElementById('issueForm');
+  if (issueFormEl) {
+    // remove old injected inv_*
+    issueFormEl.querySelectorAll('input[data-invcopy="1"]').forEach(x => x.remove());
 
-  // фокус на первое пустое INV# среди выбранных строк
-  const firstEmpty = Array.from(document.querySelectorAll('#unitsWrap tbody tr'))
-    .find(tr => {
-      if (tr.classList.contains('issued-row')) return false;
+    document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
+      if (tr.classList.contains('issued-row')) return;
 
       const cb = tr.querySelector('.issue-check');
-      if (!cb) return false;
-      if (!selected.includes(cb.value)) return false;
+      if (!cb) return;
 
-      const inv = (tr.querySelector('.inv-input')?.value || '').trim();
-      return !inv;
+      const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
+      if (!selected.includes(wopId)) return;
+
+      let invVal = (tr.querySelector('.inv-input')?.value || '').trim().toUpperCase();
+      invVal = invVal.replace(/\s+/g, ''); // убираем пробелы внутри
+
+
+      const h = document.createElement('input');
+      h.type = 'hidden';
+      h.name = `inv_${wopId}`;
+      h.value = invVal;
+      h.setAttribute('data-invcopy', '1');
+      issueFormEl.appendChild(h);
     });
-
-  const inp = firstEmpty?.querySelector('.inv-input');
-  if (inp){
-  inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  inp.focus();
-
-  inp.classList.add('inv-missing');
-  setTimeout(() => inp.classList.remove('inv-missing'), 2000);
-}
+  }
+  // --- /FIX ---
 
 
-  return;
-}
-
-
-  // ✅ ПУНКТ 3 (опционально, но полезно): ставим required визуально только на selected строки
-  document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
-    const cb  = tr.querySelector('.issue-check');
-    const inv = tr.querySelector('.inv-input');
-    if (!cb || !inv) return;
-
-    if (selected.includes(cb.value)) inv.setAttribute('required','required');
-    else inv.removeAttribute('required');
-  });
-
+  // 3) submit
   if (statusSel) statusSel.value = 'done';
 
   document.getElementById('issue_set_status').value = 'done';
@@ -1334,6 +1345,7 @@
   document.getElementById('issue_ins_ids').value   = insSelected.join(',');
   document.getElementById('issueForm').submit();
 });
+
 
 
 

@@ -1279,22 +1279,32 @@ def _parse_units_form(form):
 @login_required
 def issued_confirm_toggle():
     """Техник ставит подтверждение через fetch (one-way), админ может ставить/снимать через форму."""
-    from flask import request, redirect, url_for
+    from flask import request, redirect, url_for, jsonify
     from datetime import datetime, timezone
     from flask_login import current_user
     from extensions import db
     from models import IssuedPartRecord, WorkOrder
 
-    rec_id_raw = request.form.get("record_id")
-    wo_id_raw = request.form.get("wo_id")
-    state_raw = request.form.get("state")
+    payload = request.get_json(silent=True) or {}
+
+    def _get(k):
+        v = request.form.get(k)
+        if v is None:
+            v = payload.get(k)
+        if v is None:
+            v = request.args.get(k)
+        return v
+
+    rec_id_raw = _get("record_id")
+    wo_id_raw = _get("wo_id")
+    state_raw = _get("state")
 
     try:
         rec_id = int(rec_id_raw or 0)
     except Exception:
         rec_id = 0
 
-    requested_checked = (state_raw == "1")
+    requested_checked = str(state_raw or "").strip().lower() in ("1", "true", "on", "yes")
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
     user_id = getattr(current_user, "id", None)
@@ -1305,52 +1315,58 @@ def issued_confirm_toggle():
         or str(user_id)
     )
 
+    is_adminlike = role in ("admin", "superadmin")
+
     if not wo_id_raw or not rec_id:
-        if role in ("admin", "superadmin"):
+        if is_adminlike:
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw or 0))
-        return ("", 204)
+        return jsonify({"ok": False, "error": "MISSING_PARAMS"}), 400
 
     wo = WorkOrder.query.get(int(wo_id_raw))
     if not wo:
-        if role in ("admin", "superadmin"):
+        if is_adminlike:
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
-        return ("", 204)
+        return jsonify({"ok": False, "error": "WO_NOT_FOUND"}), 404
 
     wo_tech_id = getattr(wo, "technician_id", None)
-    wo_tech_name = (wo.technician_username or wo.technician_name or "").strip().lower()
+    wo_tech_name = (
+        (getattr(wo, "technician_username", None) or "") or
+        (getattr(wo, "technician_name", None) or "")
+    ).strip().lower()
+
     me_name = (
-        (getattr(current_user, "username", "") or getattr(current_user, "name", "") or "")
-        .strip()
-        .lower()
-    )
+        (getattr(current_user, "username", "") or "") or
+        (getattr(current_user, "email", "") or "") or
+        (getattr(current_user, "name", "") or "")
+    ).strip().lower()
 
     is_my_wo = (
-        (wo_tech_id and user_id and wo_tech_id == user_id)
+        (wo_tech_id is not None and user_id is not None and int(wo_tech_id) == int(user_id))
         or (wo_tech_name and me_name and wo_tech_name == me_name)
     )
 
-    is_adminlike = role in ("admin", "superadmin")
     is_techlike = role in ("technician", "tech") and is_my_wo
 
     rec = IssuedPartRecord.query.filter_by(id=rec_id).first()
     if not rec:
         if is_adminlike:
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
-        return ("", 204)
+        return jsonify({"ok": False, "error": "REC_NOT_FOUND"}), 404
 
     currently_confirmed = bool(rec.confirmed_by_tech)
 
     if is_adminlike:
         new_state = bool(requested_checked)
     elif is_techlike:
+        # one-way for technician
         new_state = True if requested_checked else currently_confirmed
     else:
-        return ("", 204)
+        return jsonify({"ok": False, "error": "FORBIDDEN"}), 403
 
     if new_state == currently_confirmed:
         if is_adminlike:
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
-        return ("", 204)
+        return jsonify({"ok": True, "noop": True, "confirmed": currently_confirmed})
 
     rec.confirmed_by_tech = new_state
     if new_state:
@@ -1364,7 +1380,9 @@ def issued_confirm_toggle():
 
     if is_adminlike:
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
-    return ("", 204)
+
+    return jsonify({"ok": True, "record_id": rec_id, "confirmed": bool(rec.confirmed_by_tech)})
+
 
 # ---------- STOCK HINT API ----------
 from flask import jsonify, request
@@ -3094,10 +3112,14 @@ def wo_detail(wo_id):
         .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
     )
     if canon:
+        canon_t = canon.strip()
         base_q = base_q.filter(
             or_(
-                func.trim(IssuedPartRecord.reference_job) == canon,
-                func.trim(IssuedBatch.reference_job) == canon,
+                func.trim(IssuedPartRecord.reference_job) == canon_t,
+                func.trim(IssuedPartRecord.reference_job).like(f"%{canon_t}%"),
+
+                func.trim(IssuedBatch.reference_job) == canon_t,
+                func.trim(IssuedBatch.reference_job).like(f"%{canon_t}%"),  # ✅ ВАЖНО для RETURN ...
             )
         )
 
@@ -5133,6 +5155,7 @@ def wo_issue_instock(wo_id):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
+    import re
     from urllib.parse import urlencode
     from markupsafe import Markup
     from sqlalchemy import func
@@ -5143,20 +5166,18 @@ def wo_issue_instock(wo_id):
     from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch
 
     wo = WorkOrder.query.get_or_404(wo_id)
-    # страховая ли это работа
     is_ins_job = ((wo.job_type or "").upper() == "INSURANCE")
 
-    # ===== флаг автосмены статуса (done или нет) =====
     set_status = (request.form.get("set_status") or "").strip().lower()
 
-    # === 1) расчёт доступности (для greedy-проверки) ===
+    # === availability (для greedy) ===
     try:
         avail_rows = compute_availability(wo) or []
     except Exception:
         avail_rows = []
 
-    stock_map: dict[str, int] = {}  # PN -> on_hand (по расчёту)
-    hint_map: dict[str, str] = {}   # PN -> hint/status
+    stock_map: dict[str, int] = {}
+    hint_map: dict[str, str] = {}
     for r in avail_rows:
         pn = (r.get("part_number") or "").strip().upper()
         if not pn:
@@ -5193,15 +5214,62 @@ def wo_issue_instock(wo_id):
         )
         return max(int(mb), int(ml)) + 1
 
-    # === 2) Режим “выбрано” — выдаём конкретные строки по их ID ===
+    # ===== INV from UI: inv_map (preferred) + fallback inv_<id> =====
+    inv_by_id: dict[int, str] = {}
+    inv_map_raw = (request.form.get("inv_map") or "").strip()
+
+    # format: "123=ABC;124=ZX9"
+    if inv_map_raw:
+        for pair in inv_map_raw.split(";"):
+            pair = pair.strip()
+            if not pair or "=" not in pair:
+                continue
+            k, v = pair.split("=", 1)
+            k = (k or "").strip()
+            v = (v or "").strip().upper()
+            if k.isdigit() and v:
+                inv_by_id[int(k)] = v[:32]
+
+    def _read_inv_for_line(line_id: int) -> str:
+        lid = int(line_id)
+
+        # 1) inv_map has priority (works even if inputs are outside the submitted form)
+        v = (inv_by_id.get(lid) or "").strip().upper()
+        if v:
+            return v[:32]
+
+        # 2) fallback: classic input names inside the SAME form
+        candidates = [
+            f"inv_{lid}",
+            f"invoice_{lid}",
+            f"invoice_number_{lid}",
+            f"invoice_number[{lid}]",
+            f"wop[{lid}][invoice_number]",
+            f"rows_by_id[{lid}][invoice_number]",
+            f"parts[{lid}][invoice_number]",
+        ]
+        for name in candidates:
+            vv = (request.form.get(name) or "").strip().upper()
+            if vv:
+                return vv[:32]
+
+        patt = re.compile(rf".*\[{lid}\].*\[invoice_number\]$", re.IGNORECASE)
+        for k in request.form.keys():
+            if patt.match(k):
+                vv = (request.form.get(k) or "").strip().upper()
+                if vv:
+                    return vv[:32]
+        return ""
+
+    # === 2) Selected mode ===
     raw_ids = (request.form.get("part_ids") or "").strip()
-    items_to_issue = []        # для обычных складских строк (через helper)
+
+    items_to_issue = []
     issued_row_ids: list[int] = []
     skipped_rows = []
-    new_records: list[IssuedPartRecord] = []   # ВСЕ созданные IssuedPartRecord (INS + stock)
+    new_records: list[IssuedPartRecord] = []
     issue_date = datetime.utcnow()
 
-    # ID строк, которые в форме были помечены INS (галочка INS на момент клика)
     raw_ins_ids = (request.form.get("ins_ids") or "").strip()
     ins_ids: set[int] = set()
     if raw_ins_ids:
@@ -5230,21 +5298,34 @@ def wo_issue_instock(wo_id):
 
         part_has_location = hasattr(Part, "location")
 
+        # precompute INV per selected line from UI snapshot
+        inv_now_by_line_id: dict[int, str] = {}
+        for line in wops:
+            inv_now_by_line_id[int(line.id)] = _read_inv_for_line(int(line.id))
+
         for line in wops:
             pn = (line.part_number or "").strip().upper()
             qty_req = int(line.quantity or 0)
             if not pn or qty_req <= 0:
                 continue
 
-            # Строка считается INS, если:
-            #  - либо галочка INS стоит в текущей форме (line.id в ins_ids),
-            #  - либо уже сохранена в БД как is_insurance_supplied
+            # ✅ INV# snapshot from UI (even without Save)
+            inv_now = (inv_now_by_line_id.get(int(line.id)) or "").strip().upper()[:32]
+
+            # ✅ if user typed INV# but didn't Save — save it now
+            # (safe: just one field, minimal risk)
+            if inv_now and hasattr(line, "invoice_number"):
+                try:
+                    line.invoice_number = inv_now
+                    db.session.add(line)
+                except Exception:
+                    pass
+
             is_ins_line = (
                 (line.id in ins_ids)
                 or bool(getattr(line, "is_insurance_supplied", False))
             )
 
-            # базовый запрос по Part
             q_base = Part.query.filter(func.upper(Part.part_number) == pn)
             part = None
             if part_has_location and getattr(line, "warehouse", None):
@@ -5254,7 +5335,6 @@ def wo_issue_instock(wo_id):
             if not part:
                 part = q_base.first()
 
-            # нормализуем подсказку
             hint_norm = (hint_map.get(pn) or "STOCK").upper()
             if hasattr(line, "stock_hint"):
                 try:
@@ -5262,13 +5342,10 @@ def wo_issue_instock(wo_id):
                 except Exception:
                     pass
 
-            # ========== A) INS-строки для страховых работ ==========
+            # ========== A) INS ==========
             if is_ins_job and is_ins_line:
-                # --- INS: ensure Part exists (part_id NOT NULL) ---
                 if not part:
                     part = Part(part_number=pn)
-
-                    # заполним базовые поля, если есть в модели
                     if hasattr(part, "name"):
                         part.name = getattr(line, "part_name", "") or pn
                     if hasattr(Part, "location"):
@@ -5277,9 +5354,8 @@ def wo_issue_instock(wo_id):
                         setattr(part, "quantity", 0)
                     if hasattr(Part, "unit_cost"):
                         setattr(part, "unit_cost", 0.0)
-
                     db.session.add(part)
-                    db.session.flush()  # теперь у Part есть id
+                    db.session.flush()
 
                 rec = IssuedPartRecord(
                     part_id=part.id,
@@ -5292,7 +5368,10 @@ def wo_issue_instock(wo_id):
                     is_insurance_supplied=True,
                     location=getattr(part, "location", "INS"),
                 )
-                # безопасно дозададим поля, если они есть в модели
+                # store INV# separately if field exists
+                if hasattr(rec, "inv_ref"):
+                    rec.inv_ref = inv_now or None
+
                 if hasattr(rec, "part_number"):
                     rec.part_number = pn
                 if hasattr(rec, "name_at_issue"):
@@ -5311,11 +5390,9 @@ def wo_issue_instock(wo_id):
                 if hasattr(line, "last_issued_at"):
                     line.last_issued_at = issue_date
                 db.session.add(line)
-
-                # для INS-строки склад не трогаем
                 continue
 
-            # ========== B) Обычные складские строки ==========
+            # ========== B) STOCK ==========
             if not part:
                 skipped_rows.append({
                     "id": line.id,
@@ -5328,8 +5405,6 @@ def wo_issue_instock(wo_id):
 
             ok = can_issue(pn, qty_req)
 
-            # доп. проверка: если greedy сказал "нет",
-            # но фактически по складу qty хватает — разрешаем
             if not ok and part:
                 try:
                     real_left = int(getattr(part, "quantity", 0) or 0)
@@ -5357,7 +5432,6 @@ def wo_issue_instock(wo_id):
                 })
                 continue
 
-            # реальная себестоимость из склада
             try:
                 real_cost = float(part.unit_cost or 0.0)
             except Exception:
@@ -5367,11 +5441,11 @@ def wo_issue_instock(wo_id):
                 "part_id": part.id,
                 "qty": qty_req,
                 "unit_price": real_cost,
+                "inv_ref": inv_now,  # ✅ IMPORTANT: goes into IssuedPartRecord.inv_ref via helper
             })
-
             issued_row_ids.append(line.id)
 
-        # --- выдаём обычные складские строки пачкой ---
+        # --- issue stock items in bulk ---
         if items_to_issue:
             try:
                 issue_date_stock, created_records = _issue_records_bulk(
@@ -5382,20 +5456,13 @@ def wo_issue_instock(wo_id):
                 if issue_date_stock:
                     issue_date = issue_date_stock
                 if created_records:
-                    for r in created_records:
-                        # сопоставляем по part_number
-                        for line in wops:
-                            if (line.part_number or "").strip().upper() == (r.part.part_number or "").strip().upper():
-                                r.inv_ref = (line.invoice_number or "").strip()
-                                break
                     new_records.extend(created_records)
-
             except Exception as e:
                 db.session.rollback()
                 flash(f"Error issuing stock items: {e}", "danger")
                 return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-            # обновляем issued_qty / status / last_issued_at для складских строк
+            # update issued_qty/status/last_issued_at for selected lines
             now = datetime.utcnow()
             for line in WorkOrderPart.query.filter(
                 WorkOrderPart.id.in_(issued_row_ids)
@@ -5416,7 +5483,7 @@ def wo_issue_instock(wo_id):
 
         db.session.commit()
 
-        # автосмена статуса WO -> done (если попросили)
+        # autostatus
         if set_status == "done":
             try:
                 wo.status = "done"
@@ -5424,7 +5491,7 @@ def wo_issue_instock(wo_id):
             except Exception:
                 db.session.rollback()
 
-        # --- если есть новые записи - создаём батч и инвойс ---
+        # create invoice/batch if there are new records
         if new_records:
             try:
                 inv_no = _reserve_invoice_number()
@@ -5458,9 +5525,9 @@ def wo_issue_instock(wo_id):
                 ))
             except Exception:
                 db.session.rollback()
-                # пойдём в grouped fallback ниже
+                # fallback below
 
-        # --- fallback: сгруппированный отчёт за день ---
+        # grouped fallback
         d = (issue_date or datetime.utcnow()).date().isoformat()
         params = urlencode({
             "start_date": d,
@@ -5484,9 +5551,9 @@ def wo_issue_instock(wo_id):
             issued_ids=",".join(map(str, issued_row_ids))
         ))
 
-    # === 3) Режим “ничего не выбрано” — массовая выдача in-stock (как раньше) ===
+    # === 3) Not selected mode (mass in-stock) — unchanged ===
     pn_issue_map = {}
-    items_to_issue.clear()
+    items_to_issue = []
 
     for r in avail_rows:
         issue_now = int(r.get("issue_now") or 0)
@@ -5524,7 +5591,6 @@ def wo_issue_instock(wo_id):
         items=items_to_issue,
     )
 
-    # распределяем выданное количество по строкам этого WO (issued_qty / status / last_issued_at)
     now = datetime.utcnow()
     for pn, need_to_apply in pn_issue_map.items():
         if need_to_apply <= 0:
@@ -5567,7 +5633,6 @@ def wo_issue_instock(wo_id):
 
     db.session.commit()
 
-    # статус WO -> done, если попросили
     if set_status == "done":
         try:
             wo.status = "done"
@@ -5590,7 +5655,6 @@ def wo_issue_instock(wo_id):
             except Exception:
                 db.session.rollback()
 
-    # сгруппированный отчёт за день (массовый режим как раньше)
     d = (issue_date or datetime.utcnow()).date().isoformat()
     params = urlencode({
         "start_date": d,
@@ -5605,7 +5669,7 @@ def wo_issue_instock(wo_id):
         f'<a href="{link}" target="_blank" rel="noopener">Open invoice group</a> to print.'
     ), "success")
 
-    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+    return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
 @login_required
