@@ -723,6 +723,22 @@ def _harden_preview_headers(df, default_loc: str, supplier_hint: str | None, sou
     )
     return df[keep].copy()
 
+def _job_token_match(col, token: str):
+    t = (token or "").strip()
+    if not t:
+        return False
+
+    return or_(
+        func.trim(col) == t,
+        col.ilike(f"{t},%"),
+        col.ilike(f"%, {t},%"),
+        col.ilike(f"%,{t},%"),
+        col.ilike(f"%, {t}"),
+        col.ilike(f"%,{t}"),
+        col.ilike(f"% {t} %"),
+        col.ilike(f"{t} %"),
+        col.ilike(f"% {t}"),
+    )
 
 
 def _coerce_norm_df(obj) -> pd.DataFrame:
@@ -3081,7 +3097,6 @@ def wo_detail(wo_id):
         base_q = base_q.filter(
             or_(
                 func.trim(IssuedPartRecord.reference_job) == canon,
-                func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
                 func.trim(IssuedBatch.reference_job) == canon,
             )
         )
@@ -5024,7 +5039,7 @@ def wo_list():
             for ref in ref_jobs:
                 if ref:
                     conds.append(func.trim(WorkOrder.canonical_job) == ref)
-                    conds.append(WorkOrder.job_numbers.ilike(f"%{ref}%"))
+                    conds.append(_job_token_match(WorkOrder.job_numbers, ref))
 
         filters.append(or_(*conds))
 
