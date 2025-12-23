@@ -58,6 +58,11 @@
   }
 </style>
 
+{# роли #}
+{% set role_low = (current_user.role or '')|lower %}
+{% set IS_SUPER = role_low == 'superadmin' %}
+{% set IS_ADMIN = role_low in ['admin','superadmin'] %}
+
 <div class="reports-grouped">
   <div class="report-filters filters-sticky">
     <h2 class="mb-2">Issued Parts Report (Grouped by Invoice)</h2>
@@ -249,7 +254,7 @@
         </div>
 
         {# ------------------ Панель действий: слева/справа ------------------ #}
-        {% if current_user.role in ['superadmin', 'admin', 'user'] %}
+        {% if role_low in ['superadmin', 'admin', 'user'] %}
         <form id="form-{{ inv.id }}"
               method="post"
               action="{{ url_for('inventory.update_invoice') }}"
@@ -294,16 +299,14 @@
               Mark Consumed
             </button>
 
-            {% if current_user.role in ['superadmin', 'admin', 'user'] %}
-              <button type="submit"
-                      class="btn btn-outline-secondary btn-sm"
-                      name="do_unconsume" value="1"
-                      formaction="{{ url_for('inventory.unconsume_invoice') }}"
-                      formmethod="post"
-                      title="Reset consumed_qty for chosen scope">
-                Unconsume Selected
-              </button>
-            {% endif %}
+            <button type="submit"
+                    class="btn btn-outline-secondary btn-sm"
+                    name="do_unconsume" value="1"
+                    formaction="{{ url_for('inventory.unconsume_invoice') }}"
+                    formmethod="post"
+                    title="Reset consumed_qty for chosen scope">
+              Unconsume Selected
+            </button>
 
             {% if not is_return and has_selectable %}
               <button type="submit" class="btn btn-warning btn-sm"
@@ -320,7 +323,7 @@
               Save Invoice
             </button>
 
-            {% if current_user.role == 'superadmin' and is_return %}
+            {% if IS_SUPER and is_return %}
               <button type="submit" class="btn btn-outline-danger btn-sm"
                       name="delete_return" value="1"
                       onclick="return confirm('Delete this RETURN invoice and adjust stock?');">
@@ -328,7 +331,7 @@
               </button>
             {% endif %}
 
-            {% if current_user.role == 'superadmin' and not is_return and inv.invoice_number %}
+            {% if IS_SUPER and not is_return and inv.invoice_number %}
               <button type="submit" class="btn btn-outline-danger btn-sm"
                       name="delete_invoice" value="{{ inv.invoice_number }}"
                       onclick="return confirm('Delete ENTIRE invoice (all rows) and adjust stock?');">
@@ -410,7 +413,7 @@
                     <td>{{ it.part.part_number if it.part else '' }}</td>
                     <td>{{ it.part.name if it.part else '' }}</td>
 
-                    {% if current_user.role == 'superadmin' %}
+                    {% if IS_SUPER %}
                       <td class="text-end">
                         <input type="number" step="1" class="form-control form-control-sm text-end"
                                name="edit_qty_{{ it.id }}" value="{{ it_qty }}" form="form-{{ inv.id }}">
@@ -459,7 +462,16 @@
                       <td class="text-end">{{ '%.2f'|format(it.unit_cost_at_issue or 0) }}</td>
                       <td class="text-end">{{ '%.2f'|format(it_qty*(it.unit_cost_at_issue or 0)) }}</td>
                       <td>{{ it.issued_to }}</td>
-                      <td>{{ it.reference_job }}</td>
+
+                      {# ✅ ADMIN can edit ONLY Reference Job #}
+                      <td>
+                        {% if IS_ADMIN %}
+                          <input type="text" class="form-control form-control-sm"
+                                 name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="form-{{ inv.id }}">
+                        {% else %}
+                          {{ it.reference_job }}
+                        {% endif %}
+                      </td>
                     {% endif %}
 
                     <td>{{ it.issue_date.strftime('%Y-%m-%d') if it.issue_date }}</td>

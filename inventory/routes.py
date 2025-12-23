@@ -7917,9 +7917,15 @@ def update_invoice():
         return redirect(url_for('inventory.reports_grouped'))
 
     # ---------- SAVE (edit + assign invoice number for scope='all') ----------
+
+    # ---------- SAVE (edit + assign invoice number for scope='all') ----------
     try:
-        # Superadmin can edit line fields with proper stock adjustment
-        if current_user.role == 'superadmin':
+        role = (getattr(current_user, "role", "") or "").strip().lower()
+        can_edit_refjob = role in ("superadmin", "admin")
+        is_super = role == "superadmin"
+
+        # 1) SUPERADMIN: full edit (qty/ucost/issued_to/refjob)
+        if is_super:
             for r in recs:
                 # Qty edit
                 new_qty_s = request.form.get(f"edit_qty_{r.id}")
@@ -7942,22 +7948,45 @@ def update_invoice():
                     except Exception:
                         pass
 
-                # Issued To / Reference Job edit
+                # Issued To edit
                 new_it = request.form.get(f"edit_issued_to_{r.id}")
                 if new_it is not None:
                     r.issued_to = new_it.strip()
+
+                # Reference Job edit
                 new_rj = request.form.get(f"edit_refjob_{r.id}")
                 if new_rj is not None:
                     r.reference_job = (new_rj.strip() or None)
 
-        # Common header fields
+        # 2) ADMIN: only Reference Job edit
+        elif can_edit_refjob:
+            changed_ref = None
+            for r in recs:
+                new_rj = request.form.get(f"edit_refjob_{r.id}")
+                if new_rj is None:
+                    continue
+                new_val = (new_rj.strip() or None)
+                if new_val != r.reference_job:
+                    r.reference_job = new_val
+                    changed_ref = new_val
+
+            # If we changed ref job — also update batch header(s) so the card "Ref:" updates
+            if changed_ref is not None:
+                batch_ids = {getattr(r, "batch_id", None) for r in recs if getattr(r, "batch_id", None)}
+                if batch_ids:
+                    for bid in batch_ids:
+                        b = db.session.get(IssuedBatch, bid)
+                        if b:
+                            b.reference_job = changed_ref
+
+        # 3) Common header fields (keep as-is)
         for r in recs:
             r.issued_by = issued_by or r.issued_by
             r.issue_date = issue_date or r.issue_date
             if location:
                 r.location = location
 
-        # Assign invoice number only when saving the whole card and only if none of the rows has a number
+        # 4) Assign invoice number only when saving the whole card and only if none of the rows has a number
         if apply_scope == 'all' and all(getattr(r, "invoice_number", None) is None for r in recs):
             base = recs[0]
             _ensure_invoice_number_for_records(
