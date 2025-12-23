@@ -114,6 +114,13 @@
             Showing {{ count_items }} result{% if count_items != 1 %}s{% endif %}
             {% if count_items >= 200 %}(limited to 200){% endif %}
           {% endif %}
+
+          {% if matched_by_invoice and matched_invoice_number %}
+              <span class="badge bg-info text-dark ms-2">
+                Matched by Invoice #{{ matched_invoice_number }}
+              </span>
+            {% endif %}
+
         </small>
       </div>
 
@@ -342,6 +349,11 @@
             <span class="jobs-trunc" title="{{ w.job_numbers or '' }}">
               {{ w.job_numbers or '—' }}
             </span>
+
+             {% if matched_by_invoice and (invoice_matched_wo_ids is defined) and (w.id in invoice_matched_wo_ids) %}
+              <span class="badge bg-warning text-dark ms-2">INV#{{ matched_invoice_number }}</span>
+            {% endif %}
+
             {% if w.canonical_job %}
               <div class="text-muted small">primary: <code>{{ w.canonical_job }}</code></div>
             {% endif %}

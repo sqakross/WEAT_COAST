@@ -5,6 +5,7 @@ from sqlalchemy.orm import relationship, validates
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy import CheckConstraint, UniqueConstraint, func
 from extensions import db
+import re
 
 # --------------------------------
 # User roles
@@ -113,14 +114,23 @@ class WorkOrder(db.Model):
 
     @property
     def canonical_job(self) -> str:
-        nums = [n.strip() for n in (self.job_numbers or "").split(",") if n.strip()]
-        ints = []
-        for n in nums:
+        """
+        Primary job number is always the numerically larger of the two (or more).
+        Robust parsing: supports "991472 991929" and "991472,991929" and "RETURN 991472 991929".
+        """
+        s = (self.job_numbers or "").strip()
+
+        # Prefer numeric job tokens (your real jobs are numeric)
+        nums = re.findall(r"\d+", s)
+        if nums:
             try:
-                ints.append(int(n))
-            except ValueError:
+                return str(max(int(x) for x in nums))
+            except Exception:
                 pass
-        return str(max(ints)) if ints else (nums[0] if nums else "")
+
+        # Fallback: first alnum token (for weird legacy like 122225TOM)
+        words = re.findall(r"[A-Za-z0-9]+", s)
+        return words[0] if words else ""
 
     @property
     def technician_username(self) -> str:

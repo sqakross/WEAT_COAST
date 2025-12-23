@@ -3046,6 +3046,7 @@ def wo_detail(wo_id):
     from extensions import db
     from models import WorkOrder, WorkUnit, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch
     from collections import defaultdict, defaultdict as _dd
+    import re
 
     # 1) загрузка WO со всеми строками
     wo = (
@@ -3103,25 +3104,77 @@ def wo_detail(wo_id):
         )
     ]
 
-    # 4) Issued / Batches
+    # ----------------------------------------------------------------
+    # 4) Issued / Batches  (FIX: match by ALL WO job tokens, token-safe)
+    # ----------------------------------------------------------------
     canon = (wo.canonical_job or "").strip()
+
+    raw_jobs = (getattr(wo, "job_numbers", "") or "").strip()
+
+    # извлекаем токены максимально безопасно (цифры/буквы), т.к. у тебя бывают "RETURN ..."
+    job_tokens = []
+    for t in re.findall(r"[A-Za-z0-9]+", raw_jobs):
+        tt = (t or "").strip()
+        if tt:
+            job_tokens.append(tt)
+
+    # canonical первым (чтобы если он есть — он точно в списке)
+    if canon and canon not in job_tokens:
+        job_tokens.insert(0, canon)
+
+    # de-dup, keep order
+    seen = set()
+    job_tokens = [x for x in job_tokens if not (x in seen or seen.add(x))]
+
+    def _token_match(col, tok: str):
+        """
+        SQLite-safe token match:
+        - digits: match as token (not inside other digits), handles:
+          '991472', '991472 991929', 'RETURN 991472 991929'
+        - alnum tokens: safer boundary by spaces/edges
+        """
+        tok = (tok or "").strip()
+        if not tok:
+            return False
+
+        # normalize NULL -> ""
+        c = func.coalesce(func.trim(col), "")
+
+        if tok.isdigit():
+            # boundaries: not a digit around the token
+            return or_(
+                c == tok,
+                c.op("GLOB")(f"{tok}[^0-9]*"),           # starts with tok then boundary
+                c.op("GLOB")(f"*[^0-9]{tok}[^0-9]*"),    # middle token
+                c.op("GLOB")(f"*[^0-9]{tok}"),           # ends with tok
+            )
+
+        # fallback for rare alnum tokens (e.g. 122225TOM)
+        return or_(
+            c == tok,
+            c.like(f"{tok} %"),
+            c.like(f"% {tok} %"),
+            c.like(f"% {tok}"),
+            c.like(f"%{tok},%"),
+        )
 
     base_q = (
         db.session.query(IssuedPartRecord)
         .options(joinedload(IssuedPartRecord.part), joinedload(IssuedPartRecord.batch))
         .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
     )
-    if canon:
-        canon_t = canon.strip()
-        base_q = base_q.filter(
-            or_(
-                func.trim(IssuedPartRecord.reference_job) == canon_t,
-                func.trim(IssuedPartRecord.reference_job).like(f"%{canon_t}%"),
 
-                func.trim(IssuedBatch.reference_job) == canon_t,
-                func.trim(IssuedBatch.reference_job).like(f"%{canon_t}%"),  # ✅ ВАЖНО для RETURN ...
-            )
-        )
+    # ВАЖНО:
+    # 1) не “только canon”
+    # 2) ищем по ЛЮБОМУ токену из WO.job_numbers
+    # 3) токен-матч (991472 НЕ матчится внутри 1991472)
+    token_ors = []
+    for tok in job_tokens:
+        token_ors.append(_token_match(IssuedPartRecord.reference_job, tok))
+        token_ors.append(_token_match(IssuedBatch.reference_job, tok))
+
+    if token_ors:
+        base_q = base_q.filter(or_(*token_ors))
 
     issued_items = base_q.order_by(
         IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()
@@ -3364,9 +3417,9 @@ def wo_detail(wo_id):
         raw_oflag = getattr(r, "ordered_flag", None)
         ordered_flag_truthy = raw_oflag not in (None, False, 0, "0", "", "false", "False")
         is_ordered = (
-                ordered_flag_truthy
-                or (str(getattr(r, "status", "")).strip().lower() == "ordered")
-                or (str(getattr(r, "line_status", "")).strip().lower() == "ordered")
+            ordered_flag_truthy
+            or (str(getattr(r, "status", "")).strip().lower() == "ordered")
+            or (str(getattr(r, "line_status", "")).strip().lower() == "ordered")
         )
         is_invoiced = pn in invoiced_pns
 
@@ -3374,10 +3427,10 @@ def wo_detail(wo_id):
             {
                 "part_number": getattr(r, "part_number", "") or "",
                 "alt_part_numbers": (
-                        getattr(r, "alt_part_numbers", "") or
-                        getattr(r, "alt_numbers", "") or
-                        getattr(r, "alt_pn", "") or
-                        ""
+                    getattr(r, "alt_part_numbers", "") or
+                    getattr(r, "alt_numbers", "") or
+                    getattr(r, "alt_pn", "") or
+                    ""
                 ),
                 "part_name": getattr(r, "part_name", "") or getattr(r, "name", "") or "—",
                 "qty": qty_planned,
@@ -3395,7 +3448,6 @@ def wo_detail(wo_id):
                 "inv_ref": (getattr(r, "invoice_number", "") or "").strip(),
             }
         )
-
 
     # 6) отдаём в шаблон
     return render_template(
@@ -3419,7 +3471,6 @@ def wo_detail(wo_id):
         can_view_docs=can_view_docs,
         current_user=current_user,
     )
-
 
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
@@ -4959,6 +5010,40 @@ def wo_list():
     from datetime import datetime, timedelta
     from sqlalchemy import and_, or_, func, String
     from models import IssuedBatch, IssuedPartRecord
+    import re
+
+    # -----------------------------
+    # helper: token-safe job match
+    # -----------------------------
+    def _job_token_match(col, tok: str):
+        """
+        SQLite-safe token match for WorkOrder.job_numbers.
+
+        - digits: matches as standalone token, not as substring inside longer digits
+          handles: '991472', '991472 991929', 'RETURN 991472 991929'
+        - alnum: space/edge boundaries
+        """
+        tok = (tok or "").strip()
+        if not tok:
+            return False
+
+        c = func.coalesce(func.trim(col), "")
+
+        if tok.isdigit():
+            return or_(
+                c == tok,
+                c.op("GLOB")(f"{tok}[^0-9]*"),            # starts with tok then non-digit boundary
+                c.op("GLOB")(f"*[^0-9]{tok}[^0-9]*"),     # middle token
+                c.op("GLOB")(f"*[^0-9]{tok}"),            # ends with tok
+            )
+
+        return or_(
+            c == tok,
+            c.like(f"{tok} %"),
+            c.like(f"% {tok} %"),
+            c.like(f"% {tok}"),
+            c.like(f"%{tok},%"),
+        )
 
     # ---- incoming params ----
     qtext = (request.args.get("q") or "").strip()
@@ -4972,6 +5057,11 @@ def wo_list():
     tech_id = int(tech_id_raw) if tech_id_raw.isdigit() else None
     job_type = type_raw if type_raw in ("BASE", "INSURANCE") else ""
     status   = status_raw if status_raw in ("search_ordered", "ordered", "done") else ""
+
+    # --- UI markers (so you can show: "Matched by Invoice #1005") ---
+    matched_by_invoice = False
+    matched_invoice_number = ""
+    invoice_matched_wo_ids = set()
 
     # ---- base query ----
     q = db.session.query(WorkOrder)
@@ -5027,6 +5117,9 @@ def wo_list():
 
         # ---- Issued INV# search (handles "000918" and "918") ----
         if qnorm.isdigit():
+            matched_by_invoice = True
+            matched_invoice_number = qnorm
+
             inv_raw = qnorm
             inv_trim = inv_raw.lstrip("0") or "0"
             inv_z6 = inv_trim.zfill(6)
@@ -5057,14 +5150,33 @@ def wo_list():
                 if ref:
                     ref_jobs.add(str(ref).strip())
 
-            # map found reference_job -> WorkOrder
+            # Turn ref_jobs into TOKENS, because ref might be "991472 991929"
+            invoice_job_tokens = []
             for ref in ref_jobs:
-                if ref:
-                    conds.append(func.trim(WorkOrder.canonical_job) == ref)
-                    conds.append(_job_token_match(WorkOrder.job_numbers, ref))
+                for t in re.findall(r"[A-Za-z0-9]+", ref or ""):
+                    tt = (t or "").strip()
+                    if tt:
+                        invoice_job_tokens.append(tt)
+
+            # de-dup keep order
+            seen = set()
+            invoice_job_tokens = [x for x in invoice_job_tokens if not (x in seen or seen.add(x))]
+
+            # Add invoice-derived job tokens into WO search (NO canonical_job property!)
+            for tok in invoice_job_tokens:
+                conds.append(_job_token_match(WorkOrder.job_numbers, tok))
+
+            # Also compute wo_ids to mark rows in UI as "matched by invoice"
+            if invoice_job_tokens:
+                id_q = db.session.query(WorkOrder.id).filter(
+                    or_(*[_job_token_match(WorkOrder.job_numbers, tok) for tok in invoice_job_tokens])
+                )
+                # Respect same visibility/explicit filters (technician filter etc.)
+                if filters:
+                    id_q = id_q.filter(and_(*filters))
+                invoice_matched_wo_ids = {int(x[0]) for x in id_q.all()}
 
         filters.append(or_(*conds))
-
 
     # ---- created_at date range (inclusive) ----
     if dfrom:
@@ -5145,6 +5257,11 @@ def wo_list():
         hint_values=hint_values,
         technicians=technicians,
         filters=filters_ctx,
+
+        # ✅ NEW: UI markers
+        matched_by_invoice=matched_by_invoice,
+        matched_invoice_number=matched_invoice_number,
+        invoice_matched_wo_ids=invoice_matched_wo_ids,
     )
 
 @inventory_bp.post("/work_orders/<int:wo_id>/issue_instock", endpoint="wo_issue_instock")
