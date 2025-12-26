@@ -377,6 +377,7 @@
                   <th>Reference Job</th>
                   <th>Issue Date</th>
                   <th>Location</th>
+                  <th>INV#</th>
                 </tr>
               </thead>
               <tbody>
@@ -476,6 +477,7 @@
 
                     <td>{{ it.issue_date.strftime('%Y-%m-%d') if it.issue_date }}</td>
                     <td>{{ effective_loc }}</td>
+                    <td>{{ it.inv_ref or '' }}</td>
 
                   </tr>
                 {% endfor %}
