@@ -3176,6 +3176,32 @@ def wo_detail(wo_id):
     if token_ors:
         base_q = base_q.filter(or_(*token_ors))
 
+    # ------------------------------------------------------------
+    # 4b) SAFETY: also restrict issued lines to this WO technician
+    #     (prevents mixing when canonical job is same like 111225)
+    # ------------------------------------------------------------
+    tech_aliases = set()
+
+    # WO tech name (what you print on WO page)
+    if getattr(wo, "technician_name", None):
+        tech_aliases.add((wo.technician_name or "").strip().lower())
+
+    # linked user username (if exists)
+    if getattr(wo, "technician_username", None):
+        tech_aliases.add((wo.technician_username or "").strip().lower())
+
+    # related User object (if joined)
+    if getattr(wo, "technician", None) and getattr(wo.technician, "username", None):
+        tech_aliases.add((wo.technician.username or "").strip().lower())
+
+    tech_aliases = {x for x in tech_aliases if x}
+
+    if tech_aliases:
+        base_q = base_q.filter(
+            func.lower(func.trim(IssuedPartRecord.issued_to)).in_(list(tech_aliases))
+        )
+
+
     issued_items = base_q.order_by(
         IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()
     ).all()
