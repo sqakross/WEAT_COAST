@@ -214,6 +214,16 @@ from supplier_returns.routes import supplier_returns_bp
 app.register_blueprint(supplier_returns_bp, url_prefix="/supplier_returns")
 
 logging.info("Flask app configured and blueprints registered.")
+# from flask import redirect, url_for
+
+@app.get("/")
+def home():
+    # гость -> на логин
+    if not getattr(current_user, "is_authenticated", False):
+        return redirect(url_for("auth.login"))
+    # залогинен -> стартовая Work Orders
+    return redirect(url_for("inventory.wo_list"))
+
 
 # -------------------------------------------------------------------
 # Раздача КОРНЕВОГО CA-корня клиентам (для установки доверия)

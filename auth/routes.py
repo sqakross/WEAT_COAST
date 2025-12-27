@@ -23,9 +23,13 @@ def login():
         user = User.query.filter(func.lower(User.username) == username.lower()).first()
         if user and user.check_password(password):
             login_user(user)
-            return redirect(url_for('inventory.dashboard'))
+
+            next_url = request.args.get("next")
+            return redirect(next_url or url_for("inventory.wo_list"))
+
         flash('Invalid username or password', 'danger')
     return render_template('login.html')
+
 
 # Logout
 @auth_bp.route('/logout')
@@ -40,7 +44,7 @@ def logout():
 def register():
     if current_user.role != ROLE_SUPERADMIN:
         flash('Access denied', 'danger')
-        return redirect(url_for('inventory.dashboard'))
+        return redirect(url_for('inventory.wo_list'))
 
     if request.method == 'POST':
         username = (request.form.get('username') or '').strip()
