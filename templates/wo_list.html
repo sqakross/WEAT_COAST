@@ -68,7 +68,10 @@
   .wo-list-table .col-tech{ width:140px; }
   .wo-list-table .col-type{ width:110px; text-align:center; white-space:nowrap; }
   .wo-list-table .col-status{ width:140px; text-align:center; white-space:nowrap; }
-  .wo-list-table .col-created{ width:110px; white-space:nowrap; }
+
+  /* ✅ AUDIT COLUMN */
+  .wo-list-table .col-audit{ width:190px; white-space:nowrap; }
+
   .wo-list-table .col-actions{ width:180px; white-space:nowrap; }
 
   .jobs-trunc,.brand-trunc{
@@ -76,31 +79,36 @@
     overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;
   }
 
+  /* ✅ audit look */
+  .audit-cell{ line-height:1.15; }
+  .audit-cell .when{ display:block; font-size:.86rem; }
+  .audit-cell .who{ display:block; font-size:.78rem; color:#6c757d; }
+
   /* На таче — компактные кнопки действий в столбик */
   @media (pointer:coarse){
     .wo-list-table .col-actions{ width:96px; }
-    .wo-list-table .col-created{ width:84px; }
+    .wo-list-table .col-audit{ width:140px; }
     .jobs-trunc,.brand-trunc{ max-width:180px; }
     .wo-actions{ flex-direction:column !important; gap:.4rem !important; align-items:stretch !important; }
     .wo-actions .btn{ width:100%; padding:.375rem .5rem; }
   }
 
   /* Убираем зазор между Search и Filters */
-.sticky-tools .card-lite { margin-bottom: .2rem; }                 /* было .6rem */
-.sticky-tools .card-lite .hd { padding-bottom: .4rem; }            /* уплотняем заголовок */
-.sticky-tools .card-lite .bd { padding-top: .6rem; padding-bottom: .35rem; } /* меньше низ */
+  .sticky-tools .card-lite { margin-bottom: .2rem; }                 /* было .6rem */
+  .sticky-tools .card-lite .hd { padding-bottom: .4rem; }            /* уплотняем заголовок */
+  .sticky-tools .card-lite .bd { padding-top: .6rem; padding-bottom: .35rem; } /* меньше низ */
 
-.sticky-tools .filters-desktop .filter-bar{
-  margin-top: -.2rem;                                              /* подтягиваем бар к Search */
-  padding-top: .35rem;                                             /* ровная линия */
-  border-top-left-radius: 0;                                       /* визуально как единый блок */
-  border-top-right-radius: 0;
-  /* Если видна тонкая линия между блоками – можно убрать верхнюю границу */
-  /* border-top: 0; */
-}
+  .sticky-tools .filters-desktop .filter-bar{
+    margin-top: -.2rem;                                              /* подтягиваем бар к Search */
+    padding-top: .35rem;                                             /* ровная линия */
+    border-top-left-radius: 0;                                       /* визуально как единый блок */
+    border-top-right-radius: 0;
+    /* Если видна тонкая линия между блоками – можно убрать верхнюю границу */
+    /* border-top: 0; */
+  }
 
-/* Дополнительно: убираем технический «прокладочный» зазор */
-.sticky-tools::after{ height: 0; }                                  /* было .25re
+  /* Дополнительно: убираем технический «прокладочный» зазор */
+  .sticky-tools::after{ height: 0; } /* was .25rem */
 </style>
 
 <div class="sticky-tools">
@@ -150,7 +158,6 @@
                  list="wo-hints"
                  value="{{ (filters.q if filters else '') }}"
                  placeholder="Tech / Job # / Brand / Model / Part # / Part name / INV# / Customer PO">
-
         </div>
 
         <div class="field-date">
@@ -335,7 +342,7 @@
         <th>Brand/Model</th>
         <th class="col-type">Type</th>
         <th class="col-status">Status</th>
-        <th class="col-created">Created</th>
+        <th class="col-audit">Audit</th>
         <th class="text-end col-actions">Actions</th>
       </tr>
     </thead>
@@ -350,7 +357,7 @@
               {{ w.job_numbers or '—' }}
             </span>
 
-             {% if matched_by_invoice and (invoice_matched_wo_ids is defined) and (w.id in invoice_matched_wo_ids) %}
+            {% if matched_by_invoice and (invoice_matched_wo_ids is defined) and (w.id in invoice_matched_wo_ids) %}
               <span class="badge bg-warning text-dark ms-2">INV#{{ matched_invoice_number }}</span>
             {% endif %}
 
@@ -379,7 +386,32 @@
               <span class="badge bg-secondary">search_ordered</span>
             {% endif %}
           </td>
-          <td>{{ w.created_at.strftime('%Y-%m-%d') if w.created_at else '—' }}</td>
+
+          <!-- ✅ AUDIT CELL: Updated first, then Created -->
+
+            <td class="audit-cell">
+              <span class="when">
+                upd:
+                {{ w.updated_at | local_date
+                   if w.updated_at
+                   else (w.created_at | local_date if w.created_at else '—') }}
+              </span>
+
+              <span class="who">
+                by
+                {{ (w.updated_by_user and w.updated_by_user.username)
+                   or (w.created_by_user and w.created_by_user.username)
+                   or '—' }}
+              </span>
+
+              <span class="who" style="margin-top:.15rem;">
+                crt:
+                {{ w.created_at | local_date if w.created_at else '—' }}
+                •
+                {{ (w.created_by_user and w.created_by_user.username) or '—' }}
+              </span>
+            </td>
+
           <td class="text-end">
             <div class="wo-actions d-inline-flex gap-1">
               <a class="btn btn-outline-primary btn-sm"
@@ -420,3 +452,4 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 {% endblock %}
+

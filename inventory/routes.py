@@ -4593,6 +4593,8 @@ def wo_save():
     else:
         wo = WorkOrder.query.get_or_404(int(wo_id))
 
+    from datetime import datetime as _dt
+
     # ---------- заголовок / шапка ----------
     tech_id_raw   = (f.get("technician_id")   or f.get("technician") or "").strip()
     tech_name_raw = (f.get("technician_name") or f.get("technician") or "").strip()
@@ -4791,6 +4793,43 @@ def wo_save():
 
     def _rerender_same_screen(msg_text: str, errors=None):
         db.session.rollback()
+
+        # ✅ restore audit after rollback (so UI shows correct actor)
+        from datetime import datetime as _dt
+        actor_id = getattr(current_user, "id", None)
+        now = _dt.utcnow()
+
+        actor_username = (getattr(current_user, "username", None) or "").strip()
+        actor_role = (getattr(current_user, "role", None) or "").strip()
+
+        with open(dbg_path, "a", encoding="utf-8") as fp:
+            fp.write(f"ACTOR: id={actor_id!r} user={actor_username!r} role={actor_role!r}\n")
+            fp.write(
+                "WO_BEFORE: "
+                f"wo_id={getattr(wo, 'id', None)!r} "
+                f"tech_id={getattr(wo, 'technician_id', None)!r} "
+                f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
+                f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
+            )
+
+        try:
+            if is_new and not getattr(wo, "created_by_id", None):
+                wo.created_by_id = actor_id
+                if not getattr(wo, "created_at", None):
+                    wo.created_at = now
+            wo.updated_by_id = actor_id
+            wo.updated_at = now
+
+            with open(dbg_path, "a", encoding="utf-8") as fp:
+                fp.write(
+                    "WO_AFTER_SET: "
+                    f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
+                    f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
+                )
+
+        except Exception:
+            pass
+
         flash(msg_text, "warning")
 
         technicians = _query_technicians()
@@ -5010,9 +5049,45 @@ def wo_save():
                 )
 
     # ---------- commit ----------
+    # ---------- FINAL AUDIT (MUST BE RIGHT BEFORE COMMIT) ----------
+    from datetime import datetime as _dt
+    actor_id = getattr(current_user, "id", None)
+    now = _dt.utcnow()
+
+    if is_new and not getattr(wo, "created_by_id", None):
+        wo.created_by_id = actor_id
+        if not getattr(wo, "created_at", None):
+            wo.created_at = now
+
+    wo.updated_by_id = actor_id
+    wo.updated_at = now
+    # ---------- /FINAL AUDIT ----------
+
     try:
         db.session.commit()
+        fresh = WorkOrder.query.get(wo.id)
+        with open(dbg_path, "a", encoding="utf-8") as fp:
+            fp.write(
+                "WO_AFTER_COMMIT: "
+                f"wo_id={wo.id} "
+                f"tech_id={getattr(fresh, 'technician_id', None)!r} "
+                f"created_by_id={getattr(fresh, 'created_by_id', None)!r} "
+                f"updated_by_id={getattr(fresh, 'updated_by_id', None)!r}\n"
+            )
+
         flash("Work Order saved.", "success")
+
+        # --- DEBUG: verify WO audit in DB right after commit ---
+        fresh = WorkOrder.query.get(wo.id)
+        with open(dbg_path, "a", encoding="utf-8") as fp:
+            fp.write("AFTER COMMIT WO AUDIT:\n")
+            fp.write(
+                f"  current_user.id={getattr(current_user, 'id', None)} username={getattr(current_user, 'username', None)!r}\n")
+            fp.write(f"  wo.id={wo.id}\n")
+            fp.write(
+                f"  db.created_by_id={getattr(fresh, 'created_by_id', None)} created_by_user={(fresh.created_by_user.username if fresh.created_by_user else None)!r}\n")
+            fp.write(
+                f"  db.updated_by_id={getattr(fresh, 'updated_by_id', None)} updated_by_user={(fresh.updated_by_user.username if fresh.updated_by_user else None)!r}\n")
 
         rows = (WorkOrderPart.query
                 .filter_by(work_order_id=wo.id)
@@ -5336,6 +5411,23 @@ def wo_issue_instock(wo_id):
     wo = WorkOrder.query.get_or_404(wo_id)
     is_ins_job = ((wo.job_type or "").upper() == "INSURANCE")
 
+    # --- audit helper: who changed WO ---
+    def _touch_wo():
+        # safe even if columns differ
+        try:
+            if hasattr(wo, "updated_by_id"):
+                wo.updated_by_id = getattr(current_user, "id", None)
+            elif hasattr(wo, "updated_by"):
+                wo.updated_by = getattr(current_user, "username", None)
+        except Exception:
+            pass
+        try:
+            wo.updated_at = datetime.utcnow()
+        except Exception:
+            pass
+        db.session.add(wo)
+
+
     set_status = (request.form.get("set_status") or "").strip().lower()
 
     # === availability (для greedy) ===
@@ -5649,12 +5741,16 @@ def wo_issue_instock(wo_id):
                         line.last_issued_at = now
                     db.session.add(line)
 
+        if issued_row_ids or new_records or items_to_issue:
+            _touch_wo()
+
         db.session.commit()
 
         # autostatus
         if set_status == "done":
             try:
                 wo.status = "done"
+                _touch_wo()
                 db.session.commit()
             except Exception:
                 db.session.rollback()
@@ -5678,6 +5774,7 @@ def wo_issue_instock(wo_id):
                     r.batch_id = batch.id
                     r.invoice_number = inv_no
 
+                _touch_wo()
                 db.session.commit()
 
                 params = urlencode({
@@ -5799,14 +5896,17 @@ def wo_issue_instock(wo_id):
             db.session.add(line)
             need_to_apply -= delta
 
+    _touch_wo()
     db.session.commit()
 
     if set_status == "done":
         try:
             wo.status = "done"
+            _touch_wo()
             db.session.commit()
         except Exception:
             db.session.rollback()
+
     else:
         try:
             still_wait = any(
@@ -5819,6 +5919,7 @@ def wo_issue_instock(wo_id):
         if not still_wait:
             try:
                 wo.status = "done"
+                _touch_wo()
                 db.session.commit()
             except Exception:
                 db.session.rollback()
@@ -6450,18 +6551,6 @@ def issue_line(part_id):
         flash("Issue failed: internal error", "danger")
         return redirect(url_for("inventory.dashboard"))
 
-
-@inventory_bp.get("/issue_ui")
-@login_required
-def issue_ui():
-    parts = Part.query.order_by(Part.part_number).limit(200).all()  # для примера
-    technician_name = getattr(current_user, "username", "TECH")     # замени как надо
-    canonical_ref = "TESTJOB123"                                    # подставишь свой JOB
-    return render_template("issue_ui.html", parts=parts,
-                           technician_name=technician_name,
-                           canonical_ref=canonical_ref)
-
-
 # ----------------- Dashboard -----------------
 
 @inventory_bp.route('/api/part/<part_number>', methods=['GET'])
@@ -6799,6 +6888,53 @@ def issue_part():
     from extensions import db
     from models import Part, IssuedPartRecord
 
+    # ---------- helper: touch Work Order updated_by/updated_at ----------
+    def _touch_work_order_from_ref(ref_job: str, ts: datetime, user_id: int) -> None:
+        """
+        Best-effort: if reference_job corresponds to a Work Order,
+        set updated_by_id + updated_at so header shows correct user.
+        Safe: wrapped with try/except, no crash if schema differs.
+        """
+        ref = (ref_job or "").strip()
+        if not ref:
+            return
+
+        # 1) Try via JobIndex (your architecture)
+        try:
+            from models import JobIndex  # if exists
+            ji = JobIndex.query.filter_by(job_number=ref).first()
+            if ji and getattr(ji, "work_order_id", None):
+                db.session.execute(
+                    db.text("""
+                        UPDATE work_orders
+                        SET updated_at = :ts,
+                            updated_by_id = :uid
+                        WHERE id = :wo_id
+                    """),
+                    {"ts": ts, "uid": user_id, "wo_id": ji.work_order_id}
+                )
+                return
+        except Exception:
+            pass
+
+        # 2) Fallback: try direct match on canonical_ref / job numbers (if those columns exist)
+        # NOTE: if any of these columns don't exist, SQLite will error -> we catch.
+        try:
+            db.session.execute(
+                db.text("""
+                    UPDATE work_orders
+                    SET updated_at = :ts,
+                        updated_by_id = :uid
+                    WHERE canonical_ref = :ref
+                       OR job_num_a = :ref
+                       OR job_num_b = :ref
+                """),
+                {"ts": ts, "uid": user_id, "ref": ref}
+            )
+        except Exception:
+            # last fallback: do nothing
+            return
+
     # этот список для отдельной страницы issue_part, можно оставить как есть
     parts = Part.query.filter(Part.quantity > 0).all()
 
@@ -6850,33 +6986,22 @@ def issue_part():
                 # НИКАКИХ проверок склада и НИКАКОГО списания количества
                 loc_snapshot = (getattr(part, "location", "") or "").strip()
 
-                loc = None
-                if it.get("is_ins"):
-                    loc = "INS"
-                else:
-                    loc = (getattr(part, "location", None) or "").strip() or None
-
                 rec = IssuedPartRecord(
                     part_id=part.id,
-                    quantity=issue_now,
-                    issued_to=issued_to.strip(),
-                    reference_job=(reference_job or "").strip(),
-                    issued_by=current_user.username,
-                    issue_date=issue_date,
-                    unit_cost_at_issue=price_to_fix,
-                    location=loc
+                    quantity=qty,
+                    issued_to=issued_to,
+                    reference_job=reference_job,
+                    issued_by=issued_by,
+                    issue_date=issue_dt,
+                    unit_cost_at_issue=0.0,          # INS supplied => 0 cost (как обычно делаем)
+                    location="INS",                  # явный snapshot
                 )
-                # --- INV# snapshot из WorkOrderPart ---
-                rec.inv_ref = (line.invoice_number or "").strip() if hasattr(line, "invoice_number") else None
-
                 db.session.add(rec)
                 new_records.append(rec)
 
-                # локация батча — из первой INS-строки, если ещё не установлена
                 if batch_location is None and loc_snapshot:
                     batch_location = loc_snapshot
 
-                # переходим к следующей строке, склад не трогаем
                 continue
 
             # --- Обычный случай: не страховая/не INS-строка ---
@@ -6901,13 +7026,12 @@ def issue_part():
                 reference_job=reference_job,
                 issued_by=issued_by,
                 issue_date=issue_dt,
-                unit_cost_at_issue=part.unit_cost,
-                location=loc_snapshot,  # ВАЖНО: сохраняем snapshot
+                unit_cost_at_issue=float(getattr(part, "unit_cost", 0) or 0),
+                location=loc_snapshot,  # snapshot
             )
             db.session.add(rec)
             new_records.append(rec)
 
-            # для батча можно взять локацию первой строки (если нужна)
             if batch_location is None and loc_snapshot:
                 batch_location = loc_snapshot
 
@@ -6919,8 +7043,13 @@ def issue_part():
                 issued_by=issued_by,
                 reference_job=reference_job,
                 issue_date=issue_dt,
-                location=batch_location,  # можно None, но так логичнее
+                location=batch_location,
             )
+
+            # ✅ ВАЖНО: после issue обновляем “кто обновил WO”
+            if reference_job:
+                _touch_work_order_from_ref(reference_job, issue_dt, current_user.id)
+
             db.session.commit()
         except Exception as e:
             db.session.rollback()
@@ -6940,6 +7069,24 @@ def issue_part():
         return redirect('/reports_grouped?' + urlencode(params), code=303)
 
     return render_template('issue_part.html', parts=parts)
+
+
+@inventory_bp.get("/issue_ui")
+@login_required
+def issue_ui():
+    from flask_login import current_user
+    from models import Part
+
+    parts = Part.query.order_by(Part.part_number).limit(200).all()
+    technician_name = getattr(current_user, "username", "TECH")
+    canonical_ref = "TESTJOB123"  # подставишь свой JOB
+
+    return render_template(
+        "issue_ui.html",
+        parts=parts,
+        technician_name=technician_name,
+        canonical_ref=canonical_ref
+    )
 
 @inventory_bp.route('/reports', methods=['GET', 'POST'])
 @login_required

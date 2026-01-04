@@ -127,6 +127,16 @@
     <div><strong>Created:</strong></div>
     <div>{{ wo.created_at|local_date if wo.created_at else '—' }}</div>
   </div>
+
+  <div class="col-md-3">
+      <div><strong>Updated:</strong></div>
+      <div>
+        {{ (wo.updated_by_user and wo.updated_by_user.username) or '—' }}
+        •
+        {{ wo.updated_at|local_dt if wo.updated_at else '—' }}
+      </div>
+    </div>
+
 </div>
 
 {# =========================================================

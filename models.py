@@ -1,4 +1,9 @@
-from datetime import datetime, date
+# models.py (готовый файл)
+from __future__ import annotations
+
+from datetime import datetime, date, timezone
+from zoneinfo import ZoneInfo
+
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import relationship, validates
@@ -6,6 +11,21 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy import CheckConstraint, UniqueConstraint, func
 from extensions import db
 import re
+
+PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
+
+
+def utc_to_local(dt: datetime | None) -> datetime | None:
+    """
+    DB хранит naive UTC (datetime.utcnow()).
+    Для UI переводим в America/Los_Angeles.
+    """
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(PACIFIC_TZ)
+
 
 # --------------------------------
 # User roles
@@ -16,7 +36,6 @@ ROLE_USER       = 'user'
 ROLE_VIEWER     = 'viewer'
 ROLE_TECHNICIAN = 'technician'
 
-# Разрешённые значения ролей
 ALLOWED_ROLES = {
     ROLE_SUPERADMIN,
     ROLE_ADMIN,
@@ -25,7 +44,6 @@ ALLOWED_ROLES = {
     ROLE_VIEWER,
 }
 
-# Синонимы/варианты написания
 ROLE_ALIASES = {
     'tech': ROLE_TECHNICIAN,
     'technician': ROLE_TECHNICIAN,
@@ -44,6 +62,9 @@ ROLE_ALIASES = {
 # Users
 # --------------------------------
 class User(UserMixin, db.Model):
+    __tablename__ = "user"
+    __table_args__ = {"extend_existing": True}
+
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
@@ -78,8 +99,15 @@ class WorkOrder(db.Model):
     __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
+
+    # --- FK to User (TECH) ---
     technician_id = db.Column(db.Integer, db.ForeignKey("user.id"), index=True, nullable=True)
-    technician = relationship("User", lazy="joined")
+    technician = db.relationship(
+        "User",
+        foreign_keys=[technician_id],
+        lazy="joined",
+        backref=db.backref("work_orders_as_technician", lazy="selectin"),
+    )
 
     units = db.relationship(
         "WorkUnit",
@@ -107,28 +135,49 @@ class WorkOrder(db.Model):
     delivery_fee    = db.Column(db.Float, default=0.0)
     markup_percent  = db.Column(db.Float, default=0.0)
     status          = db.Column(db.String(20), default="search_ordered")
+
     created_at      = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at      = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    ordered_date    = db.Column(db.Date, nullable=True)
-    customer_po = db.Column(db.String(64), nullable=True, index=True)
+
+    # --- audit users (created/updated by) ---
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+
+    created_by_user = db.relationship(
+        "User",
+        foreign_keys=[created_by_id],
+        lazy="joined",
+        backref=db.backref("work_orders_created", lazy="selectin"),
+    )
+    updated_by_user = db.relationship(
+        "User",
+        foreign_keys=[updated_by_id],
+        lazy="joined",
+        backref=db.backref("work_orders_updated", lazy="selectin"),
+    )
+
+    ordered_date = db.Column(db.Date, nullable=True)
+    customer_po  = db.Column(db.String(64), nullable=True, index=True)
+
+    # ---------- timezone helpers for UI ----------
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
 
     @property
-    def canonical_job(self) -> str:
-        """
-        Primary job number is always the numerically larger of the two (or more).
-        Robust parsing: supports "991472 991929" and "991472,991929" and "RETURN 991472 991929".
-        """
-        s = (self.job_numbers or "").strip()
+    def updated_at_local(self):
+        return utc_to_local(self.updated_at)
 
-        # Prefer numeric job tokens (your real jobs are numeric)
+    # ---------- helpers ----------
+    @property
+    def canonical_job(self) -> str:
+        s = (self.job_numbers or "").strip()
         nums = re.findall(r"\d+", s)
         if nums:
             try:
                 return str(max(int(x) for x in nums))
             except Exception:
                 pass
-
-        # Fallback: first alnum token (for weird legacy like 122225TOM)
         words = re.findall(r"[A-Za-z0-9]+", s)
         return words[0] if words else ""
 
@@ -142,6 +191,14 @@ class WorkOrder(db.Model):
         self.technician = user
         self.technician_id = user.id
         self.technician_name = user.username
+
+    @property
+    def created_by_username(self) -> str:
+        return (self.created_by_user.username if self.created_by_user else "") or ""
+
+    @property
+    def updated_by_username(self) -> str:
+        return (self.updated_by_user.username if self.updated_by_user else "") or ""
 
 
 class WorkUnit(db.Model):
@@ -171,26 +228,36 @@ class WorkOrderPart(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False, index=True)
     unit_id = db.Column(db.Integer, db.ForeignKey("work_units.id"), nullable=True, index=True)
+
     part_number = db.Column(db.String(80), nullable=False)
     part_name   = db.Column(db.String(120))
     quantity    = db.Column(db.Integer, default=1)
+
     alt_part_numbers = db.Column(db.String(200))
     alt_numbers      = db.Column(db.String(200))
+
     supplier       = db.Column(db.String(80))
     backorder_flag = db.Column(db.Boolean, default=False)
+
     status      = db.Column(db.String(32), default="search_ordered")
     line_status = db.Column(db.String(32), default="search_ordered")
+
     unit_price_base  = db.Column(db.Float)
     unit_price_final = db.Column(db.Float)
+
     unit_cost        = db.Column(db.Float, nullable=True, default=None)
-    issued_qty     = db.Column(db.Integer, nullable=False, default=0)
-    last_issued_at = db.Column(db.DateTime, nullable=True)
+    issued_qty       = db.Column(db.Integer, nullable=False, default=0)
+    last_issued_at   = db.Column(db.DateTime, nullable=True)
+
     warehouse  = db.Column(db.String(120), nullable=True)
     unit_label = db.Column(db.String(120), nullable=True)
     stock_hint = db.Column(db.String(120))
+
     ordered_flag = db.Column(db.Boolean, default=False, index=True)
     ordered_date = db.Column(db.Date, nullable=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
     is_insurance_supplied = db.Column(db.Boolean, nullable=False, default=False, index=True)
     invoice_number = db.Column(db.String(32), nullable=True, index=True)
 
@@ -234,6 +301,10 @@ class TechReceiveLog(db.Model):
     received_by  = db.Column(db.String(80))
     received_at  = db.Column(db.DateTime, default=datetime.utcnow)
 
+    @property
+    def received_at_local(self):
+        return utc_to_local(self.received_at)
+
 
 # --------------------------------
 # Inventory Part
@@ -249,6 +320,10 @@ class Part(db.Model):
     unit_cost = db.Column(db.Float, nullable=False)
     location = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
 
 
 class Recipient(db.Model):
@@ -269,13 +344,14 @@ class IssuedPartRecord(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     part_id = db.Column(db.Integer, db.ForeignKey('part.id'), nullable=False, index=True)
     quantity = db.Column(db.Integer, nullable=False)
+
     issued_to = db.Column(db.String(255), nullable=False, index=True)
     issued_by = db.Column(db.String(255), nullable=False)
     reference_job = db.Column(db.String(255), index=True)
+
     issue_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     unit_cost_at_issue = db.Column(db.Float, nullable=False)
 
-    # техподтверждение (как было)
     confirmed_by_tech = db.Column(db.Boolean, default=False, nullable=False)
     confirmed_at = db.Column(db.DateTime)
     confirmed_by = db.Column(db.String(64))
@@ -283,25 +359,22 @@ class IssuedPartRecord(db.Model):
     invoice_number = db.Column(db.Integer, index=True)
     location = db.Column(db.String(120), index=True)
 
-    # связь с батчем
     batch_id = db.Column(db.Integer, db.ForeignKey('issued_batch.id', ondelete='SET NULL'), index=True)
     batch = db.relationship("IssuedBatch", back_populates="parts", lazy="joined")
 
-    part  = db.relationship('Part', backref=db.backref('issued_records', lazy=True))
+    part = db.relationship('Part', backref=db.backref('issued_records', lazy=True))
 
     is_insurance_supplied = db.Column(db.Boolean, nullable=False, default=False, index=True)
 
-    # --- НОВЫЕ ПОЛЯ (соответствуют миграции) ---
-    consumed_qty  = db.Column(db.Integer, nullable=True)             # 0..quantity
+    consumed_qty  = db.Column(db.Integer, nullable=True)
     consumed_flag = db.Column(db.Boolean, nullable=False, default=False)
     consumed_at   = db.Column(db.DateTime, nullable=True)
     consumed_by   = db.Column(db.String(120), nullable=True)
     consumed_note = db.Column(db.String(500), nullable=True)
-    inv_ref = db.Column(db.String(32), nullable=True, index=True)  # INV# из WorkOrderPart
 
-    # На какой job № было помечено списание (для отчёта Grouped)
+    inv_ref = db.Column(db.String(32), nullable=True, index=True)
+
     consumed_job_ref = db.Column(db.String(64), nullable=True, index=True)
-    # журнальные записи по частичным списаниям (по job)
     consumption_logs = db.relationship(
         "IssuedConsumptionLog",
         back_populates="issued_part",
@@ -309,7 +382,13 @@ class IssuedPartRecord(db.Model):
         cascade="all, delete-orphan",
     )
 
-    # --- Удобные свойства/методы ---
+    @property
+    def issue_date_local(self):
+        return utc_to_local(self.issue_date)
+
+    @property
+    def confirmed_at_local(self):
+        return utc_to_local(self.confirmed_at)
 
     @property
     def remaining_qty(self) -> int:
@@ -319,7 +398,6 @@ class IssuedPartRecord(db.Model):
 
     @property
     def status_tuple(self) -> tuple[str, int, int]:
-        """('OPEN'|'PARTIAL'|'CONSUMED', consumed_qty, quantity)"""
         q = int(self.quantity or 0)
         used = int(self.consumed_qty or 0)
         if used <= 0:
@@ -343,7 +421,6 @@ class IssuedPartRecord(db.Model):
         self.consumed_flag = (q > 0 and used >= q)
 
     def apply_consume(self, delta: int, user: str | None = None, note: str | None = None) -> bool:
-        """Увеличить списание на delta (>=1), не превышая quantity. Возвращает: были ли изменения."""
         d = int(delta or 0)
         if d <= 0:
             return False
@@ -362,7 +439,6 @@ class IssuedPartRecord(db.Model):
         return True
 
     def unconsume_all(self) -> bool:
-        """Сбросить списание по строке (для отката)."""
         changed = bool(
             self.consumed_qty
             or self.consumed_flag
@@ -376,15 +452,12 @@ class IssuedPartRecord(db.Model):
         self.consumed_at = None
         self.consumed_by = None
         self.consumed_note = None
-
-        # сами объекты логов будут удалены через cascade="all, delete-orphan"
         self.consumption_logs.clear()
         return changed
 
-
-
     def __repr__(self):
         return f"<IssuedPartRecord id={self.id} inv={self.invoice_number} batch={self.batch_id}>"
+
 
 class IssuedConsumptionLog(db.Model):
     __tablename__ = "issued_consumption_log"
@@ -392,7 +465,6 @@ class IssuedConsumptionLog(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    # какая строка инвойса (IssuedPartRecord) была частично списана
     issued_part_id = db.Column(
         db.Integer,
         db.ForeignKey("issued_part_record.id", ondelete="CASCADE"),
@@ -400,26 +472,26 @@ class IssuedConsumptionLog(db.Model):
         index=True,
     )
 
-    # сколько штук списали этой операцией
     qty = db.Column(db.Integer, nullable=False)
-
-    # на какой job-номер списали (например "987568", "9855" и т.д.)
     job_ref = db.Column(db.String(64), nullable=True, index=True)
 
-    # мета-инфо
     consumed_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     consumed_by = db.Column(db.String(120), nullable=True)
     note = db.Column(db.String(500), nullable=True)
 
-    # связь обратно к строке инвойса
     issued_part = db.relationship(
         "IssuedPartRecord",
         back_populates="consumption_logs",
         lazy="joined",
     )
 
+    @property
+    def consumed_at_local(self):
+        return utc_to_local(self.consumed_at)
+
     def __repr__(self):
         return f"<IssuedConsumptionLog id={self.id} part_id={self.issued_part_id} qty={self.qty} job={self.job_ref}>"
+
 
 # --------------------------------
 # External Order tracking
@@ -443,8 +515,18 @@ class OrderItem(db.Model):
     notes        = db.Column(db.Text)
     row_key      = db.Column(db.String(512), unique=True)
 
-# ---- вставь это место сразу после IssuedPartRecord (или рядом с ним) ----
+    @property
+    def date_ordered_local(self):
+        return utc_to_local(self.date_ordered)
 
+    @property
+    def date_received_local(self):
+        return utc_to_local(self.date_received)
+
+
+# --------------------------------
+# IssuedBatch
+# --------------------------------
 class IssuedBatch(db.Model):
     __tablename__ = "issued_batch"
     __table_args__ = {'extend_existing': True}
@@ -457,27 +539,29 @@ class IssuedBatch(db.Model):
     issue_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     location = db.Column(db.String(120))
 
-    # связи: одна «шапка» на много строк выдачи
     parts = db.relationship("IssuedPartRecord", back_populates="batch", lazy="selectin")
 
-    # --- поля учёта списаний (из миграции 11072025_add_stock) ---
     is_stock      = db.Column(db.Boolean, nullable=False, default=False)
     consumed_flag = db.Column(db.Boolean, nullable=False, default=False)
     consumed_at   = db.Column(db.DateTime, nullable=True)
     consumed_by   = db.Column(db.String(120), nullable=True)
     consumed_note = db.Column(db.String(500), nullable=True)
 
-    # --- удобные свойства/методы для UI ---
+    @property
+    def issue_date_local(self):
+        return utc_to_local(self.issue_date)
+
+    @property
+    def consumed_at_local(self):
+        return utc_to_local(self.consumed_at)
 
     @property
     def is_stock_inferred(self) -> bool:
-        """Подстраховка: если is_stock не проставлен в старых данных — считаем по reference_job."""
         ref = (self.reference_job or "").strip().lower()
         return bool(self.is_stock or ref.startswith("stock"))
 
     @property
     def aggregate_consumption(self) -> dict:
-        """Сумма по строкам: всего, списано, остаток."""
         q_total = sum(int(r.quantity or 0) for r in (self.parts or []))
         used_total = sum(int(r.consumed_qty or 0) for r in (self.parts or []))
         rem_total = max(0, q_total - used_total)
@@ -485,7 +569,6 @@ class IssuedBatch(db.Model):
 
     @property
     def status_label(self) -> str:
-        """OPEN / PARTIAL x/y / CONSUMED для всего инвойса."""
         agg = self.aggregate_consumption
         q, used = agg["qty_total"], agg["used_total"]
         if q <= 0 or used <= 0:
@@ -499,7 +582,6 @@ class IssuedBatch(db.Model):
         self.consumed_flag = (agg["qty_total"] > 0 and agg["used_total"] >= agg["qty_total"])
 
     def mark_consumed_meta(self, user: str | None = None, note: str | None = None):
-        """Обновить метаданные списания (когда, кем, примечание) и синхронизировать флаг."""
         self.consumed_at = datetime.utcnow()
         if user:
             self.consumed_by = (user or "").strip()[:120]
@@ -510,10 +592,10 @@ class IssuedBatch(db.Model):
     def __repr__(self):
         return f"<IssuedBatch id={self.id} invoice={self.invoice_number} to={self.issued_to}>"
 
+
 # --------------------------------
 # Goods Receipts (приход)
 # --------------------------------
-# --- GoodsReceipt (без изменений полей) ---
 class GoodsReceipt(db.Model):
     __tablename__ = "goods_receipts"
     __table_args__ = (
@@ -535,10 +617,17 @@ class GoodsReceipt(db.Model):
     attachment_path = db.Column(db.String(512))
     extra_expenses = db.Column(db.Float, default=0.0)
 
-    # удобный алиас: .items == .lines
     @property
     def items(self):
         return self.lines
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def posted_at_local(self):
+        return utc_to_local(self.posted_at)
 
     @hybrid_property
     def total_cost(self) -> float:
@@ -563,12 +652,12 @@ class GoodsReceiptLine(db.Model):
         nullable=False,
         index=True,
     )
-    line_no    = db.Column(db.Integer, default=1)
-    part_number= db.Column(db.String(120), nullable=False, index=True)
-    part_name  = db.Column(db.String(255))
-    quantity   = db.Column(db.Integer, default=1, nullable=False)
-    unit_cost  = db.Column(db.Float, default=0.0)
-    location   = db.Column(db.String(64))
+    line_no     = db.Column(db.Integer, default=1)
+    part_number = db.Column(db.String(120), nullable=False, index=True)
+    part_name   = db.Column(db.String(255))
+    quantity    = db.Column(db.Integer, default=1, nullable=False)
+    unit_cost   = db.Column(db.Float, default=0.0)
+    location    = db.Column(db.String(64))
 
     applied_qty = db.Column(db.Integer, default=0, nullable=False)
 
@@ -584,8 +673,9 @@ class GoodsReceiptLine(db.Model):
         except Exception:
             return 0.0
 
+
 # --------------------------------
-# Supplier Returns (новые таблицы)
+# Supplier Returns
 # --------------------------------
 class SupplierReturnBatch(db.Model):
     __tablename__ = "supplier_return_batch"
@@ -593,29 +683,33 @@ class SupplierReturnBatch(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    # кто/что возвращаем
     supplier_name = db.Column(db.String(200), index=True)
-    reference_receiving_id = db.Column(db.Integer)  # опционально, без FK, просто справочно
+    reference_receiving_id = db.Column(db.Integer)
 
-    # статусы и мета
-    status = db.Column(db.String(20), nullable=False, default="draft")  # draft|posted
+    status = db.Column(db.String(20), nullable=False, default="draft")
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     created_by = db.Column(db.String(120))
     posted_at = db.Column(db.DateTime)
     posted_by = db.Column(db.String(120))
-    tech_note = db.Column(db.String(255))  # NEW: technician + job note
+    tech_note = db.Column(db.String(255))
 
-    # агрегаты
     total_items = db.Column(db.Integer, nullable=False, default=0)
-    total_value = db.Column(db.Float,   nullable=False, default=0.0)
+    total_value = db.Column(db.Float, nullable=False, default=0.0)
 
-    # строки возврата
     items = db.relationship(
         "SupplierReturnItem",
         back_populates="batch",
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def posted_at_local(self):
+        return utc_to_local(self.posted_at)
 
     def __repr__(self):
         return f"<SupplierReturnBatch id={self.id} status={self.status} supplier={self.supplier_name!r}>"
@@ -639,18 +733,20 @@ class SupplierReturnItem(db.Model):
     location    = db.Column(db.String(120), index=True)
 
     qty_returned = db.Column(db.Integer, nullable=False, default=0)
-    unit_cost    = db.Column(db.Float,   nullable=False, default=0.0)
-    total_cost   = db.Column(db.Float,   nullable=False, default=0.0)
-    tech_note = db.Column(db.String(255))  # Tech / Job per line
+    unit_cost    = db.Column(db.Float, nullable=False, default=0.0)
+    total_cost   = db.Column(db.Float, nullable=False, default=0.0)
+    tech_note    = db.Column(db.String(255))
 
     batch = db.relationship("SupplierReturnBatch", back_populates="items", lazy="joined")
 
     def __repr__(self):
         return f"<SupplierReturnItem id={self.id} pn={self.part_number!r} qty={self.qty_returned} loc={self.location!r}>"
 
-# --- Backwards-compatible aliases (как у тебя) ---
+
+# --- Backwards-compatible aliases ---
 ReceivingBatch = GoodsReceipt
 ReceivingItem  = GoodsReceiptLine
+
 
 
 

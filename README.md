@@ -156,6 +156,8 @@ Copy-Item "instance\inventory.db" "instance\inventory_backup_$stamp.db"
 
 del branch git branch -d name
 
+upgrade db:  flask db upgrade
+
 
 
 

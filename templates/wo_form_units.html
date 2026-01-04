@@ -224,6 +224,29 @@
   </button>
 </div>
 
+{% if IS_EDIT %}
+  {% set created_name = (wo.created_by_user and wo.created_by_user.username) or (wo.created_by or wo.technician_name) or '—' %}
+  {% set updated_name = (wo.updated_by_user and wo.updated_by_user.username) or (wo.updated_by or wo.technician_name) or '—' %}
+
+  <div class="text-muted" style="margin-top:-6px; margin-bottom:10px; font-size:.85rem;">
+    <span>
+      <strong>Created:</strong>
+      {{ created_name }}
+      •
+      {{ wo.created_at | local_dt("%m/%d/%Y %I:%M %p") if wo.created_at else '—' }}
+    </span>
+    <span class="mx-2">|</span>
+    <span>
+      <strong>Updated:</strong>
+      {{ updated_name }}
+      •
+      {{ wo.updated_at | local_dt("%m/%d/%Y %I:%M %p") if wo.updated_at else '—' }}
+    </span>
+  </div>
+{% endif %}
+
+
+
 <form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm" class="wo-form">
   {% if IS_EDIT %}
     <input type="hidden" name="wo_id" value="{{ wo.id }}">

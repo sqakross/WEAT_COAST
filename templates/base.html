@@ -55,6 +55,19 @@
       box-shadow:0 1px 2px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.3);
     }
 
+    /* ✅ NEW: Actor badge = REAL logged-in session user id */
+    .wccr-userbox .actor-badge{
+      background: linear-gradient(to bottom, #ffd24d, #ffb703 90%);
+      color:#0a1a2d;
+      font-size:.6rem;
+      font-weight:800;
+      letter-spacing:.04em;
+      padding:.25rem .45rem;
+      border-radius:.4rem;
+      text-transform:uppercase;
+      box-shadow:0 1px 2px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.7), inset 0 -1px 0 rgba(0,0,0,.25);
+    }
+
     .wccr-btn-ghost, .wccr-btn-solid {
       font-size:.65rem; font-weight:600; line-height:1.2; letter-spacing:.05em; text-transform:uppercase; border-radius:999px; border:1px solid transparent; padding:.5rem .75rem; white-space:nowrap;
       box-shadow:0 2px 4px rgba(0,0,0,.8),0 6px 16px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.3); text-shadow:0 1px 2px rgba(0,0,0,.8); transition:all .12s linear;
@@ -171,8 +184,14 @@
             <span class="welcome-label">WELCOME,</span>
             <span class="username">{{ current_user.username }}</span>
             <span class="role-badge">{{ (current_user.role or '')|upper }}</span>
+            <span class="actor-badge" title="Actor = who is logged in (session user)">
+              ACTOR: {{ current_user.id }}
+            </span>
           </div>
           <div class="d-flex flex-wrap align-items-center gap-2">
+            <button type="button" class="wccr-btn-ghost" id="btnSessionDebug" title="Show current session user info">
+              🧪 SESSION
+            </button>
             <a class="wccr-btn-ghost text-decoration-none" href="{{ url_for('inventory.change_password', user_id=current_user.id) }}">🔑 CHANGE PASSWORD</a>
             <a class="wccr-btn-solid text-decoration-none" href="{{ url_for('auth.logout') }}">LOGOUT</a>
           </div>
@@ -235,6 +254,32 @@
       navigator.serviceWorker.register("{{ url_for('static', filename='service-worker.js') }}")
         .catch(err => { console.warn("SW registration failed", err); });
     }
+  </script>
+
+  <!-- ✅ NEW: Session Debug button logic -->
+  <script>
+    (function(){
+      const btn = document.getElementById('btnSessionDebug');
+      if (!btn) return;
+
+      btn.addEventListener('click', ()=>{
+        const info =
+          "SESSION USER (actor)\n" +
+          "---------------------\n" +
+          "username: {{ (current_user.username or '')|e }}\n" +
+          "role:     {{ (current_user.role or '')|e }}\n" +
+          "id:       {{ current_user.id }}\n" +
+          "endpoint: {{ (request.endpoint or '')|e }}\n";
+
+        if (window.showToast) {
+          window.showToast(
+            "Actor: {{ (current_user.username or '')|e }} ({{ (current_user.role or '')|e }}) id={{ current_user.id }}",
+            { delay: 3500 }
+          );
+        }
+        alert(info);
+      });
+    })();
   </script>
 
   {% block extra_js %}{% endblock %}
