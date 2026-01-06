@@ -3111,51 +3111,48 @@ def wo_detail(wo_id):
 
     raw_jobs = (getattr(wo, "job_numbers", "") or "").strip()
 
-    # извлекаем токены максимально безопасно (цифры/буквы), т.к. у тебя бывают "RETURN ..."
+    # Берём только "номер" или "номер+буква" (9151A), но НЕ чистые буквы типа "AS"
     job_tokens = []
-    for t in re.findall(r"[A-Za-z0-9]+", raw_jobs):
-        tt = (t or "").strip()
+    for t in re.findall(r"\d+[A-Za-z]?", raw_jobs):
+        tt = (t or "").strip().upper()
         if tt:
             job_tokens.append(tt)
 
-    # canonical первым (чтобы если он есть — он точно в списке)
-    if canon and canon not in job_tokens:
-        job_tokens.insert(0, canon)
+    # canonical первым
+    if canon:
+        canon_u = canon.strip().upper()
+        if canon_u and canon_u not in job_tokens:
+            job_tokens.insert(0, canon_u)
+
+    # de-dup keep order
+    seen = set()
+    job_tokens = [x for x in job_tokens if not (x in seen or seen.add(x))]
 
     # de-dup, keep order
     seen = set()
     job_tokens = [x for x in job_tokens if not (x in seen or seen.add(x))]
 
     def _token_match(col, tok: str):
-        """
-        SQLite-safe token match:
-        - digits: match as token (not inside other digits), handles:
-          '991472', '991472 991929', 'RETURN 991472 991929'
-        - alnum tokens: safer boundary by spaces/edges
-        """
-        tok = (tok or "").strip()
+        tok = (tok or "").strip().upper()
         if not tok:
             return False
 
-        # normalize NULL -> ""
-        c = func.coalesce(func.trim(col), "")
+        # normalize NULL -> "" and make case-insensitive
+        c = func.upper(func.coalesce(func.trim(col), ""))
 
         if tok.isdigit():
-            # boundaries: not a digit around the token
             return or_(
                 c == tok,
-                c.op("GLOB")(f"{tok}[^0-9]*"),           # starts with tok then boundary
-                c.op("GLOB")(f"*[^0-9]{tok}[^0-9]*"),    # middle token
-                c.op("GLOB")(f"*[^0-9]{tok}"),           # ends with tok
+                c.op("GLOB")(f"{tok}[^0-9A-Za-z]*"),
+                c.op("GLOB")(f"*[^0-9A-Za-z]{tok}[^0-9A-Za-z]*"),
+                c.op("GLOB")(f"*[^0-9A-Za-z]{tok}"),
             )
 
-        # fallback for rare alnum tokens (e.g. 122225TOM)
         return or_(
             c == tok,
-            c.like(f"{tok} %"),
-            c.like(f"% {tok} %"),
-            c.like(f"% {tok}"),
-            c.like(f"%{tok},%"),
+            c.op("GLOB")(f"{tok}[^0-9A-Za-z]*"),
+            c.op("GLOB")(f"*[^0-9A-Za-z]{tok}[^0-9A-Za-z]*"),
+            c.op("GLOB")(f"*[^0-9A-Za-z]{tok}"),
         )
 
     base_q = (
@@ -3197,10 +3194,22 @@ def wo_detail(wo_id):
     tech_aliases = {x for x in tech_aliases if x}
 
     if tech_aliases:
-        base_q = base_q.filter(
-            func.lower(func.trim(IssuedPartRecord.issued_to)).in_(list(tech_aliases))
-        )
+        issued_to_norm = func.lower(func.trim(func.coalesce(IssuedPartRecord.issued_to, "")))
+        ref_norm = func.upper(func.trim(func.coalesce(IssuedPartRecord.reference_job, "")))
 
+        base_q = base_q.filter(
+            or_(
+                # 1) обычный кейс — выдано технику WO
+                issued_to_norm.in_(list(tech_aliases)),
+
+                # 2) если issued_to пустой/NULL — не прячем (старые/кривые записи)
+                issued_to_norm == "",
+
+                # 3) STOCK / RETURN — не прячем
+                ref_norm.op("GLOB")("STOCK*"),
+                ref_norm.op("GLOB")("RETURN*"),
+            )
+        )
 
     issued_items = base_q.order_by(
         IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()
