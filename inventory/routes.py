@@ -7158,7 +7158,8 @@ def reports():
 @login_required
 def reports_grouped():
     from collections import defaultdict
-    from datetime import datetime, time
+    from datetime import datetime, time, timedelta, timezone
+    from zoneinfo import ZoneInfo
     from sqlalchemy.orm import selectinload
     from sqlalchemy import func, or_, case, and_
     from flask import render_template, request
@@ -7197,6 +7198,18 @@ def reports_grouped():
     end_dt_raw   = _parse_date_ymd(end_date_s)
     start_day = start_dt_raw.date() if start_dt_raw else None
     end_day   = end_dt_raw.date()   if end_dt_raw   else None
+
+    LA_TZ = ZoneInfo("America/Los_Angeles")
+
+    # ---------- DEFAULT: current month (Los Angeles), only when no dates and no invoice search ----------
+    if (not start_day) and (not end_day) and (not invoice_search):
+        today_la = datetime.now(LA_TZ).date()
+        start_day = today_la.replace(day=1)
+        end_day = today_la
+
+        # чтобы форма сразу показала дефолтные даты
+        start_date_s = start_day.isoformat()
+        end_date_s = end_day.isoformat()
 
     # ---------- Запрос с подзагрузкой связей ----------
     q = (
@@ -7240,12 +7253,21 @@ def reports_grouped():
     if reference_job:
         q = q.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
 
-    # ---------- Фильтрация по календарным дням (включительно) ----------
+    # ---------- Date filter using LA day boundaries converted to UTC (accurate for your UTC-stored datetimes) ----------
+    def _la_day_start_utc(d):
+        # LA 00:00 -> UTC
+        return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=LA_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+
+    def _la_next_day_start_utc(d):
+        # next day LA 00:00 -> UTC (exclusive upper bound)
+        nd = d + timedelta(days=1)
+        return datetime(nd.year, nd.month, nd.day, 0, 0, 0, tzinfo=LA_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+
     if start_day:
-        q = q.filter(func.date(date_expr) >= start_day.isoformat())
+        q = q.filter(date_expr >= _la_day_start_utc(start_day))
 
     if end_day:
-        q = q.filter(func.date(date_expr) <= end_day.isoformat())
+        q = q.filter(date_expr < _la_next_day_start_utc(end_day))
 
     # ---------- Invoice#/INV# unified search ----------
     invoice_no = None
@@ -10274,6 +10296,7 @@ def receiving_list():
     )
 
     q = ReceivingBatch.query
+    DEFAULT_LIMIT = 200
 
     # ОДНА строка поиска
     global_q = (request.args.get("q") or "").strip()
@@ -10303,7 +10326,7 @@ def receiving_list():
     batches = q.order_by(
         ReceivingBatch.invoice_date.desc().nullslast(),
         ReceivingBatch.id.desc()
-    ).all()
+    ).limit(DEFAULT_LIMIT).all()
 
     # --- текстовый поиск по Supplier / Invoice / Part # / Part Name ---
     if global_q:
@@ -10373,6 +10396,7 @@ def receiving_list():
         batches=batches,
         totals=totals,
         can_admin=can_admin,
+        limit=DEFAULT_LIMIT,
         filters={
             "q": global_q,
             "date_from": d1,
