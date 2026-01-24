@@ -10192,6 +10192,11 @@ def return_selected():
         if qty == 0:
             continue
 
+        src_inv = getattr(src, "invoice_number", None)
+        src_link = f"SRCINV:{src_inv}" if src_inv else None
+
+        src_inv = (src.invoice_number if src.invoice_number is not None else None)
+
         ret = IssuedPartRecord(
             part_id=src.part_id,
             quantity=-qty,
@@ -10201,7 +10206,11 @@ def return_selected():
             issue_date=now_dt,
             unit_cost_at_issue=src.unit_cost_at_issue,
             location=src.location,
+
+            # ✅ связь возврата с исходным invoice (для корректного already-returned)
+            inv_ref=(str(src_inv) if src_inv is not None else None),
         )
+
         db.session.add(ret)
         created.append(ret)
 
@@ -10235,23 +10244,51 @@ def return_selected():
 def _already_returned_qty_for_source(src) -> int:
     """
     Сколько уже возвращено по той же детали этому же получателю.
-    Суммируем все строки с qty < 0, где part_id и issued_to совпадают,
-    а reference_job начинается с 'RETURN'.
+
+    Новый безопасный алгоритм:
+    1) Если у исходной строки есть invoice_number — сначала считаем RETURN только
+       внутри этого invoice (через inv_ref == invoice_number).
+    2) Если (1) дал 0 — fallback на старую логику (по part_id + issued_to + RETURN%),
+       чтобы старые возвраты без inv_ref продолжали учитываться и ничего не сломалось.
     """
-    total_neg = (
+
+    # --- 1) точный подсчет по исходному invoice (если он известен) ---
+    src_inv = getattr(src, "invoice_number", None)
+    if src_inv is not None:
+        inv_key = str(int(src_inv))  # нормализуем в "1552"
+        total_neg_strict = (
+            db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
+            .filter(
+                IssuedPartRecord.part_id == src.part_id,
+                IssuedPartRecord.issued_to == src.issued_to,
+                IssuedPartRecord.reference_job.ilike("RETURN%"),
+                IssuedPartRecord.quantity < 0,
+                IssuedPartRecord.inv_ref == inv_key,
+            )
+            .scalar()
+            or 0
+        )
+
+        strict_abs = abs(int(total_neg_strict))
+        if strict_abs > 0:
+            return strict_abs
+
+        # если строго 0 — идем в fallback (для старых возвратов без inv_ref)
+
+    # --- 2) fallback (старое поведение) ---
+    total_neg_fallback = (
         db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
         .filter(
             IssuedPartRecord.part_id == src.part_id,
             IssuedPartRecord.issued_to == src.issued_to,
-            IssuedPartRecord.reference_job.ilike('RETURN%'),
+            IssuedPartRecord.reference_job.ilike("RETURN%"),
+            IssuedPartRecord.quantity < 0,
         )
         .scalar()
         or 0
     )
-    # total_neg отрицательный или 0 → возвращаем модуль
-    return abs(int(total_neg))
+    return abs(int(total_neg_fallback))
 
-from sqlalchemy import func, or_   # <- добавь or_
 
 @inventory_bp.get("/receiving/by-invoice/<path:inv>", endpoint="receiving_by_invoice")
 @login_required
