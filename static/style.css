@@ -343,7 +343,26 @@ input[type="checkbox"][disabled],
     filter: brightness(1.05);
   }
 
+    /* FIX: wo_list action buttons (Delete same size as Open/Edit) */
+  body.role-technician .wo-list-table .wo-actions .btn,
+  body.role-technician .wo-list-table .wo-actions button.btn{
+    padding: .375rem .5rem !important;   /* real btn-sm */
+    font-size: .875rem !important;
+    line-height: 1.2 !important;
+    border-radius: .5rem !important;
+    min-height: 0 !important;
+  }
+
+  body.role-technician .wo-list-table .wo-actions form{
+    display:inline !important;
+    margin:0 !important;
+  }
+
+
 } /* end @media */
+
+
+
 
 
 

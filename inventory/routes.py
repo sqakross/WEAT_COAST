@@ -1104,6 +1104,7 @@ def _create_batch_for_records(
     reference_job: str | None = None,
     issue_date: datetime | None = None,
     location: str | None = None,
+    work_order_id: int | None = None,   # ✅ ADD
 ):
     """
     Создаёт IssuedBatch с уникальным invoice_number и привязывает все строки.
@@ -1125,6 +1126,7 @@ def _create_batch_for_records(
                     reference_job=reference_job,
                     issue_date=issue_date,
                     location=(location or None),
+                    work_order_id=work_order_id,   # ✅ ADD
                 )
                 db.session.add(batch)
                 db.session.flush()  # резервируем уникальный номер (может кинуть IntegrityError)
@@ -1148,47 +1150,6 @@ def _create_batch_for_records(
             continue
 
     raise RuntimeError("Не удалось сгенерировать уникальный invoice_number после нескольких попыток")
-
-def create_batch_for_records(records, issued_to, issued_by, reference_job=None, issue_date=None, location=None):
-    """Создаёт IssuedBatch и привязывает к нему все переданные строки."""
-    if not records:
-        return None
-
-    issue_date = issue_date or datetime.utcnow()
-
-    # пробуем зарезервировать invoice_number с 2–3 попытками
-    for _ in range(3):
-        inv_no = _next_invoice_number()
-        batch = IssuedBatch(
-            invoice_number=inv_no,
-            issued_to=issued_to,
-            issued_by=issued_by,
-            reference_job=reference_job,
-            issue_date=issue_date,
-            location=location
-        )
-        db.session.add(batch)
-
-        try:
-            db.session.flush()  # фиксируем уникальность invoice_number
-        except IntegrityError:
-            db.session.rollback()
-            continue  # пробуем ещё раз с новым номером
-        else:
-            # Привязываем все строки
-            for r in records:
-                r.batch_id = batch.id
-                r.invoice_number = inv_no  # оставляем дублирующий номер для отчётов
-                r.issued_to = issued_to
-                r.issued_by = issued_by
-                r.reference_job = reference_job
-                if location:
-                    r.location = location
-            return batch
-
-    raise RuntimeError("Не удалось создать IssuedBatch: invoice_number конфликтует")
-
-
 
 
 def _parse_dt_flex(s: str):
@@ -1650,10 +1611,10 @@ def _issue_records_bulk(
         "part_id": int,
         "qty": int,
         "unit_price": float | None,
-        "inv_ref": str | None,   # <-- NEW: INV# from WorkOrderPart.invoice_number
+        "inv_ref": str | None,   # INV# from WorkOrderPart.invoice_number
       }
 
-    Возвращает:
+    Returns:
       (issue_date: datetime, created_records: list[IssuedPartRecord])
     """
     if not items:
@@ -1677,7 +1638,7 @@ def _issue_records_bulk(
         if issue_now <= 0:
             continue
 
-        # цена к фиксации
+        # price snapshot
         if "unit_price" in it and it["unit_price"] is not None:
             price_to_fix = float(it["unit_price"])
         elif billed_price_per_item is not None:
@@ -1685,31 +1646,25 @@ def _issue_records_bulk(
         else:
             price_to_fix = float(part.unit_cost or 0.0)
 
-        # уменьшаем склад
+        # decrement stock (NO COMMIT here)
         part.quantity = on_hand - issue_now
+        db.session.add(part)
 
-        base_loc = (getattr(part, "location", "") or "").strip()
-
-        inv_ref = str(it.get("inv_ref") or "").strip()
-
-        loc_snap = base_loc
-        if inv_ref:
-            loc_snap = f"{base_loc} / INV# {inv_ref}" if base_loc else f"INV# {inv_ref}"
-
-        inv_ref = str(it.get("inv_ref") or "").strip()[:32] or None
-        base_loc = (getattr(part, "location", "") or "").strip()
+        inv_ref = (str(it.get("inv_ref") or "").strip()[:32] or None)
+        base_loc = (getattr(part, "location", "") or "").strip() or None
 
         rec = IssuedPartRecord(
             part_id=part.id,
             quantity=issue_now,
-            issued_to=issued_to.strip(),
+            issued_to=(issued_to or "").strip(),
             reference_job=(reference_job or "").strip(),
-            issued_by=current_user.username,
+            issued_by=getattr(current_user, "username", "system"),
             issue_date=issue_date,
             unit_cost_at_issue=price_to_fix,
-            location=(base_loc or None),  # snapshot location
-            inv_ref=inv_ref,  # ✅ INV# сохраняем ОТДЕЛЬНО
+            location=base_loc,    # snapshot location
         )
+        if hasattr(rec, "inv_ref"):
+            rec.inv_ref = inv_ref  # сохраняем INV отдельно
 
         db.session.add(rec)
         created_records.append(rec)
@@ -1717,10 +1672,9 @@ def _issue_records_bulk(
     if not created_records:
         raise ValueError("Nothing available to issue")
 
-    db.session.commit()
+    # ВАЖНО: только flush, чтобы появились id (но без commit)
+    db.session.flush()
     return issue_date, created_records
-
-# ==== RETURN HELPERS (без миграций) ====
 
 def _is_return_record(record: IssuedPartRecord) -> bool:
     """Признак 'возвратной' строки — отрицательное количество или reference_job начинается с RETURN."""
@@ -3040,7 +2994,7 @@ def _serialize_batches_for_wo_detail(db_batches, wo):
 @login_required
 def wo_detail(wo_id):
     from flask import render_template, flash, redirect, url_for, session
-    from sqlalchemy import func, or_, case
+    from sqlalchemy import func, or_, and_, case
     from sqlalchemy.orm import selectinload, joinedload
     from flask_login import current_user
     from extensions import db
@@ -3048,14 +3002,12 @@ def wo_detail(wo_id):
     from collections import defaultdict, defaultdict as _dd
     import re
 
-    # 1) загрузка WO со всеми строками
+    # 1) load WO
     wo = (
         db.session.query(WorkOrder)
         .options(
             selectinload(WorkOrder.parts),
-            selectinload(WorkOrder.units).options(
-                selectinload(WorkUnit.parts),
-            ),
+            selectinload(WorkOrder.units).options(selectinload(WorkUnit.parts)),
         )
         .get(wo_id)
     )
@@ -3063,7 +3015,7 @@ def wo_detail(wo_id):
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # 2) доступы
+    # 2) access
     role_raw = (getattr(current_user, "role", "") or "").strip().lower()
     me_id = getattr(current_user, "id", None)
     me_name = (getattr(current_user, "username", "") or "").strip().lower()
@@ -3076,9 +3028,9 @@ def wo_detail(wo_id):
     is_user = (role_raw == "user")
 
     is_my_wo = False
-    if wo_tech_id and me_id and (wo_tech_id == me_id):
+    if wo_tech_id and me_id and wo_tech_id == me_id:
         is_my_wo = True
-    elif wo_tech_name and me_name and (wo_tech_name == me_name):
+    elif wo_tech_name and me_name and wo_tech_name == me_name:
         is_my_wo = True
 
     if is_technician and not is_my_wo:
@@ -3104,31 +3056,23 @@ def wo_detail(wo_id):
         )
     ]
 
-    # ----------------------------------------------------------------
-    # 4) Issued / Batches  (FIX: match by ALL WO job tokens, token-safe)
-    # ----------------------------------------------------------------
+    # ------------------------------------------------------------
+    # 4) Issued / Batches — FIXED (work_order_id + safe fallback)
+    # ------------------------------------------------------------
     canon = (wo.canonical_job or "").strip()
-
     raw_jobs = (getattr(wo, "job_numbers", "") or "").strip()
 
-    # Берём только "номер" или "номер+буква" (9151A), но НЕ чистые буквы типа "AS"
     job_tokens = []
     for t in re.findall(r"\d+[A-Za-z]?", raw_jobs):
         tt = (t or "").strip().upper()
         if tt:
             job_tokens.append(tt)
 
-    # canonical первым
     if canon:
-        canon_u = canon.strip().upper()
-        if canon_u and canon_u not in job_tokens:
-            job_tokens.insert(0, canon_u)
+        cu = canon.strip().upper()
+        if cu and cu not in job_tokens:
+            job_tokens.insert(0, cu)
 
-    # de-dup keep order
-    seen = set()
-    job_tokens = [x for x in job_tokens if not (x in seen or seen.add(x))]
-
-    # de-dup, keep order
     seen = set()
     job_tokens = [x for x in job_tokens if not (x in seen or seen.add(x))]
 
@@ -3136,18 +3080,7 @@ def wo_detail(wo_id):
         tok = (tok or "").strip().upper()
         if not tok:
             return False
-
-        # normalize NULL -> "" and make case-insensitive
         c = func.upper(func.coalesce(func.trim(col), ""))
-
-        if tok.isdigit():
-            return or_(
-                c == tok,
-                c.op("GLOB")(f"{tok}[^0-9A-Za-z]*"),
-                c.op("GLOB")(f"*[^0-9A-Za-z]{tok}[^0-9A-Za-z]*"),
-                c.op("GLOB")(f"*[^0-9A-Za-z]{tok}"),
-            )
-
         return or_(
             c == tok,
             c.op("GLOB")(f"{tok}[^0-9A-Za-z]*"),
@@ -3161,36 +3094,35 @@ def wo_detail(wo_id):
         .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
     )
 
-    # ВАЖНО:
-    # 1) не “только canon”
-    # 2) ищем по ЛЮБОМУ токену из WO.job_numbers
-    # 3) токен-матч (991472 НЕ матчится внутри 1991472)
     token_ors = []
     for tok in job_tokens:
         token_ors.append(_token_match(IssuedPartRecord.reference_job, tok))
         token_ors.append(_token_match(IssuedBatch.reference_job, tok))
 
-    if token_ors:
-        base_q = base_q.filter(or_(*token_ors))
+    if "work_order_id" in IssuedBatch.__table__.c:
+        if token_ors:
+            base_q = base_q.filter(
+                or_(
+                    IssuedBatch.work_order_id == wo.id,
+                    and_(IssuedBatch.work_order_id.is_(None), or_(*token_ors)),
+                )
+            )
+        else:
+            base_q = base_q.filter(IssuedBatch.work_order_id == wo.id)
+    else:
+        if token_ors:
+            base_q = base_q.filter(or_(*token_ors))
 
     # ------------------------------------------------------------
-    # 4b) SAFETY: also restrict issued lines to this WO technician
-    #     (prevents mixing when canonical job is same like 111225)
+    # 4b) technician safety (оставлено как у тебя)
     # ------------------------------------------------------------
     tech_aliases = set()
-
-    # WO tech name (what you print on WO page)
-    if getattr(wo, "technician_name", None):
-        tech_aliases.add((wo.technician_name or "").strip().lower())
-
-    # linked user username (if exists)
-    if getattr(wo, "technician_username", None):
-        tech_aliases.add((wo.technician_username or "").strip().lower())
-
-    # related User object (if joined)
-    if getattr(wo, "technician", None) and getattr(wo.technician, "username", None):
-        tech_aliases.add((wo.technician.username or "").strip().lower())
-
+    if wo.technician_name:
+        tech_aliases.add(wo.technician_name.strip().lower())
+    if wo.technician_username:
+        tech_aliases.add(wo.technician_username.strip().lower())
+    if wo.technician and wo.technician.username:
+        tech_aliases.add(wo.technician.username.strip().lower())
     tech_aliases = {x for x in tech_aliases if x}
 
     if tech_aliases:
@@ -3199,21 +3131,18 @@ def wo_detail(wo_id):
 
         base_q = base_q.filter(
             or_(
-                # 1) обычный кейс — выдано технику WO
                 issued_to_norm.in_(list(tech_aliases)),
-
-                # 2) если issued_to пустой/NULL — не прячем (старые/кривые записи)
                 issued_to_norm == "",
-
-                # 3) STOCK / RETURN — не прячем
                 ref_norm.op("GLOB")("STOCK*"),
                 ref_norm.op("GLOB")("RETURN*"),
             )
         )
 
     issued_items = base_q.order_by(
-        IssuedPartRecord.issue_date.asc(), IssuedPartRecord.id.asc()
+        IssuedPartRecord.issue_date.asc(),
+        IssuedPartRecord.id.asc()
     ).all()
+
 
     money_issued = func.coalesce(
         func.sum(
@@ -5752,8 +5681,7 @@ def wo_issue_instock(wo_id):
 
         if issued_row_ids or new_records or items_to_issue:
             _touch_wo()
-
-        db.session.commit()
+            db.session.commit()
 
         # autostatus
         if set_status == "done":
@@ -5775,6 +5703,7 @@ def wo_issue_instock(wo_id):
                     reference_job=wo.canonical_job,
                     issue_date=issue_date,
                     location=None,
+                    work_order_id=wo.id,
                 )
                 db.session.add(batch)
                 db.session.flush()
@@ -5859,7 +5788,7 @@ def wo_issue_instock(wo_id):
         flash("Nothing available to issue (all WAIT).", "warning")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    issue_date, _created_records = _issue_records_bulk(
+    issue_date, created_records = _issue_records_bulk(
         issued_to=wo.technician_name,
         reference_job=wo.canonical_job,
         items=items_to_issue,
@@ -5906,6 +5835,23 @@ def wo_issue_instock(wo_id):
             need_to_apply -= delta
 
     _touch_wo()
+    inv_no = _reserve_invoice_number()
+
+    batch = IssuedBatch(
+        invoice_number=inv_no,
+        issued_to=wo.technician_name,
+        issued_by=current_user.username,
+        reference_job=wo.canonical_job,
+        issue_date=issue_date,
+        location=None,
+        work_order_id=wo.id,  # 🔑 КЛЮЧ
+    )
+    db.session.add(batch)
+    db.session.flush()
+
+    for r in created_records:
+        r.batch_id = batch.id
+        r.invoice_number = inv_no
     db.session.commit()
 
     if set_status == "done":

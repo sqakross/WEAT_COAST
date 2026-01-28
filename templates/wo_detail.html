@@ -1,24 +1,37 @@
 {% extends "base.html" %}
 {% block content %}
 
+<style>
+  /* === header action buttons: make <a> and <button> identical size === */
+  .wo-action-btn{
+    min-width: 110px;              /* tweak if you want tighter/wider */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.2;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+</style>
+
 {# ---------- header row with actions ---------- #}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3 class="mb-0">Work Order #{{ wo.id }}</h3>
 
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-sm btn-outline-secondary"
+    <a class="btn btn-sm btn-outline-secondary wo-action-btn"
        href="{{ url_for('inventory.wo_list') }}">
       ← Back to list
     </a>
 
     {% set role_low = (current_user.role or '')|lower %}
     {% if role_low in ['admin','superadmin'] %}
-      <a class="btn btn-sm btn-outline-primary"
+      <a class="btn btn-sm btn-outline-primary wo-action-btn"
          href="{{ url_for('inventory.wo_edit', wo_id=wo.id) }}">
         ✏️ Edit
       </a>
     {% else %}
-      <a class="btn btn-sm btn-outline-primary"
+      <a class="btn btn-sm btn-outline-primary wo-action-btn"
          href="{{ url_for('inventory.wo_edit', wo_id=wo.id, readonly=1) }}">
         Form view
       </a>
@@ -29,7 +42,10 @@
             action="{{ url_for('inventory.wo_delete', wo_id=wo.id) }}"
             class="d-inline"
             onsubmit="return confirm('Delete Work Order #{{ wo.id }}? This cannot be undone.');">
-        <button class="btn btn-sm btn-outline-danger" type="submit">🗑️ Delete</button>
+        <button class="btn btn-sm btn-outline-danger wo-action-btn"
+                type="submit">
+          🗑️ Delete
+        </button>
       </form>
     {% endif %}
   </div>

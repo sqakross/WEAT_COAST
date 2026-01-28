@@ -547,6 +547,8 @@ class IssuedBatch(db.Model):
     consumed_by   = db.Column(db.String(120), nullable=True)
     consumed_note = db.Column(db.String(500), nullable=True)
 
+    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=True, index=True)
+
     @property
     def issue_date_local(self):
         return utc_to_local(self.issue_date)

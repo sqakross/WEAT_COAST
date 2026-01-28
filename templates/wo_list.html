@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+ wo_list: {% extends "base.html" %}
 {% block content %}
 
 <style>
@@ -109,6 +109,24 @@
 
   /* Дополнительно: убираем технический «прокладочный» зазор */
   .sticky-tools::after{ height: 0; } /* was .25rem */
+
+    /* ✅ FIX: make Delete (<button>) same size as Open/Edit (<a>) in Actions */
+  .wo-actions a.btn.btn-sm,
+  .wo-actions button.btn.btn-sm{
+    padding: .25rem .5rem !important;
+    font-size: .875rem !important;
+    line-height: 1.5 !important;
+    border-radius: .2rem !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+
+  /* some global CSS affects buttons only */
+  .wo-actions button.btn{
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
 </style>
 
 <div class="sticky-tools">
