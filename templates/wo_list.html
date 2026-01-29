@@ -127,6 +127,92 @@
     -webkit-appearance: none;
   }
 
+  /* =========================================================
+   FIX: WO LIST action buttons size (superadmin/admin too)
+   Make Delete button same size as Open/Edit/Form
+   ========================================================= */
+
+.wo-list-table .wo-actions .btn,
+.wo-list-table .wo-actions button.btn{
+  padding: .25rem .5rem !important;    /* btn-sm */
+  font-size: .875rem !important;       /* btn-sm */
+  line-height: 1.2 !important;
+  border-radius: .5rem !important;
+  min-height: 0 !important;
+}
+
+.wo-list-table .wo-actions form{
+  display:inline !important;
+  margin:0 !important;
+}
+
+/* =========================================================
+   WO LIST: make all Actions buttons same width
+   ========================================================= */
+
+/* same size for Open/Edit/Delete */
+.wo-list-table .wo-actions .btn,
+.wo-list-table .wo-actions button.btn{
+  padding: .25rem .5rem !important;     /* btn-sm */
+  font-size: .875rem !important;        /* btn-sm */
+  line-height: 1.2 !important;
+  border-radius: .5rem !important;
+
+  min-width: 64px !important;           /* <<< ключевое: одинаковая ширина */
+  text-align: center !important;
+}
+
+/* keep delete form inline and tight */
+.wo-list-table .wo-actions form{
+  display:inline !important;
+  margin:0 !important;
+}
+
+/* on touch (where you stack buttons) keep full width */
+@media (pointer:coarse){
+  .wo-list-table .wo-actions .btn,
+  .wo-list-table .wo-actions button.btn{
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+}
+/* =========================================================
+   WO LIST – normalize Open / Edit / Delete buttons
+   ========================================================= */
+
+.wo-list-table .wo-actions .btn{
+  box-sizing: border-box !important;
+
+  min-width: 64px !important;
+  height: 30px !important;              /* фиксируем высоту */
+  padding: 0 .5rem !important;
+
+  font-size: .875rem !important;
+  line-height: 1 !important;
+
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  border-width: 1px !important;         /* 🔑 одинаковая рамка */
+  border-style: solid !important;
+  border-radius: .5rem !important;
+}
+
+/* Убираем bootstrap-особенности delete */
+.wo-list-table .wo-actions .btn-outline-danger{
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: #dc3545;
+  --bs-btn-hover-border-color: #dc3545;
+}
+
+/* Форма delete не ломает размеры */
+.wo-list-table .wo-actions form{
+  display:inline-block !important;
+  margin:0 !important;
+}
+
+
 </style>
 
 <div class="sticky-tools">

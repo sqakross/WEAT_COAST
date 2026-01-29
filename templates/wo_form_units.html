@@ -212,6 +212,57 @@
   text-overflow: ellipsis;
 }
 
+/* =========================================================
+   WO LIST — FINAL FIX for Actions buttons
+   Open / Edit / Delete = identical size & shape
+   ========================================================= */
+
+.wo-list-table .wo-actions .btn,
+.wo-list-table .wo-actions button.btn{
+  /* reset bootstrap + browser differences */
+  appearance: none !important;
+  -webkit-appearance: none !important;
+
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+
+  /* identical geometry */
+  height: 30px !important;
+  min-width: 64px !important;
+  padding: 0 .5rem !important;
+
+  font-size: .875rem !important;
+  line-height: 1 !important;
+
+  /* IMPORTANT: same corners */
+  border-radius: .25rem !important;
+
+  /* same border thickness */
+  border-width: 1px !important;
+}
+
+/* delete form must not affect layout */
+.wo-list-table .wo-actions form{
+  display:inline-block !important;
+  margin:0 !important;
+  padding:0 !important;
+}
+
+/* touch layout — stacked buttons */
+@media (pointer:coarse){
+  .wo-list-table .wo-actions{
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .wo-list-table .wo-actions .btn{
+    width:100% !important;
+    min-width:0 !important;
+  }
+}
+
+
 </style>
 
 <div class="wo-header-line">
