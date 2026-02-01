@@ -1113,7 +1113,13 @@ def _create_batch_for_records(
     if not records:
         raise ValueError("No records passed to _create_batch_for_records")
 
-    issue_date = issue_date or datetime.utcnow()
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    LA_TZ = ZoneInfo("America/Los_Angeles")
+
+    if issue_date is None:
+        issue_date = datetime.now(LA_TZ).astimezone(timezone.utc).replace(tzinfo=None)
 
     for _ in range(5):  # несколько попыток на случай гонки за номер
         inv_no = _next_invoice_number()
@@ -3435,7 +3441,6 @@ def wo_detail(wo_id):
         can_view_docs=can_view_docs,
         current_user=current_user,
     )
-
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
 def download_report_xlsx():
@@ -3452,7 +3457,13 @@ def download_report_xlsx():
     # --------- фильтры ---------
     recipient = (request.args.get("recipient") or "").strip() or None
     reference_job = (request.args.get("reference_job") or "").strip() or None
-    invoice_number = (request.args.get("invoice_number") or "").strip() or None
+
+    invoice_number_s = (request.args.get("invoice_number") or "").strip()
+    try:
+        invoice_number = int(invoice_number_s) if invoice_number_s else None
+    except ValueError:
+        invoice_number = None
+
     inv_ref = (request.args.get("inv_ref") or "").strip() or None
     start_date_str = request.args.get("start_date") or None
     end_date_str = request.args.get("end_date") or None
@@ -3479,14 +3490,13 @@ def download_report_xlsx():
     if start_dt:
         q = q.filter(IssuedPartRecord.issue_date >= start_dt)
     if end_dt:
-        q = q.filter(
-            IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59)
-        )
+        q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
+
     if recipient:
         q = q.filter(IssuedPartRecord.issued_to.ilike(f"%{recipient}%"))
     if reference_job:
         q = q.filter(IssuedPartRecord.reference_job.ilike(f"%{reference_job}%"))
-    if invoice_number:
+    if invoice_number is not None:
         q = q.filter(IssuedPartRecord.invoice_number == invoice_number)
     if inv_ref:
         q = q.filter(IssuedPartRecord.inv_ref.ilike(f"%{inv_ref}%"))
@@ -3516,6 +3526,7 @@ def download_report_xlsx():
     bold_font = Font(bold=True)
     title_font = Font(bold=True, size=14)
     filters_font = Font(italic=True, size=11)
+
     right_align = Alignment(horizontal="right")
     center_align = Alignment(horizontal="center")
 
@@ -3526,62 +3537,37 @@ def download_report_xlsx():
         bottom=Side(style="thin"),
     )
 
-    # >>> итоговый набор колонок <<<
+    # >>> итоговый набор колонок (13) <<<
     header = [
-        "Date",
-        "Invoice #",
-        "Part #",
-        "Name",
-        "Qty",
-        "Unit Cost",
-        "Total",
-        "Issued To",
-        "Job Ref.",
-        "Location",
-        "INV# (vendor)",
+        "Date",             # A
+        "Invoice #",        # B
+        "Part #",           # C
+        "Name",             # D
+        "Qty",              # E
+        "Unit Cost",        # F
+        "Total",            # G
+        "Issued To",        # H
+        "Job Ref.",         # I
+        "Location",         # J
+        "INV# (vendor)",    # K
+        "Return To",        # L
+        "Return Company",   # M
     ]
 
     # строка фильтров
     filters_parts = []
     if start_date_str or end_date_str:
-        filters_parts.append(
-            f"from {start_date_str or '…'} to {end_date_str or '…'}"
-        )
+        filters_parts.append(f"from {start_date_str or '…'} to {end_date_str or '…'}")
     if recipient:
         filters_parts.append(f"Issued To contains '{recipient}'")
     if reference_job:
         filters_parts.append(f"Job Ref contains '{reference_job}'")
-    if invoice_number:
+    if invoice_number is not None:
         filters_parts.append(f"Invoice # = {invoice_number}")
     if inv_ref:
         filters_parts.append(f"INV# contains '{inv_ref}'")
 
     filters_line = "Filters: " + ("; ".join(filters_parts) if filters_parts else "(none)")
-
-    # ===== 1) ГРУППИРОВАННЫЙ ЛИСТ =====
-    ws_grouped["A1"] = "Issued Parts Report (Grouped by Invoice)"
-    ws_grouped.merge_cells("A1:K1")
-    ws_grouped["A1"].font = title_font
-    ws_grouped["A1"].alignment = center_align
-
-    ws_grouped["A2"] = filters_line
-    ws_grouped.merge_cells("A2:K2")
-    ws_grouped["A2"].font = filters_font
-
-    ws_grouped.append([])
-    ws_grouped.append(header)
-    header_row_grouped = ws_grouped.max_row
-    for cell in ws_grouped[header_row_grouped]:
-        cell.fill = header_fill
-        cell.font = bold_font
-        cell.alignment = center_align
-        cell.border = thin_border
-
-    ws_grouped.freeze_panes = f"A{header_row_grouped + 1}"
-
-    total_sum = 0.0
-    current_invoice = None
-    current_invoice_total = 0.0
 
     def fmt_invoice_num(inv):
         if inv is None:
@@ -3591,19 +3577,42 @@ def download_report_xlsx():
         except (TypeError, ValueError):
             return str(inv)
 
-    # ===== 2) FLAT DATA =====
+    # ===== 1) GROUPED =====
+    ws_grouped["A1"] = "Issued Parts Report (Grouped by Invoice)"
+    ws_grouped.merge_cells("A1:M1")
+    ws_grouped["A1"].font = title_font
+    ws_grouped["A1"].alignment = center_align
+
+    ws_grouped["A2"] = filters_line
+    ws_grouped.merge_cells("A2:M2")
+    ws_grouped["A2"].font = filters_font
+
+    ws_grouped.append([])
+    ws_grouped.append(header)
+    header_row_grouped = ws_grouped.max_row
+
+    for cell in ws_grouped[header_row_grouped]:
+        cell.fill = header_fill
+        cell.font = bold_font
+        cell.alignment = center_align
+        cell.border = thin_border
+
+    ws_grouped.freeze_panes = f"A{header_row_grouped + 1}"
+
+    # ===== 2) FLAT =====
     ws_flat["A1"] = "Issued Parts Report (Flat Data)"
-    ws_flat.merge_cells("A1:K1")
+    ws_flat.merge_cells("A1:M1")
     ws_flat["A1"].font = title_font
     ws_flat["A1"].alignment = center_align
 
     ws_flat["A2"] = filters_line
-    ws_flat.merge_cells("A2:K2")
+    ws_flat.merge_cells("A2:M2")
     ws_flat["A2"].font = filters_font
 
     ws_flat.append([])
     ws_flat.append(header)
     header_row_flat = ws_flat.max_row
+
     for cell in ws_flat[header_row_flat]:
         cell.fill = header_fill
         cell.font = bold_font
@@ -3612,7 +3621,11 @@ def download_report_xlsx():
 
     ws_flat.freeze_panes = f"A{header_row_flat + 1}"
 
-    # ===== 3) Данные =====
+    # ===== 3) DATA =====
+    total_sum = 0.0
+    current_invoice = None
+    current_invoice_total = 0.0
+
     for rec in rows:
         part = rec.part
         qty = rec.quantity or 0
@@ -3625,22 +3638,23 @@ def download_report_xlsx():
 
         # GROUPED: новая шапка инвойса
         if inv_val != current_invoice:
+            # subtotal предыдущего инвойса
             if current_invoice is not None:
                 ws_grouped.append([
-                    "", "", "", "Invoice subtotal:", "", "",
-                    round(current_invoice_total, 2),
-                    "", "", "",
+                    "", "", "", "Invoice subtotal:",
+                    "", "", round(current_invoice_total, 2),
+                    "", "", "", "", "", ""
                 ])
                 for cell in ws_grouped[ws_grouped.max_row]:
                     cell.fill = subtotal_fill
                     cell.font = bold_font
                     cell.border = thin_border
-                ws_grouped[ws_grouped.max_row][6].alignment = right_align
+                ws_grouped[ws_grouped.max_row][6].alignment = right_align  # G (Total)
 
                 ws_grouped.append([])
 
             header_text = f"Invoice {inv_str or '(no number)'}"
-            ws_grouped.append([header_text, "", "", "", "", "", "", "", "", ""])
+            ws_grouped.append([header_text] + [""] * 12)  # 13 колонок
             for cell in ws_grouped[ws_grouped.max_row]:
                 cell.fill = invoice_header_fill
                 cell.font = bold_font
@@ -3651,8 +3665,6 @@ def download_report_xlsx():
 
         current_invoice_total += float(line_total)
 
-        # строка в grouped
-        row_idx_grouped = ws_grouped.max_row + 1
         row_common = [
             rec.issue_date.date().isoformat() if rec.issue_date else "",
             inv_str,
@@ -3665,47 +3677,55 @@ def download_report_xlsx():
             rec.reference_job or "",
             rec.location or (part.location if part else ""),
             rec.inv_ref or "",
+            (getattr(rec, "return_to", None) or ""),
+            (rec.return_destination.name if getattr(rec, "return_destination", None) else ""),
         ]
 
+        # GROUPED append
         ws_grouped.append(row_common)
+        row_idx_grouped = ws_grouped.max_row
 
-        # строка в flat
-        row_idx_flat = ws_flat.max_row + 1
+        # FLAT append
         ws_flat.append(list(row_common))
+        row_idx_flat = ws_flat.max_row
 
+        # return/stock flags
         is_return = (qty or 0) < 0 or ((rec.reference_job or "").upper().startswith("RETURN"))
         loc_upper = (rec.location or "").upper()
         ref_upper = (rec.reference_job or "").upper()
         is_stock = loc_upper.startswith("STOCK") or ref_upper.startswith("STOCK")
 
-        # стили grouped
+        # styles grouped
         for cell in ws_grouped[row_idx_grouped]:
             cell.border = thin_border
             if is_return:
                 cell.fill = return_fill
             elif is_stock:
                 cell.fill = stock_fill
-        ws_grouped[row_idx_grouped][5].alignment = right_align  # Qty
-        ws_grouped[row_idx_grouped][6].alignment = right_align  # Unit Cost
-        ws_grouped[row_idx_grouped][7].alignment = right_align  # Total
 
-        # стили flat
+        # align numeric (Qty E, UnitCost F, Total G)
+        ws_grouped[row_idx_grouped][4].alignment = right_align  # E Qty
+        ws_grouped[row_idx_grouped][5].alignment = right_align  # F Unit Cost
+        ws_grouped[row_idx_grouped][6].alignment = right_align  # G Total
+
+        # styles flat
         for cell in ws_flat[row_idx_flat]:
             cell.border = thin_border
             if is_return:
                 cell.fill = return_fill
             elif is_stock:
                 cell.fill = stock_fill
+
+        ws_flat[row_idx_flat][4].alignment = right_align
         ws_flat[row_idx_flat][5].alignment = right_align
         ws_flat[row_idx_flat][6].alignment = right_align
-        ws_flat[row_idx_flat][7].alignment = right_align
 
     # subtotal последнего инвойса
     if current_invoice is not None:
         ws_grouped.append([
-            "", "", "", "Invoice subtotal:", "", "",
-            round(current_invoice_total, 2),
-            "", "", "",
+            "", "", "", "Invoice subtotal:",
+            "", "", round(current_invoice_total, 2),
+            "", "", "", "", "", ""
         ])
         for cell in ws_grouped[ws_grouped.max_row]:
             cell.fill = subtotal_fill
@@ -3717,9 +3737,9 @@ def download_report_xlsx():
     if rows:
         ws_grouped.append([])
         ws_grouped.append([
-            "", "", "", "GRAND TOTAL:", "", "",
-            round(total_sum, 2),
-            "", "", "",
+            "", "", "", "GRAND TOTAL:",
+            "", "", round(total_sum, 2),
+            "", "", "", "", "", ""
         ])
         for cell in ws_grouped[ws_grouped.max_row]:
             cell.fill = grand_total_fill
@@ -3727,21 +3747,25 @@ def download_report_xlsx():
             cell.border = thin_border
         ws_grouped[ws_grouped.max_row][6].alignment = right_align
 
-    ws_grouped.auto_filter.ref = f"A{header_row_grouped}:K{ws_grouped.max_row}"
-    ws_flat.auto_filter.ref = f"A{header_row_flat}:K{ws_flat.max_row}"
+    # filters
+    ws_grouped.auto_filter.ref = f"A{header_row_grouped}:M{ws_grouped.max_row}"
+    ws_flat.auto_filter.ref = f"A{header_row_flat}:M{ws_flat.max_row}"
 
+    # widths A..M
     for sheet in (ws_grouped, ws_flat):
         sheet.column_dimensions["A"].width = 12  # Date
         sheet.column_dimensions["B"].width = 10  # Invoice #
         sheet.column_dimensions["C"].width = 14  # Part #
         sheet.column_dimensions["D"].width = 32  # Name
-        sheet.column_dimensions["E"].width = 8  # Qty
+        sheet.column_dimensions["E"].width = 8   # Qty
         sheet.column_dimensions["F"].width = 10  # Unit Cost
         sheet.column_dimensions["G"].width = 12  # Total
         sheet.column_dimensions["H"].width = 18  # Issued To
         sheet.column_dimensions["I"].width = 16  # Job Ref.
-        sheet.column_dimensions["J"].width = 12  # Location
+        sheet.column_dimensions["J"].width = 14  # Location
         sheet.column_dimensions["K"].width = 16  # INV# (vendor)
+        sheet.column_dimensions["L"].width = 12  # Return To
+        sheet.column_dimensions["M"].width = 22  # Return Company
 
     output = BytesIO()
     wb.save(output)
@@ -3774,6 +3798,7 @@ def download_returns_xlsx():
 
     recipient = (request.args.get("recipient") or "").strip() or None
     reference_job = (request.args.get("reference_job") or "").strip() or None
+
     invoice_number_s = (request.args.get("invoice_number") or "").strip()
     try:
         invoice_number = int(invoice_number_s) if invoice_number_s else None
@@ -3805,9 +3830,8 @@ def download_returns_xlsx():
     if start_dt:
         q = q.filter(IssuedPartRecord.issue_date >= start_dt)
     if end_dt:
-        q = q.filter(
-            IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59)
-        )
+        q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
+
     if recipient:
         q = q.filter(IssuedPartRecord.issued_to.ilike(f"%{recipient}%"))
     if reference_job:
@@ -3819,8 +3843,8 @@ def download_returns_xlsx():
 
     # только возвраты
     q = q.filter(
-        (IssuedPartRecord.quantity < 0)
-        | (IssuedPartRecord.reference_job.ilike("RETURN%"))
+        (IssuedPartRecord.quantity < 0) |
+        (IssuedPartRecord.reference_job.ilike("RETURN%"))
     )
 
     q = q.order_by(
@@ -3837,11 +3861,14 @@ def download_returns_xlsx():
 
     header_fill = PatternFill("solid", fgColor="FFD9D9D9")
     return_fill = PatternFill("solid", fgColor="FFF8CBAD")
+
     bold_font = Font(bold=True)
     title_font = Font(bold=True, size=14)
     filters_font = Font(italic=True, size=11)
+
     right_align = Alignment(horizontal="right")
     center_align = Alignment(horizontal="center")
+
     thin_border = Border(
         left=Side(style="thin"),
         right=Side(style="thin"),
@@ -3849,31 +3876,32 @@ def download_returns_xlsx():
         bottom=Side(style="thin"),
     )
 
+    # >>> 13 колонок (как и в Issued) <<<
     header = [
-        "Date",
-        "Invoice #",
-        "Part #",
-        "Name",
-        "Qty",
-        "Unit Cost",
-        "Total",
-        "Issued To",
-        "Job Ref.",
-        "Location",
-        "INV# (vendor)",
+        "Date",             # A
+        "Invoice #",        # B
+        "Part #",           # C
+        "Name",             # D
+        "Qty",              # E
+        "Unit Cost",        # F
+        "Total",            # G
+        "Issued To",        # H
+        "Job Ref.",         # I
+        "Location",         # J
+        "INV# (vendor)",    # K
+        "Return To",        # L
+        "Return Company",   # M
     ]
 
     # фильтры
     filters_parts = []
     if start_date_str or end_date_str:
-        filters_parts.append(
-            f"from {start_date_str or '…'} to {end_date_str or '…'}"
-        )
+        filters_parts.append(f"from {start_date_str or '…'} to {end_date_str or '…'}")
     if recipient:
         filters_parts.append(f"Issued To contains '{recipient}'")
     if reference_job:
         filters_parts.append(f"Job Ref contains '{reference_job}'")
-    if invoice_number:
+    if invoice_number is not None:
         filters_parts.append(f"Invoice # = {invoice_number}")
     if inv_ref:
         filters_parts.append(f"INV# contains '{inv_ref}'")
@@ -3881,17 +3909,18 @@ def download_returns_xlsx():
     filters_line = "Filters: " + ("; ".join(filters_parts) if filters_parts else "(none)")
 
     ws["A1"] = "Returns Report"
-    ws.merge_cells("A1:K1")
+    ws.merge_cells("A1:M1")
     ws["A1"].font = title_font
     ws["A1"].alignment = center_align
 
     ws["A2"] = filters_line
-    ws.merge_cells("A2:K2")
+    ws.merge_cells("A2:M2")
     ws["A2"].font = filters_font
 
     ws.append([])
     ws.append(header)
     header_row = ws.max_row
+
     for cell in ws[header_row]:
         cell.fill = header_fill
         cell.font = bold_font
@@ -3919,7 +3948,6 @@ def download_returns_xlsx():
 
         inv_str = fmt_invoice_num(rec.invoice_number)
 
-        row_idx = ws.max_row + 1
         ws.append([
             rec.issue_date.date().isoformat() if rec.issue_date else "",
             inv_str,
@@ -3932,45 +3960,51 @@ def download_returns_xlsx():
             rec.reference_job or "",
             rec.location or (part.location if part else ""),
             rec.inv_ref or "",
+            (getattr(rec, "return_to", None) or ""),
+            (rec.return_destination.name if getattr(rec, "return_destination", None) else ""),
         ])
 
+        row_idx = ws.max_row
         for cell in ws[row_idx]:
             cell.border = thin_border
             cell.fill = return_fill
 
+        # align numeric (Qty E, UnitCost F, Total G)
+        ws[row_idx][4].alignment = right_align
         ws[row_idx][5].alignment = right_align
         ws[row_idx][6].alignment = right_align
-        ws[row_idx][7].alignment = right_align
 
     if rows:
         ws.append([])
         ws.append([
-            "", "", "", "", "TOTAL RETURNS:", "", "",
-            round(total_sum, 2),
-            "", "", "",
+            "", "", "", "TOTAL RETURNS:",
+            "", "", round(total_sum, 2),
+            "", "", "", "", "", ""
         ])
 
         for cell in ws[ws.max_row]:
             cell.font = bold_font
             cell.border = thin_border
-        ws[ws.max_row][7].alignment = right_align
+        ws[ws.max_row][6].alignment = right_align  # G total
 
-    ws.auto_filter.ref = f"A{header_row}:K{ws.max_row}"
+    ws.auto_filter.ref = f"A{header_row}:M{ws.max_row}"
 
+    # widths A..M
     widths = {
         "A": 12,  # Date
         "B": 10,  # Invoice #
-        "C": 16,  # INV# (vendor)
-        "D": 14,  # Part #
-        "E": 32,  # Name
-        "F": 8,  # Qty
-        "G": 10,  # Unit Cost
-        "H": 12,  # Total
-        "I": 18,  # Issued To
-        "J": 16,  # Job Ref.
-        "K": 12,  # Location
+        "C": 14,  # Part #
+        "D": 32,  # Name
+        "E": 8,   # Qty
+        "F": 10,  # Unit Cost
+        "G": 12,  # Total
+        "H": 18,  # Issued To
+        "I": 16,  # Job Ref.
+        "J": 14,  # Location
+        "K": 16,  # INV# (vendor)
+        "L": 12,  # Return To
+        "M": 22,  # Return Company
     }
-
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
 
@@ -3984,7 +4018,6 @@ def download_returns_xlsx():
         download_name="returns_report.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
 @inventory_bp.get("/reports_grouped/stock_xlsx", endpoint="download_stock_xlsx")
 @login_required
 def download_stock_xlsx():
@@ -4001,7 +4034,16 @@ def download_stock_xlsx():
 
     recipient = (request.args.get("recipient") or "").strip() or None
     reference_job = (request.args.get("reference_job") or "").strip() or None
-    invoice_number = (request.args.get("invoice_number") or "").strip() or None
+
+    invoice_number_s = (request.args.get("invoice_number") or "").strip()
+    try:
+        invoice_number = int(invoice_number_s) if invoice_number_s else None
+    except ValueError:
+        invoice_number = None
+
+    # (опционально, чтобы было одинаково с Issued/Returns)
+    inv_ref = (request.args.get("inv_ref") or "").strip() or None
+
     start_date_str = request.args.get("start_date") or None
     end_date_str = request.args.get("end_date") or None
 
@@ -4026,15 +4068,16 @@ def download_stock_xlsx():
     if start_dt:
         q = q.filter(IssuedPartRecord.issue_date >= start_dt)
     if end_dt:
-        q = q.filter(
-            IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59)
-        )
+        q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
+
     if recipient:
         q = q.filter(IssuedPartRecord.issued_to.ilike(f"%{recipient}%"))
     if reference_job:
         q = q.filter(IssuedPartRecord.reference_job.ilike(f"%{reference_job}%"))
-    if invoice_number:
+    if invoice_number is not None:
         q = q.filter(IssuedPartRecord.invoice_number == invoice_number)
+    if inv_ref:
+        q = q.filter(IssuedPartRecord.inv_ref.ilike(f"%{inv_ref}%"))
 
     # STOCK: is_stock=True или STOCK* в reference_job/location
     is_stock_col = getattr(IssuedPartRecord, "is_stock", None)
@@ -4068,11 +4111,14 @@ def download_stock_xlsx():
 
     header_fill = PatternFill("solid", fgColor="FFD9D9D9")
     stock_fill = PatternFill("solid", fgColor="FFDEEBF7")
+
     bold_font = Font(bold=True)
     title_font = Font(bold=True, size=14)
     filters_font = Font(italic=True, size=11)
+
     right_align = Alignment(horizontal="right")
     center_align = Alignment(horizontal="center")
+
     thin_border = Border(
         left=Side(style="thin"),
         right=Side(style="thin"),
@@ -4081,29 +4127,30 @@ def download_stock_xlsx():
     )
 
     header = [
-        "Date",
-        "Location",
-        "Invoice #",
-        "Part #",
-        "Name",
-        "Qty",
-        "Unit Cost",
-        "Total",
-        "Issued To",
-        "Job Ref.",
+        "Date",         # A
+        "Location",     # B
+        "Invoice #",    # C
+        "Part #",       # D
+        "Name",         # E
+        "Qty",          # F
+        "Unit Cost",    # G
+        "Total",        # H
+        "Issued To",    # I
+        "Job Ref.",     # J
     ]
 
     filters_parts = []
     if start_date_str or end_date_str:
-        filters_parts.append(
-            f"from {start_date_str or '…'} to {end_date_str or '…'}"
-        )
+        filters_parts.append(f"from {start_date_str or '…'} to {end_date_str or '…'}")
     if recipient:
         filters_parts.append(f"Issued To contains '{recipient}'")
     if reference_job:
         filters_parts.append(f"Job Ref contains '{reference_job}'")
-    if invoice_number:
+    if invoice_number is not None:
         filters_parts.append(f"Invoice # = {invoice_number}")
+    if inv_ref:
+        filters_parts.append(f"INV# contains '{inv_ref}'")
+
     filters_line = "Filters: " + ("; ".join(filters_parts) if filters_parts else "(none)")
 
     ws["A1"] = "Stock Movements Report"
@@ -4117,6 +4164,7 @@ def download_stock_xlsx():
 
     ws.append([])
     ws.append(header)
+
     header_row = ws.max_row
     for cell in ws[header_row]:
         cell.fill = header_fill
@@ -4145,7 +4193,6 @@ def download_stock_xlsx():
 
         inv_str = fmt_invoice_num(rec.invoice_number)
 
-        row_idx = ws.max_row + 1
         ws.append([
             rec.issue_date.date().isoformat() if rec.issue_date else "",
             rec.location or (part.location if part else ""),
@@ -4159,10 +4206,13 @@ def download_stock_xlsx():
             rec.reference_job or "",
         ])
 
+        row_idx = ws.max_row
+
         for cell in ws[row_idx]:
             cell.border = thin_border
             cell.fill = stock_fill
 
+        # align numeric columns: Qty(F), Unit Cost(G), Total(H)
         ws[row_idx][5].alignment = right_align
         ws[row_idx][6].alignment = right_align
         ws[row_idx][7].alignment = right_align
@@ -4171,20 +4221,20 @@ def download_stock_xlsx():
         ws.append([])
         ws.append([
             "", "", "", "", "TOTAL STOCK MOVEMENTS:",
-            "", round(total_sum, 2),
-            "", "", "",
+            "", "", round(total_sum, 2),
+            "", ""
         ])
         for cell in ws[ws.max_row]:
             cell.font = bold_font
             cell.border = thin_border
-        ws[ws.max_row][6].alignment = right_align
+        ws[ws.max_row][7].alignment = right_align  # H
 
     ws.auto_filter.ref = f"A{header_row}:J{ws.max_row}"
 
     widths = {
         "A": 12,  # Date
         "B": 14,  # Location
-        "C": 10,  # Invoice
+        "C": 10,  # Invoice #
         "D": 14,  # Part #
         "E": 32,  # Name
         "F": 8,   # Qty
@@ -7106,12 +7156,23 @@ def reports_grouped():
     from collections import defaultdict
     from datetime import datetime, time, timedelta, timezone
     from zoneinfo import ZoneInfo
+
     from sqlalchemy.orm import selectinload
-    from sqlalchemy import func, or_, case, and_
+    from sqlalchemy import func, or_, case
+
     from flask import render_template, request
     from flask_login import current_user
+
     from extensions import db
     from models import IssuedPartRecord, IssuedBatch, Part
+    from models import IssuedPartRecord, IssuedBatch, Part
+    from models import utc_to_local
+
+    # ✅ SAFE import: если модель/таблица ещё не существует — отчёт не падает
+    try:
+        from models import ReturnDestination
+    except Exception:
+        ReturnDestination = None
 
     def _parse_date_ymd(s: str | None):
         if not s:
@@ -7121,6 +7182,22 @@ def reports_grouped():
         except Exception:
             return None
 
+    # ✅ Vendor companies (id->name) for dropdown + stable display
+    return_destinations = []
+    dest_map = {}
+    if ReturnDestination is not None:
+        try:
+            return_destinations = (
+                db.session.query(ReturnDestination)
+                .order_by(func.lower(ReturnDestination.name).asc())
+                .all()
+            )
+            dest_map = {int(d.id): (d.name or "") for d in return_destinations}
+        except Exception:
+            # Никаких падений: просто без списка компаний
+            return_destinations = []
+            dest_map = {}
+
     # ---------- Параметры (GET/POST) ----------
     params         = request.values
     start_date_s   = (params.get('start_date') or '').strip()
@@ -7128,9 +7205,9 @@ def reports_grouped():
     recipient_raw  = (params.get('recipient') or '').strip() or None
     reference_job  = (params.get('reference_job') or '').strip() or None
     invoice_s      = (params.get('invoice_number') or params.get('invoice') or params.get('invoice_no') or '').strip()
-    invoice_search = invoice_s or None  # <-- ОБЩИЙ ПОИСК (и invoice#, и inv_ref)
+    invoice_search = invoice_s or None  # общий поиск (и invoice_number, и inv_ref)
     location       = (params.get('location') or '').strip() or None
-    status         = (params.get('status') or '').strip().upper()  # НОВОЕ
+    status         = (params.get('status') or '').strip().upper()
 
     # роль/текущий пользователь
     role_low = (getattr(current_user, "role", "") or "").strip().lower()
@@ -7147,13 +7224,11 @@ def reports_grouped():
 
     LA_TZ = ZoneInfo("America/Los_Angeles")
 
-    # ---------- DEFAULT: current month (Los Angeles), only when no dates and no invoice search ----------
+    # ---------- DEFAULT: current month (LA), only when no dates and no invoice search ----------
     if (not start_day) and (not end_day) and (not invoice_search):
         today_la = datetime.now(LA_TZ).date()
         start_day = today_la.replace(day=1)
         end_day = today_la
-
-        # чтобы форма сразу показала дефолтные даты
         start_date_s = start_day.isoformat()
         end_date_s = end_day.isoformat()
 
@@ -7199,19 +7274,24 @@ def reports_grouped():
     if reference_job:
         q = q.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
 
-    # ---------- Date filter using LA day boundaries converted to UTC (accurate for your UTC-stored datetimes) ----------
+    # ---------- Date filter (LA day boundaries -> UTC naive) ----------
     def _la_day_start_utc(d):
-        # LA 00:00 -> UTC
-        return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=LA_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+        return (
+            datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=LA_TZ)
+            .astimezone(timezone.utc)
+            .replace(tzinfo=None)
+        )
 
     def _la_next_day_start_utc(d):
-        # next day LA 00:00 -> UTC (exclusive upper bound)
         nd = d + timedelta(days=1)
-        return datetime(nd.year, nd.month, nd.day, 0, 0, 0, tzinfo=LA_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+        return (
+            datetime(nd.year, nd.month, nd.day, 0, 0, 0, tzinfo=LA_TZ)
+            .astimezone(timezone.utc)
+            .replace(tzinfo=None)
+        )
 
     if start_day:
         q = q.filter(date_expr >= _la_day_start_utc(start_day))
-
     if end_day:
         q = q.filter(date_expr < _la_next_day_start_utc(end_day))
 
@@ -7237,10 +7317,7 @@ def reports_grouped():
     if location:
         q = q.filter(IssuedPartRecord.location == location)
 
-    # ---------- НОВОЕ: фильтр по статусу строки ----------
-    # OPEN: quantity>0 and COALESCE(consumed_qty,0)=0
-    # PARTIAL: quantity>0 and 0<consumed<quantity
-    # CONSUMED: quantity>0 and consumed>=quantity
+    # ---------- Фильтр по статусу строки ----------
     if status == "OPEN":
         q = q.filter(
             IssuedPartRecord.quantity > 0,
@@ -7270,8 +7347,10 @@ def reports_grouped():
             key = ('BATCH', r.batch_id)
         else:
             is_ret = ((r.quantity or 0) < 0) or ((r.reference_job or '').upper().startswith('RETURN'))
-            safe_dt = (r.batch.issue_date if (is_ret and getattr(r, "batch", None)) else
-                       (r.issue_date or (r.batch.issue_date if getattr(r, "batch", None) else None)))
+            safe_dt = (
+                r.batch.issue_date if (is_ret and getattr(r, "batch", None)) else
+                (r.issue_date or (r.batch.issue_date if getattr(r, "batch", None) else None))
+            )
             day = (safe_dt.date() if safe_dt else datetime.min.date())
             inv_num = getattr(r, 'invoice_number', None)
             key = ('LEGACY', r.issued_to, r.reference_job, r.issued_by, day, inv_num)
@@ -7305,6 +7384,7 @@ def reports_grouped():
                 'reference_job': batch.reference_job,
                 'issued_by': batch.issued_by,
                 'issue_date': batch.issue_date,
+                'issue_date_local': utc_to_local(batch.issue_date),
                 'invoice_number': batch_inv_number,
                 'location': batch.location,
                 'items': items_sorted,
@@ -7344,6 +7424,7 @@ def reports_grouped():
                 'issued_by': issued_by,
                 'issue_date': issue_dt,
                 'invoice_number': resolved_inv_num,
+                'issue_date_local': utc_to_local(issue_dt),
                 'location': first.location,
                 'items': items_sorted,
                 'total_value': total_value,
@@ -7374,7 +7455,11 @@ def reports_grouped():
         reference_job=reference_job or '',
         invoice=invoice_s or '',
         location=location or '',
-        status=status or '',   # НОВОЕ: пробрасываем в шаблон
+        status=status or '',
+
+        # ✅ For dropdown + stable display in template
+        return_destinations=return_destinations,
+        dest_map=dest_map,
     )
 
 @inventory_bp.route("/invoice/printdirect")
@@ -10094,6 +10179,17 @@ def return_selected():
         flash("Access denied", "danger")
         return redirect(url_for('inventory.reports_grouped'))
 
+    # ✅ ADD (safe)
+    from sqlalchemy import func
+    from models import ReturnDestination
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    LA_TZ = ZoneInfo("America/Los_Angeles")
+
+    now_la = datetime.now(LA_TZ)  # aware LA time
+    now_dt = now_la.astimezone(timezone.utc).replace(tzinfo=None)  # naive UTC for DB
+
     raw_ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
     try:
         selected_ids = [int(x) for x in raw_ids if str(x).strip()]
@@ -10109,7 +10205,7 @@ def return_selected():
         flash("Selected records not found.", "warning")
         return redirect(url_for('inventory.reports_grouped'))
 
-    now_dt   = datetime.utcnow()
+
     issued_by = getattr(current_user, 'username', '') or 'system'
     first = rows[0]
     batch_issued_to = first.issued_to
@@ -10138,10 +10234,46 @@ def return_selected():
         if qty == 0:
             continue
 
-        src_inv = getattr(src, "invoice_number", None)
-        src_link = f"SRCINV:{src_inv}" if src_inv else None
-
         src_inv = (src.invoice_number if src.invoice_number is not None else None)
+
+        # --- return destination meta (per source row) ---
+        r_to = (request.form.get(f"return_to_{src.id}") or "").strip().upper()
+
+        # NOTE: can be ID (digits) or free text name (when DB empty)
+        r_dest_raw = (request.form.get(f"return_dest_{src.id}") or "").strip()
+
+        # ✅ IMPORTANT: define dest_id always (avoid UnboundLocalError)
+        dest_id = None
+
+        # required only if qty > 0 (то есть реально возвращаем)
+        if qty > 0:
+            if r_to not in ("STOCK", "VENDOR"):
+                flash("Please select Return To (STOCK or VENDOR) for all returned lines.", "danger")
+                db.session.rollback()
+                return redirect(url_for('inventory.reports_grouped'))
+
+            if r_to == "VENDOR":
+                if not r_dest_raw:
+                    flash("Please select Vendor Company for all VENDOR return lines.", "danger")
+                    db.session.rollback()
+                    return redirect(url_for('inventory.reports_grouped'))
+
+                # 1) dropdown: digits => ReturnDestination.id
+                if r_dest_raw.isdigit():
+                    dest_id = int(r_dest_raw)
+                else:
+                    # 2) free text => find/create ReturnDestination by name
+                    name = r_dest_raw.strip()
+                    existing = (
+                        db.session.query(ReturnDestination)
+                        .filter(func.lower(ReturnDestination.name) == name.lower())
+                        .first()
+                    )
+                    if not existing:
+                        existing = ReturnDestination(name=name, is_active=True)
+                        db.session.add(existing)
+                        db.session.flush()  # get id without commit
+                    dest_id = existing.id
 
         ret = IssuedPartRecord(
             part_id=src.part_id,
@@ -10155,6 +10287,8 @@ def return_selected():
 
             # ✅ связь возврата с исходным invoice (для корректного already-returned)
             inv_ref=(str(src_inv) if src_inv is not None else None),
+            return_to=r_to,
+            return_destination_id=dest_id,
         )
 
         db.session.add(ret)
@@ -10170,7 +10304,7 @@ def return_selected():
         return redirect(url_for('inventory.reports_grouped'))
 
     try:
-        batch = create_batch_for_records(
+        batch = _create_batch_for_records(
             created,
             issued_to=batch_issued_to,
             issued_by=issued_by,
@@ -10182,6 +10316,7 @@ def return_selected():
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to create return invoice: {e}", "danger")
+        # ✅ don't reference batch if it failed before assignment
         return redirect(url_for('inventory.reports_grouped'))
 
     flash(f"Return invoice #{batch.invoice_number} created ({len(created)} lines).", "success")

@@ -382,6 +382,21 @@ class IssuedPartRecord(db.Model):
         cascade="all, delete-orphan",
     )
 
+    # --- Return Destination meta (for accounting) ---
+    return_to = db.Column(db.String(16), nullable=True, index=True)  # STOCK | VENDOR
+    return_destination_id = db.Column(
+        db.Integer,
+        db.ForeignKey("return_destination.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    return_destination = db.relationship(
+        "ReturnDestination",
+        lazy="joined",
+    )
+
+
     @property
     def issue_date_local(self):
         return utc_to_local(self.issue_date)
@@ -743,6 +758,18 @@ class SupplierReturnItem(db.Model):
 
     def __repr__(self):
         return f"<SupplierReturnItem id={self.id} pn={self.part_number!r} qty={self.qty_returned} loc={self.location!r}>"
+
+class ReturnDestination(db.Model):
+    __tablename__ = "return_destination"
+    __table_args__ = {"extend_existing": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<ReturnDestination id={self.id} name={self.name!r} active={self.is_active}>"
 
 
 # --- Backwards-compatible aliases ---
