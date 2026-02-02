@@ -7,7 +7,7 @@
 {% set ro  = 'readonly' if RO else '' %}
 
 <style>
-    .col-wh{width:58px}
+  .col-wh{width:58px}
   .col-inv{width:90px}
   .col-hint{width:78px}
 
@@ -23,65 +23,55 @@
   .unit-table .ordered-col{ display:none; }
 
   /* ВСЕ текстовые поля формы показываем как UPPERCASE */
-  .wo-form input[type="text"] {
-    text-transform: uppercase;
-  }
+  .wo-form input[type="text"] { text-transform: uppercase; }
 
   /* ===== Parts table layout: make Part# + Part name usable ===== */
-    .wo-form .unit-table{
-      table-layout: fixed;
-      width: 100%;
-      min-width: 0;            /* ✅ no forced horizontal scroll */
-    }
+  .wo-form .unit-table{
+    table-layout: fixed;
+    width: 100%;
+    min-width: 0;            /* ✅ no forced horizontal scroll */
+  }
 
+  /* 1) PART # (1-я колонка) */
+  .wo-form .unit-table th:nth-child(1),
+  .wo-form .unit-table td:nth-child(1){
+    width: 140px;
+  }
+  .wo-form .unit-table td:nth-child(1) .pn{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: .88rem;
+  }
 
-    /* 1) PART # (1-я колонка) */
-    .wo-form .unit-table th:nth-child(1),
-    .wo-form .unit-table td:nth-child(1){
-      width: 140px;
-    }
-    .wo-form .unit-table td:nth-child(1) .pn{
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: .88rem;
-    }
+  /* 2) ALT PN# (2-я колонка) */
+  .wo-form .unit-table th:nth-child(2),
+  .wo-form .unit-table td:nth-child(2){
+    width: 110px;
+  }
 
-    /* 2) ALT PN# (2-я колонка) */
-    .wo-form .unit-table th:nth-child(2),
-    .wo-form .unit-table td:nth-child(2){
-      width: 110px;
-    }
+  /* 3) PART NAME (3-я колонка) — самая широкая */
+  .wo-form .unit-table th:nth-child(3),
+  .wo-form .unit-table td:nth-child(3){
+    width: 320px;
+  }
 
-    /* 3) PART NAME (3-я колонка) — самая широкая */
-    .wo-form .unit-table th:nth-child(3),
-    .wo-form .unit-table td:nth-child(3){
-      width: 320px; /* можешь поднять до 360-420 если хочется ещё шире */
-    }
+  /* аккуратнее поля внутри таблицы */
+  .wo-form .unit-table td .form-control{
+    padding: .20rem .35rem;
+    font-size: .90rem;
+  }
 
-    /* аккуратнее поля внутри таблицы */
-    .wo-form .unit-table td .form-control{
-      padding: .20rem .35rem;
-      font-size: .90rem;
-    }
-
-    /* чтобы длинное имя не выглядело “сломано” — показываем многоточие, но полное будет в tooltip (ниже) */
-    .wo-form .unit-table td:nth-child(3) .part-name{
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
+  /* чтобы длинное имя не выглядело “сломано” */
+  .wo-form .unit-table td:nth-child(3) .part-name{
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   /* Чуть уменьшаем чекбоксы, сами поля не трогаем */
-  .unit-table .form-check-input{
-    transform: scale(.9);
-  }
+  .unit-table .form-check-input{ transform: scale(.9); }
 
   /* ВИЗУАЛЬНАЯ ПОДСВЕТКА КАК В WORK ORDER */
-
-  /* Выданные (issued) – зелёные */
-  tr.issued-row{
-    background:#e6f4ea;
-  }
+  tr.issued-row{ background:#e6f4ea; }
   tr.issued-row .pn,
   tr.issued-row .part-name,
   tr.issued-row .qty,
@@ -90,10 +80,7 @@
     font-weight:600;
   }
 
-  /* Заказанные (ordered) – синие */
-  tr.row-ordered{
-    background:#e7f1ff;
-  }
+  tr.row-ordered{ background:#e7f1ff; }
   tr.row-ordered .pn,
   tr.row-ordered .part-name,
   tr.row-ordered .qty,
@@ -102,10 +89,7 @@
     font-weight:600;
   }
 
-  /* Backorder – красные */
-  tr.row-backorder{
-    background:#fff5f5;
-  }
+  tr.row-backorder{ background:#fff5f5; }
   tr.row-backorder .pn,
   tr.row-backorder .part-name,
   tr.row-backorder .qty,
@@ -132,137 +116,120 @@
    P2) COMPACT MODE: fit all columns
    ================================ */
 
-/* 1) таблица без forced min-width */
-.wo-form .unit-table{
-  table-layout: fixed;
-  width: 100%;
-  min-width: 0 !important;     /* ✅ важно: убираем принудительный скролл */
-}
-
-/* 2) делаем всё компактнее */
-.wo-form .unit-table th,
-.wo-form .unit-table td{
-  padding: .18rem .22rem !important;
-  font-size: .78rem;
-  vertical-align: middle;
-}
-
-.wo-form .unit-table td .form-control{
-  padding: .12rem .20rem !important;
-  font-size: .78rem;
-  height: 26px;
-  line-height: 1.1;
-}
-
-/* 3) чекбоксы меньше */
-.wo-form .unit-table .form-check-input{
-  transform: scale(.85);
-}
-
-/* 4) ширины колонок по порядку (как у тебя в thead) */
-.wo-form .unit-table th:nth-child(1),
-.wo-form .unit-table td:nth-child(1){ width: 110px; } /* Part # */
-
-.wo-form .unit-table th:nth-child(2),
-.wo-form .unit-table td:nth-child(2){ width: 85px; }  /* Alt PN */
-
-.wo-form .unit-table th:nth-child(3),
-.wo-form .unit-table td:nth-child(3){ width: 170px; } /* Part name */
-
-.wo-form .unit-table th:nth-child(4),
-.wo-form .unit-table td:nth-child(4){ width: 48px; }  /* Qty */
-
-.wo-form .unit-table th:nth-child(5),
-.wo-form .unit-table td:nth-child(5){ width: 70px; }  /* Unit */
-
-.wo-form .unit-table th:nth-child(6),
-.wo-form .unit-table td:nth-child(6){ width: 70px; }  /* Total */
-
-.wo-form .unit-table th:nth-child(7),
-.wo-form .unit-table td:nth-child(7){ width: 46px; }  /* WH */
-
-.wo-form .unit-table th:nth-child(8),
-.wo-form .unit-table td:nth-child(8){ width: 60px; }  /* INV# */
-
-.wo-form .unit-table th:nth-child(9),
-.wo-form .unit-table td:nth-child(9){ width: 36px; }  /* B/O */
-
-.wo-form .unit-table th:nth-child(10),
-.wo-form .unit-table td:nth-child(10){ width: 36px; } /* INS */
-
-.wo-form .unit-table th:nth-child(11),
-.wo-form .unit-table td:nth-child(11){ width: 60px; } /* Sup */
-
-.wo-form .unit-table th:nth-child(12),
-.wo-form .unit-table td:nth-child(12){ width: 36px; } /* Ord */
-
-.wo-form .unit-table th:nth-child(13),
-.wo-form .unit-table td:nth-child(13){ width: 78px; } /* Stock hint */
-
-.wo-form .unit-table th:nth-child(14),
-.wo-form .unit-table td:nth-child(14){ width: 52px; } /* Issue? */
-
-.wo-form .unit-table th:nth-child(15),
-.wo-form .unit-table td:nth-child(15){ width: 42px; } /* delete */
-
-/* 5) Part name аккуратно режем */
-.wo-form .unit-table td:nth-child(3) .part-name{
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* =========================================================
-   WO LIST — FINAL FIX for Actions buttons
-   Open / Edit / Delete = identical size & shape
-   ========================================================= */
-
-.wo-list-table .wo-actions .btn,
-.wo-list-table .wo-actions button.btn{
-  /* reset bootstrap + browser differences */
-  appearance: none !important;
-  -webkit-appearance: none !important;
-
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  box-sizing: border-box !important;
-
-  /* identical geometry */
-  height: 30px !important;
-  min-width: 64px !important;
-  padding: 0 .5rem !important;
-
-  font-size: .875rem !important;
-  line-height: 1 !important;
-
-  /* IMPORTANT: same corners */
-  border-radius: .25rem !important;
-
-  /* same border thickness */
-  border-width: 1px !important;
-}
-
-/* delete form must not affect layout */
-.wo-list-table .wo-actions form{
-  display:inline-block !important;
-  margin:0 !important;
-  padding:0 !important;
-}
-
-/* touch layout — stacked buttons */
-@media (pointer:coarse){
-  .wo-list-table .wo-actions{
-    flex-direction: column !important;
-    align-items: stretch !important;
+  .wo-form .unit-table{
+    table-layout: fixed;
+    width: 100%;
+    min-width: 0 !important;
   }
-  .wo-list-table .wo-actions .btn{
-    width:100% !important;
-    min-width:0 !important;
+
+  .wo-form .unit-table th,
+  .wo-form .unit-table td{
+    padding: .18rem .22rem !important;
+    font-size: .78rem;
+    vertical-align: middle;
   }
-}
 
+  .wo-form .unit-table td .form-control{
+    padding: .12rem .20rem !important;
+    font-size: .78rem;
+    height: 26px;
+    line-height: 1.1;
+  }
 
+  .wo-form .unit-table .form-check-input{ transform: scale(.85); }
+
+  .wo-form .unit-table th:nth-child(1),
+  .wo-form .unit-table td:nth-child(1){ width: 110px; }
+
+  .wo-form .unit-table th:nth-child(2),
+  .wo-form .unit-table td:nth-child(2){ width: 85px; }
+
+  .wo-form .unit-table th:nth-child(3),
+  .wo-form .unit-table td:nth-child(3){ width: 170px; }
+
+  .wo-form .unit-table th:nth-child(4),
+  .wo-form .unit-table td:nth-child(4){ width: 48px; }
+
+  .wo-form .unit-table th:nth-child(5),
+  .wo-form .unit-table td:nth-child(5){ width: 70px; }
+
+  .wo-form .unit-table th:nth-child(6),
+  .wo-form .unit-table td:nth-child(6){ width: 70px; }
+
+  .wo-form .unit-table th:nth-child(7),
+  .wo-form .unit-table td:nth-child(7){ width: 46px; }
+
+  .wo-form .unit-table th:nth-child(8),
+  .wo-form .unit-table td:nth-child(8){ width: 60px; }
+
+  .wo-form .unit-table th:nth-child(9),
+  .wo-form .unit-table td:nth-child(9){ width: 36px; }
+
+  .wo-form .unit-table th:nth-child(10),
+  .wo-form .unit-table td:nth-child(10){ width: 36px; }
+
+  .wo-form .unit-table th:nth-child(11),
+  .wo-form .unit-table td:nth-child(11){ width: 60px; }
+
+  .wo-form .unit-table th:nth-child(12),
+  .wo-form .unit-table td:nth-child(12){ width: 36px; }
+
+  .wo-form .unit-table th:nth-child(13),
+  .wo-form .unit-table td:nth-child(13){ width: 78px; }
+
+  .wo-form .unit-table th:nth-child(14),
+  .wo-form .unit-table td:nth-child(14){ width: 52px; }
+
+  .wo-form .unit-table th:nth-child(15),
+  .wo-form .unit-table td:nth-child(15){ width: 42px; }
+
+  .wo-form .unit-table td:nth-child(3) .part-name{
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* =========================================================
+     WO LIST — FINAL FIX for Actions buttons
+     Open / Edit / Delete = identical size & shape
+     ========================================================= */
+  .wo-list-table .wo-actions .btn,
+  .wo-list-table .wo-actions button.btn{
+    appearance: none !important;
+    -webkit-appearance: none !important;
+
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+
+    height: 30px !important;
+    min-width: 64px !important;
+    padding: 0 .5rem !important;
+
+    font-size: .875rem !important;
+    line-height: 1 !important;
+
+    border-radius: .25rem !important;
+    border-width: 1px !important;
+  }
+
+  .wo-list-table .wo-actions form{
+    display:inline-block !important;
+    margin:0 !important;
+    padding:0 !important;
+  }
+
+  @media (pointer:coarse){
+    .wo-list-table .wo-actions{
+      flex-direction: column !important;
+      align-items: stretch !important;
+    }
+    .wo-list-table .wo-actions .btn{
+      width:100% !important;
+      min-width:0 !important;
+    }
+  }
 </style>
 
 <div class="wo-header-line">
@@ -295,8 +262,6 @@
     </span>
   </div>
 {% endif %}
-
-
 
 <form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm" class="wo-form">
   {% if IS_EDIT %}
@@ -395,7 +360,6 @@
              {% if IS_INS %}required{% endif %}
              {{ ro }} {{ dis }}>
     </div>
-
   </div>
 
   <div id="unitsWrap" class="d-flex flex-column gap-4">
@@ -441,7 +405,6 @@
                 <th class="col-wh">WH</th>
                 <th class="col-inv">INV#</th>
                 <th style="width:80px;" title="Backorder">B/O</th>
-
                 <th class="ins-col" style="width:70px;">INS</th>
                 <th class="col-narrow">Sup</th>
                 <th class="ordered-col" style="width:70px;">Ord</th>
@@ -464,7 +427,6 @@
               {% if issued_full %}
                 {% set row_class = row_class + ' issued-row' %}
               {% elif is_ord %}
-                {# если уже выдано полностью, НЕ помечаем как ordered, только зелёный #}
                 {% set row_class = row_class + ' row-ordered' %}
               {% endif %}
               {% if r.backorder_flag %}
@@ -521,9 +483,7 @@
                        maxlength="32"
                        placeholder="INV#"
                        {{ ro }} {{ dis }}>
-
                 </td>
-
 
                 <td class="text-center">
                   <div class="form-check d-flex justify-content-center m-0">
@@ -532,15 +492,16 @@
                            {% if r.backorder_flag %}checked{% endif %} {{ dis }}>
                   </div>
                 </td>
+
                 <td class="text-center ins-col">
                   <div class="form-check d-flex justify-content-center m-0">
                     <input class="form-check-input ins-check" type="checkbox"
                        name="units[{{ ui }}][rows][{{ ri }}][is_insurance_supplied]"
                        data-wop-id="{{ r.id or '' }}"
                        {% if r.is_insurance_supplied %}checked{% endif %} {{ dis }}>
-
                   </div>
                 </td>
+
                 <td>
                   <input class="form-control supplier-input"
                          name="units[{{ ui }}][rows][{{ ri }}][supplier]"
@@ -548,6 +509,7 @@
                          value="{{ (r.supplier or '')|upper }}"
                          {{ ro }} {{ dis }}>
                 </td>
+
                 <td class="text-center ordered-col">
                   <input type="hidden" class="ordered-val"
                          name="units[{{ ui }}][rows][{{ ri }}][ordered_flag]"
@@ -555,21 +517,24 @@
                   <input type="checkbox" class="form-check-input ordered-check"
                          {% if is_ord %}checked{% endif %} {{ dis }}>
                 </td>
+
                 <td class="hint col-hint">—</td>
+
                 <td class="text-center issue-cell">
                   {% if not RO %}
                     <div class="form-check d-flex justify-content-center m-0">
                       <input type="checkbox" class="form-check-input issue-check"
-                       name="issue_ids" value="{{ r.id or '' }}"
+                       name="issue_ids"
+                       value="{{ r.id or '' }}"
                        data-wop-id="{{ r.id or '' }}"
                        {% if not r.id %}disabled title="Save WO first"{% endif %}
                        {% if issued_full %}disabled{% endif %}>
-
                     </div>
                   {% else %}
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
+
                 <td class="text-center">
                   {% if not RO %}
                     <button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>
@@ -584,13 +549,11 @@
         <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
           {% if not RO %}
           <div class="d-flex flex-wrap gap-2">
-            <button type="button"
-                    class="btn btn-outline-secondary add-row">
+            <button type="button" class="btn btn-outline-secondary add-row">
               + Add part row
             </button>
 
-            <button type="button"
-                    class="btn btn-outline-primary btn-copy-appliance">
+            <button type="button" class="btn btn-outline-primary btn-copy-appliance">
               Copy
             </button>
           </div>
@@ -653,7 +616,6 @@
   <input type="hidden" name="wo_id" value="{{ IS_EDIT and wo.id or '' }}">
   <input type="hidden" name="part_ids" id="issue_part_ids">
   <input type="hidden" name="set_status" id="issue_set_status" value="">
-  <!-- НОВОЕ: какие строки помечены INS прямо сейчас в форме -->
   <input type="hidden" name="ins_ids" id="issue_ins_ids">
 </form>
 
@@ -681,18 +643,18 @@
   const form = document.getElementById('woForm');
   if (!form) return;
 
-    const upperSelectors = [
+  const upperSelectors = [
     'input[name="job_numbers"]',
     'input[name$="[brand]"]',
     'input[name$="[model]"]',
     'input[name$="[serial]"]',
     '.pn',
     '.alt-pn',
-    '.part-name',      // ✅ P4 ADD THIS
+    '.part-name',
     '.wh-input',
-    '.supplier-input'
+    '.supplier-input',
+    '.inv-input'
   ];
-
 
   function shouldUpper(el){
     return upperSelectors.some(sel => el.matches(sel));
@@ -730,14 +692,13 @@
   const form         = document.getElementById('woForm');
   const unitsWrap    = document.getElementById('unitsWrap');
 
-    // P3) Tooltip: show full value on hover for Part# and Part name
+  // P3) Tooltip: show full value on hover for Part# and Part name
   unitsWrap?.addEventListener('mouseover', (e)=>{
     const inp = e.target.closest('input.part-name, input.pn');
     if (!inp) return;
     const v = (inp.value || '').trim();
     if (v) inp.title = v;
   });
-
 
   const grandTotalEl = document.getElementById('grandTotal');
   const deliveryEl   = document.getElementById('deliveryFee');
@@ -752,22 +713,18 @@
   function isInsuranceJob(){
     return jobTypeSel && jobTypeSel.value === 'INSURANCE';
   }
-
   function isRowInsuranceSupplied(tr){
     if (!tr) return false;
     const cb = tr.querySelector('.ins-check');
     return !!(cb && cb.checked);
   }
 
-
   // --- UNSAVED CHANGES GUARD ---
   let isDirty = false;
   let isSubmitting = false;
 
   function handleBeforeUnload(e) {
-    if (!isDirty || isSubmitting || IS_RO) {
-      return;
-    }
+    if (!isDirty || isSubmitting || IS_RO) return;
     e.preventDefault();
     e.returnValue = '';
     return '';
@@ -800,7 +757,6 @@
   }
   statusSel?.addEventListener('change', ()=>{
     updateSupplierRequired();
-    // при ручной смене статуса тоже проверим автологику
     reevaluateWOStatusFromOrd();
   });
 
@@ -808,14 +764,12 @@
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
       cell.style.display = 'table-cell';
       const cb  = cell.querySelector('.ordered-check');
-      if (cb && !IS_RO) {
-        cb.disabled = false;
-      }
+      if (cb && !IS_RO) cb.disabled = false;
     });
   }
   statusSel?.addEventListener('change', toggleOrderedCols);
 
-  // === NEW: показ/скрытие INS-колонки в зависимости от Job type
+  // показ/скрытие INS-колонки в зависимости от Job type
   function updateInsColumns(){
     const show = jobTypeSel && jobTypeSel.value === 'INSURANCE';
     document.querySelectorAll('.ins-col').forEach(el=>{
@@ -824,7 +778,7 @@
   }
   jobTypeSel?.addEventListener('change', updateInsColumns);
 
-    function updatePOField(){
+  function updatePOField(){
     const wrap = document.getElementById('poWrap');
     const inp  = document.querySelector('input[name="customer_po"]');
     const show = jobTypeSel && jobTypeSel.value === 'INSURANCE';
@@ -837,18 +791,15 @@
   }
   jobTypeSel?.addEventListener('change', updatePOField);
 
-
-  // === NEW: есть ли хотя бы один отмеченный Ord
   function hasAnyOrderedChecked(){
     return Array.from(document.querySelectorAll('.unit-table .ordered-check'))
       .some(cb => cb.checked);
   }
 
-  // === NEW: авто-установка статуса по чекбоксам Ord
   function reevaluateWOStatusFromOrd(){
     if (!statusSel) return;
     const cur = statusSel.value;
-    if (cur === 'done') return; // done не трогаем
+    if (cur === 'done') return;
 
     if (hasAnyOrderedChecked()){
       if (cur !== 'ordered'){
@@ -864,18 +815,14 @@
     }
   }
 
-  // helper: sync ordered_flag hidden inputs before final submit
   function syncOrderedFlagsBeforeSubmit(){
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
       const cb  = cell.querySelector('.ordered-check');
       const hid = cell.querySelector('.ordered-val');
-      if (hid) {
-        hid.value = (cb && cb.checked) ? '1' : '0';
-      }
+      if (hid) hid.value = (cb && cb.checked) ? '1' : '0';
     });
   }
 
-  // DUPLICATE CHECK LOGIC ...
   async function handleDuplicateCheckBeforeSubmit(){
     if (IS_EDIT) return true;
 
@@ -924,7 +871,6 @@
     }
   }
 
-  // final guarded submit handler
   if (form) {
     form.addEventListener('submit', async (e)=>{
       e.preventDefault();
@@ -932,7 +878,6 @@
       const okToSubmit = await handleDuplicateCheckBeforeSubmit();
       if (!okToSubmit) return;
 
-      // sync ordered_flag checkboxes into hidden vals
       syncOrderedFlagsBeforeSubmit();
 
       if (!IS_RO) {
@@ -948,36 +893,31 @@
   const toMoney = (n)=> (Math.round((Number(n||0)+Number.EPSILON)*100)/100).toFixed(2);
 
   function recomputeUnitSubtotal(card){
-  const markup   = parseFloat(markupEl?.value || '0') || 0;
-  const delivery = parseFloat(deliveryEl?.value || '0') || 0;
-  let unitSum = 0;
+    const markup   = parseFloat(markupEl?.value || '0') || 0;
+    const delivery = parseFloat(deliveryEl?.value || '0') || 0;
+    let unitSum = 0;
 
-  card.querySelectorAll('tbody tr').forEach(tr => {
-    const q        = parseFloat(tr.querySelector('.qty')?.value || '0') || 0;
-    const baseCost = parseFloat(tr.querySelector('.unit-cost')?.value || '0') || 0;
+    card.querySelectorAll('tbody tr').forEach(tr => {
+      const q        = parseFloat(tr.querySelector('.qty')?.value || '0') || 0;
+      const baseCost = parseFloat(tr.querySelector('.unit-cost')?.value || '0') || 0;
 
-    // ✅ Delivery fee ОДИН РАЗ на позицию:
-    // raw = qty * unit + delivery
-    // markup накручиваем на всю сумму строки
-    const rawLine = (q * baseCost) + delivery;
-    const line    = rawLine * (1 + markup / 100);
+      const rawLine = (q * baseCost) + delivery;
+      const line    = rawLine * (1 + markup / 100);
 
-    const cell = tr.querySelector('.line-total');
-    if (cell){
-      const v = toMoney(line);
-      cell.textContent = v;
-      cell.dataset.value = v;
-    }
-    unitSum += line;
-  });
+      const cell = tr.querySelector('.line-total');
+      if (cell){
+        const v = toMoney(line);
+        cell.textContent = v;
+        cell.dataset.value = v;
+      }
+      unitSum += line;
+    });
 
-  const us = card.querySelector('.unit-subtotal');
-  if (us) us.textContent = toMoney(unitSum);
+    const us = card.querySelector('.unit-subtotal');
+    if (us) us.textContent = toMoney(unitSum);
 
-  recomputeGrandTotal();
-}
-
-
+    recomputeGrandTotal();
+  }
 
   function recomputeGrandTotal(){
     let g = 0;
@@ -996,11 +936,11 @@
     });
   });
 
+  // ✅ FIXED: deterministic enable/disable
   function setIssueEnabled(tr, enabled){
     const cb = tr.querySelector('.issue-check');
     if (!cb) return;
 
-    // если уже выдано — всегда запрещено
     if (tr.classList.contains('issued-row')){
       cb.checked = false;
       cb.disabled = true;
@@ -1008,97 +948,33 @@
       return;
     }
 
-    // INS логика
-    const isINSJob =
-      jobTypeSel &&
-      jobTypeSel.value === 'INSURANCE';
-
+    const isINSJob = (jobTypeSel && jobTypeSel.value === 'INSURANCE');
     const insCheckbox = tr.querySelector('.ins-check');
     const isINSLine = !!(insCheckbox && insCheckbox.checked);
 
-    // ✅ РАЗРЕШАЕМ issue если:
-    // - есть STOCK
-    // - ИЛИ INSURANCE + INS
     const allowIssue = enabled || (isINSJob && isINSLine);
 
-    if (allowIssue){
-      cb.disabled = !IS_EDIT;
+    if (!allowIssue){
+      cb.checked = false;
+      cb.disabled = true;
+      cb.setAttribute('disabled','disabled');
+      return;
+    }
+
+    if (IS_EDIT){
+      cb.disabled = false;
       cb.removeAttribute('disabled');
     } else {
       cb.checked = false;
       cb.disabled = true;
       cb.setAttribute('disabled','disabled');
+      cb.title = "Save WO first";
     }
-  }
-
-
-  // Рекурсивно выдёргиваем количество из любого уровня вложенности (здесь не используется, но пусть будет)
-  function extractQtySmart(root){
-    const keys = [
-      'qty_available','available_qty','available','on_hand','onhand',
-      'stock','in_stock','qty','count','quantity'
-    ];
-
-    let best = 0;
-
-    function dfs(node, depth){
-      if (!node || depth > 5) return;
-
-      if (Array.isArray(node)){
-        node.forEach(x => dfs(x, depth + 1));
-        return;
-      }
-      if (typeof node === 'object'){
-        for (const [k, v] of Object.entries(node)){
-          const key = String(k || '').toLowerCase();
-          if (keys.includes(key) && v !== null && v !== undefined && !isNaN(Number(v))){
-            const n = Number(v);
-            if (n > best) best = n;
-          }
-          if (v && typeof v === 'object'){
-            dfs(v, depth + 1);
-          }
-        }
-      }
-    }
-
-    dfs(root, 0);
-    return best;
-  }
-
-  // Рекурсивно ищем первую непустую строку по списку вариантов ключей
-  function pickDeep(root, variants){
-    let result;
-
-    function dfs(node, depth){
-      if (result !== undefined || !node || depth > 5) return;
-
-      if (Array.isArray(node)){
-        node.forEach(x => dfs(x, depth + 1));
-        return;
-      }
-      if (typeof node === 'object'){
-        for (const [k, v] of Object.entries(node)){
-          const key = String(k || '').toLowerCase();
-          if (variants.includes(key) && v !== null && v !== undefined && String(v).trim() !== ''){
-            result = v;
-            return;
-          }
-          if (v && typeof v === 'object'){
-            dfs(v, depth + 1);
-            if (result !== undefined) return;
-          }
-        }
-      }
-    }
-
-    dfs(root, 0);
-    return result;
   }
 
   function fetchHint(tr){
     const pnInput  = tr.querySelector('.pn');
-    const altInput = tr.querySelector('.alt-pn');   // Alt PN
+    const altInput = tr.querySelector('.alt-pn');
     const qtyInput = tr.querySelector('.qty');
     const whInput  = tr.querySelector('.wh-input');
     const nameInp  = tr.querySelector('.part-name');
@@ -1107,7 +983,7 @@
 
     const pnMain = (pnInput?.value || '').trim().toUpperCase();
     const pnAlt  = (altInput?.value || '').trim().toUpperCase();
-    const pn     = pnMain || pnAlt;   // если Part # пустой – используем Alt PN
+    const pn     = pnMain || pnAlt;
 
     const qty = parseInt(qtyInput?.value || '0', 10) || 0;
 
@@ -1117,12 +993,7 @@
       return;
     }
 
-    // ВАЖНО: не фильтруем по WH из Work Order.
-    // В колонке WH у тебя "B2", а реальная локация в инвентаре "MAR/REL/...".
-    // Поэтому сюда WH НЕ отправляем, чтобы не терять наличие.
-    const url = API_STOCK
-      + '?pn=' + encodeURIComponent(pn)
-      + '&qty=' + qty;
+    const url = API_STOCK + '?pn=' + encodeURIComponent(pn) + '&qty=' + qty;
 
     fetch(url)
       .then(r => r.ok ? r.json() : Promise.reject())
@@ -1139,21 +1010,13 @@
         ) || 0;
 
         const okFlag  = !!flat.ok;
-        let isStock   = okFlag && qa > 0;
+        const isStock = okFlag && qa > 0;
 
-        const label = isStock ? 'STOCK' : 'WAIT';
-        if (hintEl) {
-          hintEl.textContent = label + '/' + qa;
-        }
+        if (hintEl) hintEl.textContent = (isStock ? 'STOCK' : 'WAIT') + '/' + qa;
 
         setIssueEnabled(tr, isStock);
 
-        const nameGuess =
-          flat.part_name ||
-          flat.name ||
-          flat.title ||
-          flat.description;
-
+        const nameGuess = flat.part_name || flat.name || flat.title || flat.description;
         if (nameInp && (!nameInp.value || !nameInp.value.trim()) && nameGuess){
           nameInp.value = String(nameGuess).trim().slice(0,120);
         }
@@ -1178,16 +1041,10 @@
 
           costInp.value = newCost;
           const card = tr.closest('.card');
-          if (card) {
-            recomputeUnitSubtotal(card);
-          }
+          if (card) recomputeUnitSubtotal(card);
         }
 
-        const whGuess =
-          flat.warehouse ||
-          flat.location ||
-          flat.wh;
-
+        const whGuess = flat.warehouse || flat.location || flat.wh;
         if (whInput && (!whInput.value || !whInput.value.trim()) && whGuess){
           whInput.value = String(whGuess).trim().slice(0,120).toUpperCase();
         }
@@ -1218,24 +1075,35 @@
              name="units[${ui}][rows][${ri}][backorder_flag]" ${thebo}>
     </div>
   </td>
+
   <td class="text-center ins-col">
     <div class="form-check d-flex justify-content-center m-0">
       <input class="form-check-input ins-check" type="checkbox"
              name="units[${ui}][rows][${ri}][is_insurance_supplied]" ${thebo}>
     </div>
   </td>
+
   <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
+
   <td class="text-center ordered-col">
     <input type="hidden" class="ordered-val" name="units[${ui}][rows][${ri}][ordered_flag]" value="0">
     <input type="checkbox" class="form-check-input ordered-check" ${thebo}>
   </td>
+
   <td class="hint">—</td>
+
+  <!-- ✅ FIX: unsaved rows must not have fake value; keep disabled until WO saved -->
   <td class="text-center issue-cell">
     <div class="form-check d-flex justify-content-center m-0">
       <input type="checkbox" class="form-check-input issue-check"
-             name="issue_ids" value="${ui}_${ri}" ${IS_EDIT?'':'disabled'}>
+             name="issue_ids"
+             value=""
+             data-wop-id=""
+             disabled
+             title="Save WO first">
     </div>
   </td>
+
   <td class="text-center">
     ${IS_RO?'':'<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>'}
   </td>
@@ -1296,13 +1164,10 @@
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
       ${IS_RO ? '<span></span>' : `
       <div class="d-flex flex-wrap gap-2">
-        <button type="button"
-                class="btn btn-outline-secondary add-row">
+        <button type="button" class="btn btn-outline-secondary add-row">
           + Add part row
         </button>
-
-        <button type="button"
-                class="btn btn-outline-primary btn-copy-appliance">
+        <button type="button" class="btn btn-outline-primary btn-copy-appliance">
           Copy
         </button>
       </div>`}
@@ -1316,14 +1181,25 @@
   }
 
   unitsWrap.addEventListener('input', (e)=>{
-    const tr=e.target.closest('tr');
-    const card=e.target.closest('.card');
-    if(!card) return;
+    const tr = e.target.closest('tr');
+    const card = e.target.closest('.card');
+    if (!card) return;
 
-    if(tr && (e.target.classList.contains('qty')||e.target.classList.contains('unit-cost'))){
+    // ✅ INV normalization on input (no spaces)
+    if (tr && e.target.classList.contains('inv-input')) {
+      const v = (e.target.value || '').toUpperCase();
+      const nv = v.replace(/\s+/g, '');
+      if (e.target.value !== nv) {
+        const s = e.target.selectionStart, e2 = e.target.selectionEnd;
+        e.target.value = nv;
+        if (s != null && e2 != null) e.target.setSelectionRange(s, e2);
+      }
+    }
+
+    if (tr && (e.target.classList.contains('qty') || e.target.classList.contains('unit-cost'))){
       recomputeUnitSubtotal(card);
     }
-    if(tr && (
+    if (tr && (
       e.target.classList.contains('pn') ||
       e.target.classList.contains('alt-pn') ||
       e.target.classList.contains('qty') ||
@@ -1332,11 +1208,10 @@
       fetchHint(tr);
     }
   });
-       // Когда переключаем INS или ORD на строке – пересчитываем доступность и статус WO
+
   unitsWrap.addEventListener('change', (e)=>{
     const target = e.target;
 
-    // --- INS чекбокс ---
     if (target.classList.contains('ins-check')) {
       const tr = target.closest('tr');
       if (!tr) return;
@@ -1345,53 +1220,41 @@
       const status = raw.split('/')[0];
       const isStock = (status === 'STOCK');
 
-      // INS-строка в INSURANCE-job тоже может быть доступной (эта логика уже есть в selectAll/issueBtn),
-      // здесь просто обновляем кнопку Issue.
       setIssueEnabled(tr, isStock);
     }
 
-    // --- ORD чекбокс ---
     if (target.classList.contains('ordered-check')) {
       const cell = target.closest('.ordered-col');
       const hid  = cell && cell.querySelector('.ordered-val');
 
-      // сразу синхронизируем скрытое поле ordered_flag
-      if (hid) {
-        hid.value = target.checked ? '1' : '0';
-      }
+      if (hid) hid.value = target.checked ? '1' : '0';
 
-      // пересчёт статуса WO и required на Sup
       reevaluateWOStatusFromOrd();
       updateSupplierRequired();
     }
   });
 
-
-
   unitsWrap.addEventListener('click', (e)=>{
     const btn = e.target.closest('button');
     if(!btn) return;
 
-    // ---- УДАЛИТЬ АППЛАЙЕНС ----
-    if(btn.classList.contains('del-unit')){
-      const card = btn.closest('card');
-      const cardReal = btn.closest('.card');
-      const targetCard = cardReal || card;
+    // ✅ FIX: delete unit reliably
+    if (btn.classList.contains('del-unit')) {
+      const targetCard = btn.closest('.card');
       if (targetCard) {
         targetCard.remove();
 
-        // Перенумеровка Appliance #1, #2, ...
         document.querySelectorAll('#unitsWrap .card').forEach((c, idx)=>{
-          const strong=c.querySelector('.card-header strong');
-          if(strong) strong.textContent = `Appliance #${idx+1}`;
+          const strong = c.querySelector('.card-header strong');
+          if (strong) strong.textContent = `Appliance #${idx+1}`;
         });
 
         recomputeGrandTotal();
+        reevaluateWOStatusFromOrd();
       }
       return;
     }
 
-    // ---- ДОБАВИТЬ СТРОКУ ----
     if(btn.classList.contains('add-row')){
       const card  = btn.closest('.card'); if(!card) return;
       const tbody = card.querySelector('tbody'); if(!tbody) return;
@@ -1405,23 +1268,15 @@
       toggleOrderedCols();
       updateInsColumns();
       updatePOField();
-
-      // NEW: после добавления строки – пересчёт статуса
       reevaluateWOStatusFromOrd();
       return;
     }
 
-    // ---- УДАЛИТЬ СТРОКУ ----
     if(btn.classList.contains('del-row')){
       const tr   = btn.closest('tr');
       const card = btn.closest('.card') || (tr && tr.closest('.card')) || null;
-      if (tr) {
-        tr.remove();
-      }
-      if (card) {
-        recomputeUnitSubtotal(card);
-      }
-      // NEW: пересчёт после удаления строки
+      if (tr) tr.remove();
+      if (card) recomputeUnitSubtotal(card);
       reevaluateWOStatusFromOrd();
       return;
     }
@@ -1431,11 +1286,12 @@
     const ui = document.querySelectorAll('#unitsWrap .card').length;
     unitsWrap.insertAdjacentHTML('beforeend', unitTemplate(ui));
     const card = unitsWrap.lastElementChild;
+
     updateSupplierRequired();
     recomputeUnitSubtotal(card);
     toggleOrderedCols();
     updateInsColumns();
-    // NEW: пересчёт после добавления юнита
+    updatePOField();
     reevaluateWOStatusFromOrd();
   });
 
@@ -1450,9 +1306,7 @@
       const status = raw.split('/')[0];
       const isStock = (status === 'STOCK');
 
-      // INS-строка в INSURANCE-job тоже считается "доступной"
       const isInsEligible = isInsuranceJob() && isRowInsuranceSupplied(tr);
-
       return isStock || isInsEligible;
     });
 
@@ -1463,71 +1317,38 @@
   });
 
   issueBtn?.addEventListener('click', ()=>{
-  const selected    = [];
-  const insSelected = [];
-  const isINSJob    = isInsuranceJob();
+    const selected    = [];
+    const insSelected = [];
+    const isINSJob    = isInsuranceJob();
 
-  // 1) collect ONLY numeric WorkOrderPart IDs
-  document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
-    if (tr.classList.contains('issued-row')) return;
+    document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
+      if (tr.classList.contains('issued-row')) return;
 
-    const cb = tr.querySelector('.issue-check');
-    if (!cb || !cb.checked) return;
+      const cb = tr.querySelector('.issue-check');
+      if (!cb || !cb.checked) return;
 
-    const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
-    if (!/^\d+$/.test(wopId)) return; // <-- critical: skip non-saved rows
+      const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
+      if (!/^\d+$/.test(wopId)) return;
 
-    const raw    = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
-    const status = raw.split('/')[0];
-    const insLine = isRowInsuranceSupplied(tr);
+      const raw    = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
+      const status = raw.split('/')[0];
+      const insLine = isRowInsuranceSupplied(tr);
 
-    // allow only STOCK or (INS job + INS line)
-    if (status === 'STOCK' || (isINSJob && insLine)) {
-      selected.push(wopId);
-      if (isINSJob && insLine) insSelected.push(wopId);
+      if (status === 'STOCK' || (isINSJob && insLine)) {
+        selected.push(wopId);
+        if (isINSJob && insLine) insSelected.push(wopId);
+      }
+    });
+
+    if (selected.length === 0) {
+      alert(isINSJob
+        ? 'Select at least one in-stock or INS part (saved rows only).'
+        : 'Select at least one in-stock part (saved rows only).'
+      );
+      return;
     }
-  });
 
-  if (selected.length === 0) {
-    alert(isINSJob
-      ? 'Select at least one in-stock or INS part (saved rows only).'
-      : 'Select at least one in-stock part (saved rows only).'
-    );
-    return;
-  }
-
-  // 2) require INV# for selected rows
-  let firstEmpty = null;
-  document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
-    if (tr.classList.contains('issued-row')) return;
-
-    const cb = tr.querySelector('.issue-check');
-    if (!cb) return;
-
-    const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
-    if (!selected.includes(wopId)) return;
-
-    const inv = (tr.querySelector('.inv-input')?.value || '').trim();
-    if (!inv && !firstEmpty) firstEmpty = tr;
-  });
-
-  if (firstEmpty){
-    alert('Invoice # is required for all selected lines before issuing.');
-    const inp = firstEmpty.querySelector('.inv-input');
-    if (inp){
-      inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      inp.focus();
-      inp.classList.add('inv-missing');
-      setTimeout(() => inp.classList.remove('inv-missing'), 2000);
-    }
-    return;
-  }
-    // --- FIX: copy INV# of selected lines into issueForm ---
-  const issueFormEl = document.getElementById('issueForm');
-  if (issueFormEl) {
-    // remove old injected inv_*
-    issueFormEl.querySelectorAll('input[data-invcopy="1"]').forEach(x => x.remove());
-
+    let firstEmpty = null;
     document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
       if (tr.classList.contains('issued-row')) return;
 
@@ -1537,33 +1358,54 @@
       const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
       if (!selected.includes(wopId)) return;
 
-      let invVal = (tr.querySelector('.inv-input')?.value || '').trim().toUpperCase();
-      invVal = invVal.replace(/\s+/g, ''); // убираем пробелы внутри
-
-
-      const h = document.createElement('input');
-      h.type = 'hidden';
-      h.name = `inv_${wopId}`;
-      h.value = invVal;
-      h.setAttribute('data-invcopy', '1');
-      issueFormEl.appendChild(h);
+      const inv = (tr.querySelector('.inv-input')?.value || '').trim();
+      if (!inv && !firstEmpty) firstEmpty = tr;
     });
-  }
-  // --- /FIX ---
 
+    if (firstEmpty){
+      alert('Invoice # is required for all selected lines before issuing.');
+      const inp = firstEmpty.querySelector('.inv-input');
+      if (inp){
+        inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        inp.focus();
+        inp.classList.add('inv-missing');
+        setTimeout(() => inp.classList.remove('inv-missing'), 2000);
+      }
+      return;
+    }
 
-  // 3) submit
-  if (statusSel) statusSel.value = 'done';
+    const issueFormEl = document.getElementById('issueForm');
+    if (issueFormEl) {
+      issueFormEl.querySelectorAll('input[data-invcopy="1"]').forEach(x => x.remove());
 
-  document.getElementById('issue_set_status').value = 'done';
-  document.getElementById('issue_part_ids').value  = selected.join(',');
-  document.getElementById('issue_ins_ids').value   = insSelected.join(',');
-  document.getElementById('issueForm').submit();
-});
+      document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
+        if (tr.classList.contains('issued-row')) return;
 
+        const cb = tr.querySelector('.issue-check');
+        if (!cb) return;
 
+        const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
+        if (!selected.includes(wopId)) return;
 
+        let invVal = (tr.querySelector('.inv-input')?.value || '').trim().toUpperCase();
+        invVal = invVal.replace(/\s+/g, '');
 
+        const h = document.createElement('input');
+        h.type = 'hidden';
+        h.name = `inv_${wopId}`;
+        h.value = invVal;
+        h.setAttribute('data-invcopy', '1');
+        issueFormEl.appendChild(h);
+      });
+    }
+
+    if (statusSel) statusSel.value = 'done';
+
+    document.getElementById('issue_set_status').value = 'done';
+    document.getElementById('issue_part_ids').value  = selected.join(',');
+    document.getElementById('issue_ins_ids').value   = insSelected.join(',');
+    document.getElementById('issueForm').submit();
+  });
 
   // initial calc / hints
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
@@ -1571,7 +1413,7 @@
   updateSupplierRequired();
   toggleOrderedCols();
   updateInsColumns();
-  // NEW: первичный пересчёт статуса по уже отмеченным Ord
+  updatePOField();                 // ✅ FIX: run on load
   reevaluateWOStatusFromOrd();
 })();
 </script>
@@ -1681,4 +1523,255 @@ function wccrToast(msg) {
   });
 })();
 </script>
+
+<script>
+(function(){
+  const IS_EDIT = {{ 'true' if IS_EDIT else 'false' }};
+  const IS_RO   = {{ 'true' if RO else 'false' }};
+
+  // не лочим в режиме Edit или Readonly
+  if (IS_EDIT || IS_RO) return;
+
+  const API_RESERVE = "{{ url_for('inventory.api_job_reserve') }}";
+  const API_RELEASE = "{{ url_for('inventory.api_job_release') }}";
+
+  const form = document.getElementById('woForm');
+  if (!form) return;
+
+  const jobInput  = form.querySelector('input[name="job_numbers"]');
+  const saveBtn   = form.querySelector('button[type="submit"]');
+  const issueBtn  = document.getElementById('issueSelectedBtn'); // у тебя уже есть
+  if (!jobInput) return;
+
+  // --- UI: status line under job field ---
+  const statusLine = document.createElement('div');
+  statusLine.className = "form-text";
+  statusLine.style.marginTop = "6px";
+  jobInput.insertAdjacentElement('afterend', statusLine);
+
+  // --- helpers ---
+  function setButtonsEnabled(enabled){
+    if (saveBtn) saveBtn.disabled = !enabled;
+    if (issueBtn) issueBtn.disabled = !enabled; // пока WO new — issue всё равно disabled у тебя, но пусть будет
+  }
+
+  function escapeHtml(s){
+      return String(s || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function setOk(msg){
+      jobInput.classList.remove('is-invalid');
+      statusLine.className = "form-text text-success";
+      statusLine.innerHTML = msg ? escapeHtml(msg) : "Reserved";
+      setButtonsEnabled(true);
+    }
+
+    function setWarn(html){
+      jobInput.classList.add('is-invalid');
+      statusLine.className = "form-text text-danger";
+      // тут мы УЖЕ хотим поддержать HTML (кнопку/ссылку)
+      statusLine.innerHTML = html || "Locked / Duplicate";
+      setButtonsEnabled(false);
+    }
+
+
+  function parseISO(iso){
+      if (!iso) return null;
+      // if string has timezone (Z or +hh:mm) -> ok
+      if (/[zZ]|[+-]\d\d:\d\d$/.test(iso)) return new Date(iso);
+      // otherwise treat as UTC
+      return new Date(iso + 'Z');
+    }
+
+
+  function setIdle(){
+    jobInput.classList.remove('is-invalid');
+    statusLine.className = "form-text text-muted";
+    statusLine.textContent = "Enter job number(s) to reserve.";
+    setButtonsEnabled(true); // пусть можно, пока поле пустое
+  }
+
+  // convert ISO UTC -> local string (PST will show automatically in browser)
+  function fmtLocalPT(iso){
+  try{
+    const d = parseISO(iso) || new Date(iso);
+    if (isNaN(d.getTime())) return "";
+
+    // Always show Pacific Time (America/Los_Angeles)
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Los_Angeles',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      timeZoneName: 'short' // PST / PDT automatically
+    }).format(d);
+  }catch(e){
+    return "";
+  }
+}
+
+
+  // normalize same way as your backend tokenization prefers numbers
+  function hasAnyToken(s){
+    return /\d+/.test((s||"").trim());
+  }
+
+  // --- debounce reserve ---
+  let tmr = null;
+  let lastSent = "";
+  let lastStatus = "idle";
+
+  async function reserveNow(){
+    const raw = (jobInput.value || "").trim();
+    if (!hasAnyToken(raw)){
+      lastStatus = "idle";
+      lastSent = "";
+      setIdle();
+      return;
+    }
+
+    // avoid spam if unchanged
+    if (raw === lastSent && (lastStatus === "reserved")) return;
+
+    lastSent = raw;
+
+    // show "checking..."
+    statusLine.className = "form-text text-muted";
+    statusLine.textContent = "Checking…";
+
+    let resp, data;
+    try{
+      // твой api_job_reserve сейчас GET, поэтому отправляю GET.
+      // Если переделаешь на POST — скажи, я дам вариант.
+      const qs = new URLSearchParams({ job_numbers: raw }).toString();
+      resp = await fetch(API_RESERVE + "?" + qs, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { "Accept": "application/json" }
+      });
+      data = await resp.json();
+    }catch(e){
+      // при ошибке сети — не блокируем, но показываем предупреждение
+      lastStatus = "neterr";
+      statusLine.className = "form-text text-warning";
+      statusLine.textContent = "Reserve check failed (network). You can try Save, server will still protect.";
+      setButtonsEnabled(true);
+      return;
+    }
+
+    if (!resp.ok || !data || data.ok === false){
+      lastStatus = "bad";
+      setWarn((data && data.error) ? data.error : "Reserve check failed.");
+      return;
+    }
+
+    if (data.status === "exists"){
+      lastStatus = "exists";
+
+      const existingId = String(data.existing_id || '').trim();
+      const token = escapeHtml(data.token || '');
+
+      const urlTpl = "{{ url_for('inventory.wo_detail', wo_id=0) }}";  // /work_orders/0
+      const url = urlTpl.replace("0", existingId);
+
+      setWarn(
+        `Duplicate: Work Order <a href="${url}" class="fw-bold text-danger" target="_blank">#${escapeHtml(existingId)}</a> already exists for job ${token}. ` +
+        `<a href="${url}" class="btn btn-sm btn-outline-primary ms-2" target="_blank">Open</a>`
+      );
+      return;
+    }
+
+    if (data.status === "locked"){
+      lastStatus = "locked";
+      const b = (data.blocked && data.blocked[0]) ? data.blocked[0] : null;
+      const who = b ? (b.holder || "another user") : "another user";
+      const until = b && b.expires_at ? (" until " + fmtLocalPT(b.expires_at)) : "";
+      setWarn(`Locked by ${who}${until}. Try again later.`);
+      return;
+    }
+
+    if (data.status === "reserved" || data.status === "empty"){
+      lastStatus = "reserved";
+      const list = (data.reserved || []).join(", ");
+      setOk(list ? `Reserved: ${list}` : "Reserved");
+      return;
+    }
+
+    // unknown status
+    lastStatus = "unknown";
+    statusLine.className = "form-text text-warning";
+    statusLine.textContent = "Unknown reserve status. Server will still protect on Save.";
+    setButtonsEnabled(true);
+  }
+
+  function scheduleReserve(){
+    if (IS_RO) return;
+    clearTimeout(tmr);
+    tmr = setTimeout(reserveNow, 600);
+  }
+
+  jobInput.addEventListener('input', scheduleReserve);
+  jobInput.addEventListener('blur', reserveNow);
+
+  // initial state
+  setIdle();
+
+  // --- best effort release on leave ---
+  function releaseLock(){
+    const raw = (jobInput.value || "").trim();
+    if (!hasAnyToken(raw)) return;
+
+    // sendBeacon is best, but it requires simple payload
+    try{
+      const body = new URLSearchParams({ job_numbers: raw }).toString();
+      if (navigator.sendBeacon){
+        const blob = new Blob([body], { type: "application/x-www-form-urlencoded" });
+        navigator.sendBeacon(API_RELEASE, blob);
+        return;
+      }
+    }catch(e){}
+
+    // fallback fetch keepalive
+    try{
+      fetch(API_RELEASE, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ job_numbers: raw }).toString(),
+        keepalive: true
+      });
+    }catch(e){}
+  }
+
+  window.addEventListener('beforeunload', releaseLock);
+
+  // --- extra safety: on submit, re-check reserve immediately ---
+  form.addEventListener('submit', async (e)=>{
+    // если уже заблокировано/дубликат — стоп
+    if (lastStatus === "locked" || lastStatus === "exists"){
+      e.preventDefault();
+      return;
+    }
+    // финальный моментальный чек
+    try{
+      await reserveNow();
+      if (lastStatus === "locked" || lastStatus === "exists"){
+        e.preventDefault();
+        return;
+      }
+    }catch(err){}
+  });
+
+})();
+</script>
+
 {% endblock %}

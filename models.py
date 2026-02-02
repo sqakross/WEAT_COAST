@@ -90,6 +90,32 @@ class User(UserMixin, db.Model):
     def password(self, password):
         self.set_password(password)
 
+class JobReservation(db.Model):
+    __tablename__ = "job_reservation"
+    __table_args__ = (
+        db.UniqueConstraint("job_token", name="uq_job_reservation_token"),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # один токен = один job number (например 986238)
+    job_token = db.Column(db.String(64), nullable=False, index=True)
+
+    # кто держит lock
+    holder_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    holder_username = db.Column(db.String(64), nullable=True, index=True)
+
+    # когда истекает (TTL)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+
+    # если хочешь — можно привязать к созданному WO
+    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=True, index=True)
+
+    holder = db.relationship("User", foreign_keys=[holder_user_id], lazy="joined")
 
 # --------------------------------
 # Work Orders

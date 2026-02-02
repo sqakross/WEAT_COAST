@@ -6,22 +6,15 @@ from models import IssuedPartRecord, WorkOrder, WorkOrderPart, TechReceiveLog, I
 from services.receiving import unpost_receiving_batch
 import json
 from services.receiving import post_receiving_batch
-from services.receiving_import import create_receiving_from_rows
-import pdfplumber
-from pdf2image import convert_from_path
-import pytesseract
-from PIL import Image
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, send_file, jsonify, after_this_request,
     current_app,abort, session,                   # NEW
 )
-from markupsafe import Markup
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import abort
 from werkzeug.security import generate_password_hash, check_password_hash
-# from sqlalchemy import or_
 from urllib.parse import urlencode
 import re,sqlite3,os
 
@@ -29,33 +22,14 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime, timedelta, time, date
 from collections import defaultdict
-
-from config import Config
 from extensions import db
-# from models import Part, IssuedPartRecord, User
 from utils.invoice_generator import generate_invoice_pdf
-# from models.order_items import OrderItem
 from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER,ROLE_TECHNICIAN, Part, WorkOrder, WorkOrderPart
-# from sqlalchemy import or_
-from pathlib import Path
-import logging
-
-# PDF (ReportLab)
 from reportlab.lib.pagesizes import letter, landscape
-# from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-# from reportlab.lib import colors
-# from reportlab.lib.styles import getSampleStyleSheet
-
-# Сравнение корзин / экспорт
 from compare_cart.run_compare import get_marcone_items, check_cart_items, export_to_docx
 from compare_cart.run_compare_reliable import get_reliable_items
-
-# Импорт на склад (наш новый функционал)
 from .import_rules import load_table, normalize_table, build_receive_movements
 from .import_ledger import has_key, add_key
-                              # NEW
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import LETTER
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
@@ -119,6 +93,30 @@ def _query_technicians():
         .all()
     )
 
+def _job_tokens_from_text(s: str) -> list[str]:
+    raw = (s or "").upper()
+    # берём числа (твоя canonical_job на этом же принципе)
+    nums = re.findall(r"\d+", raw)
+    # уникальные, сохраняем порядок
+    out = []
+    for n in nums:
+        n = n.strip()
+        if n and n not in out:
+            out.append(n)
+    return out
+
+def _job_tokens(raw: str) -> list[str]:
+    s = (raw or "").upper()
+    tokens = re.findall(r"\d+[A-Za-z]?", s)  # 986238 or 986238A
+    out = []
+    for t in tokens:
+        t = t.strip().upper()
+        if t and t not in out:
+            out.append(t)
+    return out
+
+
+
 # рядом с другими утилитами
 def _is_superadmin_user(u) -> bool:
     role = (getattr(u, "role", "") or "").strip().lower()
@@ -137,8 +135,6 @@ def _supplier_to_default_location(supplier_hint: str | None) -> str:
         if key in s:
             return loc
     return "MAIN"
-
-from sqlalchemy import func  # если ещё нет
 
 def _reserve_invoice_number():
     """
@@ -413,6 +409,118 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
         pass
 
     return int(deleted or 0)
+
+@inventory_bp.get("/api/job_reserve", endpoint="api_job_reserve")
+@login_required
+def api_job_reserve():
+    from flask import request, jsonify
+    from models import JobReservation, WorkOrder
+    from extensions import db
+    from datetime import timezone  # ✅ add
+
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role not in ("admin", "superadmin"):
+        return jsonify({"ok": False, "error": "Access denied"}), 403
+
+    job_numbers = (request.args.get("job_numbers") or "").strip()
+    tokens = _job_tokens_from_text(job_numbers)
+    if not tokens:
+        return jsonify({"ok": True, "tokens": [], "status": "empty"})
+
+    now = datetime.utcnow()
+    ttl = timedelta(minutes=15)
+    exp = now + ttl
+
+    # ✅ helper: always return UTC with Z so frontend converts correctly
+    def _iso_utc_z(dt):
+        if not dt:
+            return None
+        return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # clean expired
+    JobReservation.query.filter(JobReservation.expires_at < now).delete(synchronize_session=False)
+
+    # 1) if WO exists -> duplicate
+    for t in tokens:
+        wo = (
+            WorkOrder.query
+            .filter(WorkOrder.job_numbers.ilike(f"%{t}%"))
+            .order_by(WorkOrder.id.desc())
+            .first()
+        )
+        if wo:
+            return jsonify({
+                "ok": True,
+                "status": "exists",
+                "existing_id": wo.id,
+                "token": t
+            })
+
+    blocked = []
+    reserved = []
+    for t in tokens:
+        row = JobReservation.query.filter_by(job_token=t).first()
+        if row and row.expires_at >= now:
+            if row.holder_user_id == getattr(current_user, "id", None):
+                row.expires_at = exp
+                row.holder_username = getattr(current_user, "username", None)
+                db.session.add(row)
+                reserved.append(t)
+            else:
+                blocked.append({
+                    "token": t,
+                    "holder": row.holder_username or "unknown",
+                    "expires_at": _iso_utc_z(row.expires_at)  # ✅ fixed
+                })
+        else:
+            if not row:
+                row = JobReservation(job_token=t)
+            row.holder_user_id = getattr(current_user, "id", None)
+            row.holder_username = getattr(current_user, "username", None)
+            row.expires_at = exp
+            db.session.add(row)
+            reserved.append(t)
+
+    db.session.commit()
+
+    if blocked:
+        return jsonify({
+            "ok": True,
+            "status": "locked",
+            "reserved": reserved,
+            "blocked": blocked,
+            "ttl_seconds": 15 * 60
+        })
+
+    return jsonify({
+        "ok": True,
+        "status": "reserved",
+        "reserved": reserved,
+        "ttl_seconds": 15 * 60
+    })
+
+@inventory_bp.post("/api/job_release", endpoint="api_job_release")
+@login_required
+def api_job_release():
+    from flask import request, jsonify
+    from models import JobReservation
+    from extensions import db
+
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role not in ("admin", "superadmin"):
+        return jsonify({"ok": False, "error": "Access denied"}), 403
+
+    job_numbers = (request.form.get("job_numbers") or "").strip()
+    tokens = _job_tokens_from_text(job_numbers)
+    if not tokens:
+        return jsonify({"ok": True})
+
+    uid = getattr(current_user, "id", None)
+    for t in tokens:
+        JobReservation.query.filter_by(job_token=t, holder_user_id=uid).delete(synchronize_session=False)
+
+    db.session.commit()
+    return jsonify({"ok": True})
 
 @inventory_bp.post("/receiving/<int:batch_id>/delete", endpoint="receiving_delete")
 @login_required
@@ -4489,12 +4597,14 @@ def wo_newx(prefill_wo=None, prefill_units=None):
 @login_required
 def wo_save():
     from flask import request, session, redirect, url_for, flash, current_app, render_template
-    from models import WorkOrder, WorkUnit, WorkOrderPart, User
+    from models import WorkOrder, WorkUnit, WorkOrderPart, User, JobReservation
     from extensions import db
+    from datetime import datetime, timedelta
     from flask_login import current_user
     import re
     from datetime import date
     from sqlalchemy import or_
+    from flask import request
 
     # ---------- helpers ----------
     def _clip(s, n):
@@ -4653,6 +4763,53 @@ def wo_save():
             flash("Job number is required.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
+    # =========================
+    # HARD LOCK CHECK (atomic)
+    # =========================
+    now = datetime.utcnow()
+    uid = getattr(current_user, "id", None)
+    uname = (getattr(current_user, "username", None) or "").strip()
+
+    tokens = _job_tokens(wo.job_numbers)
+
+    if tokens:
+        JobReservation.query.filter(JobReservation.expires_at < now).delete(synchronize_session=False)
+
+        locked = (
+            JobReservation.query
+            .filter(
+                JobReservation.job_token.in_(tokens),
+                JobReservation.expires_at >= now,
+                JobReservation.holder_user_id != uid
+            )
+            .first()
+        )
+        if locked:
+            # ВАЖНО: не редиректим на чужой WO, а возвращаемся на ту же форму (как ты хочешь)
+            if is_new:
+                return _rerender_same_screen(
+                    f"Job {locked.job_token} is locked by {locked.holder_username or 'another user'}. Try again later.",
+                    errors={"job_numbers": "This job is currently locked by another user."}
+                )
+            db.session.rollback()
+            flash(f"Job {locked.job_token} is locked by {locked.holder_username or 'another user'}.", "danger")
+            return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+
+        exp = now + timedelta(minutes=15)
+        for t in tokens:
+            row = JobReservation.query.filter_by(job_token=t).first()
+            if not row:
+                row = JobReservation(job_token=t)
+            row.holder_user_id = uid
+            row.holder_username = uname or None
+            row.expires_at = exp
+            db.session.add(row)
+
+        db.session.flush()
+    # =========================
+    # /HARD LOCK CHECK
+    # =========================
+
     # === DUP GUARD ===
     input_jobs = _parse_jobs(wo.job_numbers)
 
@@ -4675,7 +4832,10 @@ def wo_save():
                     f"already exists (#{existing.id}).",
                     "warning",
                 )
-                return redirect(url_for("inventory.wo_detail", wo_id=existing.id))
+                return _rerender_same_screen(
+                    f"Duplicate: Work Order #{existing.id} already exists for job(s) ...",
+                    errors={"job_numbers": "Duplicate job number(s)."}
+                )
 
     # ---------- собрать units[...] и их rows[...] ----------
     re_unit = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
@@ -4878,6 +5038,7 @@ def wo_save():
             db.session.rollback()
             flash("Job number is required.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+
 
     if is_new:
         db.session.add(wo)
