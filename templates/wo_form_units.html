@@ -479,7 +479,7 @@
                   <input class="form-control inv-input"
                        name="units[{{ ui }}][rows][{{ ri }}][invoice_number]"
                        value="{{ (r.invoice_number or '')|upper }}"
-                       data-wop-id="{{ r.id or '' }}"
+                       data-wop-id="{{ wop_id or '' }}"
                        maxlength="32"
                        placeholder="INV#"
                        {{ ro }} {{ dis }}>
@@ -523,12 +523,15 @@
                 <td class="text-center issue-cell">
                   {% if not RO %}
                     <div class="form-check d-flex justify-content-center m-0">
-                      <input type="checkbox" class="form-check-input issue-check"
-                       name="issue_ids"
-                       value="{{ r.id or '' }}"
-                       data-wop-id="{{ r.id or '' }}"
-                       {% if not r.id %}disabled title="Save WO first"{% endif %}
-                       {% if issued_full %}disabled{% endif %}>
+                      {% set wop_id = r.get('id') %}
+                        <input type="checkbox" class="form-check-input issue-check"
+                               name="issue_ids"
+                               value="{{ wop_id or '' }}"
+                               data-wop-id="{{ wop_id or '' }}"
+                               {% if wop_id is none %}disabled{% endif %}
+                               {% if issued_full %}disabled{% endif %}
+
+
                     </div>
                   {% else %}
                     <span class="text-muted">—</span>
@@ -686,7 +689,9 @@
   // STOCK API
   const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
   const API_DUP   = "{{ url_for('inventory.api_job_duplicate_check') }}";
-  const IS_EDIT   = {{ 'true' if IS_EDIT else 'false' }};
+  const IS_EDIT_TPL = {{ 'true' if IS_EDIT else 'false' }}; // оставим для справки
+  const IS_EDIT = !!(document.querySelector('#woForm input[name="wo_id"]')?.value || '').trim(); // ✅ реально из DOM
+
   const IS_RO     = {{ 'true' if RO else 'false' }};
 
   const form         = document.getElementById('woForm');
@@ -938,39 +943,48 @@
 
   // ✅ FIXED: deterministic enable/disable
   function setIssueEnabled(tr, enabled){
-    const cb = tr.querySelector('.issue-check');
-    if (!cb) return;
+  const cb = tr.querySelector('.issue-check');
+  if (!cb) return;
 
-    if (tr.classList.contains('issued-row')){
-      cb.checked = false;
-      cb.disabled = true;
-      cb.setAttribute('disabled','disabled');
-      return;
-    }
-
-    const isINSJob = (jobTypeSel && jobTypeSel.value === 'INSURANCE');
-    const insCheckbox = tr.querySelector('.ins-check');
-    const isINSLine = !!(insCheckbox && insCheckbox.checked);
-
-    const allowIssue = enabled || (isINSJob && isINSLine);
-
-    if (!allowIssue){
-      cb.checked = false;
-      cb.disabled = true;
-      cb.setAttribute('disabled','disabled');
-      return;
-    }
-
-    if (IS_EDIT){
-      cb.disabled = false;
-      cb.removeAttribute('disabled');
-    } else {
-      cb.checked = false;
-      cb.disabled = true;
-      cb.setAttribute('disabled','disabled');
-      cb.title = "Save WO first";
-    }
+  // already issued => never allow
+  if (tr.classList.contains('issued-row')){
+    cb.checked = false;
+    cb.disabled = true;
+    cb.setAttribute('disabled','disabled');
+    cb.title = ''; // ✅ чистим
+    return;
   }
+
+  const isINSJob = (jobTypeSel && jobTypeSel.value === 'INSURANCE');
+  const insCheckbox = tr.querySelector('.ins-check');
+  const isINSLine = !!(insCheckbox && insCheckbox.checked);
+
+  const allowIssue = enabled || (isINSJob && isINSLine);
+
+  // если WO не сохранён — всегда блок
+  if (!IS_EDIT){
+    cb.checked = false;
+    cb.disabled = true;
+    cb.setAttribute('disabled','disabled');
+    cb.title = "Save WO first";
+    return;
+  }
+
+  // WO сохранён
+  if (!allowIssue){
+    cb.checked = false;
+    cb.disabled = true;
+    cb.setAttribute('disabled','disabled');
+    cb.title = ""; // ✅ важно: иначе tooltip может остаться
+    return;
+  }
+
+  // разрешаем
+  cb.disabled = false;
+  cb.removeAttribute('disabled');
+  cb.title = ""; // ✅ убрать "Save WO first"
+}
+
 
   function fetchHint(tr){
     const pnInput  = tr.querySelector('.pn');
@@ -1526,16 +1540,22 @@ function wccrToast(msg) {
 
 <script>
 (function(){
-  const IS_EDIT = {{ 'true' if IS_EDIT else 'false' }};
-  const IS_RO   = {{ 'true' if RO else 'false' }};
+  const IS_RO = {{ 'true' if RO else 'false' }};
+
+  // ✅ Надежно определяем EDIT по hidden wo_id (а не по Jinja)
+  const woIdEl = document.querySelector('#woForm input[name="wo_id"]');
+  const IS_EDIT_REAL = !!(woIdEl && String(woIdEl.value || '').trim());
 
   // не лочим в режиме Edit или Readonly
-  if (IS_EDIT || IS_RO) return;
+  if (IS_EDIT_REAL || IS_RO) return;
+
 
   const API_RESERVE = "{{ url_for('inventory.api_job_reserve') }}";
   const API_RELEASE = "{{ url_for('inventory.api_job_release') }}";
 
   const form = document.getElementById('woForm');
+
+
   if (!form) return;
 
   const jobInput  = form.querySelector('input[name="job_numbers"]');

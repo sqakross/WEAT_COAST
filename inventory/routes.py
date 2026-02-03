@@ -4646,6 +4646,87 @@ def wo_save():
                 cleaned.append(p)
         return cleaned
 
+    def _rerender_same_screen(msg_text: str, errors=None):
+        db.session.rollback()
+
+        # ✅ restore audit after rollback (so UI shows correct actor)
+        from datetime import datetime as _dt
+        actor_id = getattr(current_user, "id", None)
+        now = _dt.utcnow()
+
+        actor_username = (getattr(current_user, "username", None) or "").strip()
+        actor_role = (getattr(current_user, "role", None) or "").strip()
+
+        with open(dbg_path, "a", encoding="utf-8") as fp:
+            fp.write(f"ACTOR: id={actor_id!r} user={actor_username!r} role={actor_role!r}\n")
+            fp.write(
+                "WO_BEFORE: "
+                f"wo_id={getattr(wo, 'id', None)!r} "
+                f"tech_id={getattr(wo, 'technician_id', None)!r} "
+                f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
+                f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
+            )
+
+        try:
+            if is_new and not getattr(wo, "created_by_id", None):
+                wo.created_by_id = actor_id
+                if not getattr(wo, "created_at", None):
+                    wo.created_at = now
+            wo.updated_by_id = actor_id
+            wo.updated_at = now
+
+            with open(dbg_path, "a", encoding="utf-8") as fp:
+                fp.write(
+                    "WO_AFTER_SET: "
+                    f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
+                    f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
+                )
+
+        except Exception:
+            pass
+
+        flash(msg_text, "warning")
+
+        technicians = _query_technicians()
+        recent_suppliers = session.get("recent_suppliers", []) or []
+
+        sel_tid = wo.technician_id
+        sel_tname = wo.technician_name or None
+
+        safe_units = units_payload if units_payload else [{
+            "brand": wo.brand or "",
+            "model": wo.model or "",
+            "serial": wo.serial or "",
+            "rows": [{
+                "id": None,
+                "part_number": "",
+                "part_name": "",
+                "quantity": 1,
+                "alt_numbers": "",
+                "warehouse": "",
+                "supplier": "",
+                "backorder_flag": False,
+                "line_status": "search_ordered",
+                "unit_cost": 0.0,
+                "ordered_flag": False,
+                "is_insurance_supplied": False,
+                "invoice_number": "",
+            }],
+        }]
+
+        return render_template(
+            "wo_form_units.html",
+            wo=wo,
+            units=safe_units,
+            recent_suppliers=recent_suppliers,
+            readonly=False,
+            technicians=technicians,
+            selected_tech_id=sel_tid,
+            selected_tech_username=sel_tname,
+            errors=(errors or {}),
+        ), 400
+
+
     def _jobs_set_from_wo(wo_obj) -> set[str]:
         return set(_parse_jobs(getattr(wo_obj, "job_numbers", "") or ""))
 
@@ -4766,46 +4847,43 @@ def wo_save():
     # =========================
     # HARD LOCK CHECK (atomic)
     # =========================
-    now = datetime.utcnow()
-    uid = getattr(current_user, "id", None)
-    uname = (getattr(current_user, "username", None) or "").strip()
+    if is_new:
+        now = datetime.utcnow()
+        uid = getattr(current_user, "id", None)
+        uname = (getattr(current_user, "username", None) or "").strip()
 
-    tokens = _job_tokens(wo.job_numbers)
+        tokens = _job_tokens(wo.job_numbers)
 
-    if tokens:
-        JobReservation.query.filter(JobReservation.expires_at < now).delete(synchronize_session=False)
+        if tokens:
+            JobReservation.query.filter(JobReservation.expires_at < now).delete(synchronize_session=False)
 
-        locked = (
-            JobReservation.query
-            .filter(
-                JobReservation.job_token.in_(tokens),
-                JobReservation.expires_at >= now,
-                JobReservation.holder_user_id != uid
+            locked = (
+                JobReservation.query
+                .filter(
+                    JobReservation.job_token.in_(tokens),
+                    JobReservation.expires_at >= now,
+                    JobReservation.holder_user_id != uid
+                )
+                .first()
             )
-            .first()
-        )
-        if locked:
-            # ВАЖНО: не редиректим на чужой WO, а возвращаемся на ту же форму (как ты хочешь)
-            if is_new:
+            if locked:
                 return _rerender_same_screen(
                     f"Job {locked.job_token} is locked by {locked.holder_username or 'another user'}. Try again later.",
                     errors={"job_numbers": "This job is currently locked by another user."}
                 )
-            db.session.rollback()
-            flash(f"Job {locked.job_token} is locked by {locked.holder_username or 'another user'}.", "danger")
-            return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
-        exp = now + timedelta(minutes=15)
-        for t in tokens:
-            row = JobReservation.query.filter_by(job_token=t).first()
-            if not row:
-                row = JobReservation(job_token=t)
-            row.holder_user_id = uid
-            row.holder_username = uname or None
-            row.expires_at = exp
-            db.session.add(row)
+            exp = now + timedelta(minutes=15)
+            for t in tokens:
+                row = JobReservation.query.filter_by(job_token=t).first()
+                if not row:
+                    row = JobReservation(job_token=t)
+                row.holder_user_id = uid
+                row.holder_username = uname or None
+                row.expires_at = exp
+                db.session.add(row)
 
-        db.session.flush()
+            db.session.flush()
+
     # =========================
     # /HARD LOCK CHECK
     # =========================
@@ -4938,86 +5016,6 @@ def wo_save():
         len(units_payload),
         sum(len(u.get('rows') or []) for u in units_payload)
     )
-
-    def _rerender_same_screen(msg_text: str, errors=None):
-        db.session.rollback()
-
-        # ✅ restore audit after rollback (so UI shows correct actor)
-        from datetime import datetime as _dt
-        actor_id = getattr(current_user, "id", None)
-        now = _dt.utcnow()
-
-        actor_username = (getattr(current_user, "username", None) or "").strip()
-        actor_role = (getattr(current_user, "role", None) or "").strip()
-
-        with open(dbg_path, "a", encoding="utf-8") as fp:
-            fp.write(f"ACTOR: id={actor_id!r} user={actor_username!r} role={actor_role!r}\n")
-            fp.write(
-                "WO_BEFORE: "
-                f"wo_id={getattr(wo, 'id', None)!r} "
-                f"tech_id={getattr(wo, 'technician_id', None)!r} "
-                f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
-                f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
-            )
-
-        try:
-            if is_new and not getattr(wo, "created_by_id", None):
-                wo.created_by_id = actor_id
-                if not getattr(wo, "created_at", None):
-                    wo.created_at = now
-            wo.updated_by_id = actor_id
-            wo.updated_at = now
-
-            with open(dbg_path, "a", encoding="utf-8") as fp:
-                fp.write(
-                    "WO_AFTER_SET: "
-                    f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
-                    f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
-                )
-
-        except Exception:
-            pass
-
-        flash(msg_text, "warning")
-
-        technicians = _query_technicians()
-        recent_suppliers = session.get("recent_suppliers", []) or []
-
-        sel_tid = wo.technician_id
-        sel_tname = wo.technician_name or None
-
-        safe_units = units_payload if units_payload else [{
-            "brand": wo.brand or "",
-            "model": wo.model or "",
-            "serial": wo.serial or "",
-            "rows": [{
-                "id": None,
-                "part_number": "",
-                "part_name": "",
-                "quantity": 1,
-                "alt_numbers": "",
-                "warehouse": "",
-                "supplier": "",
-                "backorder_flag": False,
-                "line_status": "search_ordered",
-                "unit_cost": 0.0,
-                "ordered_flag": False,
-                "is_insurance_supplied": False,
-                "invoice_number": "",
-            }],
-        }]
-
-        return render_template(
-            "wo_form_units.html",
-            wo=wo,
-            units=safe_units,
-            recent_suppliers=recent_suppliers,
-            readonly=False,
-            technicians=technicians,
-            selected_tech_id=sel_tid,
-            selected_tech_username=sel_tname,
-            errors=(errors or {}),
-        ), 400
 
     # ---------- ВАЛИДАЦИЯ (продолжение) ----------
     if not tech_name_val:
@@ -5250,7 +5248,30 @@ def wo_save():
 
     except Exception as e:
         db.session.rollback()
-        flash(f"Failed to save Work Order: {e}", "danger")
+        try:
+            db.session.commit()
+
+            # ✅ RELEASE reservation right after successful NEW WO save
+            if is_new:
+                try:
+                    now2 = datetime.utcnow()
+                    tokens2 = _job_tokens(wo.job_numbers)
+                    if tokens2:
+                        JobReservation.query.filter(
+                            JobReservation.job_token.in_(tokens2),
+                            JobReservation.holder_user_id == actor_id
+                        ).delete(synchronize_session=False)
+                        db.session.commit()  # отдельный commit на удаление резерва — ок
+                except Exception:
+                    db.session.rollback()
+
+            flash("Work Order saved.", "success")
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Failed to save Work Order: {e}", "danger")
+            return redirect(url_for("inventory.wo_list"))
+
         return redirect(url_for("inventory.wo_list"))
 
     # ---------- remember suppliers ----------
