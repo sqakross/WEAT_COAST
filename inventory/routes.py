@@ -7346,15 +7346,16 @@ def reports_grouped():
     from flask_login import current_user
 
     from extensions import db
-    from models import IssuedPartRecord, IssuedBatch, Part
-    from models import IssuedPartRecord, IssuedBatch, Part
-    from models import utc_to_local
+    from models import IssuedPartRecord, IssuedBatch, Part, utc_to_local
 
     # ✅ SAFE import: если модель/таблица ещё не существует — отчёт не падает
     try:
         from models import ReturnDestination
     except Exception:
         ReturnDestination = None
+
+    DEFAULT_LIMIT = 50
+    LA_TZ = ZoneInfo("America/Los_Angeles")
 
     def _parse_date_ymd(s: str | None):
         if not s:
@@ -7404,16 +7405,6 @@ def reports_grouped():
     start_day = start_dt_raw.date() if start_dt_raw else None
     end_day   = end_dt_raw.date()   if end_dt_raw   else None
 
-    LA_TZ = ZoneInfo("America/Los_Angeles")
-
-    # ---------- DEFAULT: current month (LA), only when no dates and no invoice search ----------
-    if (not start_day) and (not end_day) and (not invoice_search):
-        today_la = datetime.now(LA_TZ).date()
-        start_day = today_la.replace(day=1)
-        end_day = today_la
-        start_date_s = start_day.isoformat()
-        end_date_s = end_day.isoformat()
-
     # ---------- Запрос с подзагрузкой связей ----------
     q = (
         db.session.query(IssuedPartRecord)
@@ -7434,6 +7425,17 @@ def reports_grouped():
         (is_return, IssuedBatch.issue_date),
         else_=func.coalesce(IssuedPartRecord.issue_date, IssuedBatch.issue_date)
     )
+
+    # ✅ Default mode: если пользователь НЕ задал никаких фильтров — показываем последние 50 инвойсов
+    has_any_filter = any([
+        start_day, end_day,
+        invoice_search,
+        recipient_effective,
+        reference_job,
+        location,
+        status
+    ])
+    default_mode = (not has_any_filter)
 
     # Фильтр по "кому выдано"
     if recipient_effective:
@@ -7517,10 +7519,46 @@ def reports_grouped():
             func.coalesce(IssuedPartRecord.consumed_qty, 0) >= IssuedPartRecord.quantity
         )
 
-    rows = q.order_by(
-        func.date(date_expr).desc(),
-        IssuedPartRecord.id.desc()
-    ).all()
+    # ---------- DEFAULT: last 50 invoices (when no filters) ----------
+    rows = None
+    if default_mode:
+        recent_inv = (
+            q.with_entities(IssuedPartRecord.invoice_number)
+             .filter(IssuedPartRecord.invoice_number.isnot(None))
+             .order_by(date_expr.desc(), IssuedPartRecord.id.desc())
+             .distinct()
+             .limit(DEFAULT_LIMIT)
+             .all()
+        )
+        recent_inv_numbers = [x[0] for x in recent_inv if x and x[0] is not None]
+
+        if not recent_inv_numbers:
+            rows = []
+        else:
+            q2 = (
+                db.session.query(IssuedPartRecord)
+                .join(Part, IssuedPartRecord.part_id == Part.id)
+                .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
+                .options(
+                    selectinload(IssuedPartRecord.part),
+                    selectinload(IssuedPartRecord.batch),
+                )
+                .filter(IssuedPartRecord.invoice_number.in_(recent_inv_numbers))
+            )
+            rows = q2.order_by(
+                func.date(date_expr).desc(),
+                IssuedPartRecord.id.desc()
+            ).all()
+
+            # ✅ не показываем дефолтные даты в форме
+            start_date_s = ""
+            end_date_s = ""
+
+    if rows is None:
+        rows = q.order_by(
+            func.date(date_expr).desc(),
+            IssuedPartRecord.id.desc()
+        ).all()
 
     # ---------- Группировка: batch/legacy ----------
     grouped = defaultdict(list)
@@ -7643,6 +7681,7 @@ def reports_grouped():
         return_destinations=return_destinations,
         dest_map=dest_map,
     )
+
 
 @inventory_bp.route("/invoice/printdirect")
 @login_required

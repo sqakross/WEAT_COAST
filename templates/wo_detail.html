@@ -18,13 +18,22 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3 class="mb-0">Work Order #{{ wo.id }}</h3>
 
+  {% set role_low = (current_user.role or '')|lower %}
+
   <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-sm btn-outline-secondary wo-action-btn"
        href="{{ url_for('inventory.wo_list') }}">
       ← Back to list
     </a>
 
-    {% set role_low = (current_user.role or '')|lower %}
+    {# ✅ NEW: quick create from wo_detail #}
+    {% if role_low in ['admin','superadmin'] %}
+      <a class="btn btn-sm btn-success wo-action-btn"
+         href="{{ url_for('inventory.wo_new') }}">
+        + New Work Order
+      </a>
+    {% endif %}
+
     {% if role_low in ['admin','superadmin'] %}
       <a class="btn btn-sm btn-outline-primary wo-action-btn"
          href="{{ url_for('inventory.wo_edit', wo_id=wo.id) }}">
@@ -50,6 +59,7 @@
     {% endif %}
   </div>
 </div>
+
 
 {# ---------- permissions / role helpers ---------- #}
 {% set role_low = (current_user.role or '')|lower %}
