@@ -5498,7 +5498,24 @@ def wo_list():
         q = q.distinct(WorkOrder.id)
 
     # ---- fetch rows ----
-    items = q.order_by(WorkOrder.created_at.desc()).limit(200).all()
+    MAX_LIMIT = 200
+
+    base_q = q.order_by(WorkOrder.created_at.desc())
+
+    has_filters = any([
+        bool(qtext),
+        bool(dfrom),
+        bool(dto),
+        bool(tech_id),
+        bool(job_type),
+        bool(status),
+    ])
+
+    # IMPORTANT: лимит только когда нет фильтров
+    if not has_filters:
+        base_q = base_q.limit(MAX_LIMIT)
+
+    items = base_q.all()
     count_items = len(items)
 
     # ---- datalist hints ----
