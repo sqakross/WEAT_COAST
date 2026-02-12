@@ -244,16 +244,22 @@
           {% endif %}
 
           <td class="text-center text-nowrap col-inv cell-tight">
-            {% if inv_val %}
-              <a href="{{ url_for('inventory.receiving_list', q=inv_val) }}"
-                 target="_blank" rel="noopener"
-                 class="text-decoration-none">
-                {{ inv_val }}
-              </a>
-            {% else %}
-              <span class="text-muted">—</span>
-            {% endif %}
-          </td>
+              {% if inv_val %}
+                {% set inv_raw = (inv_val|string)|trim %}
+                {% set inv_list = inv_raw.replace(',', ' ').replace(';', ' ').split() %}
+
+                {% for inv in inv_list %}
+                  <a href="{{ url_for('inventory.receiving_list', q=inv) }}"
+                     target="_blank" rel="noopener"
+                     class="text-decoration-none">
+                    {{ inv }}
+                  </a>{% if not loop.last %} {% endif %}
+                {% endfor %}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
 
           <td class="text-center text-nowrap col-ord cell-tight">
             {% if row.is_ordered %}

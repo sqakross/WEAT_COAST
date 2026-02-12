@@ -1199,16 +1199,17 @@
     const card = e.target.closest('.card');
     if (!card) return;
 
-    // ✅ INV normalization on input (no spaces)
+    // ✅ INV normalization on input (keep single spaces between tokens)
     if (tr && e.target.classList.contains('inv-input')) {
-      const v = (e.target.value || '').toUpperCase();
-      const nv = v.replace(/\s+/g, '');
+      const v  = (e.target.value || '').toUpperCase();
+      const nv = v.replace(/\s+/g, ' ').trim();   // <-- keep spaces, collapse multiple to one
       if (e.target.value !== nv) {
         const s = e.target.selectionStart, e2 = e.target.selectionEnd;
         e.target.value = nv;
         if (s != null && e2 != null) e.target.setSelectionRange(s, e2);
       }
     }
+
 
     if (tr && (e.target.classList.contains('qty') || e.target.classList.contains('unit-cost'))){
       recomputeUnitSubtotal(card);
@@ -1401,8 +1402,9 @@
         const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
         if (!selected.includes(wopId)) return;
 
-        let invVal = (tr.querySelector('.inv-input')?.value || '').trim().toUpperCase();
-        invVal = invVal.replace(/\s+/g, '');
+        let invVal = (tr.querySelector('.inv-input')?.value || '').toUpperCase();
+        invVal = invVal.replace(/\s+/g, ' ').trim();   // <-- keep spaces, collapse
+
 
         const h = document.createElement('input');
         h.type = 'hidden';
