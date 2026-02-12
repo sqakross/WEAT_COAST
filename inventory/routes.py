@@ -10657,15 +10657,23 @@ def receiving_list():
 
     d1p, d2p = _parse_date(d1), _parse_date(d2)
     if d1p:
-        q = q.filter(ReceivingBatch.invoice_date >= d1p)
+        q = q.filter(or_(ReceivingBatch.invoice_date.is_(None),
+                         ReceivingBatch.invoice_date >= d1p))
     if d2p:
-        q = q.filter(ReceivingBatch.invoice_date <= d2p)
+        q = q.filter(or_(ReceivingBatch.invoice_date.is_(None),
+                         ReceivingBatch.invoice_date <= d2p))
 
     # Забираем батчи из БД (без текстового фильтра)
-    batches = q.order_by(
+    qry = q.order_by(
         ReceivingBatch.invoice_date.desc().nullslast(),
         ReceivingBatch.id.desc()
-    ).limit(DEFAULT_LIMIT).all()
+    )
+
+    # IMPORTANT: limit only when NO filters (иначе пропадают “старые” инвойсы)
+    if not global_q and not d1p and not d2p and not status:
+        qry = qry.limit(DEFAULT_LIMIT)
+
+    batches = qry.all()
 
     # --- текстовый поиск по Supplier / Invoice / Part # / Part Name ---
     if global_q:

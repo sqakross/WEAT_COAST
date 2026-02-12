@@ -54,6 +54,40 @@
     0%   { box-shadow: 0 0 0 6px rgba(13,110,253,0.6); }
     100% { box-shadow: 0 0 0 0 rgba(13,110,253,0); }
   }
+
+  /* ===== Better table readability (reports_grouped) ===== */
+  .reports-grouped table {
+    font-size: 14px;
+  }
+  .reports-grouped th {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* Bigger inputs inside table (override form-control-sm) */
+  .reports-grouped .table .form-control,
+  .reports-grouped .table .form-select {
+    font-size: 14px;
+    padding: .25rem .45rem;
+    height: 34px;
+  }
+
+  /* Column sizing */
+  .col-pn    { min-width: 120px; }
+  .col-name  { min-width: 260px; max-width: 520px; }
+  .col-qty   { min-width: 90px; }
+  .col-ucost { min-width: 120px; }
+  .col-total { min-width: 90px; }
+
+  /* Part Name wrap */
+  td.col-name, th.col-name {
+    white-space: normal !important;
+    word-break: break-word;
+    line-height: 1.15;
+  }
+
+  /* Numeric inputs aligned */
+  td.text-end .form-control { text-align: right; }
 </style>
 
 {# роли #}
@@ -305,13 +339,13 @@
                     <input type="checkbox"
                            onclick="for (const cb of this.closest('table').querySelectorAll('.linecb:not([disabled])')) cb.checked = this.checked;">
                   </th>
-                  <th>Part Number</th>
-                  <th>Part Name</th>
-                  <th class="text-end">Qty</th>
+                  <th class="col-pn">Part Number</th>
+                  <th class="col-name">Part Name</th>
+                  <th class="text-end col-qty">Qty</th>
                   <th class="text-end">Consumed</th>
                   <th class="text-end">Remaining</th>
-                  <th class="text-end">Unit Cost</th>
-                  <th class="text-end">Total</th>
+                  <th class="text-end col-ucost">Unit Cost</th>
+                  <th class="text-end col-total">Total</th>
                   <th>Issued To</th>
                   <th>Reference Job</th>
                   <th>Issue Date</th>
@@ -339,7 +373,7 @@
                         <input type="number"
                                name="qty_{{ it.id }}"
                                class="form-control form-control-sm return-qty"
-                               style="width:70px"
+                               style="width:90px"
                                inputmode="numeric"
                                pattern="\d*"
                                step="1"
@@ -351,21 +385,34 @@
                       </div>
                     </td>
 
-                    <td>{{ it.part.part_number if it.part else '' }}</td>
-                    <td>{{ it.part.name if it.part else '' }}</td>
+                    <td class="col-pn">{{ it.part.part_number if it.part else '' }}</td>
+                    <td class="col-name">{{ it.part.name if it.part else '' }}</td>
+
 
                     {% if IS_SUPER %}
-                      <td class="text-end">
-                        <input type="number" step="1" class="form-control form-control-sm text-end"
-                               name="edit_qty_{{ it.id }}" value="{{ it_qty }}" form="form-{{ inv.id }}">
-                      </td>
-                      <td class="text-end">{{ it_used }}</td>
-                      <td class="text-end">{{ it_rem }}</td>
-                      <td class="text-end">
-                        <input type="number" step="0.01" class="form-control form-control-sm text-end"
-                               name="edit_ucost_{{ it.id }}" value="{{ (it.unit_cost_at_issue or 0)|round(2) }}" form="form-{{ inv.id }}">
-                      </td>
-                      <td class="text-end">{{ '%.2f'|format(it_qty*(it.unit_cost_at_issue or 0)) }}</td>
+                      <td class="text-end col-qty">
+                          <input type="number" step="1"
+                                 class="form-control text-end"
+                                 name="edit_qty_{{ it.id }}"
+                                 value="{{ it_qty }}"
+                                 form="form-{{ inv.id }}">
+                        </td>
+
+                        <td class="text-end">{{ it_used }}</td>
+                        <td class="text-end">{{ it_rem }}</td>
+
+                        <td class="text-end col-ucost">
+                          <input type="number" step="0.01"
+                                 class="form-control text-end"
+                                 name="edit_ucost_{{ it.id }}"
+                                 value="{{ (it.unit_cost_at_issue or 0)|round(2) }}"
+                                 form="form-{{ inv.id }}">
+                        </td>
+
+                        <td class="text-end col-total">
+                          {{ '%.2f'|format(it_qty*(it.unit_cost_at_issue or 0)) }}
+                        </td>
+
                       <td>
                         <input type="text" class="form-control form-control-sm"
                                name="edit_issued_to_{{ it.id }}" value="{{ it.issued_to }}" form="form-{{ inv.id }}">
@@ -375,11 +422,12 @@
                                name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="form-{{ inv.id }}">
                       </td>
                     {% else %}
-                      <td class="text-end">{{ it_qty }}</td>
-                      <td class="text-end">{{ it_used }}</td>
-                      <td class="text-end">{{ it_rem }}</td>
-                      <td class="text-end">{{ '%.2f'|format(it.unit_cost_at_issue or 0) }}</td>
-                      <td class="text-end">{{ '%.2f'|format(it_qty*(it.unit_cost_at_issue or 0)) }}</td>
+                      <td class="text-end col-qty">{{ it_qty }}</td>
+                        <td class="text-end">{{ it_used }}</td>
+                        <td class="text-end">{{ it_rem }}</td>
+                        <td class="text-end col-ucost">{{ '%.2f'|format(it.unit_cost_at_issue or 0) }}</td>
+                        <td class="text-end col-total">{{ '%.2f'|format(it_qty*(it.unit_cost_at_issue or 0)) }}</td>
+
                       <td>{{ it.issued_to }}</td>
                       <td>
                         {% if IS_ADMIN %}
@@ -391,9 +439,39 @@
                       </td>
                     {% endif %}
 
-                    <td>{{ it.issue_date_local.strftime('%Y-%m-%d') if it.issue_date_local else (it.issue_date.strftime('%Y-%m-%d') if it.issue_date else '') }}</td>
-                    <td>{{ effective_loc }}</td>
-                    <td>{{ it.inv_ref or '' }}</td>
+                    <td>
+                      {% if IS_SUPER %}
+                        <input type="date" class="form-control form-control-sm"
+                               name="edit_issuedate_{{ it.id }}"
+                               value="{{ it.issue_date_local.strftime('%Y-%m-%d') if it.issue_date_local else (it.issue_date.strftime('%Y-%m-%d') if it.issue_date else '') }}"
+                               form="form-{{ inv.id }}">
+                      {% else %}
+                        {{ it.issue_date_local.strftime('%Y-%m-%d') if it.issue_date_local else (it.issue_date.strftime('%Y-%m-%d') if it.issue_date else '') }}
+                      {% endif %}
+                    </td>
+
+                    <td>
+                      {% if IS_SUPER %}
+                        <input type="text" class="form-control form-control-sm"
+                               name="edit_location_{{ it.id }}"
+                               value="{{ effective_loc }}"
+                               form="form-{{ inv.id }}">
+                      {% else %}
+                        {{ effective_loc }}
+                      {% endif %}
+                    </td>
+
+                    <td>
+                      {% if IS_SUPER %}
+                        <input type="text" class="form-control form-control-sm"
+                               name="edit_invref_{{ it.id }}"
+                               value="{{ it.inv_ref or '' }}"
+                               form="form-{{ inv.id }}">
+                      {% else %}
+                        {{ it.inv_ref or '' }}
+                      {% endif %}
+                    </td>
+
 
                     {% if row_is_return %}
                       {% set rt = (it.return_to or '') %}
