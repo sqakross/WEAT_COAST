@@ -3184,12 +3184,13 @@ def wo_detail(wo_id):
     audit_log = []
     for a in (audit_rows or []):
         audit_log.append({
-            "ts": a.created_at,  # template will use |local_dt
+            "id": a.id,
+            "ts": a.created_at,
             "action": (a.action or ""),
             "message": (a.message or ""),
             "actor": (a.actor_username or "—"),
+            "meta": (a.meta_json or ""),  # <= ВОТ детальные логи
         })
-
 
     # ------------------------------------------------------------
     # 4) Issued / Batches — FIXED (work_order_id + safe fallback)

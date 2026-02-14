@@ -649,6 +649,17 @@
             {% if ev.message %}
               <div class="audit-msg">{{ ev.message }}</div>
             {% endif %}
+            {% if ev.meta %}
+              <div class="mt-1">
+                <a class="small text-decoration-none" data-bs-toggle="collapse" href="#auditMeta{{ ev.id }}">
+                  Details
+                </a>
+                <div class="collapse mt-1" id="auditMeta{{ ev.id }}">
+                  <pre class="small mb-0" style="white-space:pre-wrap;">{{ ev.meta }}</pre>
+                </div>
+              </div>
+            {% endif %}
+
           </div>
         </div>
       {% endfor %}
