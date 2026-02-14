@@ -549,6 +549,116 @@
 </div>
 
 {# =========================================================
+   ACTIVITY / HISTORY
+   ========================================================= #}
+
+<h5 class="mt-4">Activity / History</h5>
+
+<style>
+  .audit-wrap{
+    border: 1px solid #dee2e6;
+    border-radius: .75rem;
+    background: #fff;
+    overflow: hidden;
+  }
+  .audit-hd{
+    background:#f8f9fa;
+    border-bottom:1px solid #dee2e6;
+    padding:.6rem .9rem;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:.75rem;
+  }
+  .audit-bd{
+    padding:.75rem .9rem;
+  }
+  .audit-row{
+    display:flex;
+    gap:.75rem;
+    padding:.55rem 0;
+    border-bottom: 1px dashed #e9ecef;
+  }
+  .audit-row:last-child{ border-bottom:0; }
+  .audit-ts{
+    width: 160px;
+    flex: 0 0 160px;
+    font-variant-numeric: tabular-nums;
+    color:#6c757d;
+    white-space: nowrap;
+  }
+  .audit-main{
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .audit-title{
+    display:flex;
+    flex-wrap:wrap;
+    gap:.4rem .6rem;
+    align-items:baseline;
+  }
+  .audit-actor{
+    font-weight:600;
+  }
+  .audit-action{
+    font-size:.85rem;
+    padding:.1rem .45rem;
+    border-radius: .5rem;
+    background:#eef2ff;
+    color:#1e40af;
+    border: 1px solid rgba(30,64,175,.15);
+  }
+  .audit-msg{
+    margin-top:.15rem;
+    color:#212529;
+    word-break: break-word;
+  }
+  .audit-empty{
+    color:#6c757d;
+    padding:.4rem 0;
+  }
+  @media (max-width: 768px){
+    .audit-row{ flex-direction: column; }
+    .audit-ts{ width:auto; flex: 0 0 auto; }
+  }
+</style>
+
+<div class="audit-wrap mb-4">
+  <div class="audit-hd">
+    <div class="small text-muted">
+      Last {{ (audit_log|length) if audit_log is defined else 0 }} events
+    </div>
+  </div>
+
+  <div class="audit-bd small">
+    {% if audit_log is defined and audit_log and (audit_log|length) > 0 %}
+      {% for ev in audit_log %}
+        <div class="audit-row">
+          <div class="audit-ts">
+            {{ ev.ts|local_dt if ev.ts else '—' }}
+          </div>
+
+          <div class="audit-main">
+            <div class="audit-title">
+              <span class="audit-actor">{{ ev.actor or '—' }}</span>
+              {% if ev.action %}
+                <span class="audit-action">{{ ev.action }}</span>
+              {% endif %}
+            </div>
+
+            {% if ev.message %}
+              <div class="audit-msg">{{ ev.message }}</div>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="audit-empty">No activity yet.</div>
+    {% endif %}
+  </div>
+</div>
+
+{# =========================================================
    TECH STICKY FOOTER
    ========================================================= #}
 {% set first_invoice = None %}

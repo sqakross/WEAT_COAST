@@ -3112,7 +3112,7 @@ def wo_detail(wo_id):
     from sqlalchemy.orm import selectinload, joinedload
     from flask_login import current_user
     from extensions import db
-    from models import WorkOrder, WorkUnit, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch
+    from models import WorkOrder, WorkUnit, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit
     from collections import defaultdict, defaultdict as _dd
     import re
 
@@ -3169,6 +3169,27 @@ def wo_detail(wo_id):
             .all()
         )
     ]
+
+    # ------------------------------------------------------------
+    # 3b) Activity log (WorkOrderAudit)
+    # ------------------------------------------------------------
+    audit_rows = (
+        db.session.query(WorkOrderAudit)
+        .filter(WorkOrderAudit.work_order_id == wo.id)
+        .order_by(WorkOrderAudit.created_at.desc(), WorkOrderAudit.id.desc())
+        .limit(200)
+        .all()
+    )
+
+    audit_log = []
+    for a in (audit_rows or []):
+        audit_log.append({
+            "ts": a.created_at,  # template will use |local_dt
+            "action": (a.action or ""),
+            "message": (a.message or ""),
+            "actor": (a.actor_username or "—"),
+        })
+
 
     # ------------------------------------------------------------
     # 4) Issued / Batches — FIXED (work_order_id + safe fallback)
@@ -3548,6 +3569,7 @@ def wo_detail(wo_id):
         can_confirm_any=can_confirm_any,
         can_view_docs=can_view_docs,
         current_user=current_user,
+        audit_log=audit_log,
     )
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
@@ -4597,7 +4619,7 @@ def wo_newx(prefill_wo=None, prefill_units=None):
 @login_required
 def wo_save():
     from flask import request, session, redirect, url_for, flash, current_app, render_template
-    from models import WorkOrder, WorkUnit, WorkOrderPart, User, JobReservation
+    from models import WorkOrder, WorkUnit, WorkOrderPart, User, JobReservation, WorkOrderAudit
     from extensions import db
     from datetime import datetime, timedelta
     from flask_login import current_user
@@ -4605,10 +4627,24 @@ def wo_save():
     from datetime import date
     from sqlalchemy import or_
     from flask import request
+    import json
 
     # ---------- helpers ----------
     def _clip(s, n):
         return (s or "").strip()[:n]
+
+    def _wo_audit(wo_id: int, action: str, message: str, meta: dict | None = None):
+        # meta хранится как JSON текст
+        a = WorkOrderAudit(
+            work_order_id=wo_id,
+            action=(action or "note")[:40],
+            message=(message or "")[:255],
+            meta_json=json.dumps(meta or {}, ensure_ascii=False),
+            actor_user_id=getattr(current_user, "id", None),
+            actor_username=((getattr(current_user, "username", None) or "").strip()[:64] or None),
+            created_at=datetime.utcnow(),
+        )
+        db.session.add(a)
 
     def _i(x, default=0):
         try:
@@ -4771,6 +4807,22 @@ def wo_save():
         wo = WorkOrder()
     else:
         wo = WorkOrder.query.get_or_404(int(wo_id))
+
+    # ---------- audit snapshot (before) ----------
+    before = None
+    if not is_new:
+        before = {
+            "technician_id": getattr(wo, "technician_id", None),
+            "technician_name": (getattr(wo, "technician_name", "") or ""),
+            "job_numbers": (getattr(wo, "job_numbers", "") or ""),
+            "job_type": (getattr(wo, "job_type", "") or ""),
+            "delivery_fee": float(getattr(wo, "delivery_fee", 0.0) or 0.0),
+            "markup_percent": float(getattr(wo, "markup_percent", 0.0) or 0.0),
+            "status": (getattr(wo, "status", "") or ""),
+            "customer_po": (getattr(wo, "customer_po", None) or ""),
+            "units_count": len(getattr(wo, "units", []) or []),
+            "parts_count": len(getattr(wo, "parts", []) or []),
+        }
 
     from datetime import datetime as _dt
 
@@ -5082,6 +5134,115 @@ def wo_save():
                     getattr(old_p, "ordered_date", None)
                 )
 
+    # =========================================================
+    # AUDIT: snapshot parts BEFORE rebuild (for diff)
+    # =========================================================
+    def _part_key(unit_obj_or_tuple, pn: str, sup: str):
+        # key = (unit_key, part_number, supplier_norm)
+        if isinstance(unit_obj_or_tuple, tuple):
+            uk = unit_obj_or_tuple
+        else:
+            uk = _unit_key(
+                getattr(unit_obj_or_tuple, "brand", "") or "",
+                getattr(unit_obj_or_tuple, "model", "") or "",
+                getattr(unit_obj_or_tuple, "serial", "") or "",
+            )
+        return (uk, (pn or "").strip().upper(), _norm_supplier(sup))
+
+    def _snap_from_existing_workorder(wo_obj):
+        snap = {}
+        for u in (getattr(wo_obj, "units", []) or []):
+            for p in (getattr(u, "parts", []) or []):
+                k = _part_key(u, getattr(p, "part_number", ""), getattr(p, "supplier", "") or "")
+                snap[k] = {
+                    "pn": (getattr(p, "part_number", "") or "").strip().upper(),
+                    "name": (getattr(p, "part_name", "") or "")[:120],
+                    "qty": int(getattr(p, "quantity", 0) or 0),
+                    "supplier": (getattr(p, "supplier", "") or "")[:80],
+                    "inv": (getattr(p, "invoice_number", None) or "")[:32],
+                    "ordered_flag": bool(getattr(p, "ordered_flag", False)),
+                    "ordered_date": (str(getattr(p, "ordered_date", "") or "") or ""),
+                    "backorder_flag": bool(getattr(p, "backorder_flag", False)),
+                    "is_insurance_supplied": bool(getattr(p, "is_insurance_supplied", False)),
+                    "unit": {
+                        "brand": (getattr(u, "brand", "") or "")[:80],
+                        "model": (getattr(u, "model", "") or "")[:25],
+                        "serial": (getattr(u, "serial", "") or "")[:25],
+                    }
+                }
+        return snap
+
+    def _snap_from_units_payload(payload_units):
+        snap = {}
+        for up in (payload_units or []):
+            uk = _unit_key(up.get("brand") or "", up.get("model") or "", up.get("serial") or "")
+            for r in (up.get("rows") or []):
+                pn = (r.get("part_number") or "").strip().upper()
+                sup = (r.get("supplier") or "")
+                k = _part_key(uk, pn, sup)
+                snap[k] = {
+                    "pn": pn,
+                    "name": (r.get("part_name") or "")[:120],
+                    "qty": int(r.get("quantity") or 0),
+                    "supplier": (sup or "")[:80],
+                    "inv": ((r.get("invoice_number") or "")[:32]).strip().upper(),
+                    "ordered_flag": bool(r.get("ordered_flag")),
+                    "ordered_date": "",  # payload doesn't carry old date; ok
+                    "backorder_flag": bool(r.get("backorder_flag")),
+                    "is_insurance_supplied": bool(r.get("is_insurance_supplied")),
+                    "unit": {
+                        "brand": (up.get("brand") or "")[:80],
+                        "model": (up.get("model") or "")[:25],
+                        "serial": (up.get("serial") or "")[:25],
+                    }
+                }
+        return snap
+
+    def _diff_parts(before_snap: dict, after_snap: dict):
+        before_keys = set(before_snap.keys())
+        after_keys  = set(after_snap.keys())
+
+        added_keys   = sorted(list(after_keys - before_keys))
+        removed_keys = sorted(list(before_keys - after_keys))
+        common_keys  = sorted(list(before_keys & after_keys))
+
+        changed = []
+        for k in common_keys:
+            b = before_snap[k]
+            a = after_snap[k]
+            fields = ("qty", "inv", "supplier", "ordered_flag", "backorder_flag", "is_insurance_supplied", "name")
+            delta = {}
+            for f1 in fields:
+                if (b.get(f1) or "") != (a.get(f1) or ""):
+                    delta[f1] = {"from": b.get(f1), "to": a.get(f1)}
+            if delta:
+                changed.append({
+                    "pn": a.get("pn") or b.get("pn"),
+                    "unit": a.get("unit") or b.get("unit"),
+                    "changes": delta
+                })
+
+        # detailed meta
+        meta = {
+            "parts": {
+                "added_count": len(added_keys),
+                "removed_count": len(removed_keys),
+                "changed_count": len(changed),
+                "added": [after_snap[k] for k in added_keys[:50]],     # safety cap
+                "removed": [before_snap[k] for k in removed_keys[:50]], # safety cap
+                "changed": changed[:50],                                # safety cap
+            }
+        }
+
+        # short summary for UI
+        summary = f"parts +{len(added_keys)} ~{len(changed)} -{len(removed_keys)}"
+        return summary, meta
+
+    parts_before_snap = _snap_from_existing_workorder(wo) if not is_new else {}
+    parts_after_snap  = _snap_from_units_payload(units_payload or [])
+    parts_summary, parts_meta = _diff_parts(parts_before_snap, parts_after_snap)
+
+
     # ---------- удалить старые юниты/parts и пересоздать ----------
     for u in list(getattr(wo, "units", []) or []):
         for p in list(getattr(u, "parts", []) or []):
@@ -5208,6 +5369,58 @@ def wo_save():
 
     wo.updated_by_id = actor_id
     wo.updated_at = now
+
+    # ---------- audit snapshot (after) + enqueue activity log ----------
+    after = {
+        "technician_id": getattr(wo, "technician_id", None),
+        "technician_name": (getattr(wo, "technician_name", "") or ""),
+        "job_numbers": (getattr(wo, "job_numbers", "") or ""),
+        "job_type": (getattr(wo, "job_type", "") or ""),
+        "delivery_fee": float(getattr(wo, "delivery_fee", 0.0) or 0.0),
+        "markup_percent": float(getattr(wo, "markup_percent", 0.0) or 0.0),
+        "status": (getattr(wo, "status", "") or ""),
+        "customer_po": (getattr(wo, "customer_po", None) or ""),
+        "units_count": len(getattr(wo, "units", []) or []),
+        "parts_count": len(getattr(wo, "parts", []) or []),
+    }
+
+    try:
+        if is_new:
+            # wo.id появится после flush/commit; но у тебя уже были flush-и раньше.
+            db.session.flush()
+            _wo_audit(getattr(wo, "id", None) or 0, "created", "Work order created", meta=after)
+        else:
+            header_changed = {}
+            for k in ("technician_id", "technician_name", "job_numbers", "job_type", "delivery_fee", "markup_percent",
+                      "status", "customer_po"):
+                if (before or {}).get(k) != after.get(k):
+                    header_changed[k] = {"from": (before or {}).get(k), "to": after.get(k)}
+
+            # short message (UI)
+            msg_bits = []
+            if header_changed:
+                msg_bits.append("header (" + ", ".join(header_changed.keys()) + ")")
+            if parts_summary:
+                msg_bits.append(parts_summary)
+
+            if msg_bits:
+                msg = "Updated: " + ", ".join(msg_bits)
+            else:
+                msg = "Updated: saved (no changes)"
+
+            # detailed meta_json
+            meta = {
+                "header": header_changed,
+                **(parts_meta or {}),
+            }
+
+            _wo_audit(wo.id, "updated", msg, meta=meta)
+
+    except Exception:
+        # если лог не записался — не ломаем сохранение WO
+        pass
+    # ---------- /activity log ----------
+
     # ---------- /FINAL AUDIT ----------
 
     try:

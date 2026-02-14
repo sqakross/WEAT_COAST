@@ -333,6 +333,46 @@ class TechReceiveLog(db.Model):
 
 
 # --------------------------------
+# Work Order Activity Log (audit trail)
+# --------------------------------
+class WorkOrderAudit(db.Model):
+    __tablename__ = "work_order_audit"
+    __table_args__ = {"extend_existing": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    work_order_id = db.Column(
+        db.Integer,
+        db.ForeignKey("work_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # e.g.: created, updated, issued, confirm, delete, note
+    action = db.Column(db.String(40), nullable=False, index=True)
+
+    # human-readable short text
+    message = db.Column(db.String(255), nullable=False)
+
+    # optional JSON for details
+    meta_json = db.Column(db.Text, nullable=True)
+
+    actor_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    actor_username = db.Column(db.String(64), nullable=True, index=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    # relationships (optional, safe)
+    actor = db.relationship("User", foreign_keys=[actor_user_id], lazy="joined")
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    def __repr__(self):
+        return f"<WorkOrderAudit id={self.id} wo={self.work_order_id} action={self.action} by={self.actor_username}>"
+
+# --------------------------------
 # Inventory Part
 # --------------------------------
 class Part(db.Model):
