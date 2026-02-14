@@ -1,7 +1,8 @@
 # supplier_returns/routes.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
-from sqlalchemy import func as sa_func
+from sqlalchemy import func as sa_func, and_, or_
+from sqlalchemy.sql import exists
 from extensions import db
 from models import SupplierReturnBatch, SupplierReturnItem, Part
 from services.supplier_returns_services import (
@@ -41,8 +42,7 @@ def api_part_lookup():
         },
     }
 
-
-# ---------- LIST ----------
+# ------ LIST ----------
 @supplier_returns_bp.route("/", methods=["GET"])
 @login_required
 def list_returns():
@@ -50,17 +50,61 @@ def list_returns():
         flash("Access denied", "danger")
         return redirect(url_for("inventory.dashboard"))
 
-    q = SupplierReturnBatch.query
     supplier = (request.args.get("supplier") or "").strip()
     status   = (request.args.get("status") or "").strip()
+    qtext    = (request.args.get("q") or "").strip()   # <-- NEW общий поиск
+
+    q = SupplierReturnBatch.query
+
+    # Supplier filter (как было)
     if supplier:
         q = q.filter(SupplierReturnBatch.supplier_name.ilike(f"%{supplier}%"))
+
+    # Status filter (как было)
     if status in ("draft", "posted"):
         q = q.filter(SupplierReturnBatch.status == status)
 
-    rows = q.order_by(SupplierReturnBatch.id.desc()).all()
-    return render_template("supplier_returns/list.html", rows=rows, supplier=supplier, status=status)
+    # NEW: full-text-ish search across batch + items (Part#/Name/Tech-Job)
+    if qtext:
+        like = f"%{qtext}%"
 
+        # если ввели "#39" или "39" — дадим поиск по ID
+        q_digits = (qtext or "").strip().lstrip("#")
+        id_val = None
+        if q_digits.isdigit():
+            try:
+                id_val = int(q_digits)
+            except Exception:
+                id_val = None
+
+        item_match = exists().where(and_(
+            SupplierReturnItem.batch_id == SupplierReturnBatch.id,
+            or_(
+                SupplierReturnItem.part_number.ilike(like),
+                SupplierReturnItem.part_name.ilike(like),
+                SupplierReturnItem.tech_note.ilike(like),
+            )
+        ))
+
+        batch_match = or_(
+            SupplierReturnBatch.supplier_name.ilike(like),
+            item_match
+        )
+
+        if id_val is not None:
+            batch_match = or_(SupplierReturnBatch.id == id_val, batch_match)
+
+        q = q.filter(batch_match)
+
+    rows = q.order_by(SupplierReturnBatch.id.desc()).all()
+
+    return render_template(
+        "supplier_returns/list.html",
+        rows=rows,
+        supplier=supplier,
+        status=status,
+        q=qtext,   # <-- NEW чтобы поле не очищалось
+    )
 
 # ---------- NEW ----------
 @supplier_returns_bp.route("/new", methods=["GET", "POST"])

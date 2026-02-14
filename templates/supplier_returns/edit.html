@@ -1,22 +1,28 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="container" style="max-width: 1100px;">
-  <div class="d-flex align-items-center justify-content-between mt-4 mb-2">
-    <a href="{{ url_for('supplier_returns.list_returns') }}" class="btn btn-light">&larr; Back</a>
-  </div>
 
-  <div class="card shadow-sm">
+  <div class="card shadow-sm mt-4">
+
     <div class="card-header d-flex justify-content-between align-items-center">
-      <div>
-        <h5 class="mb-0">Supplier Return #{{ b.id }}</h5>
-        <small class="text-muted">
-          Status:
-          {% if b.status == 'posted' %}
-            <span class="badge bg-success">posted</span>
-          {% else %}
-            <span class="badge bg-secondary">draft</span>
-          {% endif %}
-        </small>
+      <div class="d-flex align-items-center gap-3">
+        <!-- ✅ BACK TO LIST (в хедере, слева) -->
+        <a href="{{ url_for('supplier_returns.list_returns') }}"
+           class="btn btn-outline-secondary btn-sm">
+          &larr; Supplier Returns
+        </a>
+
+        <div>
+          <h5 class="mb-0">Supplier Return #{{ b.id }}</h5>
+          <small class="text-muted">
+            Status:
+            {% if b.status == 'posted' %}
+              <span class="badge bg-success">posted</span>
+            {% else %}
+              <span class="badge bg-secondary">draft</span>
+            {% endif %}
+          </small>
+        </div>
       </div>
 
       <!-- Header actions submit the main form as well -->
@@ -33,6 +39,7 @@
                   class="btn btn-success btn-sm"
                   data-disable-on-submit="true" data-action-label="Posting…"
                   title="Decrement stock">Post</button>
+
           <form method="post" action="{{ url_for('supplier_returns.delete_return', batch_id=b.id) }}"
                 onsubmit="return confirm('Delete draft?');">
             <button class="btn btn-outline-danger btn-sm">Delete</button>
@@ -53,6 +60,15 @@
       <input type="hidden" name="action" id="action-hidden" value="save"/>
 
       <div class="card-body">
+
+        <!-- ✅ BACK (внутри card-body, в самом верху) -->
+        <div class="mb-3">
+          <a href="{{ url_for('supplier_returns.list_returns') }}"
+             class="btn btn-light btn-sm">
+            &larr; Back
+          </a>
+        </div>
+
         <div class="row g-3 mb-2">
           <div class="col-md-6">
             <label class="form-label">Supplier</label>
@@ -227,93 +243,33 @@
 
   /* ======== ПЕЧАТЬ: LANDSCAPE, КРУПНЫЙ ТЕКСТ, ТАБЛИЦА НА ВСЮ ШИРИНУ ======== */
   @media print {
-    @page {
-      size: A4 landscape;
-      margin: 10mm;
-    }
+    @page { size: A4 landscape; margin: 10mm; }
 
-    body {
-      margin: 0;
-      background: #ffffff !important;
-      font-size: 14px !important;
-      -webkit-print-color-adjust: exact;
-    }
+    body { margin: 0; background: #ffffff !important; font-size: 14px !important; -webkit-print-color-adjust: exact; }
 
-    nav.navbar,
-    .navbar,
-    .top-navbar,
-    .alert {
-      display: none !important;
-    }
+    nav.navbar, .navbar, .top-navbar, .alert { display: none !important; }
 
-    .card-footer,
-    .btn,
-    a.btn {
-      display: none !important;
-    }
+    .card-footer, .btn, a.btn { display: none !important; }
 
-    .container {
-      max-width: 100% !important;
-      width: 100% !important;
-      padding: 0 !important;
-      margin: 0 !important;
-    }
+    .container { max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
 
-    .card {
-      width: 100% !important;
-      box-shadow: none !important;
-      border: 1px solid #000 !important;
-      margin: 0 !important;
-    }
+    .card { width: 100% !important; box-shadow: none !important; border: 1px solid #000 !important; margin: 0 !important; }
 
-    #items-table {
-      width: 100% !important;
-      table-layout: auto !important;
-    }
+    #items-table { width: 100% !important; table-layout: auto !important; }
 
-    #items-table th,
-    #items-table td {
-      font-size: 13px !important;
-      padding: 4px 6px !important;
-      white-space: nowrap;
-    }
+    #items-table th, #items-table td { font-size: 13px !important; padding: 4px 6px !important; white-space: nowrap; }
 
-    /* убираем любые inline-width */
-    #items-table th[style],
-    #items-table td[style] {
-      width: auto !important;
-      max-width: none !important;
-    }
+    #items-table th[style], #items-table td[style] { width: auto !important; max-width: none !important; }
 
-    /* Part name можно переносить */
-    #items-table th:nth-child(2),
-    #items-table td:nth-child(2) {
-      white-space: normal !important;
-    }
+    #items-table th:nth-child(2), #items-table td:nth-child(2) { white-space: normal !important; }
 
-    /* инпуты как текст */
     #items-table input {
-      border: none !important;
-      background: transparent !important;
-      padding: 0 !important;
-      margin: 0 !important;
-      box-shadow: none !important;
-      width: 100% !important;
-      font-size: 13px !important;
+      border: none !important; background: transparent !important; padding: 0 !important; margin: 0 !important;
+      box-shadow: none !important; width: 100% !important; font-size: 13px !important;
     }
 
-      /* не рвём строки части между страницами */
-    #items-table tr {
-        page-break-inside: avoid;
-        break-inside: avoid;
-    }
-
-    /* саму карточку разрешаем делить по страницам */
-    .card {
-        page-break-inside: auto;
-        break-inside: auto;
-    }
-
+    #items-table tr { page-break-inside: avoid; break-inside: avoid; }
+    .card { page-break-inside: auto; break-inside: auto; }
   }
 </style>
 
@@ -321,7 +277,6 @@
 (function(){
   const API_LOOKUP = "{{ url_for('supplier_returns.api_part_lookup') }}";
 
-  // ---------- helpers ----------
   const fmt = n => '$' + (Math.round((+n||0)*100)/100).toFixed(2);
 
   function recalcRow(tr){
