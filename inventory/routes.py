@@ -3578,24 +3578,18 @@ def download_report_xlsx():
     from flask import request, send_file
     from datetime import datetime
     from io import BytesIO
-
+    from sqlalchemy import or_, func
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
     from extensions import db
     from models import IssuedPartRecord, Part
 
-    # --------- фильтры ---------
-    recipient = (request.args.get("recipient") or "").strip() or None
-    reference_job = (request.args.get("reference_job") or "").strip() or None
+    # --------- filters (unified, matches reports_grouped) ---------
+    q_s = (request.args.get("q") or "").strip() or None
+    location = (request.args.get("location") or "").strip() or None
+    status = (request.args.get("status") or "").strip().upper() or ""
 
-    invoice_number_s = (request.args.get("invoice_number") or "").strip()
-    try:
-        invoice_number = int(invoice_number_s) if invoice_number_s else None
-    except ValueError:
-        invoice_number = None
-
-    inv_ref = (request.args.get("inv_ref") or "").strip() or None
     start_date_str = request.args.get("start_date") or None
     end_date_str = request.args.get("end_date") or None
 
@@ -3623,14 +3617,49 @@ def download_report_xlsx():
     if end_dt:
         q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
 
-    if recipient:
-        q = q.filter(IssuedPartRecord.issued_to.ilike(f"%{recipient}%"))
-    if reference_job:
-        q = q.filter(IssuedPartRecord.reference_job.ilike(f"%{reference_job}%"))
-    if invoice_number is not None:
-        q = q.filter(IssuedPartRecord.invoice_number == invoice_number)
-    if inv_ref:
-        q = q.filter(IssuedPartRecord.inv_ref.ilike(f"%{inv_ref}%"))
+    # ---------- unified search q ----------
+    if q_s:
+        like = f"%{q_s}%"
+        inv_no = None
+        try:
+            inv_no = int(q_s)
+        except Exception:
+            inv_no = None
+
+        conds = [
+            IssuedPartRecord.issued_to.ilike(like),
+            IssuedPartRecord.reference_job.ilike(like),
+            func.coalesce(IssuedPartRecord.inv_ref, "").ilike(like),
+            Part.part_number.ilike(like),
+            Part.name.ilike(like),
+            func.coalesce(IssuedPartRecord.location, "").ilike(like),
+        ]
+        if inv_no is not None:
+            conds.append(IssuedPartRecord.invoice_number == inv_no)
+
+        q = q.filter(or_(*conds))
+
+    # ---------- location filter ----------
+    if location:
+        q = q.filter(IssuedPartRecord.location == location)
+
+    # ---------- status filter ----------
+    if status == "OPEN":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) == 0
+        )
+    elif status == "PARTIAL":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) < IssuedPartRecord.quantity
+        )
+    elif status == "CONSUMED":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) >= IssuedPartRecord.quantity
+        )
 
     q = q.order_by(
         IssuedPartRecord.invoice_number.asc().nullsfirst(),
@@ -3689,14 +3718,12 @@ def download_report_xlsx():
     filters_parts = []
     if start_date_str or end_date_str:
         filters_parts.append(f"from {start_date_str or '…'} to {end_date_str or '…'}")
-    if recipient:
-        filters_parts.append(f"Issued To contains '{recipient}'")
-    if reference_job:
-        filters_parts.append(f"Job Ref contains '{reference_job}'")
-    if invoice_number is not None:
-        filters_parts.append(f"Invoice # = {invoice_number}")
-    if inv_ref:
-        filters_parts.append(f"INV# contains '{inv_ref}'")
+    if q_s:
+        filters_parts.append(f"Search q = '{q_s}'")
+    if location:
+        filters_parts.append(f"Location = '{location}'")
+    if status:
+        filters_parts.append(f"Status = {status}")
 
     filters_line = "Filters: " + ("; ".join(filters_parts) if filters_parts else "(none)")
 
@@ -3923,20 +3950,15 @@ def download_returns_xlsx():
 
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-
+    from sqlalchemy import or_, func
     from extensions import db
     from models import IssuedPartRecord, Part
 
-    recipient = (request.args.get("recipient") or "").strip() or None
-    reference_job = (request.args.get("reference_job") or "").strip() or None
+    # --------- filters (unified, matches reports_grouped) ---------
+    q_s = (request.args.get("q") or "").strip() or None
+    location = (request.args.get("location") or "").strip() or None
+    status = (request.args.get("status") or "").strip().upper() or ""
 
-    invoice_number_s = (request.args.get("invoice_number") or "").strip()
-    try:
-        invoice_number = int(invoice_number_s) if invoice_number_s else None
-    except ValueError:
-        invoice_number = None
-
-    inv_ref = (request.args.get("inv_ref") or "").strip() or None
     start_date_str = request.args.get("start_date") or None
     end_date_str = request.args.get("end_date") or None
 
@@ -3963,14 +3985,49 @@ def download_returns_xlsx():
     if end_dt:
         q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
 
-    if recipient:
-        q = q.filter(IssuedPartRecord.issued_to.ilike(f"%{recipient}%"))
-    if reference_job:
-        q = q.filter(IssuedPartRecord.reference_job.ilike(f"%{reference_job}%"))
-    if invoice_number is not None:
-        q = q.filter(IssuedPartRecord.invoice_number == invoice_number)
-    if inv_ref:
-        q = q.filter(IssuedPartRecord.inv_ref.ilike(f"%{inv_ref}%"))
+    # ---------- unified search q ----------
+    if q_s:
+        like = f"%{q_s}%"
+        inv_no = None
+        try:
+            inv_no = int(q_s)
+        except Exception:
+            inv_no = None
+
+        conds = [
+            IssuedPartRecord.issued_to.ilike(like),
+            IssuedPartRecord.reference_job.ilike(like),
+            func.coalesce(IssuedPartRecord.inv_ref, "").ilike(like),
+            Part.part_number.ilike(like),
+            Part.name.ilike(like),
+            func.coalesce(IssuedPartRecord.location, "").ilike(like),
+        ]
+        if inv_no is not None:
+            conds.append(IssuedPartRecord.invoice_number == inv_no)
+
+        q = q.filter(or_(*conds))
+
+    # ---------- location filter ----------
+    if location:
+        q = q.filter(IssuedPartRecord.location == location)
+
+    # ---------- status filter ----------
+    if status == "OPEN":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) == 0
+        )
+    elif status == "PARTIAL":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) < IssuedPartRecord.quantity
+        )
+    elif status == "CONSUMED":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) >= IssuedPartRecord.quantity
+        )
 
     # только возвраты
     q = q.filter(
@@ -4025,17 +4082,16 @@ def download_returns_xlsx():
     ]
 
     # фильтры
+    # фильтры
     filters_parts = []
     if start_date_str or end_date_str:
         filters_parts.append(f"from {start_date_str or '…'} to {end_date_str or '…'}")
-    if recipient:
-        filters_parts.append(f"Issued To contains '{recipient}'")
-    if reference_job:
-        filters_parts.append(f"Job Ref contains '{reference_job}'")
-    if invoice_number is not None:
-        filters_parts.append(f"Invoice # = {invoice_number}")
-    if inv_ref:
-        filters_parts.append(f"INV# contains '{inv_ref}'")
+    if q_s:
+        filters_parts.append(f"Search q = '{q_s}'")
+    if location:
+        filters_parts.append(f"Location = '{location}'")
+    if status:
+        filters_parts.append(f"Status = {status}")
 
     filters_line = "Filters: " + ("; ".join(filters_parts) if filters_parts else "(none)")
 
@@ -4155,7 +4211,7 @@ def download_stock_xlsx():
     from flask import request, send_file
     from datetime import datetime
     from io import BytesIO
-
+    from sqlalchemy import func
     from sqlalchemy import or_
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -4163,17 +4219,10 @@ def download_stock_xlsx():
     from extensions import db
     from models import IssuedPartRecord, Part
 
-    recipient = (request.args.get("recipient") or "").strip() or None
-    reference_job = (request.args.get("reference_job") or "").strip() or None
-
-    invoice_number_s = (request.args.get("invoice_number") or "").strip()
-    try:
-        invoice_number = int(invoice_number_s) if invoice_number_s else None
-    except ValueError:
-        invoice_number = None
-
-    # (опционально, чтобы было одинаково с Issued/Returns)
-    inv_ref = (request.args.get("inv_ref") or "").strip() or None
+    # --------- filters (unified, matches reports_grouped) ---------
+    q_s = (request.args.get("q") or "").strip() or None
+    location = (request.args.get("location") or "").strip() or None
+    status = (request.args.get("status") or "").strip().upper() or ""
 
     start_date_str = request.args.get("start_date") or None
     end_date_str = request.args.get("end_date") or None
@@ -4201,14 +4250,49 @@ def download_stock_xlsx():
     if end_dt:
         q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
 
-    if recipient:
-        q = q.filter(IssuedPartRecord.issued_to.ilike(f"%{recipient}%"))
-    if reference_job:
-        q = q.filter(IssuedPartRecord.reference_job.ilike(f"%{reference_job}%"))
-    if invoice_number is not None:
-        q = q.filter(IssuedPartRecord.invoice_number == invoice_number)
-    if inv_ref:
-        q = q.filter(IssuedPartRecord.inv_ref.ilike(f"%{inv_ref}%"))
+    # ---------- unified search q ----------
+    if q_s:
+        like = f"%{q_s}%"
+        inv_no = None
+        try:
+            inv_no = int(q_s)
+        except Exception:
+            inv_no = None
+
+        conds = [
+            IssuedPartRecord.issued_to.ilike(like),
+            IssuedPartRecord.reference_job.ilike(like),
+            func.coalesce(IssuedPartRecord.inv_ref, "").ilike(like),
+            Part.part_number.ilike(like),
+            Part.name.ilike(like),
+            func.coalesce(IssuedPartRecord.location, "").ilike(like),
+        ]
+        if inv_no is not None:
+            conds.append(IssuedPartRecord.invoice_number == inv_no)
+
+        q = q.filter(or_(*conds))
+
+    # ---------- location filter ----------
+    if location:
+        q = q.filter(IssuedPartRecord.location == location)
+
+    # ---------- status filter ----------
+    if status == "OPEN":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) == 0
+        )
+    elif status == "PARTIAL":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) < IssuedPartRecord.quantity
+        )
+    elif status == "CONSUMED":
+        q = q.filter(
+            IssuedPartRecord.quantity > 0,
+            func.coalesce(IssuedPartRecord.consumed_qty, 0) >= IssuedPartRecord.quantity
+        )
 
     # STOCK: is_stock=True или STOCK* в reference_job/location
     is_stock_col = getattr(IssuedPartRecord, "is_stock", None)
@@ -4273,14 +4357,12 @@ def download_stock_xlsx():
     filters_parts = []
     if start_date_str or end_date_str:
         filters_parts.append(f"from {start_date_str or '…'} to {end_date_str or '…'}")
-    if recipient:
-        filters_parts.append(f"Issued To contains '{recipient}'")
-    if reference_job:
-        filters_parts.append(f"Job Ref contains '{reference_job}'")
-    if invoice_number is not None:
-        filters_parts.append(f"Invoice # = {invoice_number}")
-    if inv_ref:
-        filters_parts.append(f"INV# contains '{inv_ref}'")
+    if q_s:
+        filters_parts.append(f"Search q = '{q_s}'")
+    if location:
+        filters_parts.append(f"Location = '{location}'")
+    if status:
+        filters_parts.append(f"Status = {status}")
 
     filters_line = "Filters: " + ("; ".join(filters_parts) if filters_parts else "(none)")
 
@@ -7614,6 +7696,8 @@ def reports_grouped():
 
     # ---------- Параметры (GET/POST) ----------
     params         = request.values
+    q_s = (params.get('q') or '').strip()
+    q_search = q_s or None
     start_date_s   = (params.get('start_date') or '').strip()
     end_date_s     = (params.get('end_date') or '').strip()
     recipient_raw  = (params.get('recipient') or '').strip() or None
@@ -7629,6 +7713,14 @@ def reports_grouped():
 
     # ТЕХНИК: принудительно фильтруем только по себе
     recipient_effective = me_user if role_low == "technician" else recipient_raw
+
+    if role_low == "technician":
+        q = q.filter(
+            or_(
+                func.trim(IssuedPartRecord.issued_to) == me_user,
+                func.trim(IssuedBatch.issued_to) == me_user,
+            )
+        )
 
     # ---------- Даты: работаем по календарным дням ----------
     start_dt_raw = _parse_date_ymd(start_date_s)
@@ -7659,35 +7751,35 @@ def reports_grouped():
 
     # ✅ Default mode: если пользователь НЕ задал никаких фильтров — показываем последние 50 инвойсов
     has_any_filter = any([
-        start_day, end_day,
-        invoice_search,
-        recipient_effective,
-        reference_job,
+        start_day,
+        end_day,
+        q_search,
         location,
         status
     ])
+
     default_mode = (not has_any_filter)
 
     # Фильтр по "кому выдано"
-    if recipient_effective:
-        if role_low == "technician":
-            q = q.filter(
-                or_(
-                    func.trim(IssuedPartRecord.issued_to) == recipient_effective,
-                    func.trim(IssuedBatch.issued_to)     == recipient_effective,
-                )
-            )
-        else:
-            like = f"%{recipient_effective}%"
-            q = q.filter(
-                or_(
-                    IssuedPartRecord.issued_to.ilike(like),
-                    IssuedBatch.issued_to.ilike(like),
-                )
-            )
-
-    if reference_job:
-        q = q.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
+    # if recipient_effective:
+    #     if role_low == "technician":
+    #         q = q.filter(
+    #             or_(
+    #                 func.trim(IssuedPartRecord.issued_to) == recipient_effective,
+    #                 func.trim(IssuedBatch.issued_to)     == recipient_effective,
+    #             )
+    #         )
+    #     else:
+    #         like = f"%{recipient_effective}%"
+    #         q = q.filter(
+    #             or_(
+    #                 IssuedPartRecord.issued_to.ilike(like),
+    #                 IssuedBatch.issued_to.ilike(like),
+    #             )
+    #         )
+    #
+    # if reference_job:
+    #     q = q.filter(IssuedPartRecord.reference_job.ilike(f'%{reference_job}%'))
 
     # ---------- Date filter (LA day boundaries -> UTC naive) ----------
     def _la_day_start_utc(d):
@@ -7711,26 +7803,57 @@ def reports_grouped():
         q = q.filter(date_expr < _la_next_day_start_utc(end_day))
 
     # ---------- Invoice#/INV# unified search ----------
-    invoice_no = None
-    if invoice_search:
+    # invoice_no = None
+    # if invoice_search:
+    #     try:
+    #         invoice_no = int(invoice_search)
+    #     except ValueError:
+    #         invoice_no = None
+    #
+    #     like = f"%{invoice_search}%"
+    #     if invoice_no is not None:
+    #         q = q.filter(
+    #             or_(
+    #                 IssuedPartRecord.invoice_number == invoice_no,
+    #                 func.coalesce(IssuedPartRecord.inv_ref, "").ilike(like),
+    #             )
+    #         )
+    #     else:
+    #         q = q.filter(IssuedPartRecord.inv_ref.ilike(like))
+    #
+    # if location:
+    #     q = q.filter(IssuedPartRecord.location == location)
+    # ✅ ONE common search (q): invoice#, inv_ref, issued_to, job ref, part#, part name, location, issued_by
+    if q_search:
+        like = f"%{q_search}%"
+
+        q_int = None
         try:
-            invoice_no = int(invoice_search)
-        except ValueError:
-            invoice_no = None
+            q_int = int(q_search)
+        except Exception:
+            q_int = None
 
-        like = f"%{invoice_search}%"
-        if invoice_no is not None:
-            q = q.filter(
-                or_(
-                    IssuedPartRecord.invoice_number == invoice_no,
-                    func.coalesce(IssuedPartRecord.inv_ref, "").ilike(like),
-                )
-            )
-        else:
-            q = q.filter(IssuedPartRecord.inv_ref.ilike(like))
+        ors = [
+            IssuedPartRecord.issued_to.ilike(like),
+            func.coalesce(IssuedBatch.issued_to, "").ilike(like),
 
-    if location:
-        q = q.filter(IssuedPartRecord.location == location)
+            func.coalesce(IssuedPartRecord.reference_job, "").ilike(like),
+            func.coalesce(IssuedBatch.reference_job, "").ilike(like),
+
+            func.coalesce(IssuedPartRecord.inv_ref, "").ilike(like),
+            func.coalesce(IssuedPartRecord.location, "").ilike(like),
+            func.coalesce(IssuedBatch.location, "").ilike(like),
+
+            func.coalesce(IssuedPartRecord.issued_by, "").ilike(like),
+            func.coalesce(IssuedBatch.issued_by, "").ilike(like),
+
+            Part.part_number.ilike(like),
+            Part.name.ilike(like),
+        ]
+        if q_int is not None:
+            ors.append(IssuedPartRecord.invoice_number == q_int)
+
+        q = q.filter(or_(*ors))
 
     # ---------- Фильтр по статусу строки ----------
     if status == "OPEN":
@@ -7902,9 +8025,7 @@ def reports_grouped():
         total=grand_total,
         start_date=start_date_s,
         end_date=end_date_s,
-        recipient=(recipient_effective or ''),
-        reference_job=reference_job or '',
-        invoice=invoice_s or '',
+        q=q_s,
         location=location or '',
         status=status or '',
 
