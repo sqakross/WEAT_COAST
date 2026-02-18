@@ -93,6 +93,21 @@ def _query_technicians():
         .all()
     )
 
+def _back_to_invoice(inv_no=None):
+    # 1) prefer invoice anchor
+    if inv_no is not None:
+        u = url_for('inventory.reports_grouped', invoice_number=inv_no)
+        return redirect(u + f"#invoice-{inv_no}")
+
+    # 2) fallback to referrer (keeps current scroll sometimes, and keeps filters if GET)
+    ref = request.referrer
+    if ref:
+        return redirect(ref)
+
+    # 3) last fallback
+    return redirect(url_for('inventory.reports_grouped'))
+
+
 def _job_tokens_from_text(s: str) -> list[str]:
     raw = (s or "").upper()
     # берём числа (твоя canonical_job на этом же принципе)
@@ -10748,20 +10763,45 @@ def delete_return_invoice():
 @inventory_bp.route('/reports/return_selected', methods=['POST'])
 @login_required
 def return_selected():
-    if current_user.role not in ['superadmin', 'admin']:
-        flash("Access denied", "danger")
-        return redirect(url_for('inventory.reports_grouped'))
-
-    # ✅ ADD (safe)
+    from flask import request
     from sqlalchemy import func
     from models import ReturnDestination
     from datetime import datetime, timezone
     from zoneinfo import ZoneInfo
 
-    LA_TZ = ZoneInfo("America/Los_Angeles")
+    def _back_to_same_invoice(default_invoice_number=None):
+        """
+        Prefer returning back to the same invoice card.
+        1) If we know invoice_number -> reports_grouped?invoice_number=...
+        2) Else use referrer (keeps filters/search/date range)
+        3) Else fallback to reports_grouped
+        """
+        inv_no = default_invoice_number
 
-    now_la = datetime.now(LA_TZ)  # aware LA time
-    now_dt = now_la.astimezone(timezone.utc).replace(tzinfo=None)  # naive UTC for DB
+        # try to infer invoice from selected rows (safe)
+        if inv_no is None:
+            raw_ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
+            try:
+                ids = [int(x) for x in raw_ids if str(x).strip()]
+            except ValueError:
+                ids = []
+            if ids:
+                first_row = IssuedPartRecord.query.filter(IssuedPartRecord.id == ids[0]).first()
+                if first_row:
+                    inv_no = getattr(first_row, "invoice_number", None)
+
+        if inv_no is not None:
+            return redirect(url_for('inventory.reports_grouped', invoice_number=inv_no))
+
+        return redirect(request.referrer or url_for('inventory.reports_grouped'))
+
+    if current_user.role not in ['superadmin', 'admin']:
+        flash("Access denied", "danger")
+        return _back_to_same_invoice()
+
+    LA_TZ = ZoneInfo("America/Los_Angeles")
+    now_la = datetime.now(LA_TZ)
+    now_dt = now_la.astimezone(timezone.utc).replace(tzinfo=None)
 
     raw_ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
     try:
@@ -10771,24 +10811,25 @@ def return_selected():
 
     if not selected_ids:
         flash("No rows selected.", "warning")
-        return redirect(url_for('inventory.reports_grouped'))
+        return _back_to_same_invoice()
 
     rows = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(selected_ids)).all()
     if not rows:
         flash("Selected records not found.", "warning")
-        return redirect(url_for('inventory.reports_grouped'))
-
+        return _back_to_same_invoice()
 
     issued_by = getattr(current_user, 'username', '') or 'system'
     first = rows[0]
+    inv_no_first = getattr(first, "invoice_number", None)
+
     batch_issued_to = first.issued_to
     batch_reference = (first.reference_job or '').strip() or 'STOCK'
     return_reference = f"RETURN {batch_reference.upper()}"
-    batch_location   = first.location
+    batch_location = first.location
 
     created = []
+
     for src in rows:
-        # то, что пользователь попросил вернуть
         try:
             want = int(request.form.get(f"qty_{src.id}", "1") or "1")
         except ValueError:
@@ -10796,57 +10837,48 @@ def return_selected():
         if want <= 0:
             continue
 
-        # Сколько уже возвращено по этой детали/получателю
         already = _already_returned_qty_for_source(src)
 
-        # Максимум к возврату сейчас = выдано по строке − уже возвращено (не ниже 0)
         issued_qty = int(src.quantity or 0)
-        max_can_return = max(0, issued_qty - already)
-
-        qty = min(want, max_can_return)
-        if qty == 0:
+        if issued_qty <= 0:
             continue
 
-        src_inv = (src.invoice_number if src.invoice_number is not None else None)
+        max_can_return = max(0, issued_qty - already)
+        qty = min(want, max_can_return)
+        if qty <= 0:
+            continue
 
-        # --- return destination meta (per source row) ---
         r_to = (request.form.get(f"return_to_{src.id}") or "").strip().upper()
-
-        # NOTE: can be ID (digits) or free text name (when DB empty)
         r_dest_raw = (request.form.get(f"return_dest_{src.id}") or "").strip()
 
-        # ✅ IMPORTANT: define dest_id always (avoid UnboundLocalError)
         dest_id = None
 
-        # required only if qty > 0 (то есть реально возвращаем)
-        if qty > 0:
-            if r_to not in ("STOCK", "VENDOR"):
-                flash("Please select Return To (STOCK or VENDOR) for all returned lines.", "danger")
+        # ✅ VALIDATION — if missing, STAY on same invoice
+        if r_to not in ("STOCK", "VENDOR"):
+            flash("Please select Return To (STOCK or VENDOR) for all returned lines.", "danger")
+            db.session.rollback()
+            return _back_to_invoice(inv_no_first)
+
+        if r_to == "VENDOR":
+            if not r_dest_raw:
+                flash("Please select Vendor Company for all VENDOR return lines.", "danger")
                 db.session.rollback()
-                return redirect(url_for('inventory.reports_grouped'))
+                return _back_to_invoice(inv_no_first)
 
-            if r_to == "VENDOR":
-                if not r_dest_raw:
-                    flash("Please select Vendor Company for all VENDOR return lines.", "danger")
-                    db.session.rollback()
-                    return redirect(url_for('inventory.reports_grouped'))
-
-                # 1) dropdown: digits => ReturnDestination.id
-                if r_dest_raw.isdigit():
-                    dest_id = int(r_dest_raw)
-                else:
-                    # 2) free text => find/create ReturnDestination by name
-                    name = r_dest_raw.strip()
-                    existing = (
-                        db.session.query(ReturnDestination)
-                        .filter(func.lower(ReturnDestination.name) == name.lower())
-                        .first()
-                    )
-                    if not existing:
-                        existing = ReturnDestination(name=name, is_active=True)
-                        db.session.add(existing)
-                        db.session.flush()  # get id without commit
-                    dest_id = existing.id
+            if r_dest_raw.isdigit():
+                dest_id = int(r_dest_raw)
+            else:
+                name = r_dest_raw.strip()
+                existing = (
+                    db.session.query(ReturnDestination)
+                    .filter(func.lower(ReturnDestination.name) == name.lower())
+                    .first()
+                )
+                if not existing:
+                    existing = ReturnDestination(name=name, is_active=True)
+                    db.session.add(existing)
+                    db.session.flush()
+                dest_id = existing.id
 
         ret = IssuedPartRecord(
             part_id=src.part_id,
@@ -10858,8 +10890,11 @@ def return_selected():
             unit_cost_at_issue=src.unit_cost_at_issue,
             location=src.location,
 
-            # ✅ связь возврата с исходным invoice (для корректного already-returned)
-            inv_ref=(str(src_inv) if src_inv is not None else None),
+            # ✅ IMPORTANT: this field must be your "link to original invoice"
+            # If you want "already returned per invoice" to work, inv_ref MUST store invoice_number.
+            # Your current code sets inv_ref=src.inv_ref (vendor INV#) — that breaks the algorithm.
+            inv_ref=(str(src.invoice_number) if src.invoice_number is not None else None),
+
             return_to=r_to,
             return_destination_id=dest_id,
         )
@@ -10867,14 +10902,13 @@ def return_selected():
         db.session.add(ret)
         created.append(ret)
 
-        # Возвращаем на склад
         if src.part:
             src.part.quantity = (src.part.quantity or 0) + qty
 
     if not created:
         flash("Nothing to return.", "warning")
         db.session.rollback()
-        return redirect(url_for('inventory.reports_grouped'))
+        return _back_to_same_invoice(inv_no_first)
 
     try:
         batch = _create_batch_for_records(
@@ -10889,27 +10923,28 @@ def return_selected():
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to create return invoice: {e}", "danger")
-        # ✅ don't reference batch if it failed before assignment
-        return redirect(url_for('inventory.reports_grouped'))
+        return _back_to_same_invoice(inv_no_first)
 
     flash(f"Return invoice #{batch.invoice_number} created ({len(created)} lines).", "success")
     return redirect(url_for('inventory.reports_grouped', invoice_number=batch.invoice_number))
 
+
+from sqlalchemy import func
+
 def _already_returned_qty_for_source(src) -> int:
     """
-    Сколько уже возвращено по той же детали этому же получателю.
+    How many units were already returned for this *same source context*.
 
-    Новый безопасный алгоритм:
-    1) Если у исходной строки есть invoice_number — сначала считаем RETURN только
-       внутри этого invoice (через inv_ref == invoice_number).
-    2) Если (1) дал 0 — fallback на старую логику (по part_id + issued_to + RETURN%),
-       чтобы старые возвраты без inv_ref продолжали учитываться и ничего не сломалось.
+    Strategy:
+    1) Strict: if src has invoice_number -> count RETURN rows linked via inv_ref == invoice_number.
+    2) Fallback: count RETURN rows for same part_id + issued_to + SAME source reference_job (RETURN <ref>),
+       so returns from other jobs/invoices do NOT block this invoice.
+    3) Last resort: old global fallback (part_id + issued_to) only if source ref is empty.
     """
 
-    # --- 1) точный подсчет по исходному invoice (если он известен) ---
     src_inv = getattr(src, "invoice_number", None)
     if src_inv is not None:
-        inv_key = str(int(src_inv))  # нормализуем в "1552"
+        inv_key = str(int(src_inv))
         total_neg_strict = (
             db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
             .filter(
@@ -10922,14 +10957,30 @@ def _already_returned_qty_for_source(src) -> int:
             .scalar()
             or 0
         )
-
         strict_abs = abs(int(total_neg_strict))
         if strict_abs > 0:
             return strict_abs
 
-        # если строго 0 — идем в fallback (для старых возвратов без inv_ref)
+    # ---- fallback narrowed to SAME source reference_job ----
+    src_ref = (getattr(src, "reference_job", None) or "").strip()
+    if src_ref:
+        # normalize exactly like you create it: "RETURN <SOURCE_REF_IN_UPPER>"
+        want_return_ref = f"RETURN {src_ref.upper()}"
 
-    # --- 2) fallback (старое поведение) ---
+        total_neg_same_ref = (
+            db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
+            .filter(
+                IssuedPartRecord.part_id == src.part_id,
+                IssuedPartRecord.issued_to == src.issued_to,
+                IssuedPartRecord.quantity < 0,
+                func.upper(IssuedPartRecord.reference_job) == want_return_ref,
+            )
+            .scalar()
+            or 0
+        )
+        return abs(int(total_neg_same_ref))
+
+    # ---- last resort (old behavior) ----
     total_neg_fallback = (
         db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
         .filter(

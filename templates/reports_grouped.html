@@ -40,7 +40,6 @@
     margin-right: .5rem;
   }
 
-  /* compact controls */
   .return-to { min-width: 105px; }
   .return-dest { min-width: 170px; }
 
@@ -55,11 +54,9 @@
     100% { box-shadow: 0 0 0 0 rgba(13,110,253,0); }
   }
 
-  /* ===== Better table readability (reports_grouped) ===== */
   .reports-grouped table { font-size: 14px; }
   .reports-grouped th { font-size: 12px; white-space: nowrap; }
 
-  /* Bigger inputs inside table (override form-control-sm) */
   .reports-grouped .table .form-control,
   .reports-grouped .table .form-select {
     font-size: 14px;
@@ -67,25 +64,24 @@
     height: 34px;
   }
 
-  /* Column sizing */
   .col-pn    { min-width: 120px; }
   .col-name  { min-width: 260px; max-width: 520px; }
   .col-qty   { min-width: 90px; }
   .col-ucost { min-width: 120px; }
   .col-total { min-width: 90px; }
 
-  /* Part Name wrap */
   td.col-name, th.col-name {
     white-space: normal !important;
     word-break: break-word;
     line-height: 1.15;
   }
 
-  /* Numeric inputs aligned */
   td.text-end .form-control { text-align: right; }
+
+  /* simple inline highlight for invalid controls */
+  .needs-fix { outline: 2px solid #dc3545; outline-offset: 2px; border-radius: 6px; }
 </style>
 
-{# роли #}
 {% set role_low = (current_user.role or '')|lower %}
 {% set IS_SUPER = role_low == 'superadmin' %}
 {% set IS_ADMIN = role_low in ['admin','superadmin'] %}
@@ -94,7 +90,6 @@
   <div class="report-filters filters-sticky">
     <h2 class="mb-2">Issued Parts Report (Grouped by Invoice)</h2>
 
-    {# ===== ONE GLOBAL SEARCH BAR + DATE RANGE ===== #}
     <form method="POST" class="mb-3">
       <div class="row g-3 align-items-end">
         <div class="col-12 col-lg-6">
@@ -157,7 +152,12 @@
       {% set lines = inv['items'] %}
       {% set inv_no_raw = inv.invoice_number %}
       {% set inv_no_str = ('%06d' % (inv_no_raw|int)) if inv_no_raw is not none else '—' %}
-      {% set is_focused = false %}
+
+      {% set form_id = 'form-' ~ (inv.invoice_number if inv.invoice_number else 'noinv-' ~ loop.index) %}
+
+      {% set focus_invoice = request.args.get('invoice_number') %}
+      {% set is_focused = (focus_invoice and inv.invoice_number and (focus_invoice|string) == (inv.invoice_number|string)) %}
+
       {% set batch = (lines and lines[0].batch) if lines else None %}
 
       {% set qty_total = (lines | map(attribute='quantity') | sum) or 0 %}
@@ -247,84 +247,85 @@
         </div>
 
         {% if role_low in ['superadmin', 'admin', 'user'] %}
-        <form id="form-{{ inv.id }}"
-              method="post"
-              action="{{ url_for('inventory.update_invoice') }}"
-              class="mb-3 invoice-toolbar">
+          <form id="{{ form_id }}"
+                method="post"
+                action="{{ url_for('inventory.update_invoice') }}"
+                class="mb-3 invoice-toolbar">
 
-          <div class="toolbar-left">
-            {% set has_selectable = lines | selectattr('quantity','gt',0) | list | length > 0 %}
-            {% if has_selectable %}
-              <div class="apply-scope" role="group" aria-label="apply-scope">
-                <span class="me-1 small text-muted">Apply to:</span>
+            <div class="toolbar-left">
+              {% set has_selectable = lines | selectattr('quantity','gt',0) | list | length > 0 %}
+              {% if has_selectable %}
+                <div class="apply-scope" role="group" aria-label="apply-scope">
+                  <span class="me-1 small text-muted">Apply to:</span>
 
-                <input type="radio" class="btn-check" name="apply_scope" id="scope_all_{{ inv.id }}" value="all" checked>
-                <label class="btn btn-outline-secondary btn-sm" for="scope_all_{{ inv.id }}">Entire invoice</label>
+                  <input type="radio" class="btn-check" name="apply_scope" id="scope_all_{{ form_id }}" value="all" checked>
+                  <label class="btn btn-outline-secondary btn-sm" for="scope_all_{{ form_id }}">Entire invoice</label>
 
-                <input type="radio" class="btn-check" name="apply_scope" id="scope_sel_{{ inv.id }}" value="selected">
-                <label class="btn btn-outline-secondary btn-sm" for="scope_sel_{{ inv.id }}">Selected rows</label>
+                  <input type="radio" class="btn-check" name="apply_scope" id="scope_sel_{{ form_id }}" value="selected">
+                  <label class="btn btn-outline-secondary btn-sm" for="scope_sel_{{ form_id }}">Selected rows</label>
+                </div>
+              {% endif %}
+
+              <div class="apply-scope">
+                <span class="me-1 small text-muted">Consumed for job:</span>
+                <input type="text" name="job_ref" class="form-control form-control-sm"
+                       style="width: 140px;" placeholder="Job # (required)">
               </div>
-            {% endif %}
 
-            <div class="apply-scope">
-              <span class="me-1 small text-muted">Consumed for job:</span>
-              <input type="text" name="job_ref" class="form-control form-control-sm"
-                     style="width: 140px;" placeholder="Job # (required)">
+              <button type="submit" class="btn btn-outline-primary btn-sm"
+                      name="do_consume" value="1"
+                      formaction="{{ url_for('inventory.consume_invoice') }}"
+                      formmethod="post">Mark Consumed</button>
+
+              <button type="submit" class="btn btn-outline-secondary btn-sm"
+                      name="do_unconsume" value="1"
+                      formaction="{{ url_for('inventory.unconsume_invoice') }}"
+                      formmethod="post">Unconsume Selected</button>
+
+              {% if not is_return and has_selectable %}
+                <button type="submit"
+                        class="btn btn-warning btn-sm btn-return-selected"
+                        formaction="{{ url_for('inventory.return_selected') }}"
+                        formmethod="post"
+                        onclick="return confirm('Create RETURN invoice from selected rows?');">
+                  Return Selected
+                </button>
+              {% endif %}
             </div>
 
-            <button type="submit" class="btn btn-outline-primary btn-sm"
-                    name="do_consume" value="1"
-                    formaction="{{ url_for('inventory.consume_invoice') }}"
-                    formmethod="post">Mark Consumed</button>
+            <div class="toolbar-right">
+              <button type="submit" class="btn btn-success btn-sm" name="do_return" value="0">Save Invoice</button>
 
-            <button type="submit" class="btn btn-outline-secondary btn-sm"
-                    name="do_unconsume" value="1"
-                    formaction="{{ url_for('inventory.unconsume_invoice') }}"
-                    formmethod="post">Unconsume Selected</button>
+              {% if IS_SUPER and is_return %}
+                <button type="submit" class="btn btn-outline-danger btn-sm"
+                        name="delete_return" value="1"
+                        onclick="return confirm('Delete this RETURN invoice and adjust stock?');">
+                  Delete Return
+                </button>
+              {% endif %}
 
-            {% if not is_return and has_selectable %}
-              <button type="submit" class="btn btn-warning btn-sm"
-                      formaction="{{ url_for('inventory.return_selected') }}"
-                      formmethod="post"
-                      onclick="return confirm('Create RETURN invoice from selected rows?');">
-                Return Selected
-              </button>
+              {% if IS_SUPER and not is_return and inv.invoice_number %}
+                <button type="submit" class="btn btn-outline-danger btn-sm"
+                        name="delete_invoice" value="{{ inv.invoice_number }}"
+                        onclick="return confirm('Delete ENTIRE invoice (all rows) and adjust stock?');">
+                  Delete Invoice
+                </button>
+              {% endif %}
+            </div>
+
+            <input type="hidden" name="group_issued_to"     value="{{ inv.issued_to }}">
+            <input type="hidden" name="group_reference_job" value="{{ inv.reference_job or '' }}">
+            <input type="hidden" name="group_issued_by"     value="{{ inv.issued_by }}">
+            <input type="hidden" name="group_issue_date"    value="{{ inv.issue_date.strftime('%Y-%m-%d %H:%M:%S') }}">
+            <input type="hidden" name="location"            value="{{ inv.location or '' }}">
+            <input type="hidden" name="issued_by"  value="{{ current_user.username }}">
+            <input type="hidden" name="issue_date" value="{{ inv.issue_date.strftime('%Y-%m-%d %H:%M:%S') }}">
+            <input type="hidden" name="issued_to"  value="{{ inv.issued_to }}">
+            <input type="hidden" name="reference_job" value="{{ inv.reference_job or '' }}">
+            {% if inv.invoice_number %}
+              <input type="hidden" name="invoice_number" value="{{ inv.invoice_number }}">
             {% endif %}
-          </div>
-
-          <div class="toolbar-right">
-            <button type="submit" class="btn btn-success btn-sm" name="do_return" value="0">Save Invoice</button>
-
-            {% if IS_SUPER and is_return %}
-              <button type="submit" class="btn btn-outline-danger btn-sm"
-                      name="delete_return" value="1"
-                      onclick="return confirm('Delete this RETURN invoice and adjust stock?');">
-                Delete Return
-              </button>
-            {% endif %}
-
-            {% if IS_SUPER and not is_return and inv.invoice_number %}
-              <button type="submit" class="btn btn-outline-danger btn-sm"
-                      name="delete_invoice" value="{{ inv.invoice_number }}"
-                      onclick="return confirm('Delete ENTIRE invoice (all rows) and adjust stock?');">
-                Delete Invoice
-              </button>
-            {% endif %}
-          </div>
-
-          <input type="hidden" name="group_issued_to"     value="{{ inv.issued_to }}">
-          <input type="hidden" name="group_reference_job" value="{{ inv.reference_job or '' }}">
-          <input type="hidden" name="group_issued_by"     value="{{ inv.issued_by }}">
-          <input type="hidden" name="group_issue_date"    value="{{ inv.issue_date.strftime('%Y-%m-%d %H:%M:%S') }}">
-          <input type="hidden" name="location"            value="{{ inv.location or '' }}">
-          <input type="hidden" name="issued_by"  value="{{ current_user.username }}">
-          <input type="hidden" name="issue_date" value="{{ inv.issue_date.strftime('%Y-%m-%d %H:%M:%S') }}">
-          <input type="hidden" name="issued_to"  value="{{ inv.issued_to }}">
-          <input type="hidden" name="reference_job" value="{{ inv.reference_job or '' }}">
-          {% if inv.invoice_number %}
-            <input type="hidden" name="invoice_number" value="{{ inv.invoice_number }}">
-          {% endif %}
-        </form>
+          </form>
         {% endif %}
 
         {% if lines|length > 0 %}
@@ -365,7 +366,7 @@
                     <td>
                       <div class="d-flex align-items-center gap-2 flex-wrap">
                         <input class="linecb" type="checkbox" name="record_ids[]" value="{{ it.id }}"
-                               form="form-{{ inv.id }}" {% if row_is_return %}disabled{% endif %}>
+                               form="{{ form_id }}" {% if row_is_return %}disabled{% endif %}>
 
                         <input type="number"
                                name="qty_{{ it.id }}"
@@ -377,7 +378,7 @@
                                min="0"
                                max="{{ it_qty }}"
                                value="{{ 1 if it_qty > 0 else 0 }}"
-                               form="form-{{ inv.id }}"
+                               form="{{ form_id }}"
                                {% if row_is_return %}disabled{% endif %}>
                       </div>
                     </td>
@@ -387,35 +388,35 @@
 
                     {% if IS_SUPER %}
                       <td class="text-end col-qty">
-                          <input type="number" step="1"
-                                 class="form-control text-end"
-                                 name="edit_qty_{{ it.id }}"
-                                 value="{{ it_qty }}"
-                                 form="form-{{ inv.id }}">
-                        </td>
+                        <input type="number" step="1"
+                               class="form-control text-end"
+                               name="edit_qty_{{ it.id }}"
+                               value="{{ it_qty }}"
+                               form="{{ form_id }}">
+                      </td>
 
-                        <td class="text-end">{{ it_used }}</td>
-                        <td class="text-end">{{ it_rem }}</td>
+                      <td class="text-end">{{ it_used }}</td>
+                      <td class="text-end">{{ it_rem }}</td>
 
-                        <td class="text-end col-ucost">
-                          <input type="number" step="0.01"
-                                 class="form-control text-end"
-                                 name="edit_ucost_{{ it.id }}"
-                                 value="{{ (it.unit_cost_at_issue or 0)|round(2) }}"
-                                 form="form-{{ inv.id }}">
-                        </td>
+                      <td class="text-end col-ucost">
+                        <input type="number" step="0.01"
+                               class="form-control text-end"
+                               name="edit_ucost_{{ it.id }}"
+                               value="{{ (it.unit_cost_at_issue or 0)|round(2) }}"
+                               form="{{ form_id }}">
+                      </td>
 
-                        <td class="text-end col-total">
-                          {{ '%.2f'|format(it_qty*(it.unit_cost_at_issue or 0)) }}
-                        </td>
+                      <td class="text-end col-total">
+                        {{ '%.2f'|format(it_qty*(it.unit_cost_at_issue or 0)) }}
+                      </td>
 
                       <td>
                         <input type="text" class="form-control form-control-sm"
-                               name="edit_issued_to_{{ it.id }}" value="{{ it.issued_to }}" form="form-{{ inv.id }}">
+                               name="edit_issued_to_{{ it.id }}" value="{{ it.issued_to }}" form="{{ form_id }}">
                       </td>
                       <td>
                         <input type="text" class="form-control form-control-sm"
-                               name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="form-{{ inv.id }}">
+                               name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="{{ form_id }}">
                       </td>
                     {% else %}
                       <td class="text-end col-qty">{{ it_qty }}</td>
@@ -428,7 +429,7 @@
                       <td>
                         {% if IS_ADMIN %}
                           <input type="text" class="form-control form-control-sm"
-                                 name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="form-{{ inv.id }}">
+                                 name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="{{ form_id }}">
                         {% else %}
                           {{ it.reference_job }}
                         {% endif %}
@@ -440,7 +441,7 @@
                         <input type="date" class="form-control form-control-sm"
                                name="edit_issuedate_{{ it.id }}"
                                value="{{ it.issue_date_local.strftime('%Y-%m-%d') if it.issue_date_local else (it.issue_date.strftime('%Y-%m-%d') if it.issue_date else '') }}"
-                               form="form-{{ inv.id }}">
+                               form="{{ form_id }}">
                       {% else %}
                         {{ it.issue_date_local.strftime('%Y-%m-%d') if it.issue_date_local else (it.issue_date.strftime('%Y-%m-%d') if it.issue_date else '') }}
                       {% endif %}
@@ -451,7 +452,7 @@
                         <input type="text" class="form-control form-control-sm"
                                name="edit_location_{{ it.id }}"
                                value="{{ effective_loc }}"
-                               form="form-{{ inv.id }}">
+                               form="{{ form_id }}">
                       {% else %}
                         {{ effective_loc }}
                       {% endif %}
@@ -462,7 +463,7 @@
                         <input type="text" class="form-control form-control-sm"
                                name="edit_invref_{{ it.id }}"
                                value="{{ it.inv_ref or '' }}"
-                               form="form-{{ inv.id }}">
+                               form="{{ form_id }}">
                       {% else %}
                         {{ it.inv_ref or '' }}
                       {% endif %}
@@ -485,20 +486,22 @@
                         {% endif %}
                       </td>
                     {% else %}
+                      {% set cur_to = (it.return_to or '') %}
                       <td>
                         <select name="return_to_{{ it.id }}"
                                 class="form-select form-select-sm return-to"
-                                form="form-{{ inv.id }}">
+                                form="{{ form_id }}">
                           <option value="">—</option>
-                          <option value="STOCK">STOCK</option>
-                          <option value="VENDOR">VENDOR</option>
+                          <option value="STOCK" {% if cur_to == 'STOCK' %}selected{% endif %}>STOCK</option>
+                          <option value="VENDOR" {% if cur_to == 'VENDOR' %}selected{% endif %}>VENDOR</option>
                         </select>
                       </td>
                       <td>
                         <div class="d-flex gap-2 align-items-center">
-                          <select class="form-select form-select-sm return-dest-select"
+                          <select name="return_dest_select_{{ it.id }}"
+                                  class="form-select form-select-sm return-dest-select"
                                   style="min-width: 170px;"
-                                  form="form-{{ inv.id }}"
+                                  form="{{ form_id }}"
                                   {% if not (return_destinations or []) %}disabled{% endif %}>
                             <option value="">Company…</option>
                             {% for v in (return_destinations or []) %}
@@ -507,17 +510,18 @@
                           </select>
 
                           <input type="text"
+                                 name="return_dest_text_{{ it.id }}"
                                  class="form-control form-control-sm return-dest-text"
                                  style="min-width: 170px;"
                                  placeholder="or type company…"
                                  list="return_dest_list"
                                  disabled
-                                 form="form-{{ inv.id }}">
+                                 form="{{ form_id }}">
 
                           <input type="hidden"
                                  name="return_dest_{{ it.id }}"
                                  class="return-dest-hidden"
-                                 form="form-{{ inv.id }}"
+                                 form="{{ form_id }}"
                                  value="">
                         </div>
                       </td>
@@ -594,7 +598,77 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  document.querySelectorAll('tbody tr').forEach(syncRow);
+  function clearFixMarks(card) {
+    card.querySelectorAll('.needs-fix').forEach(el => el.classList.remove('needs-fix'));
+  }
+
+  function validateReturnSelected(form) {
+    const card = form.closest('.invoice-card');
+    if (!card) return true;
+
+    clearFixMarks(card);
+
+    // sync hidden for all rows in this card
+    card.querySelectorAll('tbody tr').forEach(syncRow);
+
+    const selected = card.querySelectorAll('input.linecb:checked');
+    if (!selected.length) {
+      alert('Select at least one row to return.');
+      return false;
+    }
+
+    for (const cb of selected) {
+      const tr = cb.closest('tr');
+      if (!tr) continue;
+
+      const to = tr.querySelector('select.return-to');
+      const hid = tr.querySelector('input.return-dest-hidden');
+      const sel = tr.querySelector('select.return-dest-select');
+      const txt = tr.querySelector('input.return-dest-text');
+
+      const valTo = (to && to.value || '').toUpperCase();
+
+      if (!valTo) {
+        if (to) to.classList.add('needs-fix');
+        tr.scrollIntoView({behavior:'smooth', block:'center'});
+        alert('Please select Return To (STOCK or VENDOR) for all selected rows.');
+        return false;
+      }
+
+      if (valTo === 'VENDOR') {
+        const v = (hid && hid.value || '').trim();
+        if (!v) {
+          if (sel) sel.classList.add('needs-fix');
+          if (txt) txt.classList.add('needs-fix');
+          tr.scrollIntoView({behavior:'smooth', block:'center'});
+          alert('Please select Vendor Company for all selected VENDOR return lines.');
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+    // ✅ If we have #invoice-XXXX in URL, ensure we scroll to it (and offset for sticky header)
+  function scrollToInvoiceAnchor() {
+    const hash = window.location.hash || '';
+    if (!hash.startsWith('#invoice-')) return;
+
+    const el = document.querySelector(hash);
+    if (!el) return;
+
+    // offset for sticky header
+    const y = el.getBoundingClientRect().top + window.pageYOffset - 70;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  }
+
+  // run after layout
+  setTimeout(scrollToInvoiceAnchor, 50);
+
+
+  // initial sync
+  document.querySelectorAll('.reports-grouped tbody tr').forEach(syncRow);
 
   document.addEventListener('change', function(e) {
     const tr = e.target ? e.target.closest('tr') : null;
@@ -615,7 +689,26 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 
+  // ✅ key part: prevent leaving page for Return Selected until fixed
+  document.querySelectorAll('form.invoice-toolbar').forEach(function(form) {
+    form.addEventListener('submit', function(ev) {
+      const submitter = ev.submitter;
+      // only block for Return Selected button
+      if (submitter && submitter.classList && submitter.classList.contains('btn-return-selected')) {
+        if (!validateReturnSelected(form)) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          return false;
+        }
+      }
+      // always sync before any submit
+      const card = form.closest('.invoice-card');
+      if (card) card.querySelectorAll('tbody tr').forEach(syncRow);
+    });
+  });
+
 });
 </script>
 
 {% endblock %}
+
