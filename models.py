@@ -440,6 +440,27 @@ class IssuedPartRecord(db.Model):
 
     inv_ref = db.Column(db.String(32), nullable=True, index=True)
 
+    # --- Cost provenance (link issued line -> receipt line that defined the cost) ---
+    source_receipt_line_id = db.Column(
+        db.Integer,
+        db.ForeignKey("goods_receipt_lines.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    cost_source = db.Column(db.String(32), nullable=True, index=True)
+    # examples:
+    #   "receipt_inv_match"
+    #   "receipt_latest_fallback"
+    #   "fallback_part_unit_cost"
+
+    source_receipt_line = db.relationship(
+        "GoodsReceiptLine",
+        lazy="joined",
+        foreign_keys=[source_receipt_line_id],
+    )
+
+
     consumed_job_ref = db.Column(db.String(64), nullable=True, index=True)
     consumption_logs = db.relationship(
         "IssuedConsumptionLog",
@@ -740,6 +761,11 @@ class GoodsReceiptLine(db.Model):
     part_name   = db.Column(db.String(255))
     quantity    = db.Column(db.Integer, default=1, nullable=False)
     unit_cost   = db.Column(db.Float, default=0.0)
+    # --- LOT pricing (safe, optional) ---
+    base_unit_cost = db.Column(db.Float, nullable=True, default=None)     # cost from invoice (no extras)
+    extra_alloc_per_unit = db.Column(db.Float, nullable=True, default=0.0) # allocated extra per unit
+    actual_unit_cost = db.Column(db.Float, nullable=True, default=None)   # base + extra
+
     location    = db.Column(db.String(64))
 
     applied_qty = db.Column(db.Integer, default=0, nullable=False)
@@ -755,6 +781,25 @@ class GoodsReceiptLine(db.Model):
             return float((self.quantity or 0) * (self.unit_cost or 0.0))
         except Exception:
             return 0.0
+
+    @property
+    def effective_base_cost(self) -> float:
+        try:
+            if self.base_unit_cost is not None:
+                return float(self.base_unit_cost or 0.0)
+            return float(self.unit_cost or 0.0)
+        except Exception:
+            return 0.0
+
+    @property
+    def effective_actual_cost(self) -> float:
+        try:
+            if self.actual_unit_cost is not None:
+                return float(self.actual_unit_cost or 0.0)
+            return float(self.unit_cost or 0.0)
+        except Exception:
+            return 0.0
+
 
 
 # --------------------------------

@@ -1739,8 +1739,8 @@ def _issue_records_bulk(
       {
         "part_id": int,
         "qty": int,
-        "unit_price": float | None,
-        "inv_ref": str | None,   # INV# from WorkOrderPart.invoice_number
+        "unit_price": float | None,   # override (если задано)
+        "inv_ref": str | None,        # INV# from WorkOrderPart.invoice_number (для попытки match receipt invoice)
       }
 
     Returns:
@@ -1748,6 +1748,13 @@ def _issue_records_bulk(
     """
     if not items:
         raise ValueError("No items to issue")
+
+    # local imports (как у тебя)
+    from datetime import datetime
+    from flask_login import current_user
+    from extensions import db
+    from models import IssuedPartRecord, Part
+    from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
 
     issue_date = datetime.utcnow()
     created_records: list[IssuedPartRecord] = []
@@ -1767,20 +1774,47 @@ def _issue_records_bulk(
         if issue_now <= 0:
             continue
 
-        # price snapshot
+        inv_ref = (str(it.get("inv_ref") or "").strip()[:32] or None)
+        base_loc = (getattr(part, "location", "") or "").strip() or None
+
+        # ------------------------------------------------------------
+        # COST PRIORITY:
+        # 1) item.unit_price override
+        # 2) billed_price_per_item override
+        # 3) receipt lot (invoice match -> else latest)
+        # 4) part.unit_cost
+        # and we also write source_receipt_line_id + cost_source
+        # ------------------------------------------------------------
+        chosen_receipt_line_id = None
+        chosen_cost_source = None
+
+        # 1) per-item override
         if "unit_price" in it and it["unit_price"] is not None:
             price_to_fix = float(it["unit_price"])
+            chosen_cost_source = "override_item_unit_price"
+
+        # 2) global billed override
         elif billed_price_per_item is not None:
             price_to_fix = float(billed_price_per_item)
+            chosen_cost_source = "override_billed_price_per_item"
+
         else:
-            price_to_fix = float(part.unit_cost or 0.0)
+            # 3) receipt lot
+            # берём part_number из Part (надежнее), чем из формы
+            pn = (getattr(part, "part_number", "") or "").strip()
+            line, src = pick_receipt_line_for_issue(part_number=pn, inv_ref=inv_ref)
+            if line is not None:
+                price_to_fix = float(receipt_line_cost(line))
+                chosen_receipt_line_id = int(line.id)
+                chosen_cost_source = src
+            else:
+                # 4) fallback part
+                price_to_fix = float(part.unit_cost or 0.0)
+                chosen_cost_source = "fallback_part_unit_cost"
 
         # decrement stock (NO COMMIT here)
         part.quantity = on_hand - issue_now
         db.session.add(part)
-
-        inv_ref = (str(it.get("inv_ref") or "").strip()[:32] or None)
-        base_loc = (getattr(part, "location", "") or "").strip() or None
 
         rec = IssuedPartRecord(
             part_id=part.id,
@@ -1790,10 +1824,18 @@ def _issue_records_bulk(
             issued_by=getattr(current_user, "username", "system"),
             issue_date=issue_date,
             unit_cost_at_issue=price_to_fix,
-            location=base_loc,    # snapshot location
+            location=base_loc,  # snapshot location
         )
+
+        # inv_ref snapshot
         if hasattr(rec, "inv_ref"):
-            rec.inv_ref = inv_ref  # сохраняем INV отдельно
+            rec.inv_ref = inv_ref
+
+        # cost provenance snapshots
+        if hasattr(rec, "source_receipt_line_id"):
+            rec.source_receipt_line_id = chosen_receipt_line_id
+        if hasattr(rec, "cost_source"):
+            rec.cost_source = (chosen_cost_source or "")[:32] or None
 
         db.session.add(rec)
         created_records.append(rec)
@@ -1801,9 +1843,9 @@ def _issue_records_bulk(
     if not created_records:
         raise ValueError("Nothing available to issue")
 
-    # ВАЖНО: только flush, чтобы появились id (но без commit)
-    db.session.flush()
+    db.session.flush()  # only flush (no commit)
     return issue_date, created_records
+
 
 def _is_return_record(record: IssuedPartRecord) -> bool:
     """Признак 'возвратной' строки — отрицательное количество или reference_job начинается с RETURN."""
@@ -4779,6 +4821,9 @@ def wo_save():
                 seen.add(p)
                 cleaned.append(p)
         return cleaned
+
+        # ✅ IMPORTANT: must exist before _rerender_same_screen uses it (early returns)
+        units_payload = None
 
     def _rerender_same_screen(msg_text: str, errors=None):
         db.session.rollback()
