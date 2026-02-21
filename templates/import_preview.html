@@ -108,20 +108,17 @@
         <div class="flex-grow-1 d-flex flex-wrap gap-2">
           <div class="d-flex flex-column text-nowrap">
             <div class="text-muted" style="font-size:.7rem; line-height:1.2;">Subtotal (parts only)</div>
-            <div id="subtotal-display"
-                 style="font-size:1rem; font-weight:600;">$0.00</div>
+            <div id="subtotal-display" style="font-size:1rem; font-weight:600;">$0.00</div>
           </div>
 
           <div class="d-flex flex-column text-nowrap">
             <div class="text-muted" style="font-size:.7rem; line-height:1.2;">Extra expenses</div>
-            <div id="extra-display"
-                 style="font-size:1rem; font-weight:600;">$0.00</div>
+            <div id="extra-display" style="font-size:1rem; font-weight:600;">$0.00</div>
           </div>
 
           <div class="d-flex flex-column text-nowrap">
             <div class="text-muted" style="font-size:.7rem; line-height:1.2;">Grand total (invoice)</div>
-            <div id="grand-display"
-                 style="font-size:1rem; font-weight:700; color:#198754;">$0.00</div>
+            <div id="grand-display" style="font-size:1rem; font-weight:700; color:#198754;">$0.00</div>
           </div>
         </div>
 
@@ -163,10 +160,8 @@
     </div>
 
     <!-- editable table card -->
-    <div class="card shadow-sm border-0"
-         style="border-radius:1rem; overflow:hidden;">
-      <div class="card-header bg-white border-0"
-           style="border-bottom:1px solid #dee2e6;">
+    <div class="card shadow-sm border-0" style="border-radius:1rem; overflow:hidden;">
+      <div class="card-header bg-white border-0" style="border-bottom:1px solid #dee2e6;">
         <div class="fw-semibold text-uppercase"
              style="font-size:.8rem; letter-spacing:.05em; color:#6c757d;">
           Incoming Items
@@ -176,22 +171,17 @@
         </div>
       </div>
 
-      <form method="POST"
-            id="import-form"
-            action="{{ url_for('inventory.import_parts_upload') }}"
-            style="margin:0;">
+      <form method="POST" id="import-form" action="{{ url_for('inventory.import_parts_upload') }}" style="margin:0;">
         <input type="hidden" name="saved_path" value="{{ saved_path }}">
         <input type="hidden" name="extra_expenses" id="extra-expenses-hidden" value="{{ val(extra_expenses) }}">
 
-        {# dummy block for parser expecting units[0] group #}
+        <!-- dummy block for parser expecting units[0] group -->
         <input type="hidden" name="units[0][brand]"  value="">
         <input type="hidden" name="units[0][model]"  value="">
         <input type="hidden" name="units[0][serial]" value="">
 
         <div class="table-responsive" style="max-height:60vh; border-top:1px solid #dee2e6;">
-          <table id="edit-table"
-                 class="table align-middle mb-0"
-                 style="font-size:.8rem;">
+          <table id="edit-table" class="table align-middle mb-0" style="font-size:.8rem;">
             <thead class="table-light"
                    style="position:sticky; top:0; z-index:5; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em;">
               <tr>
@@ -291,33 +281,24 @@
         <div class="card-footer bg-white d-flex flex-wrap gap-2 justify-content-between align-items-start"
              style="border-top:1px solid #dee2e6; font-size:.75rem;">
           <div class="d-flex flex-wrap gap-2">
-            <button class="btn btn-primary shadow-sm"
-                    name="save"
-                    value="1"
-                    type="submit"
+            <button class="btn btn-primary shadow-sm" name="save" value="1" type="submit"
                     style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.8rem; box-shadow:0 .5rem 1rem rgba(13,110,253,.35)!important;">
               💾 Save Edits
             </button>
 
-            <button id="add-row-bottom"
-                    class="btn btn-outline-info shadow-sm"
-                    type="button"
+            <button id="add-row-bottom" class="btn btn-outline-info shadow-sm" type="button"
                     style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.8rem;">
               ➕ Add Blank Row
             </button>
           </div>
 
           <div class="d-flex flex-wrap gap-2">
-            <button class="btn btn-success shadow-sm"
-                    name="apply"
-                    value="1"
-                    type="submit"
+            <button class="btn btn-success shadow-sm" name="apply" value="1" type="submit"
                     style="font-weight:600; border-radius:.6rem; padding:.5rem .9rem; font-size:.8rem; box-shadow:0 .5rem 1rem rgba(25,135,84,.35)!important;">
               ✅ Apply Import
             </button>
 
-            <a class="btn btn-outline-secondary shadow-sm"
-               href="{{ url_for('inventory.import_parts_upload') }}"
+            <a class="btn btn-outline-secondary shadow-sm" href="{{ url_for('inventory.import_parts_upload') }}"
                style="font-weight:500; border-radius:.6rem; padding:.5rem .9rem; font-size:.8rem;">
               ✖ Cancel
             </a>
@@ -327,20 +308,21 @@
       </form>
     </div>
 
-    <div class="text-center text-muted mt-4"
-         style="font-size:.7rem; line-height:1.3;">
+    <div class="text-center text-muted mt-4" style="font-size:.7rem; line-height:1.3;">
       Check for typos before applying. This will affect live stock.
     </div>
 
   </div>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
 <script>
   function parseFloatSafe(v) {
     const x = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
     return isNaN(x) ? 0 : x;
   }
-
   function money(n) {
     return "$" + (Math.round(n * 100) / 100).toFixed(2);
   }
@@ -357,11 +339,11 @@
     let perRowData = [];
 
     rows.forEach((tr) => {
-      const qtyEl       = tr.querySelector('.qty-input');
-      const baseCostEl  = tr.querySelector('.base-cost-input');
+      const qtyEl      = tr.querySelector('.qty-input');
+      const baseCostEl = tr.querySelector('.base-cost-input');
 
-      const qty        = parseFloatSafe(qtyEl.value);
-      const baseCost   = parseFloatSafe(baseCostEl.value);
+      const qty      = parseFloatSafe(qtyEl.value);
+      const baseCost = parseFloatSafe(baseCostEl.value);
 
       const lineBaseTotal = qty * baseCost;
       subtotalBase += lineBaseTotal;
@@ -378,14 +360,14 @@
         adjCost = row.baseCost + perItemFee;
       }
       const adjCostEl = row.tr.querySelector('.adj-cost-input');
-      adjCostEl.value = (Math.round(adjCost * 100) / 100).toFixed(2);
+      if (adjCostEl) adjCostEl.value = (Math.round(adjCost * 100) / 100).toFixed(2);
     });
 
     const grand = subtotalBase + extraVal;
 
-    document.getElementById('subtotal-display').textContent       = money(subtotalBase);
-    document.getElementById('extra-display').textContent          = money(extraVal);
-    document.getElementById('grand-display').textContent          = money(grand);
+    document.getElementById('subtotal-display').textContent = money(subtotalBase);
+    document.getElementById('extra-display').textContent    = money(extraVal);
+    document.getElementById('grand-display').textContent    = money(grand);
 
     document.getElementById('subtotal-display-bottom').textContent = money(subtotalBase);
     document.getElementById('extra-display-bottom').textContent    = money(extraVal);
@@ -414,23 +396,16 @@
     document.querySelectorAll('input[name^="units[0][rows]"][name$="[location]"]').forEach(inp => {
       const cur = (inp.value || '').trim().toUpperCase();
 
-      if (!cur) {
-        inp.value = defLoc;
-        return;
-      }
-      if (looksLikeReliable(savedPath, supplierHint) && cur === 'MAR') {
-        inp.value = 'REL';
-        return;
-      }
-      if (looksLikeMarcone(savedPath, supplierHint) && cur === 'REL') {
-        inp.value = 'MAR';
-        return;
-      }
+      if (!cur) { inp.value = defLoc; return; }
+      if (looksLikeReliable(savedPath, supplierHint) && cur === 'MAR') { inp.value = 'REL'; return; }
+      if (looksLikeMarcone(savedPath, supplierHint) && cur === 'REL')  { inp.value = 'MAR'; return; }
     });
   }
 
   function addBlankRow() {
     const tbody = document.querySelector('#edit-table tbody');
+    if (!tbody) return;
+
     const idx = tbody.children.length;
     const tr = document.createElement('tr');
     tr.classList.add('import-row');
@@ -494,7 +469,7 @@
   document.getElementById('add-row-bottom')?.addEventListener('click', addBlankRow);
 
   document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('del-row')) {
+    if (e.target && e.target.classList && e.target.classList.contains('del-row')) {
       e.preventDefault();
       e.target.closest('tr')?.remove();
       recalcTotalsAndAdjCosts();
@@ -502,19 +477,30 @@
   });
 
   document.addEventListener('input', (e) => {
-    if (
-      e.target.classList.contains('qty-input') ||
-      e.target.classList.contains('base-cost-input') ||
-      e.target.id === 'extra-expenses-input'
-    ) {
+    const t = e.target;
+    if (!t) return;
+
+    if (t.classList.contains('qty-input') || t.classList.contains('base-cost-input') || t.id === 'extra-expenses-input') {
       recalcTotalsAndAdjCosts();
     }
-    if (e.target.name === 'supplier_hint') {
+    if (t.name === 'supplier_hint') {
       applySupplierDefaultToLocations();
     }
   });
 
   applySupplierDefaultToLocations();
   recalcTotalsAndAdjCosts();
+</script>
+
+<!-- ✅ flag for base.html scroll-to-flash -->
+<script>
+(function () {
+  const form = document.getElementById('import-form');
+  if (!form) return;
+
+  form.addEventListener('submit', function () {
+    try { sessionStorage.setItem('wccr_scroll_flash', '1'); } catch(e) {}
+  });
+})();
 </script>
 {% endblock %}

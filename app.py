@@ -85,7 +85,15 @@ else:
 # -------------------------------------------------------------------
 # 4) Flask app init
 # -------------------------------------------------------------------
-app = Flask(__name__, instance_relative_config=True)
+ROOT_TEMPLATES = os.path.join(Config.BASE_DIR, "templates")
+ROOT_STATIC    = os.path.join(Config.BASE_DIR, "static")
+
+app = Flask(
+    __name__,
+    instance_relative_config=True,
+    template_folder=ROOT_TEMPLATES,
+    static_folder=ROOT_STATIC,
+)
 app.config.from_object(Config)
 app.config.from_pyfile('config.py', silent=True)  # instance/config.py (если есть)
 

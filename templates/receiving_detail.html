@@ -1,6 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
 
+{# ----------------- SAFE FALLBACKS FOR FIELD NAMES ----------------- #}
+{% set supplier_val = (batch|attr('supplier_name')|default('', true)) %}
+{% if not supplier_val %}
+  {% set supplier_val = (batch|attr('supplier')|default('', true)) %}
+{% endif %}
+
+{% set invoice_val = (batch|attr('invoice_number')|default('', true)) %}
+{% if not invoice_val %}
+  {% set invoice_val = (batch|attr('invoice_no')|default('', true)) %}
+{% endif %}
+{% if not invoice_val %}
+  {% set invoice_val = (batch|attr('invoice')|default('', true)) %}
+{% endif %}
+
+{% set inv_date_val = (batch|attr('invoice_date')|default(none, true)) %}
+{% if inv_date_val is none %}
+  {% set inv_date_val = (batch|attr('date')|default(none, true)) %}
+{% endif %}
+
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
     <h3 class="mb-1">Receiving Batch #{{ batch.id }}</h3>
@@ -8,20 +27,24 @@
     <div class="text-muted small d-flex flex-wrap align-items-center" style="gap:.5rem;">
       <span class="me-3">
         <strong>Supplier:</strong>
-        {{ batch|attr('supplier_name')|default('—', true) }}
+        {{ supplier_val if supplier_val else '—' }}
       </span>
 
       <span class="me-3">
         <strong>Invoice #:</strong>
-        {{ batch|attr('invoice_number')|default('—', true) }}
+        {{ invoice_val if invoice_val else '—' }}
       </span>
 
       <span class="me-3">
         <strong>Date:</strong>
-        {{ batch|attr('invoice_date')|default('—', true) }}
+        {# show date nicely if it's a date/datetime #}
+        {% if inv_date_val and inv_date_val.strftime is defined %}
+          {{ inv_date_val.strftime('%Y-%m-%d') }}
+        {% else %}
+          {{ inv_date_val|default('—', true) }}
+        {% endif %}
       </span>
 
-      {# статус партии (posted / draft) #}
       {% set is_posted = (batch|attr('status')|default('', true)) == 'posted' %}
       <span class="me-3">
         <strong>Status:</strong>
@@ -32,20 +55,16 @@
         {% endif %}
       </span>
 
-      {# индикатор, применён ли приход к стоку #}
-      {% if stock_applied %}
-        <span class="badge bg-success" style="font-size:.7rem;">
-          Stock Applied
-        </span>
+      {# if controller doesn't pass stock_applied, treat POSTED as applied #}
+      {% set stock_applied_ui = (stock_applied or false) or is_posted %}
+      {% if stock_applied_ui %}
+        <span class="badge bg-success" style="font-size:.7rem;">Stock Applied</span>
       {% else %}
-        <span class="badge bg-secondary" style="font-size:.7rem;">
-          No Stock Applied
-        </span>
+        <span class="badge bg-secondary" style="font-size:.7rem;">No Stock Applied</span>
       {% endif %}
     </div>
   </div>
 
-  {# ----- ACTION BUTTONS (admin или superadmin) ----- #}
   {% set role = (current_user.role if current_user.is_authenticated else '')|lower %}
   {% set can_super = current_user.is_authenticated and (
     role in ['admin','superadmin']
@@ -53,21 +72,12 @@
     or (current_user.is_superadmin|default(false))
     or (current_user.is_super_admin|default(false))
   ) %}
-  {% set is_superadmin = current_user.is_authenticated and (
-    role == 'superadmin'
-    or (current_user.is_superadmin|default(false))
-    or (current_user.is_super_admin|default(false))
-  ) %}
 
-  {# шапку можно редактировать, если это admin/superadmin ИЛИ can_edit из контроллера #}
   {% set can_edit_header = can_super or can_edit %}
 
   <div class="text-end">
-    <a class="btn btn-outline-secondary me-2" href="{{ url_for('inventory.receiving_list') }}">
-      ‹ Back
-    </a>
+    <a class="btn btn-outline-secondary me-2" href="{{ url_for('inventory.receiving_list') }}">‹ Back</a>
 
-    {# Post / Unpost #}
     {% if can_super and can_unpost %}
       <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
             method="post" class="d-inline">
@@ -75,32 +85,25 @@
           {{ 'Unpost' if is_posted else 'Post' }}
         </button>
       </form>
-
     {% elif can_super and (not can_unpost) and is_posted %}
       <button class="btn btn-warning" type="button" disabled
               title="Batch already issued to technicians. Cannot unpost.">
         Unpost
       </button>
-
     {% elif can_super and (not is_posted) %}
       <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
             method="post" class="d-inline">
-        <button class="btn btn-primary" type="submit">
-          Post
-        </button>
+        <button class="btn btn-primary" type="submit">Post</button>
       </form>
     {% endif %}
 
-    {# Delete запрещаем, если stock_applied == True #}
     {% if can_super %}
       <form action="{{ url_for('inventory.receiving_delete', batch_id=batch.id) }}"
             method="post" class="d-inline"
             onsubmit="return confirm('Delete batch #{{ batch.id }}? This cannot be undone.');">
         <button class="btn btn-danger"
                 type="submit"
-                {% if stock_applied %}disabled
-                   title="Unpost first to remove from stock before deleting."
-                {% endif %}>
+                {% if stock_applied_ui %}disabled title="Unpost first to remove from stock before deleting."{% endif %}>
           Delete
         </button>
       </form>
@@ -116,13 +119,11 @@
   </div>
 {% endif %}
 
-{# ---------- SUMMARY CARD ---------- #}
 <div class="card mb-4 shadow-sm">
   <div class="card-header d-flex justify-content-between align-items-center py-2">
     <strong class="small text-uppercase text-muted">Received Items</strong>
     <span class="small text-muted">
-      Currency:
-      {{ batch|attr('currency')|default('USD', true) }}
+      Currency: {{ batch|attr('currency')|default('USD', true) }}
     </span>
   </div>
 
@@ -133,48 +134,61 @@
           <th style="width:50px;">#</th>
           <th style="width:160px;">Part #</th>
           <th>Description</th>
-          <th style="width:100px;" class="text-end">Qty</th>
-          <th style="width:120px;" class="text-end">Unit Cost</th>
+          <th style="width:80px;" class="text-end">Qty</th>
+          <th style="width:120px;" class="text-end">Base Cost</th>
+          <th style="width:110px;" class="text-end">Fee</th>
+          <th style="width:120px;" class="text-end">Adj Cost</th>
           <th style="width:140px;" class="text-end">Line Total</th>
           <th style="width:120px;">Location</th>
         </tr>
       </thead>
       <tbody>
         {% set curr = batch|attr('currency')|default('USD', true) %}
-        {% set grand_by_unit = 0.0 %}
+        {% set grand = 0.0 %}
 
         {% for it in lines %}
-          {# part # и name с fallback на Part relationship #}
           {% set pn   = (it|attr('part') and (it.part|attr('number')|default('', true))) or (it|attr('part_number')|default('', true)) %}
           {% set name = (it|attr('part') and (it.part|attr('name')|default('', true)))   or (it|attr('part_name')|default('', true)) %}
-
-          {# количество #}
           {% set qty  = (it|attr('qty')|default(it|attr('quantity'), true)|default(0, true)) | int %}
 
-          {# простая цена для GoodsReceiptLine: unit_cost #}
-          {% set ucost = (it|attr('unit_cost')|default(0.0, true)) | float %}
-          {% set line_total = qty * ucost %}
-          {% set grand_by_unit = grand_by_unit + line_total %}
+          {% set actual = (it|attr('actual_unit_cost')|default(none, true)) %}
+          {% set actual = (actual if actual is not none else (it|attr('unit_cost')|default(0.0, true))) | float %}
+
+          {% set fee = (it|attr('extra_alloc_per_unit')|default(0.0, true)) | float %}
+
+          {% set base = (it|attr('base_unit_cost')|default(none, true)) %}
+          {% set base = (base if base is not none else (it|attr('unit_cost_base')|default(none, true))) %}
+          {% if base is not none %}
+            {% set base = base | float %}
+          {% else %}
+            {% set base = (actual - fee) %}
+          {% endif %}
+          {% if base < 0 %}{% set base = 0.0 %}{% endif %}
+
+          {% set line_total = qty * actual %}
+          {% set grand = grand + line_total %}
 
           <tr>
             <td class="text-muted small">{{ loop.index }}</td>
             <td class="fw-semibold">{{ pn }}</td>
-            <td class="text-truncate" style="max-width: 300px;">{{ name }}</td>
+            <td class="text-truncate" style="max-width: 340px;">{{ name }}</td>
             <td class="text-end">{{ qty }}</td>
-            <td class="text-end">{{ curr }} {{ '%.2f' % ucost }}</td>
+
+            <td class="text-end">{{ curr }} {{ '%.2f' % base }}</td>
+            <td class="text-end">{{ curr }} {{ '%.2f' % fee }}</td>
+            <td class="text-end">{{ curr }} {{ '%.2f' % actual }}</td>
             <td class="text-end">{{ curr }} {{ '%.2f' % line_total }}</td>
+
             <td>{{ it|attr('location')|default((it|attr('part') and it.part|attr('location')|default('', true)) or '', true) }}</td>
           </tr>
         {% endfor %}
       </tbody>
+
       <tfoot class="table-light">
-        {# Total: либо batch_total из контроллера, либо сумма по unit_cost #}
-        {% set total_to_show = (batch_total if batch_total is not none else grand_by_unit) %}
+        {% set total_to_show = (batch_total if batch_total is not none else grand) %}
         <tr>
-          <th colspan="5" class="text-end">Total:</th>
-          <th class="text-end">
-            {{ curr }} {{ '%.2f' % total_to_show }}
-          </th>
+          <th colspan="7" class="text-end">Total:</th>
+          <th class="text-end">{{ curr }} {{ '%.2f' % total_to_show }}</th>
           <th></th>
         </tr>
       </tfoot>
@@ -183,13 +197,11 @@
 
   {% if batch|attr('notes') %}
     <div class="card-footer small text-muted">
-      <strong>Notes:</strong>
-      {{ batch|attr('notes')|default('', true) }}
+      <strong>Notes:</strong> {{ batch|attr('notes')|default('', true) }}
     </div>
   {% endif %}
 </div>
 
-{# ---------- EDIT CARD (Admin / Superadmin) ---------- #}
 {% if can_super %}
 <div class="card shadow-sm">
   <div class="card-header d-flex justify-content-between align-items-center py-2">
@@ -197,22 +209,14 @@
       <strong class="small text-uppercase text-muted">Edit Batch</strong>
 
       {% if not can_edit %}
-        <span class="text-muted small">
-          Quantities locked (batch posted and partially issued).
-        </span>
+        <span class="text-muted small">Quantities locked (batch posted and partially issued).</span>
       {% elif is_posted %}
-        <span class="text-muted small">
-          Batch is posted — Unpost to enable editing of quantities and costs.
-        </span>
+        <span class="text-muted small">Batch is posted — Unpost to enable editing of quantities and costs.</span>
       {% else %}
-        <span class="text-muted small">
-          Draft mode — you can edit and repost.
-        </span>
+        <span class="text-muted small">Draft mode — you can edit and repost.</span>
       {% endif %}
     </div>
-    <span class="badge bg-light text-dark border">
-      ID: {{ batch.id }}
-    </span>
+    <span class="badge bg-light text-dark border">ID: {{ batch.id }}</span>
   </div>
 
   <div class="card-body">
@@ -223,21 +227,33 @@
         <div class="col-md-3">
           <label class="form-label small text-muted">Supplier</label>
           <input name="supplier_name" class="form-control form-control-sm"
-                 value="{{ batch|attr('supplier_name')|default('', true) }}"
+                 value="{{ supplier_val }}"
                  {% if not can_edit_header %}readonly style="background:#eee; color:#666;"{% endif %}>
+          {# fallback name #}
+          <input type="hidden" name="supplier" value="{{ supplier_val }}">
         </div>
+
         <div class="col-md-3">
           <label class="form-label small text-muted">Invoice #</label>
           <input name="invoice_number" class="form-control form-control-sm"
-                 value="{{ batch|attr('invoice_number')|default('', true) }}"
+                 value="{{ invoice_val }}"
                  {% if not can_edit_header %}readonly style="background:#eee; color:#666;"{% endif %}>
+          {# ✅ send fallbacks too so backend/model catches any name #}
+          <input type="hidden" name="invoice_no" value="{{ invoice_val }}">
+          <input type="hidden" name="invoice" value="{{ invoice_val }}">
         </div>
+
         <div class="col-md-3">
           <label class="form-label small text-muted">Invoice Date</label>
           <input type="date" name="invoice_date" class="form-control form-control-sm"
-                 value="{{ batch.invoice_date and batch.invoice_date.strftime('%Y-%m-%d') or '' }}"
+                 value="{% if inv_date_val and inv_date_val.strftime is defined %}{{ inv_date_val.strftime('%Y-%m-%d') }}{% endif %}"
                  {% if not can_edit_header %}readonly style="background:#eee; color:#666;"{% endif %}>
+          {# fallback name if some route uses date instead of invoice_date #}
+          {% if inv_date_val and inv_date_val.strftime is defined %}
+            <input type="hidden" name="date" value="{{ inv_date_val.strftime('%Y-%m-%d') }}">
+          {% endif %}
         </div>
+
         <div class="col-md-3">
           <label class="form-label small text-muted">Currency</label>
           <input name="currency" class="form-control form-control-sm"
@@ -303,16 +319,9 @@
       </div>
 
       <div class="d-flex flex-wrap gap-2">
-        <button class="btn btn-outline-primary btn-sm"
-                type="submit" name="action" value="save">
-          Save Draft
-        </button>
-
+        <button class="btn btn-outline-primary btn-sm" type="submit" name="action" value="save">Save Draft</button>
         {% if not is_posted %}
-          <button class="btn btn-success btn-sm"
-                  type="submit" name="action" value="post">
-            Post &amp; Update Stock
-          </button>
+          <button class="btn btn-success btn-sm" type="submit" name="action" value="post">Post &amp; Update Stock</button>
         {% endif %}
       </div>
     </form>

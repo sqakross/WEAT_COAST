@@ -1754,6 +1754,7 @@ def _issue_records_bulk(
     from flask_login import current_user
     from extensions import db
     from models import IssuedPartRecord, Part
+    from services.lot_costing import receipt_line_cost
     from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
 
     issue_date = datetime.utcnow()
@@ -6760,18 +6761,78 @@ def _parse_units_form(form):
 @inventory_bp.get("/api/part_lookup")
 @login_required
 def api_part_lookup():
+    from flask import request, jsonify
     from sqlalchemy import func
+    from extensions import db
     from models import Part
+
     pn = (request.args.get("pn") or "").strip().upper()
     if not pn:
         return jsonify({"found": False})
+
     part = Part.query.filter(func.upper(Part.part_number) == pn).first()
     if not part:
         return jsonify({"found": False, "stock_hint": "—"})
+
+    # --- stock ---
     on_hand = int(getattr(part, "on_hand", 0) or getattr(part, "quantity", 0) or 0)
     stock_hint = "STOCK" if on_hand > 0 else "WAIT"
     wh = getattr(part, "location", None) or getattr(part, "wh", None) or ""
-    return jsonify({"found": True, "name": getattr(part, "name", "") or "", "wh": wh, "stock_hint": stock_hint})
+
+    # ============================================================
+    # NEW: latest POSTED receipt invoice (safe / optional)
+    # ============================================================
+    latest_inv = None
+    latest_posted_at = None
+    latest_line_id = None
+
+    try:
+        from models import GoodsReceipt, GoodsReceiptLine
+
+        q = (
+            db.session.query(GoodsReceiptLine, GoodsReceipt)
+            .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
+            .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+            .filter(func.lower(func.coalesce(GoodsReceipt.status, "")) == "posted")
+            .order_by(
+                GoodsReceipt.posted_at.desc().nullslast(),
+                GoodsReceipt.id.desc(),
+                GoodsReceiptLine.id.desc(),
+            )
+        )
+        row = q.first()
+        if row:
+            line, gr = row
+            latest_inv = getattr(gr, "invoice_number", None)
+            latest_posted_at = getattr(gr, "posted_at", None)
+            latest_line_id = getattr(line, "id", None)
+    except Exception:
+        # safe fallback — ничего не ломаем
+        pass
+
+    # ============================================================
+    # RESPONSE (backward compatible + new fields)
+    # ============================================================
+    return jsonify({
+        # OLD fields (НЕ ЛОМАЕМ)
+        "found": True,
+        "name": getattr(part, "name", "") or "",
+        "wh": wh,
+        "stock_hint": stock_hint,
+
+        # NEW fields (для нового UI)
+        "id": part.id,
+        "part_number": part.part_number,
+        "quantity": on_hand,
+        "location": wh,
+        "latest_receipt_invoice_number": latest_inv,
+        "latest_receipt_posted_at": (
+            latest_posted_at.isoformat() if latest_posted_at else None
+        ),
+        "latest_receipt_line_id": (
+            int(latest_line_id) if latest_line_id is not None else None
+        ),
+    })
 
 @inventory_bp.post("/work_orders/<int:wo_id>/units/<int:unit_id>/issue_instock")
 @login_required
@@ -7448,20 +7509,18 @@ def issue_part():
     from extensions import db
     from models import Part, IssuedPartRecord
 
+    # ✅ lot costing helpers
+    from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
+
     # ---------- helper: touch Work Order updated_by/updated_at ----------
     def _touch_work_order_from_ref(ref_job: str, ts: datetime, user_id: int) -> None:
-        """
-        Best-effort: if reference_job corresponds to a Work Order,
-        set updated_by_id + updated_at so header shows correct user.
-        Safe: wrapped with try/except, no crash if schema differs.
-        """
         ref = (ref_job or "").strip()
         if not ref:
             return
 
-        # 1) Try via JobIndex (your architecture)
+        # 1) via JobIndex
         try:
-            from models import JobIndex  # if exists
+            from models import JobIndex
             ji = JobIndex.query.filter_by(job_number=ref).first()
             if ji and getattr(ji, "work_order_id", None):
                 db.session.execute(
@@ -7477,8 +7536,7 @@ def issue_part():
         except Exception:
             pass
 
-        # 2) Fallback: try direct match on canonical_ref / job numbers (if those columns exist)
-        # NOTE: if any of these columns don't exist, SQLite will error -> we catch.
+        # 2) fallback via canonical_ref / job_num_a / job_num_b
         try:
             db.session.execute(
                 db.text("""
@@ -7492,10 +7550,9 @@ def issue_part():
                 {"ts": ts, "uid": user_id, "ref": ref}
             )
         except Exception:
-            # last fallback: do nothing
             return
 
-    # этот список для отдельной страницы issue_part, можно оставить как есть
+    # page data
     parts = Part.query.filter(Part.quantity > 0).all()
 
     if request.method == 'POST':
@@ -7512,39 +7569,101 @@ def issue_part():
 
         new_records: list[IssuedPartRecord] = []
 
-        # шапка батча — из первой строки
         first = all_parts[0]
         issued_to = (first.get('recipient') or '').strip()
         reference_job = (first.get('reference_job') or '').strip() or None
         issued_by = current_user.username
         issue_dt = datetime.utcnow()
 
-        # batch-level location (опционально — по первой строке)
+        # ✅ server-side guard (UI required, но лучше защитить)
+        if not issued_to:
+            flash("Company / Technician is required.", "danger")
+            return redirect(url_for(".issue_part"))
+        if not reference_job:
+            flash("Reference Job is required.", "danger")
+            return redirect(url_for(".issue_part"))
+
         batch_location = None
 
-        # 1) валидируем сток и создаём строки выдачи
-        for idx, item in enumerate(all_parts):
-            part_id = item.get('part_id')
-            part = Part.query.get(part_id) if part_id else None
-            qty = int(item.get('quantity') or 0)
+        # ✅ IMPORTANT: if ANY line fails → rollback → issue NOTHING
+        try:
+            for idx, item in enumerate(all_parts):
+                part_id = item.get('part_id')
+                part = Part.query.get(part_id) if part_id else None
+                qty = int(item.get('quantity') or 0)
 
-            # тип работы и INS-флаг (если не придут — будет False и логика как раньше)
-            job_type = (item.get('job_type') or '').strip().upper()
-            is_ins_flag = bool(
-                item.get('is_ins')
-                or item.get('is_insurance_supplied')
-                or item.get('ins_flag')
-            )
-            is_insurance_case = (job_type == 'INSURANCE') and is_ins_flag
+                # inv_ref from UI (optional)
+                inv_ref_raw = (item.get("inv_ref") or "").strip()
+                inv_ref_up = inv_ref_raw.upper()
+                inv_ref = None if (not inv_ref_raw or inv_ref_up == "STOCK") else inv_ref_up[:32]
 
-            if not part or qty <= 0:
-                flash(f"Invalid part or quantity for item #{idx + 1}.", 'danger')
-                return redirect(url_for('.issue_part'))
+                job_type = (item.get('job_type') or '').strip().upper()
+                is_ins_flag = bool(
+                    item.get('is_ins')
+                    or item.get('is_insurance_supplied')
+                    or item.get('ins_flag')
+                )
+                is_insurance_case = (job_type == 'INSURANCE') and is_ins_flag
 
-            # --- ОСОБЫЙ СЛУЧАЙ: страховая работа + INS-строка ---
-            if is_insurance_case:
-                # НИКАКИХ проверок склада и НИКАКОГО списания количества
+                if not part or qty <= 0:
+                    raise ValueError(f"Invalid part or quantity for item #{idx + 1}.")
+
+                # snapshot location from Part
                 loc_snapshot = (getattr(part, "location", "") or "").strip()
+
+                # --- INS supplied line ---
+                if is_insurance_case:
+                    rec = IssuedPartRecord(
+                        part_id=part.id,
+                        quantity=qty,
+                        issued_to=issued_to,
+                        reference_job=reference_job,
+                        issued_by=issued_by,
+                        issue_date=issue_dt,
+                        unit_cost_at_issue=0.0,
+                        location="INS",
+                    )
+                    if hasattr(rec, "inv_ref"):
+                        rec.inv_ref = inv_ref
+
+                    db.session.add(rec)
+                    new_records.append(rec)
+
+                    # batch_location: если только INS строки — ниже поставим "INS"
+                    if batch_location is None and loc_snapshot:
+                        batch_location = loc_snapshot
+                    continue
+
+                # --- normal stock line ---
+                if int(part.quantity or 0) < qty:
+                    raise ValueError(
+                        f"Not enough stock for {getattr(part, 'part_number', 'UNKNOWN')}: "
+                        f"need {qty}, have {int(part.quantity or 0)}."
+                    )
+
+                # ✅ LOT COSTING (strict when inv_ref is provided)
+                pn = (getattr(part, "part_number", "") or "").strip()
+                line, src = pick_receipt_line_for_issue(part_number=pn, inv_ref=inv_ref)
+
+                # 🔥 STRICT RULE:
+                # if inv_ref is set (and not STOCK) → MUST be receipt_inv_match
+                if inv_ref and src != "receipt_inv_match":
+                    raise ValueError(
+                        f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
+                        f"Nothing was issued."
+                    )
+
+                if line is not None:
+                    unit_cost = float(receipt_line_cost(line))
+                    chosen_receipt_line_id = int(line.id)
+                    chosen_cost_source = src
+                else:
+                    unit_cost = float(getattr(part, "unit_cost", 0) or 0.0)
+                    chosen_receipt_line_id = None
+                    chosen_cost_source = "fallback_part_unit_cost"
+
+                # decrement stock (still not committed)
+                part.quantity = int(part.quantity or 0) - qty
 
                 rec = IssuedPartRecord(
                     part_id=part.id,
@@ -7553,50 +7672,31 @@ def issue_part():
                     reference_job=reference_job,
                     issued_by=issued_by,
                     issue_date=issue_dt,
-                    unit_cost_at_issue=0.0,          # INS supplied => 0 cost (как обычно делаем)
-                    location="INS",                  # явный snapshot
+                    unit_cost_at_issue=unit_cost,
+                    location=loc_snapshot,
                 )
+
+                if hasattr(rec, "inv_ref"):
+                    rec.inv_ref = inv_ref
+                if hasattr(rec, "source_receipt_line_id"):
+                    rec.source_receipt_line_id = chosen_receipt_line_id
+                if hasattr(rec, "cost_source"):
+                    rec.cost_source = (chosen_cost_source or "")[:32] or None
+
                 db.session.add(rec)
                 new_records.append(rec)
 
                 if batch_location is None and loc_snapshot:
                     batch_location = loc_snapshot
 
-                continue
+            if not new_records:
+                raise ValueError("No valid lines to issue.")
 
-            # --- Обычный случай: не страховая/не INS-строка ---
-            if part.quantity < qty:
-                flash(
-                    f"Not enough stock for {item.get('part_number', 'UNKNOWN')}: "
-                    f"need {qty}, have {part.quantity}.",
-                    'danger'
-                )
-                return redirect(url_for('.issue_part'))
+            # если batch_location всё ещё None → значит только INS (или локация пустая)
+            if batch_location is None:
+                batch_location = "INS"
 
-            # уменьшаем сток
-            part.quantity -= qty
-
-            # СНИМОК локации на момент выдачи
-            loc_snapshot = (getattr(part, "location", "") or "").strip()
-
-            rec = IssuedPartRecord(
-                part_id=part.id,
-                quantity=qty,
-                issued_to=issued_to,
-                reference_job=reference_job,
-                issued_by=issued_by,
-                issue_date=issue_dt,
-                unit_cost_at_issue=float(getattr(part, "unit_cost", 0) or 0),
-                location=loc_snapshot,  # snapshot
-            )
-            db.session.add(rec)
-            new_records.append(rec)
-
-            if batch_location is None and loc_snapshot:
-                batch_location = loc_snapshot
-
-        # 2) сразу создаём батч + номер инвойса
-        try:
+            # ✅ create batch + invoice number
             _create_batch_for_records(
                 records=new_records,
                 issued_to=issued_to,
@@ -7606,19 +7706,18 @@ def issue_part():
                 location=batch_location,
             )
 
-            # ✅ ВАЖНО: после issue обновляем “кто обновил WO”
-            if reference_job:
-                _touch_work_order_from_ref(reference_job, issue_dt, current_user.id)
+            # ✅ touch WO
+            _touch_work_order_from_ref(reference_job, issue_dt, current_user.id)
 
             db.session.commit()
+
         except Exception as e:
             db.session.rollback()
-            flash(f'Error creating invoice batch: {e}', 'danger')
+            flash(str(e) if str(e) else "Issue failed.", "danger")
             return redirect(url_for('.issue_part'))
 
         flash('All parts issued successfully.', 'success')
 
-        # 3) редирект в grouped — инвойс уже существует
         today = issue_dt.date().isoformat()
         params = {'start_date': today, 'end_date': today}
         if issued_to:
@@ -7629,7 +7728,6 @@ def issue_part():
         return redirect('/reports_grouped?' + urlencode(params), code=303)
 
     return render_template('issue_part.html', parts=parts)
-
 
 @inventory_bp.get("/issue_ui")
 @login_required
@@ -9687,10 +9785,25 @@ def download_reliable_report():
     flash("❌ Reliable report generation failed!", "danger")
     return redirect(url_for("inventory.dashboard"))
 
+from collections import defaultdict
+import re
+
+from collections import defaultdict
+import re
+
+# units[0][rows][12][field]
+_rows_re = re.compile(r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[([^\]]+)\]$")
+# rows[12][field]
+_rows_flat_re = re.compile(r"^rows\[(\d+)\]\[([^\]]+)\]$")
+
+
 def parse_preview_rows_relaxed(form):
     """
-    Собирает строки превью из request.form:
-    [{"part_number":..., "part_name":..., "quantity":..., "unit_cost_base":..., "unit_cost":..., "location":...}]
+    Собирает строки превью из request.form.
+    Умеет разные названия полей (base/adj/qty), чтобы BASE не терялся.
+
+    Output:
+      [{"part_number","part_name","quantity","unit_cost_base","unit_cost","location","supplier"}]
     """
     buckets = defaultdict(dict)
 
@@ -9698,60 +9811,80 @@ def parse_preview_rows_relaxed(form):
     for key, val in form.items():
         m = _rows_re.match(key)
         if m:
-            unit_idx, row_idx, field = m.groups()
+            _unit_idx, row_idx, field = m.groups()
             buckets[int(row_idx)][field] = (val or "").strip()
 
-    # 2) rows[i][field] fallback
+    # 2) rows[i][field] fallback (не затираем то что пришло из units[])
     for key, val in form.items():
         m = _rows_flat_re.match(key)
         if m:
             row_idx, field = m.groups()
-            buckets[int(row_idx)][field] = (val or "").strip()
+            if field not in buckets[int(row_idx)] or str(buckets[int(row_idx)][field]).strip() == "":
+                buckets[int(row_idx)][field] = (val or "").strip()
+
+    def _first_present(d: dict, keys: list[str]) -> str:
+        for k in keys:
+            if k in d and str(d.get(k) or "").strip() != "":
+                return str(d.get(k) or "").strip()
+        return ""
+
+    def _to_int(s: str, default=0) -> int:
+        try:
+            s = (s or "").replace(",", "").strip()
+            if s == "":
+                return int(default)
+            return int(float(s))
+        except Exception:
+            return int(default)
+
+    def _to_float(s: str, default=0.0) -> float:
+        try:
+            s = (s or "").replace("$", "").replace(",", "").strip()
+            if s == "":
+                return float(default)
+            return float(s)
+        except Exception:
+            return float(default)
 
     out = []
-
     for i in sorted(buckets.keys()):
         r = buckets[i]
 
-        # qty
-        try:
-            qty = int((r.get("quantity") or "0").replace(",", ""))
-        except Exception:
-            qty = 0
+        pn = _first_present(r, ["part_number", "pn", "part", "sku", "code"]).strip()
+        name = _first_present(r, ["part_name", "name", "descr", "description", "title"]).strip()
 
-        # base cost (editable)
-        try:
-            base = float((r.get("unit_cost_base") or "0").replace("$", "").replace(",", ""))
-        except Exception:
-            base = 0.0
+        qty_raw = _first_present(r, ["quantity", "qty", "count", "on_hand"])
+        qty = _to_int(qty_raw, 0)
 
-        # adjusted cost (readonly)
-        try:
-            adj = float((r.get("unit_cost") or "").replace("$", "").replace(",", ""))
-        except Exception:
-            adj = 0.0
+        base_raw = _first_present(r, ["unit_cost_base", "base_unit_cost", "base_cost", "cost_base", "base"])
+        base = _to_float(base_raw, 0.0)
 
-        # если adj пустой, а base есть → берём base
-        if adj <= 0 and base > 0:
+        adj_raw = _first_present(r, ["unit_cost", "adj_cost", "adjusted_cost", "actual_unit_cost", "actual_cost", "cost", "price"])
+        adj = _to_float(adj_raw, 0.0)
+
+        # IMPORTANT: сравниваем именно raw-пустоту, а не <=0
+        if (adj_raw.strip() == "") and (base_raw.strip() != ""):
             adj = base
+        if (base_raw.strip() == "") and (adj_raw.strip() != ""):
+            base = adj
 
-        pn   = (r.get("part_number") or "").strip()
-        name = (r.get("part_name") or "").strip()
-
-        # выкидываем только реально пустые строки
-        if not pn and not name and qty <= 0 and base <= 0 and adj <= 0:
+        # drop only truly empty rows
+        if not pn and not name and qty <= 0 and (base_raw.strip() == "") and (adj_raw.strip() == ""):
             continue
 
-        loc = (r.get("location") or "").strip().upper() or "MAIN"
+        loc_raw = _first_present(r, ["location", "loc", "bin", "shelf", "place"])
+        loc = (loc_raw or "").strip().upper() or "MAIN"
+
+        supplier = _first_present(r, ["supplier", "vendor", "provider"]).strip()
 
         out.append({
-            "part_number":     pn,
-            "part_name":       name,
-            "quantity":        qty,
-            "unit_cost_base":  base,
-            "unit_cost":       adj,
-            "location":        loc,
-            "supplier":        (r.get("supplier") or "").strip(),
+            "part_number": pn,
+            "part_name": name,
+            "quantity": qty,
+            "unit_cost_base": float(base),
+            "unit_cost": float(adj),
+            "location": loc,
+            "supplier": supplier,
         })
 
     return out
@@ -10124,10 +10257,13 @@ def import_parts_upload():
 
         # НОВОЕ: читаем supplier из visible-поля или скрытого supplier_hint
         supplier_from_form = (request.form.get("supplier") or
+                              request.form.get("supplier_name") or
                               request.form.get("supplier_hint") or "").strip()
 
         if not saved_path:
             flash("Saved path is empty. Upload the file again.", "warning")
+
+        import pandas as pd
 
         rows = parse_preview_rows_relaxed(request.form)
         if not rows:
@@ -10143,8 +10279,15 @@ def import_parts_upload():
                 invoice_date=invoice_date_raw,
             )
 
-        norm = rows_to_norm_df(rows, saved_path)
+        # ✅ IMPORTANT: строим norm прямо из rows, чтобы unit_cost_base не терялся
+        norm = pd.DataFrame(rows)
         norm = _coerce_norm_df(norm)
+
+        # совместимость: qty <-> quantity
+        if "qty" not in norm.columns and "quantity" in norm.columns:
+            norm["qty"] = norm["quantity"]
+        if "quantity" not in norm.columns and "qty" in norm.columns:
+            norm["quantity"] = norm["qty"]
 
         # если юзер не ввёл supplier — пробуем угадать; если всё равно пусто, ругаемся
         supplier_hint = (
@@ -10170,17 +10313,15 @@ def import_parts_upload():
             )
 
         norm = _ensure_norm_columns(norm, default_loc, saved_path)
+        norm, subtotal_base, grand_total = _apply_extra_to_df_once(norm, extra_expenses_val)
 
         import pandas as pd
         norm["quantity"] = pd.to_numeric(norm["quantity"], errors="coerce").fillna(0).astype(int)
-        norm["unit_cost"] = pd.to_numeric(norm["unit_cost"], errors="coerce").fillna(0.0)
         norm["unit_cost_base"] = pd.to_numeric(norm["unit_cost_base"], errors="coerce").fillna(0.0)
 
-        subtotal_base = float((norm["quantity"] * norm["unit_cost_base"]).sum() or 0.0)
-        grand_total = float((norm["quantity"] * norm["unit_cost"]).sum() or 0.0)
-
-        # extra не распределяем здесь – пока 0
-        extra_expenses_val = 0.0
+        # ✅ IMPORTANT: всегда считаем unit_cost на сервере из base + extra
+        # чтобы Save/Apply совпадали и не зависели от JS
+        norm, subtotal_base, grand_total = _apply_extra_to_df_once(norm, extra_expenses_val)
 
         flash(
             f"Supplier hint: {supplier_hint or 'None'}, default location: {default_loc}",
@@ -10294,7 +10435,7 @@ def import_parts_upload():
                 if B_P_AT:  batch_kwargs[B_P_AT]  = None
                 if B_P_BY:  batch_kwargs[B_P_BY]  = None
                 if B_ATTP:  batch_kwargs[B_ATTP]  = ""
-                if B_EXTRA: batch_kwargs[B_EXTRA] = 0.0
+                if B_EXTRA: batch_kwargs[B_EXTRA] = float(extra_expenses_val or 0.0)
 
                 try:
                     batch = BatchModel(**batch_kwargs)
@@ -10318,47 +10459,103 @@ def import_parts_upload():
                 return _merge_locations_stable(old_loc, new_loc)
 
             def make_movement(m: dict) -> None:
+                """
+                Creates/updates Part and (optionally) creates ReceivingItem/GoodsReceiptLine.
+
+                Writes LOT fields (if ItemModel has them):
+                  - base_unit_cost        = BASE (gray)
+                  - extra_alloc_per_unit  = EXTRA per unit (adj - base)
+                  - actual_unit_cost      = ACTUAL (green) = base + extra
+
+                Keeps compatibility:
+                  - unit_cost = actual_unit_cost (so old UI still shows "Unit Cost" as adjusted)
+                """
+
                 PartModel = Part
 
-                PN_FIELDS   = ["part_number","number","sku","code","partnum","pn"]
-                NAME_FIELDS = ["name","part_name","descr","description","title"]
-                QTY_FIELDS  = ["quantity","qty","on_hand","stock","count"]
-                LOC_FIELDS  = ["location","bin","shelf","place","loc"]
-                COST_FIELDS = ["unit_cost","cost","price","unitprice","last_cost"]
-                SUP_FIELDS  = ["supplier","vendor","provider"]
+                PN_FIELDS = ["part_number", "number", "sku", "code", "partnum", "pn"]
+                NAME_FIELDS = ["name", "part_name", "descr", "description", "title"]
+                QTY_FIELDS = ["quantity", "qty", "on_hand", "stock", "count"]
+                LOC_FIELDS = ["location", "bin", "shelf", "place", "loc"]
+                COST_FIELDS = ["unit_cost", "cost", "price", "unitprice", "last_cost"]
+                SUP_FIELDS = ["supplier", "vendor", "provider"]
 
-                pn_field   = _pick_field(PartModel, PN_FIELDS)
+                pn_field = _pick_field(PartModel, PN_FIELDS)
                 name_field = _pick_field(PartModel, NAME_FIELDS)
-                qty_field  = _pick_field(PartModel, QTY_FIELDS)
-                loc_field  = _pick_field(PartModel, LOC_FIELDS)
+                qty_field = _pick_field(PartModel, QTY_FIELDS)
+                loc_field = _pick_field(PartModel, LOC_FIELDS)
                 cost_field = _pick_field(PartModel, COST_FIELDS)
-                sup_field  = _pick_field(PartModel, SUP_FIELDS)
+                sup_field = _pick_field(PartModel, SUP_FIELDS)
 
                 if pn_field is None or qty_field is None:
                     raise RuntimeError("Не найдено поле PART # или QTY в модели Part.")
 
-                incoming_pn   = m["part_number"]
-                incoming_qty  = int(m.get("qty") or m.get("quantity") or 0)
-                incoming_cost = m.get("unit_cost")
-                incoming_name = m.get("part_name") or ""
-                incoming_loc  = (m.get("location") or "").strip().upper()
-                incoming_sup  = supplier_hint or (m.get("supplier") or "")
+                def _to_int(x, default=0):
+                    try:
+                        return int(float(str(x).replace(",", "").strip()))
+                    except Exception:
+                        return int(default)
 
-                part = PartModel.query.filter(
-                    getattr(PartModel, pn_field) == incoming_pn
-                ).first()
+                def _to_float(x, default=0.0):
+                    try:
+                        if x is None:
+                            return float(default)
+                        s = str(x).strip()
+                        if not s:
+                            return float(default)
+                        s = s.replace("$", "").replace(",", "")
+                        return float(s)
+                    except Exception:
+                        return float(default)
+
+                # ---------------- incoming ----------------
+                incoming_pn = (m.get("part_number") or "").strip().upper()
+                incoming_name = (m.get("part_name") or "").strip()
+                incoming_loc = (m.get("location") or "").strip().upper()
+                incoming_sup = (supplier_hint or (m.get("supplier") or "")).strip()
+
+                incoming_qty = _to_int(m.get("qty") if m.get("qty") is not None else m.get("quantity"), 0)
+                if incoming_qty < 0:
+                    incoming_qty = 0
+
+                # ACTUAL/ADJ (green)
+                actual_cost = _to_float(m.get("unit_cost"), 0.0)
+
+                # BASE (gray) - IMPORTANT: don't use "or" chain that can drop 0.0; use explicit keys
+                base_raw = m.get("unit_cost_base", None)
+                if base_raw is None:
+                    base_raw = m.get("base_unit_cost", None)
+                if base_raw is None:
+                    base_raw = m.get("base_cost", None)
+
+                base_cost = _to_float(base_raw, actual_cost)
+
+                # extra per unit
+                extra_raw = m.get("extra_alloc_per_unit", None)
+                if extra_raw is None:
+                    extra_per_unit = max(0.0, actual_cost - base_cost)
+                else:
+                    extra_per_unit = max(0.0, _to_float(extra_raw, 0.0))
+
+                # guards
+                if base_cost < 0:
+                    base_cost = 0.0
+                if actual_cost < 0:
+                    actual_cost = 0.0
+
+                # ---------------- find/create Part ----------------
+                part = PartModel.query.filter(getattr(PartModel, pn_field) == incoming_pn).first()
 
                 if not part:
-                    kwargs = {
-                        pn_field: incoming_pn,
-                        qty_field: 0,
-                    }
+                    kwargs = {pn_field: incoming_pn, qty_field: 0}
+
                     if name_field and incoming_name:
                         kwargs[name_field] = incoming_name
                     if loc_field:
                         kwargs[loc_field] = incoming_loc
-                    if cost_field and (incoming_cost is not None):
-                        kwargs[cost_field] = float(incoming_cost)
+                    if cost_field:
+                        # keep Part cost = ACTUAL (current behavior)
+                        kwargs[cost_field] = float(actual_cost)
                     if sup_field and incoming_sup:
                         kwargs[sup_field] = incoming_sup
 
@@ -10368,9 +10565,7 @@ def import_parts_upload():
                         session.flush()
                     except IntegrityError:
                         session.rollback()
-                        part = PartModel.query.filter(
-                            getattr(PartModel, pn_field) == incoming_pn
-                        ).first()
+                        part = PartModel.query.filter(getattr(PartModel, pn_field) == incoming_pn).first()
                         if not part:
                             raise
 
@@ -10379,34 +10574,40 @@ def import_parts_upload():
 
                 setattr(part, qty_field, on_hand_before + incoming_qty)
 
-                if cost_field and (incoming_cost is not None):
-                    setattr(part, cost_field, float(incoming_cost))
+                if cost_field:
+                    setattr(part, cost_field, float(actual_cost))
 
-                if name_field and incoming_name and not getattr(part, name_field):
+                if name_field and incoming_name and not (getattr(part, name_field) or "").strip():
                     setattr(part, name_field, incoming_name)
 
-                if loc_field:
-                    incoming_loc_up = incoming_loc
-                    if incoming_loc_up:
-                        if on_hand_before > 0:
-                            merged = _merge_locations_stable_local(old_loc_before, incoming_loc_up)
-                            setattr(part, loc_field, merged)
-                        else:
-                            setattr(part, loc_field, incoming_loc_up)
+                if loc_field and incoming_loc:
+                    if on_hand_before > 0:
+                        merged = _merge_locations_stable_local(old_loc_before, incoming_loc)
+                        setattr(part, loc_field, merged)
+                    else:
+                        setattr(part, loc_field, incoming_loc)
 
+                # ---------------- create ReceivingItem/GoodsReceiptLine ----------------
                 if ItemModel is not None and batch is not None and batch_id_field is not None:
-                    I_BATCH = _pick_field(ItemModel, ["goods_receipt_id","batch_id","receiving_id"])
-                    I_PART  = _pick_field(ItemModel, ["part_id","item_part_id"])
-                    I_PN    = _pick_field(ItemModel, ["part_number","part","sku","code"])
-                    I_PNAME = _pick_field(ItemModel, ["part_name","name","descr","description","title"])
-                    I_QTY   = _pick_field(ItemModel, ["qty","quantity"])
-                    I_COST  = _pick_field(ItemModel, ["unit_cost","cost","price","unitprice"])
-                    I_LOC   = _pick_field(ItemModel, ["location","bin","shelf","place","loc"])
+                    I_BATCH = _pick_field(ItemModel, ["goods_receipt_id", "batch_id", "receiving_id"])
+                    I_PART = _pick_field(ItemModel, ["part_id", "item_part_id"])
+                    I_PN = _pick_field(ItemModel, ["part_number", "part", "sku", "code"])
+                    I_PNAME = _pick_field(ItemModel, ["part_name", "name", "descr", "description", "title"])
+                    I_QTY = _pick_field(ItemModel, ["qty", "quantity"])
+                    I_COST = _pick_field(ItemModel, ["unit_cost", "cost", "price", "unitprice"])
+                    I_LOC = _pick_field(ItemModel, ["location", "bin", "shelf", "place", "loc"])
+
+                    # LOT fields
+                    I_BASE = _pick_field(ItemModel, ["base_unit_cost", "unit_cost_base", "base_cost"])
+                    I_EXTRA = _pick_field(ItemModel, ["extra_alloc_per_unit"])
+                    I_ACT = _pick_field(ItemModel, ["actual_unit_cost"])
 
                     try:
                         item_kwargs = {}
+
                         if I_BATCH:
                             item_kwargs[I_BATCH] = getattr(batch, batch_id_field)
+
                         if I_PART:
                             item_kwargs[I_PART] = getattr(part, "id", None)
                         else:
@@ -10414,15 +10615,28 @@ def import_parts_upload():
                                 item_kwargs[I_PN] = incoming_pn
                             if I_PNAME:
                                 item_kwargs[I_PNAME] = incoming_name
+
                         if I_QTY:
-                            item_kwargs[I_QTY] = incoming_qty
-                        if I_COST and (incoming_cost is not None):
-                            item_kwargs[I_COST] = float(incoming_cost)
+                            item_kwargs[I_QTY] = int(incoming_qty or 0)
+
+                        # ✅ costs
+                        if I_BASE:
+                            item_kwargs[I_BASE] = float(base_cost)
+                        if I_EXTRA:
+                            item_kwargs[I_EXTRA] = float(extra_per_unit)
+                        if I_ACT:
+                            item_kwargs[I_ACT] = float(actual_cost)
+
+                        # compatibility: unit_cost = actual
+                        if I_COST:
+                            item_kwargs[I_COST] = float(actual_cost)
+
                         if I_LOC:
                             item_kwargs[I_LOC] = incoming_loc
 
-                        if item_kwargs.get(I_QTY, 0) > 0:
+                        if int(item_kwargs.get(I_QTY, 0) or 0) > 0:
                             session.add(ItemModel(**item_kwargs))
+
                     except IntegrityError as e:
                         session.rollback()
                         logging.exception("DB error while creating ReceivingItem: %s", e)
@@ -10432,16 +10646,21 @@ def import_parts_upload():
                         logging.exception("Failed to create ReceivingItem: %s", e)
                         flash("Не удалось создать строку приёмки (см. лог).", "warning")
 
+                # ---------------- dedup key ----------------
                 meta = {
                     "file": m.get("source_file"),
                     "supplier": supplier_hint,
                     "invoice": (invoice_guess or "").strip(),
+                    "base_unit_cost": base_cost,
+                    "extra_alloc_per_unit": extra_per_unit,
+                    "actual_unit_cost": actual_cost,
                 }
                 try:
                     if batch is not None and batch_id_field:
                         meta["batch_id"] = getattr(batch, batch_id_field)
                 except Exception:
                     pass
+
                 add_key(m["row_key"], meta)
 
             built, errors = build_receive_movements(
@@ -10464,10 +10683,15 @@ def import_parts_upload():
                     bid = getattr(batch, batch_id_field or "id", None)
                     fresh_batch = BatchModel.query.get(bid)
                     if fresh_batch is not None:
-                        B_STAT  = _pick_field(BatchModel, ["status","state"])
-                        B_P_AT  = _pick_field(BatchModel, ["posted_at"])
-                        B_P_BY  = _pick_field(BatchModel, ["posted_by"])
-                        B_EXTRA = _pick_field(BatchModel, ["extra_expenses","shipping_fee","freight","expenses"])
+                        B_STAT = _pick_field(BatchModel, ["status", "state"])
+                        B_P_AT = _pick_field(BatchModel, ["posted_at"])
+                        B_P_BY = _pick_field(BatchModel, ["posted_by"])
+                        B_EXTRA = _pick_field(BatchModel, ["extra_expenses", "shipping_fee", "freight", "expenses"])
+
+                        # ✅ NEW: optional "stock applied" flags (different projects use different names)
+                        B_SA_BOOL = _pick_field(BatchModel, ["stock_applied", "is_stock_applied", "applied_to_stock"])
+                        B_SA_AT = _pick_field(BatchModel, ["stock_applied_at", "applied_at", "applied_to_stock_at"])
+                        B_SA_BY = _pick_field(BatchModel, ["stock_applied_by", "applied_by"])
 
                         if B_STAT:
                             setattr(fresh_batch, B_STAT, "posted")
@@ -10479,9 +10703,20 @@ def import_parts_upload():
                             except Exception:
                                 uid = 0
                             setattr(fresh_batch, B_P_BY, uid)
+                        # ✅ NEW: mark stock applied (import already updated Part quantities)
+                        if B_SA_BOOL:
+                            setattr(fresh_batch, B_SA_BOOL, True)
+                        if B_SA_AT:
+                            setattr(fresh_batch, B_SA_AT, datetime.utcnow())
+                        if B_SA_BY:
+                            try:
+                                uid = getattr(current_user, "id", 0)
+                            except Exception:
+                                uid = 0
+                            setattr(fresh_batch, B_SA_BY, uid)
 
-                        if B_EXTRA and getattr(fresh_batch, B_EXTRA, 0) not in (0, 0.0, None):
-                            setattr(fresh_batch, B_EXTRA, 0.0)
+                        # if B_EXTRA and getattr(fresh_batch, B_EXTRA, 0) not in (0, 0.0, None):
+                        #     setattr(fresh_batch, B_EXTRA, 0.0)
 
                         session.add(fresh_batch)
                         session.commit()
@@ -10808,11 +11043,16 @@ def delete_return_invoice():
 @inventory_bp.route('/reports/return_selected', methods=['POST'])
 @login_required
 def return_selected():
-    from flask import request
+    from flask import request, redirect, url_for, flash
     from sqlalchemy import func
-    from models import ReturnDestination
     from datetime import datetime, timezone
     from zoneinfo import ZoneInfo
+
+    from extensions import db
+    from flask_login import current_user
+
+    from models import IssuedPartRecord, ReturnDestination, Part
+    from services.lot_costing import pick_receipt_line_for_return, receipt_line_base_cost
 
     def _back_to_same_invoice(default_invoice_number=None):
         """
@@ -10902,13 +11142,13 @@ def return_selected():
         if r_to not in ("STOCK", "VENDOR"):
             flash("Please select Return To (STOCK or VENDOR) for all returned lines.", "danger")
             db.session.rollback()
-            return _back_to_invoice(inv_no_first)
+            return _back_to_same_invoice(inv_no_first)
 
         if r_to == "VENDOR":
             if not r_dest_raw:
                 flash("Please select Vendor Company for all VENDOR return lines.", "danger")
                 db.session.rollback()
-                return _back_to_invoice(inv_no_first)
+                return _back_to_same_invoice(inv_no_first)
 
             if r_dest_raw.isdigit():
                 dest_id = int(r_dest_raw)
@@ -10925,6 +11165,38 @@ def return_selected():
                     db.session.flush()
                 dest_id = existing.id
 
+        # ---- BASE COST for RETURNS (STRICT supplier invoice match) ----
+        pn = None
+        if getattr(src, "part", None) and getattr(src.part, "part_number", None):
+            pn = (src.part.part_number or "").strip()
+        else:
+            p = Part.query.get(src.part_id)
+            pn = (p.part_number or "").strip() if p else None
+
+        # ✅ supplier receipt invoice must come from src.inv_ref (vendor invoice like 9611597)
+        receipt_inv = (getattr(src, "inv_ref", None) or "").strip()
+
+        if not pn or not receipt_inv:
+            flash(
+                f"Cannot create BASE return: missing part_number or supplier invoice (inv_ref) "
+                f"for source row id={src.id}.",
+                "danger",
+            )
+            db.session.rollback()
+            return _back_to_same_invoice(inv_no_first)
+
+        line, cs = pick_receipt_line_for_return(part_number=pn, inv_ref=receipt_inv)
+        if not line:
+            flash(
+                f"Cannot create BASE return: receipt line not found for part {pn} "
+                f"with supplier invoice '{receipt_inv}' (strict match).",
+                "danger",
+            )
+            db.session.rollback()
+            return _back_to_same_invoice(inv_no_first)
+
+        base_cost = round(float(receipt_line_base_cost(line) or 0.0), 2)
+
         ret = IssuedPartRecord(
             part_id=src.part_id,
             quantity=-qty,
@@ -10932,13 +11204,11 @@ def return_selected():
             issued_by=issued_by,
             reference_job=return_reference,
             issue_date=now_dt,
-            unit_cost_at_issue=src.unit_cost_at_issue,
+            unit_cost_at_issue=base_cost,  # ✅ BASE ONLY (no expenses)
             location=src.location,
 
-            # ✅ IMPORTANT: this field must be your "link to original invoice"
-            # If you want "already returned per invoice" to work, inv_ref MUST store invoice_number.
-            # Your current code sets inv_ref=src.inv_ref (vendor INV#) — that breaks the algorithm.
-            inv_ref=(str(src.invoice_number) if src.invoice_number is not None else None),
+            # Link to original invoice (for "already returned per invoice")
+            inv_ref=(receipt_inv or None),
 
             return_to=r_to,
             return_destination_id=dest_id,
@@ -10947,8 +11217,11 @@ def return_selected():
         db.session.add(ret)
         created.append(ret)
 
-        if src.part:
-            src.part.quantity = (src.part.quantity or 0) + qty
+        # ✅ Always return stock qty (even if src.part relationship isn't loaded)
+        p_obj = getattr(src, "part", None) or Part.query.get(src.part_id)
+        if p_obj:
+            p_obj.quantity = (p_obj.quantity or 0) + qty
+            db.session.add(p_obj)
 
     if not created:
         flash("Nothing to return.", "warning")
@@ -10972,7 +11245,6 @@ def return_selected():
 
     flash(f"Return invoice #{batch.invoice_number} created ({len(created)} lines).", "success")
     return redirect(url_for('inventory.reports_grouped', invoice_number=batch.invoice_number))
-
 
 from sqlalchemy import func
 
@@ -11582,9 +11854,6 @@ def receiving_save():
         batch.items.clear()
 
     # ------------- ПАРСИМ СТРОКИ И СЧИТАЕМ РАСПРЕДЕЛЕНИЕ ----------------
-    # сначала соберём все строки в память, чтобы:
-    # 1) посчитать subtotal = сумма qty * base_cost
-    # 2) потом рассчитать для каждой строки adjusted_cost
     tmp_rows = []
     idx = 0
     while True:
@@ -11594,12 +11863,20 @@ def receiving_save():
 
         pn_val = (f.get(f"{basekey}[part_number]") or "").strip().upper()
         if pn_val:
+            # qty
             try:
                 qty_val = int(f.get(f"{basekey}[quantity]") or 0)
             except Exception:
                 qty_val = 0
+
+            # ✅ base cost must come from unit_cost_base (invoice/base)
+            raw_base = f.get(f"{basekey}[unit_cost_base]")
+            if raw_base is None:
+                # safe fallback for older forms
+                raw_base = f.get(f"{basekey}[base_unit_cost]") or f.get(f"{basekey}[unit_cost]")
+
             try:
-                base_cost_val = float(f.get(f"{basekey}[unit_cost]") or 0.0)
+                base_cost_val = float(raw_base or 0.0)
             except Exception:
                 base_cost_val = 0.0
 
@@ -11616,37 +11893,48 @@ def receiving_save():
 
         idx += 1
 
-    # считаем subtotal
+    # subtotal (qty * base)
     subtotal = 0.0
     for r in tmp_rows:
         subtotal += (r["qty"] or 0) * (r["base_cost"] or 0.0)
 
-    # теперь считаем adjusted cost для каждой строки
+    # compute per-line allocation
     for r in tmp_rows:
         qty = r["qty"] or 0
         base_cost = r["base_cost"] or 0.0
-        adj_cost = base_cost
-        if subtotal > 0 and qty > 0:
+
+        per_item_fee = 0.0
+        if subtotal > 0 and qty > 0 and extra_expenses_total > 0:
             line_total = qty * base_cost
             share = line_total / subtotal
             extra_for_line = extra_expenses_total * share
             per_item_fee = extra_for_line / qty
-            adj_cost = base_cost + per_item_fee
-        r["adj_cost"] = adj_cost
 
-    # пишем extra_expenses в сам батч
+        r["per_item_fee"] = per_item_fee
+        r["actual_cost"] = base_cost + per_item_fee
+
+    # write header extra_expenses
     batch.extra_expenses = float(extra_expenses_total or 0.0)
 
-    # создаём и добавляем ReceivingItem строки (уже с adj_cost)
+    # ✅ create lines with full cost provenance
     for r in tmp_rows:
         if not r["part_number"]:
             continue
+
         item = ReceivingItem(
-            part_number = r["part_number"],
-            part_name   = r["part_name"] or "",
-            quantity    = int(r["qty"] or 0),
-            unit_cost   = float(r["adj_cost"] or 0.0),  # ВАЖНО: уже с fee
-            location    = r["location"] or "",
+            part_number=r["part_number"],
+            part_name=r["part_name"] or "",
+            quantity=int(r["qty"] or 0),
+
+            # legacy
+            unit_cost=float(r["actual_cost"] or 0.0),
+
+            # provenance (your model fields)
+            base_unit_cost=float(r["base_cost"] or 0.0),
+            extra_alloc_per_unit=float(r["per_item_fee"] or 0.0),
+            actual_unit_cost=float(r["actual_cost"] or 0.0),
+
+            location=r["location"] or "",
         )
         batch.items.append(item)
 
@@ -11957,14 +12245,56 @@ def create_receiving_from_rows(
         if qty <= 0:
             continue
 
+        # --- incoming costs from UI/import ---
+        # r["unit_cost"] here should be ACTUAL/ADJ (like your import preview green column)
+        # r may also contain base cost under: unit_cost_base / base_unit_cost / base_cost
+        def _to_float(x, default=0.0):
+            try:
+                return float(x)
+            except Exception:
+                return float(default)
+
+        actual_cost = _to_float(r.get("unit_cost") or r.get("price") or 0.0, 0.0)
+
+        base_cost_raw = (
+            r.get("unit_cost_base")
+            or r.get("base_unit_cost")
+            or r.get("base_cost")
+        )
+        base_cost = _to_float(base_cost_raw, actual_cost)
+
+        extra_per_unit_raw = r.get("extra_alloc_per_unit")
+        if extra_per_unit_raw is None:
+            extra_per_unit = actual_cost - base_cost
+        else:
+            extra_per_unit = _to_float(extra_per_unit_raw, 0.0)
+
+        # guards
+        if extra_per_unit < 0:
+            extra_per_unit = 0.0
+        if base_cost < 0:
+            base_cost = 0.0
+
         line_kwargs = dict(
             line_no=line_no,
             part_number=pn,
             part_name=(r.get("part_name") or r.get("description") or r.get("descr") or "").strip() or None,
             quantity=qty,
-            unit_cost=float((r.get("unit_cost") or r.get("price") or 0) or 0),
+
+            # compatibility: unit_cost stays ACTUAL (as before)
+            unit_cost=actual_cost,
+
+            # ✅ new lot fields (already exist in GoodsReceiptLine)
+            base_unit_cost=base_cost,
+            extra_alloc_per_unit=extra_per_unit,
+            actual_unit_cost=actual_cost,
+
             location=(r.get("location") or r.get("supplier") or "").strip() or None,
         )
+
+        # IMPORTANT: GoodsReceiptLine uses goods_receipt_id, not batch_id
+        # (you have alias ReceivingItem = GoodsReceiptLine)
+        line_kwargs["goods_receipt_id"] = batch.id
 
         # ВАЖНО: у тебя ReceivingItem сейчас создаётся с batch_id=gr.id
         # если у твоей модели строк реально поле называется goods_receipt_id,

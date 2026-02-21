@@ -26,7 +26,9 @@
     <div class="card shadow-sm border-0 mb-3" style="border-radius:.75rem;">
       <div class="card-body pb-2">
         <div class="row g-3">
-          <div class="col-md-6">
+
+          <!-- Company/Tech -->
+          <div class="col-md-5">
             <label class="form-label fw-semibold" for="recipient" style="font-size:.9rem;">
               Company / Technician
             </label>
@@ -42,7 +44,8 @@
             </div>
           </div>
 
-          <div class="col-md-6">
+          <!-- Reference Job -->
+          <div class="col-md-4">
             <label class="form-label fw-semibold" for="reference_job" style="font-size:.9rem;">
               Reference Job
             </label>
@@ -54,6 +57,22 @@
               Work order / claim / invoice ref
             </div>
           </div>
+
+          <!-- INV ref -->
+          <div class="col-md-3">
+            <label class="form-label fw-semibold" for="inv_ref" style="font-size:.9rem;">
+              Source INV# / STOCK
+            </label>
+            <input type="text"
+                   class="form-control form-control-sm text-uppercase"
+                   id="inv_ref"
+                   placeholder="e.g. 111223-00 or STOCK"
+                   style="font-weight:500; text-transform:uppercase;">
+            <div class="text-muted" style="font-size:.75rem; line-height:1.2;">
+              Optional. If set (not STOCK) → strict match.
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
@@ -115,16 +134,13 @@
               <div class="fw-semibold" id="part_name" style="min-height:1.2rem;">—</div>
             </div>
             <div class="col-md-6">
-              <div class="text-muted" style="font-size:.7rem;">Available (by location)</div>
+              <div class="text-muted" style="font-size:.7rem;">Available / Location</div>
               <div class="fw-semibold" style="min-height:1.2rem;">
                 <span id="part_quantity">—</span>
                 <span class="text-muted"> / </span>
                 <span id="part_locations"
                       class="text-muted text-uppercase"
                       style="font-size:.8rem;">—</span>
-              </div>
-              <div class="text-muted" style="font-size:.7rem; line-height:1.2;">
-                Example: MAIN:4 • TRUCK1:2 • VAN2:1
               </div>
             </div>
           </div>
@@ -156,33 +172,29 @@
         <div class="table-responsive">
           <table id="parts_table"
                  class="table table-bordered align-middle mb-0"
-                 style="min-width:700px; font-size:.8rem; display:none;">
-            <thead class="table-light text-center align-middle"
-                   style="font-size:.75rem;">
+                 style="min-width:780px; font-size:.8rem; display:none;">
+            <thead class="table-light text-center align-middle" style="font-size:.75rem;">
               <tr class="text-nowrap">
                 <th style="min-width:90px;">Part #</th>
                 <th style="min-width:180px;">Name</th>
                 <th style="width:70px;">Qty</th>
                 <th style="min-width:110px;">Issued To</th>
                 <th style="min-width:110px;">Reference Job</th>
+                <th style="min-width:120px;">Inv Ref</th>
                 <th style="width:60px;">Remove</th>
               </tr>
             </thead>
-            <tbody>
-              <!-- rows go here -->
-            </tbody>
+            <tbody></tbody>
           </table>
 
-          <div id="empty_hint"
-               class="text-muted text-center py-4"
-               style="font-size:.8rem;">
+          <div id="empty_hint" class="text-muted text-center py-4" style="font-size:.8rem;">
             No parts added yet.
           </div>
         </div>
       </div>
     </div>
 
-    <!-- hidden submit form (kept same route logic you had) -->
+    <!-- hidden submit form -->
     <form method="POST"
           action="{{ url_for('inventory.issue_part') }}"
           id="final_form"
@@ -190,17 +202,17 @@
       <input type="hidden" name="all_parts_json" id="all_parts_json">
     </form>
 
-  </div><!-- /max-width wrapper -->
-</div><!-- /container -->
+  </div>
+</div>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
 
-  // ===== DOM refs =====
   const partNumberInput   = document.getElementById('part_number');
   const quantityInput     = document.getElementById('quantity');
   const recipientInput    = document.getElementById('recipient');
   const referenceInput    = document.getElementById('reference_job');
+  const invRefInput       = document.getElementById('inv_ref');
   const addBtn            = document.getElementById('add_part_btn');
 
   const nameDisplay       = document.getElementById('part_name');
@@ -212,75 +224,45 @@ document.addEventListener("DOMContentLoaded", function () {
   const tableBody         = partsTable.querySelector('tbody');
   const allPartsJsonInput = document.getElementById('all_parts_json');
   const issueAllBtn       = document.getElementById('issue_all_btn');
-
   const emptyHintEl       = document.getElementById('empty_hint');
 
-  // ===== DATA =====
-  // каждая строка:
-  // { part_id, part_number, name, quantity, recipient, reference_job }
+  // { part_id, part_number, name, quantity, recipient, reference_job, inv_ref }
   let addedParts = [];
+  let currentMaxQty = null;
 
-  // состояние найденного парта
-  let currentMaxQty = null;    // число доступных
-  let currentLocs   = null;    // строка "TS" или объект {MAIN:4,...}
-
-  // ===== helpers =====
   function normPN(raw) {
     return (raw || "").trim().toUpperCase();
   }
 
-  // склеить локации в строку вида "MAIN:4 • TRUCK1:2"
+  function normInv(raw) {
+    const v = (raw || "").trim().toUpperCase();
+    if (!v) return null;
+    if (v === "STOCK") return null;
+    return v.slice(0, 32);
+  }
+
   function renderLocations(locData) {
     if (!locData) return "—";
-
-    if (typeof locData === "string") {
-      return locData.trim() || "—";
-    }
-
-    if (typeof locData === "object") {
-      const entries = Object.entries(locData);
-      if (!entries.length) return "—";
-      return entries
-        .map(([loc, qty]) => `${loc}:${qty}`)
-        .join(" • ");
-    }
-
+    if (typeof locData === "string") return locData.trim() || "—";
     return "—";
   }
 
-  // запросить инфу о парте
   async function lookupPart(pn) {
-    const info = {
-      found: false,
-      id: "",
-      name: "—",
-      qty_available: "—",
-      locs: null
-    };
-
+    const info = { found:false, id:"", name:"—", qty_available:"—", locs:null };
     if (!pn) return info;
 
     try {
-      const resp = await fetch(`/api/part/${encodeURIComponent(pn)}`);
+      const resp = await fetch(`/api/part_lookup?pn=${encodeURIComponent(pn)}`);
       if (!resp.ok) throw new Error("not found");
       const data = await resp.json();
 
-      info.found          = true;
-      info.id             = data.id ?? "";
-      info.name           = data.name || "—";
-      info.qty_available  = (data.quantity !== undefined && data.quantity !== null)
-                            ? String(data.quantity)
-                            : "—";
+      if (!data.found) throw new Error("not found");
 
-      // поддерживаем обе схемы:
-      // data.locations (dict) ИЛИ data.location (single string)
-      if (data.locations) {
-        info.locs = data.locations;
-      } else if (data.location) {
-        info.locs = data.location;
-      } else {
-        info.locs = null;
-      }
+      info.found = true;
+      info.id = data.id ?? "";
+      info.name = data.name || "—";
+      info.qty_available = (data.quantity !== undefined && data.quantity !== null) ? String(data.quantity) : "—";
+      info.locs = data.location || data.wh || null;
 
       return info;
     } catch (err) {
@@ -288,39 +270,26 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
-  // показать инфу по текущему парту
   function renderCurrentPart(info) {
     nameDisplay.textContent      = info.name || "—";
     quantityDisplay.textContent  = info.qty_available || "—";
     locationsDisplay.textContent = renderLocations(info.locs);
-
     hiddenPartId.value           = info.id || "";
 
-    currentMaxQty = (info.qty_available === "—")
-      ? null
-      : parseInt(info.qty_available, 10);
-
-    currentLocs = info.locs || null;
+    currentMaxQty = (info.qty_available === "—") ? null : parseInt(info.qty_available, 10);
   }
 
   async function fetchAndRenderPart() {
     const pn = normPN(partNumberInput.value);
     if (!pn) {
-      renderCurrentPart({
-        found:false,id:"",name:"—",qty_available:"—",locs:null
-      });
+      renderCurrentPart({found:false,id:"",name:"—",qty_available:"—",locs:null});
       return;
     }
-
     const info = await lookupPart(pn);
     renderCurrentPart(info);
-
-    if (!info.found) {
-      alert("⚠ Part not found.");
-    }
+    if (!info.found) alert("⚠ Part not found.");
   }
 
-  // отрисовать таблицу со списком к выдаче
   function renderTable() {
     tableBody.innerHTML = "";
 
@@ -338,14 +307,14 @@ document.addEventListener("DOMContentLoaded", function () {
       tr.classList.add("align-middle", "text-center");
 
       tr.innerHTML = `
-        <td style="vertical-align:middle;">${row.part_number}</td>
-        <td style="vertical-align:middle; text-align:left;">${row.name}</td>
-        <td style="width:70px; vertical-align:middle;" class="text-end">${row.quantity}</td>
-        <td style="vertical-align:middle;">${row.recipient}</td>
-        <td style="vertical-align:middle;">${row.reference_job}</td>
-        <td style="width:60px; vertical-align:middle;">
-          <button class="btn btn-outline-danger btn-sm"
-                  data-del="${idx}"
+        <td>${row.part_number}</td>
+        <td style="text-align:left;">${row.name}</td>
+        <td class="text-end">${row.quantity}</td>
+        <td>${row.recipient}</td>
+        <td>${row.reference_job}</td>
+        <td>${row.inv_ref ? row.inv_ref : '<span class="text-muted">—</span>'}</td>
+        <td>
+          <button class="btn btn-outline-danger btn-sm" data-del="${idx}"
                   style="border-radius:.5rem; padding:.1rem .4rem; font-size:.7rem;">
             ✖
           </button>
@@ -355,61 +324,39 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
-  // удалить строку
   tableBody.addEventListener("click", (e) => {
-    const delIdx = e.target.getAttribute("data-del");
-    if (delIdx !== null) {
-      addedParts.splice(parseInt(delIdx,10), 1);
-      renderTable();
-      syncHiddenPayload();
-    }
+    const btn = e.target.closest("[data-del]");
+    if (!btn) return;
+    const delIdx = btn.getAttribute("data-del");
+    addedParts.splice(parseInt(delIdx,10), 1);
+    renderTable();
+    syncHiddenPayload();
   });
 
-  // синкнуть скрытое поле перед submit
   function syncHiddenPayload() {
     allPartsJsonInput.value = JSON.stringify(addedParts);
   }
 
-  // логика Add Part с мерджем
   function addCurrentLine() {
     const pn        = normPN(partNumberInput.value);
     const qtyReq    = parseInt(quantityInput.value || "0", 10);
     const issuedTo  = (recipientInput.value || "").trim().toUpperCase();
     const refJob    = (referenceInput.value || "").trim();
+    const invRef    = normInv(invRefInput.value);
     const partName  = nameDisplay.textContent || "—";
     const partId    = hiddenPartId.value;
 
-    // валидация
-    if (!pn || !partId) {
-      alert("⚠ No part selected.");
-      partNumberInput.focus();
-      return;
-    }
-    if (!qtyReq || qtyReq < 1) {
-      alert("⚠ Quantity?");
-      quantityInput.focus();
-      return;
-    }
-    if (currentMaxQty !== null && qtyReq > currentMaxQty) {
-      alert("⚠ Quantity requested exceeds available.");
-      return;
-    }
-    if (!issuedTo) {
-      alert("⚠ Technician / Company required.");
-      recipientInput.focus();
-      return;
-    }
-    if (!refJob) {
-      alert("⚠ Reference job required.");
-      referenceInput.focus();
-      return;
-    }
+    if (!pn || !partId) { alert("⚠ No part selected."); partNumberInput.focus(); return; }
+    if (!qtyReq || qtyReq < 1) { alert("⚠ Quantity?"); quantityInput.focus(); return; }
+    if (currentMaxQty !== null && qtyReq > currentMaxQty) { alert("⚠ Quantity requested exceeds available."); return; }
+    if (!issuedTo) { alert("⚠ Technician / Company required."); recipientInput.focus(); return; }
+    if (!refJob) { alert("⚠ Reference job required."); referenceInput.focus(); return; }
 
-    // если тот же part_id, тот же issuedTo и тот же refJob уже есть — увеличиваем qty
     const existing = addedParts.find(row =>
-      row.part_id       === partId &&
-      row.recipient     === issuedTo &&
-      row.reference_job === refJob
+      row.part_id === partId &&
+      row.recipient === issuedTo &&
+      row.reference_job === refJob &&
+      (row.inv_ref || null) === (invRef || null)
     );
 
     if (existing) {
@@ -422,51 +369,37 @@ document.addEventListener("DOMContentLoaded", function () {
         name: partName,
         quantity: qtyReq,
         recipient: issuedTo,
-        reference_job: refJob
+        reference_job: refJob,
+        inv_ref: invRef
       });
     }
 
     renderTable();
     syncHiddenPayload();
 
-    // очистка инпутов и предпросмотра
-    quantityInput.value          = "";
-    partNumberInput.value        = "";
-    hiddenPartId.value           = "";
-    currentMaxQty                = null;
-    currentLocs                  = null;
+    quantityInput.value = "";
+    partNumberInput.value = "";
+    hiddenPartId.value = "";
+    currentMaxQty = null;
 
-    nameDisplay.textContent      = "—";
-    quantityDisplay.textContent  = "—";
+    nameDisplay.textContent = "—";
+    quantityDisplay.textContent = "—";
     locationsDisplay.textContent = "—";
 
-    // вернём фокус в Part Number (для сканера)
     partNumberInput.focus();
   }
 
-  // === EVENTS ===
+  // events
+  partNumberInput.addEventListener("blur", fetchAndRenderPart);
+  addBtn.addEventListener("click", addCurrentLine);
 
-  // подтягиваем инфу о парте при потере фокуса поля Part #
-  partNumberInput.addEventListener("blur", async () => {
-    await fetchAndRenderPart();
-  });
-
-  // Add Part
-  addBtn.addEventListener("click", () => {
-    addCurrentLine();
-  });
-
-  // Issue All
   issueAllBtn.addEventListener("click", () => {
-    if (!addedParts.length) {
-      alert("No parts in the list.");
-      return;
-    }
-    // payload уже синканули, просто сабмитим скрытую форму
+    if (!addedParts.length) { alert("No parts in the list."); return; }
+    syncHiddenPayload();
     document.getElementById('final_form').submit();
   });
 
-  // техникам автоподсказка (reuse logic from other pages)
+  // technician autocomplete
   (function technicianSuggestInit(){
     const TECH_SUGGEST_URL = "{{ url_for('inventory.api_technicians') }}";
     const input = recipientInput;
@@ -474,9 +407,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!input || !list) return;
 
     function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-    function renderOptions(items){
-      list.innerHTML = (items||[]).map(v=>`<option value="${v}">`).join('');
-    }
+    function renderOptions(items){ list.innerHTML = (items||[]).map(v=>`<option value="${v}">`).join(''); }
 
     const fetchSuggest = debounce((term)=>{
       term = (term||'').trim().toUpperCase();
@@ -489,13 +420,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     input.addEventListener('input', e => fetchSuggest(e.target.value));
     input.addEventListener('focus', () => fetchSuggest(input.value));
-    input.addEventListener('blur', ()=>{
-      input.value = (input.value||"").trim().toUpperCase();
-    });
+    input.addEventListener('blur', ()=>{ input.value = (input.value||"").trim().toUpperCase(); });
   })();
 
 });
 </script>
 
 {% endblock %}
-

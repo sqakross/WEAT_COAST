@@ -55,7 +55,7 @@
       box-shadow:0 1px 2px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.3);
     }
 
-    /* ✅ NEW: Actor badge = REAL logged-in session user id */
+    /* Actor badge */
     .wccr-userbox .actor-badge{
       background: linear-gradient(to bottom, #ffd24d, #ffb703 90%);
       color:#0a1a2d;
@@ -144,7 +144,6 @@
                href="{{ url_for('inventory.receiving_list') }}">RECEIVING</a>
           </li>
 
-          {# NEW: Supplier Returns menu for admins #}
           {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('supplier_returns.') %} active{% endif %}"
@@ -210,16 +209,20 @@
   </div>
 
   <main class="container main-wrapper">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div class="alert alert-{{ category }} alert-dismissible fade show mt-2" role="alert">
-            {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-          </div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
+    <!-- ✅ Flash container MUST have id="flash" -->
+    <div id="flash" class="mt-2">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+              {{ message }}
+              <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+    </div>
+
     {% block content %}{% endblock %}
   </main>
 
@@ -256,7 +259,7 @@
     }
   </script>
 
-  <!-- ✅ NEW: Session Debug button logic -->
+  <!-- ✅ Session Debug -->
   <script>
     (function(){
       const btn = document.getElementById('btnSessionDebug');
@@ -280,6 +283,44 @@
         alert(info);
       });
     })();
+  </script>
+
+  <!-- ✅ Scroll-to-flash (NO nested scripts) -->
+  <script>
+  (function () {
+    try {
+      if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    } catch(e) {}
+
+    function scrollToFlashHard() {
+      const box = document.getElementById('flash');
+      if (!box) return;
+
+      const alertEl = box.querySelector('.alert');
+      if (!alertEl) return;
+
+      const y = box.getBoundingClientRect().top + window.scrollY - 90;
+
+      window.scrollTo(0, 0);
+      setTimeout(() => window.scrollTo({ top: Math.max(y, 0), behavior: 'auto' }), 0);
+      setTimeout(() => window.scrollTo({ top: Math.max(y, 0), behavior: 'smooth' }), 150);
+    }
+
+    window.addEventListener('load', function () {
+      let need = false;
+      try { need = sessionStorage.getItem('wccr_scroll_flash') === '1'; } catch(e) {}
+
+      if (!need) {
+        const box = document.getElementById('flash');
+        need = !!(box && box.querySelector('.alert'));
+      }
+
+      if (need) {
+        try { sessionStorage.removeItem('wccr_scroll_flash'); } catch(e) {}
+        scrollToFlashHard();
+      }
+    });
+  })();
   </script>
 
   {% block extra_js %}{% endblock %}
