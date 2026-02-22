@@ -1735,12 +1735,16 @@ def _issue_records_bulk(
     billed_price_per_item: float | None = None,
 ):
     """
+    INV# is REQUIRED per item:
+      - "STOCK" => LATEST (no invoice filter, newest posted lot)
+      - real invoice number => STRICT match to POSTED receipt, and price comes from that receipt line
+
     items: list of dicts:
       {
         "part_id": int,
         "qty": int,
-        "unit_price": float | None,   # override (если задано)
-        "inv_ref": str | None,        # INV# from WorkOrderPart.invoice_number (для попытки match receipt invoice)
+        "unit_price": float | None,   # kept for backward-compat, ignored in invoice mode
+        "inv_ref": str | None,        # REQUIRED: "STOCK" or real invoice number
       }
 
     Returns:
@@ -1749,12 +1753,10 @@ def _issue_records_bulk(
     if not items:
         raise ValueError("No items to issue")
 
-    # local imports (как у тебя)
     from datetime import datetime
     from flask_login import current_user
     from extensions import db
     from models import IssuedPartRecord, Part
-    from services.lot_costing import receipt_line_cost
     from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
 
     issue_date = datetime.utcnow()
@@ -1775,45 +1777,63 @@ def _issue_records_bulk(
         if issue_now <= 0:
             continue
 
-        inv_ref = (str(it.get("inv_ref") or "").strip()[:32] or None)
+        inv_raw = (str(it.get("inv_ref") or "").strip()[:32] or "")
+        inv_up = inv_raw.upper()
+
+        if not inv_raw:
+            raise ValueError("INV# is required (use STOCK or a real invoice number).")
+
+        is_stock = (inv_up == "STOCK")
+        inv_ref = None if is_stock else inv_raw
+
         base_loc = (getattr(part, "location", "") or "").strip() or None
 
-        # ------------------------------------------------------------
-        # COST PRIORITY:
-        # 1) item.unit_price override
-        # 2) billed_price_per_item override
-        # 3) receipt lot (invoice match -> else latest)
-        # 4) part.unit_cost
-        # and we also write source_receipt_line_id + cost_source
-        # ------------------------------------------------------------
+        pn = (getattr(part, "part_number", "") or "").strip()
+        lot_line = None
+        lot_src = None
         chosen_receipt_line_id = None
+
+        if pn:
+            # ✅ STOCK => prefer_latest=True (LATEST lot)
+            lot_line, lot_src = pick_receipt_line_for_issue(
+                part_number=pn,
+                inv_ref=inv_ref,
+                prefer_latest=is_stock,
+            )
+
+            if inv_ref:
+                # STRICT: invoice provided -> MUST match posted receipt invoice
+                if lot_line is None or lot_src != "receipt_inv_match":
+                    raise ValueError(
+                        f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
+                        f"Nothing was issued."
+                    )
+            else:
+                # STOCK => if picker returned nothing, one more try without flags (safe)
+                if lot_line is None:
+                    lot_line, lot_src = pick_receipt_line_for_issue(
+                        part_number=pn,
+                        inv_ref=None,
+                        prefer_latest=True,
+                    )
+
+            if lot_line is not None:
+                chosen_receipt_line_id = int(getattr(lot_line, "id", 0) or 0) or None
+
         chosen_cost_source = None
 
-        # 1) per-item override
-        if "unit_price" in it and it["unit_price"] is not None:
-            price_to_fix = float(it["unit_price"])
-            chosen_cost_source = "override_item_unit_price"
-
-        # 2) global billed override
-        elif billed_price_per_item is not None:
-            price_to_fix = float(billed_price_per_item)
-            chosen_cost_source = "override_billed_price_per_item"
-
+        if inv_ref:
+            price_to_fix = float(receipt_line_cost(lot_line))
+            chosen_cost_source = "receipt_inv_match"
         else:
-            # 3) receipt lot
-            # берём part_number из Part (надежнее), чем из формы
-            pn = (getattr(part, "part_number", "") or "").strip()
-            line, src = pick_receipt_line_for_issue(part_number=pn, inv_ref=inv_ref)
-            if line is not None:
-                price_to_fix = float(receipt_line_cost(line))
-                chosen_receipt_line_id = int(line.id)
-                chosen_cost_source = src
+            # STOCK / LATEST
+            if lot_line is not None:
+                price_to_fix = float(receipt_line_cost(lot_line))
+                chosen_cost_source = (lot_src or "latest")[:32]
             else:
-                # 4) fallback part
                 price_to_fix = float(part.unit_cost or 0.0)
                 chosen_cost_source = "fallback_part_unit_cost"
 
-        # decrement stock (NO COMMIT here)
         part.quantity = on_hand - issue_now
         db.session.add(part)
 
@@ -1825,16 +1845,15 @@ def _issue_records_bulk(
             issued_by=getattr(current_user, "username", "system"),
             issue_date=issue_date,
             unit_cost_at_issue=price_to_fix,
-            location=base_loc,  # snapshot location
+            location=base_loc,
         )
 
-        # inv_ref snapshot
         if hasattr(rec, "inv_ref"):
-            rec.inv_ref = inv_ref
+            rec.inv_ref = inv_ref  # None for STOCK
 
-        # cost provenance snapshots
         if hasattr(rec, "source_receipt_line_id"):
             rec.source_receipt_line_id = chosen_receipt_line_id
+
         if hasattr(rec, "cost_source"):
             rec.cost_source = (chosen_cost_source or "")[:32] or None
 
@@ -1844,9 +1863,8 @@ def _issue_records_bulk(
     if not created_records:
         raise ValueError("Nothing available to issue")
 
-    db.session.flush()  # only flush (no commit)
+    db.session.flush()
     return issue_date, created_records
-
 
 def _is_return_record(record: IssuedPartRecord) -> bool:
     """Признак 'возвратной' строки — отрицательное количество или reference_job начинается с RETURN."""
@@ -7646,8 +7664,8 @@ def issue_part():
                 line, src = pick_receipt_line_for_issue(part_number=pn, inv_ref=inv_ref)
 
                 # 🔥 STRICT RULE:
-                # if inv_ref is set (and not STOCK) → MUST be receipt_inv_match
-                if inv_ref and src != "receipt_inv_match":
+                # if inv_ref is set (and not STOCK) → MUST match a posted receipt invoice AND return a line
+                if inv_ref and (line is None or src not in ("fifo_inv_ref_receipt",)):
                     raise ValueError(
                         f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
                         f"Nothing was issued."

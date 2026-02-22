@@ -1,17 +1,21 @@
 # services/lot_costing.py
 from __future__ import annotations
 
-from typing import Optional, Tuple
 from sqlalchemy import func
 
 from extensions import db
 from models import GoodsReceipt, GoodsReceiptLine, ReceivingBatch, ReceivingItem
 
+
 def _norm_inv(s: str) -> str:
     s = (s or "").strip()
-    # normalize leading zeros (e.g. "0002066" vs "2066")
     s2 = s.lstrip("0")
     return s2 if s2 else s
+
+
+def _is_posted(status_col):
+    return func.lower(func.coalesce(status_col, "")) == "posted"
+
 
 def pick_receipt_line_for_return(*, part_number: str, inv_ref: str | None):
     pn = (part_number or "").strip().upper()
@@ -26,7 +30,7 @@ def pick_receipt_line_for_return(*, part_number: str, inv_ref: str | None):
         db.session.query(GoodsReceiptLine)
         .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
         .filter(func.upper(GoodsReceiptLine.part_number) == pn)
-        .filter(func.lower(func.coalesce(GoodsReceipt.status, "")) == "posted")
+        .filter(_is_posted(GoodsReceipt.status))
         .filter(func.ltrim(func.coalesce(GoodsReceipt.invoice_number, ""), "0") == inv)
         .order_by(
             GoodsReceipt.posted_at.desc().nullslast(),
@@ -40,16 +44,8 @@ def pick_receipt_line_for_return(*, part_number: str, inv_ref: str | None):
 
     return None, "receipt_inv_not_found"
 
+
 def receipt_line_base_cost(line: "GoodsReceiptLine") -> float:
-    """
-    RETURN cost (BASE ONLY, no extras).
-    Priority:
-      1) explicit base fields
-      2) derive base = actual_unit_cost - extra_alloc_per_unit
-      3) if actual exists and equals unit_cost -> do NOT return unit_cost (it's adjusted) => 0.0
-      4) last resort: unit_cost (for very old lots where it was base)
-    """
-    # helper: safe float
     def _f(x):
         try:
             if x is None:
@@ -58,36 +54,32 @@ def receipt_line_base_cost(line: "GoodsReceiptLine") -> float:
         except Exception:
             return None
 
-    # 1) explicit base fields (your model uses base_unit_cost)
     for attr in ("base_unit_cost", "unit_cost_base", "base_cost"):
         v = _f(getattr(line, attr, None))
         if v is not None and v > 0:
             return round(v, 4)
 
-    # 2) derive from actual - alloc
     actual = _f(getattr(line, "actual_unit_cost", None))
-    alloc  = _f(getattr(line, "extra_alloc_per_unit", None))
+    alloc = _f(getattr(line, "extra_alloc_per_unit", None))
     if actual is not None and alloc is not None:
         base = actual - alloc
         if base < 0:
             base = 0.0
         return round(base, 4)
 
-    # 3) if actual exists and unit_cost matches it -> unit_cost is adjusted => return 0.0
     unit_cost = _f(getattr(line, "unit_cost", None)) or 0.0
     if actual is not None and abs(actual - unit_cost) < 0.0001:
         return 0.0
 
-    # 4) fallback (old data)
     return round(unit_cost, 4)
 
 
-def receipt_line_cost(line: GoodsReceiptLine) -> float:
+def receipt_line_cost(line) -> float:
     """
     Issue cost:
-      - prefer actual_unit_cost (includes expenses/alloc if your receiving set it)
+      - prefer actual_unit_cost
       - else unit_cost
-    This function MUST exist because issue code imports it.
+    Works for GoodsReceiptLine and (optionally) ReceivingItem if it has those fields.
     """
     try:
         if getattr(line, "actual_unit_cost", None) is not None:
@@ -100,65 +92,183 @@ def receipt_line_cost(line: GoodsReceiptLine) -> float:
     except Exception:
         return 0.0
 
-# -------------------------------------------------------------------
-# Backward-compat: older code imports this name
-# -------------------------------------------------------------------
-def pick_receipt_line_for_issue(part_id: int, qty_needed: int = 1):
-    """
-    Pick a GoodsReceiptLine / ReceivingItem line to issue stock from.
-    FIFO by created/received date.
 
-    Returns a model instance (receipt line) or None.
-
-    This function exists for backward compatibility because some routes
-    import `pick_receipt_line_for_issue` from services.lot_costing.
+def pick_receipt_line_for_issue(
+    part_id: int | None = None,
+    qty_needed: int = 1,
+    part_number: str | None = None,
+    inv_ref: str | None = None,
+    prefer_latest: bool = False,  # ✅ NEW (default keeps old behavior)
+):
     """
-    try:
-        from models import GoodsReceiptLine  # adjust if your model name differs
-    except Exception:
+    Picker for issuing stock.
+
+    Rules:
+      - if inv_ref provided -> STRICT match by POSTED invoice (latest within that invoice)
+      - if inv_ref is None:
+          - prefer_latest=False -> FIFO (old behavior)
+          - prefer_latest=True  -> LATEST (newest posted lot)
+
+    Return style:
+      - if called with part_number/inv_ref -> returns (line, src)
+      - else -> returns line
+    """
+    want_tuple = (part_number is not None) or (inv_ref is not None)
+
+    if not part_number and part_id is not None:
         try:
-            # some projects call it ReceivingItem / ReceivingLine
-            from models import ReceivingItem as GoodsReceiptLine  # type: ignore
+            from models import Part
+            p = Part.query.get(int(part_id))
+            if not p:
+                return (None, "part_not_found") if want_tuple else None
+            part_number = p.part_number
         except Exception:
-            try:
-                from models import ReceivingLine as GoodsReceiptLine  # type: ignore
-            except Exception:
-                return None
+            return (None, "part_lookup_failed") if want_tuple else None
 
-    # IMPORTANT: detect columns safely (project variants)
-    def _has(attr: str) -> bool:
-        return hasattr(GoodsReceiptLine, attr)
+    pn = (part_number or "").strip().upper()
+    if not pn:
+        return (None, "missing_part_number") if want_tuple else None
 
-    part_field = "part_id" if _has("part_id") else None
-    qty_field = "qty" if _has("qty") else ("quantity" if _has("quantity") else None)
-
-    # remaining/available quantity fields differ across versions
+    # optional "remaining" field on GoodsReceiptLine
     rem_field = None
     for cand in ("qty_remaining", "remaining_qty", "remaining", "qty_left"):
-        if _has(cand):
+        if hasattr(GoodsReceiptLine, cand):
             rem_field = cand
             break
 
-    # date ordering fields
-    order_field = None
-    for cand in ("received_at", "created_at", "invoice_date", "date"):
-        if _has(cand):
-            order_field = cand
-            break
+    inv = _norm_inv(inv_ref or "") if inv_ref else ""
 
-    if not part_field or not qty_field:
-        return None
+    # ------------------------------------------------------------
+    # fallback remaining calc when no rem_field exists:
+    # remaining = GoodsReceiptLine.quantity - SUM(IssuedPartRecord.quantity where source_receipt_line_id=line.id)
+    # ------------------------------------------------------------
+    IssuedPartRecord = None
+    issued_sum = None
+    try:
+        from models import IssuedPartRecord as _IPR
+        IssuedPartRecord = _IPR
+        issued_sum = func.coalesce(func.sum(IssuedPartRecord.quantity), 0)
+    except Exception:
+        IssuedPartRecord = None
+        issued_sum = None
 
-    q = GoodsReceiptLine.query.filter(getattr(GoodsReceiptLine, part_field) == int(part_id))
+    def _apply_remaining_filter_goodsreceipt(q):
+        if rem_field:
+            return q.filter(getattr(GoodsReceiptLine, rem_field) > 0)
 
-    # only lines with something available
-    if rem_field:
-        q = q.filter(getattr(GoodsReceiptLine, rem_field) > 0)
+        if (
+            IssuedPartRecord is not None
+            and issued_sum is not None
+            and hasattr(GoodsReceiptLine, "quantity")
+            and hasattr(IssuedPartRecord, "source_receipt_line_id")
+        ):
+            q = q.outerjoin(
+                IssuedPartRecord,
+                IssuedPartRecord.source_receipt_line_id == GoodsReceiptLine.id,
+            )
+            q = q.group_by(GoodsReceiptLine.id, GoodsReceipt.id)
+            q = q.having((func.coalesce(GoodsReceiptLine.quantity, 0) - issued_sum) > 0)
+            return q
+
+        return q
+
+    # ============================================================
+    # A) STRICT invoice match
+    # ============================================================
+    if inv:
+        qg = (
+            db.session.query(GoodsReceiptLine)
+            .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
+            .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+            .filter(_is_posted(GoodsReceipt.status))
+            .filter(func.ltrim(func.coalesce(GoodsReceipt.invoice_number, ""), "0") == inv)
+        )
+
+        qg = _apply_remaining_filter_goodsreceipt(qg)
+
+        # within invoice: pick newest posted line
+        qg = qg.order_by(
+            GoodsReceipt.posted_at.desc().nullslast(),
+            GoodsReceipt.id.desc(),
+            GoodsReceiptLine.id.desc(),
+        )
+
+        line = qg.first()
+        if line is not None:
+            return (line, "receipt_inv_match") if want_tuple else line
+
+        # ReceivingBatch fallback (only if schema supports it)
+        fk = None
+        if hasattr(ReceivingItem, "receiving_batch_id"):
+            fk = ReceivingItem.receiving_batch_id
+        elif hasattr(ReceivingItem, "batch_id"):
+            fk = ReceivingItem.batch_id
+
+        if fk is not None:
+            qr = (
+                db.session.query(ReceivingItem)
+                .join(ReceivingBatch, fk == ReceivingBatch.id)
+                .filter(func.upper(ReceivingItem.part_number) == pn)
+                .filter(_is_posted(ReceivingBatch.status))
+                .filter(func.ltrim(func.coalesce(ReceivingBatch.invoice_number, ""), "0") == inv)
+            )
+
+            rem2 = None
+            for cand in ("qty_remaining", "remaining_qty", "remaining", "qty_left"):
+                if hasattr(ReceivingItem, cand):
+                    rem2 = cand
+                    break
+            if rem2:
+                qr = qr.filter(getattr(ReceivingItem, rem2) > 0)
+
+            if hasattr(ReceivingBatch, "posted_at"):
+                qr = qr.order_by(
+                    ReceivingBatch.posted_at.desc().nullslast(),
+                    ReceivingBatch.id.desc(),
+                    ReceivingItem.id.desc(),
+                )
+            else:
+                qr = qr.order_by(ReceivingBatch.id.desc(), ReceivingItem.id.desc())
+
+            line2 = qr.first()
+            if line2 is not None:
+                return (line2, "receipt_inv_match") if want_tuple else line2
+
+        return (None, "receipt_inv_not_found") if want_tuple else None
+
+    # ============================================================
+    # B) STOCK mode (inv_ref=None):
+    #    - prefer_latest=False -> FIFO (old)
+    #    - prefer_latest=True  -> LATEST (new)
+    # ============================================================
+    q = (
+        db.session.query(GoodsReceiptLine)
+        .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
+        .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+        .filter(_is_posted(GoodsReceipt.status))
+    )
+
+    q = _apply_remaining_filter_goodsreceipt(q)
+
+    if prefer_latest:
+        q = q.order_by(
+            GoodsReceipt.posted_at.desc().nullslast(),
+            GoodsReceipt.id.desc(),
+            GoodsReceiptLine.id.desc(),
+        )
     else:
-        # fallback: if no remaining field exists, just require qty > 0
-        q = q.filter(getattr(GoodsReceiptLine, qty_field) > 0)
+        q = q.order_by(
+            GoodsReceipt.posted_at.asc().nullslast(),
+            GoodsReceipt.id.asc(),
+            GoodsReceiptLine.id.asc(),
+        )
 
-    if order_field:
-        q = q.order_by(getattr(GoodsReceiptLine, order_field).asc())
+    line = q.first()
 
-    return q.first()
+    if want_tuple:
+        if not line:
+            return None, "no_stock"
+        return line, ("latest" if prefer_latest else "fifo")
+
+    return line
+
