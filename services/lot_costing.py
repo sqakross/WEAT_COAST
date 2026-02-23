@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from sqlalchemy import func
-
+import re
 from extensions import db
 from models import GoodsReceipt, GoodsReceiptLine, ReceivingBatch, ReceivingItem
 
@@ -12,6 +12,33 @@ def _norm_inv(s: str) -> str:
     s2 = s.lstrip("0")
     return s2 if s2 else s
 
+def _split_invoice_refs(raw: str | None) -> list[str]:
+    """
+    Accepts strings like:
+      "71619166 91852629"
+      "71619166,91852629"
+      "71619166/91852629"
+      "71619166; 91852629"
+    Returns normalized invoice tokens without leading zeros.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return []
+    # split by common separators: space, comma, semicolon, slash, pipe, newline, tab
+    parts = re.split(r"[,\s;/|]+", s)
+    out: list[str] = []
+    for p in parts:
+        p = _norm_inv(p)
+        if p:
+            out.append(p)
+    # de-dupe but keep order
+    seen = set()
+    uniq = []
+    for x in out:
+        if x not in seen:
+            uniq.append(x)
+            seen.add(x)
+    return uniq
 
 def _is_posted(status_col):
     return func.lower(func.coalesce(status_col, "")) == "posted"
@@ -19,31 +46,33 @@ def _is_posted(status_col):
 
 def pick_receipt_line_for_return(*, part_number: str, inv_ref: str | None):
     pn = (part_number or "").strip().upper()
-    inv = _norm_inv(inv_ref or "")
+    invs = _split_invoice_refs(inv_ref)
 
     if not pn:
         return None, "missing_part_number"
-    if not inv:
+    if not invs:
         return None, "missing_invoice"
 
-    q1 = (
-        db.session.query(GoodsReceiptLine)
-        .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
-        .filter(func.upper(GoodsReceiptLine.part_number) == pn)
-        .filter(_is_posted(GoodsReceipt.status))
-        .filter(func.ltrim(func.coalesce(GoodsReceipt.invoice_number, ""), "0") == inv)
-        .order_by(
-            GoodsReceipt.posted_at.desc().nullslast(),
-            GoodsReceipt.id.desc(),
-            GoodsReceiptLine.id.desc(),
+    # Try each invoice token strictly (most recent lot inside that invoice)
+    for inv in invs:
+        q1 = (
+            db.session.query(GoodsReceiptLine)
+            .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
+            .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+            .filter(_is_posted(GoodsReceipt.status))
+            .filter(func.ltrim(func.coalesce(GoodsReceipt.invoice_number, ""), "0") == inv)
+            .order_by(
+                GoodsReceipt.posted_at.desc().nullslast(),
+                GoodsReceipt.id.desc(),
+                GoodsReceiptLine.id.desc(),
+            )
         )
-    )
-    line = q1.first()
-    if line is not None:
-        return line, "goods_receipt_match"
+        line = q1.first()
+        if line is not None:
+            return line, "goods_receipt_match"
 
+    # none matched
     return None, "receipt_inv_not_found"
-
 
 def receipt_line_base_cost(line: "GoodsReceiptLine") -> float:
     def _f(x):

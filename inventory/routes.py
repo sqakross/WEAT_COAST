@@ -11244,13 +11244,24 @@ def return_selected():
         if not line:
             flash(
                 f"Cannot create BASE return: receipt line not found for part {pn} "
-                f"with supplier invoice '{receipt_inv}' (strict match).",
+                f"with supplier invoice '{receipt_inv}'. "
+                f"Tip: if invoice contains multiple numbers, separate them with space/comma.",
                 "danger",
             )
             db.session.rollback()
             return _back_to_same_invoice(inv_no_first)
 
         base_cost = round(float(receipt_line_base_cost(line) or 0.0), 2)
+
+        used_inv = None
+        try:
+            used_inv = getattr(line.goods_receipt, "invoice_number", None)
+        except Exception:
+            used_inv = None
+
+        if used_inv:
+            used_inv = str(used_inv).strip()
+            used_inv = used_inv.lstrip("0") or used_inv
 
         ret = IssuedPartRecord(
             part_id=src.part_id,
@@ -11263,8 +11274,7 @@ def return_selected():
             location=src.location,
 
             # Link to original invoice (for "already returned per invoice")
-            inv_ref=(receipt_inv or None),
-
+            inv_ref=(used_inv or None),
             return_to=r_to,
             return_destination_id=dest_id,
         )
