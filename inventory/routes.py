@@ -10341,6 +10341,14 @@ def import_parts_upload():
         # чтобы Save/Apply совпадали и не зависели от JS
         norm, subtotal_base, grand_total = _apply_extra_to_df_once(norm, extra_expenses_val)
 
+        # ✅ FIX: явно сохраняем fee per unit, чтобы UI показывал Fee, а Base не становился Adj
+        norm["unit_cost"] = pd.to_numeric(norm.get("unit_cost"), errors="coerce").fillna(0.0)
+        norm["extra_alloc_per_unit"] = (norm["unit_cost"] - norm["unit_cost_base"]).clip(lower=0.0)
+
+        # (не обязательно, но полезно — алиасы для совместимости/ясности)
+        norm["base_unit_cost"] = norm["unit_cost_base"]
+        norm["actual_unit_cost"] = norm["unit_cost"]
+
         flash(
             f"Supplier hint: {supplier_hint or 'None'}, default location: {default_loc}",
             "info"
@@ -10539,12 +10547,34 @@ def import_parts_upload():
                 # ACTUAL/ADJ (green)
                 actual_cost = _to_float(m.get("unit_cost"), 0.0)
 
-                # BASE (gray) - IMPORTANT: don't use "or" chain that can drop 0.0; use explicit keys
+                import math
+
+                # BASE (gray)
                 base_raw = m.get("unit_cost_base", None)
                 if base_raw is None:
                     base_raw = m.get("base_unit_cost", None)
                 if base_raw is None:
                     base_raw = m.get("base_cost", None)
+
+                # normalize "empty"/nan to None
+                try:
+                    if isinstance(base_raw, float) and math.isnan(base_raw):
+                        base_raw = None
+                except Exception:
+                    pass
+                if isinstance(base_raw, str) and not base_raw.strip():
+                    base_raw = None
+
+                # ✅ fallback: parse base_cost from row_key "...|<base_cost>"
+                if base_raw is None:
+                    rk = (m.get("row_key") or "").strip()
+                    if rk and "|" in rk:
+                        try:
+                            tail = rk.split("|")[-1].strip()
+                            if tail:
+                                base_raw = float(tail)
+                        except Exception:
+                            base_raw = None
 
                 base_cost = _to_float(base_raw, actual_cost)
 
@@ -10811,6 +10841,13 @@ def import_parts_upload():
 
         norm = _ensure_norm_columns(norm, default_loc, path)
         norm, subtotal_base, grand_total = _distribute_extra_and_adjust_costs(norm, 0.0)
+
+        import pandas as pd
+        norm["unit_cost_base"] = pd.to_numeric(norm.get("unit_cost_base"), errors="coerce").fillna(0.0)
+        norm["unit_cost"] = pd.to_numeric(norm.get("unit_cost"), errors="coerce").fillna(0.0)
+        norm["extra_alloc_per_unit"] = (norm["unit_cost"] - norm["unit_cost_base"]).clip(lower=0.0)
+        norm["base_unit_cost"] = norm["unit_cost_base"]
+        norm["actual_unit_cost"] = norm["unit_cost"]
 
         rows = norm.to_dict(orient="records")
         rows = fix_norm_records(rows, default_loc)
