@@ -9918,6 +9918,7 @@ def import_parts_upload():
     import logging
     from datetime import datetime, date
     from sqlalchemy.exc import IntegrityError
+    # from flask import flash as _flash, request as _request, redirect as _redirect, url_for as _url_for
 
     # ===== helpers ============================================================
     def _supplier_to_default_location(supplier_hint: str | None) -> str:
@@ -10079,7 +10080,20 @@ def import_parts_upload():
             i = int(row.get("__row_i", 0) or 0)
             return f"{file_id}|{i}|{pn}|{loc}|{qty_local}|{cost_base}"
 
-        df["row_key"] = df.apply(_mk_key, axis=1)
+        try:
+            tmp = df.apply(_mk_key, axis=1)
+
+            # tmp должен быть Series (одна колонка). Если DataFrame — значит документ не того формата.
+            if hasattr(tmp, "columns"):
+                # apply вернул DataFrame -> _mk_key возвращает не 1 значение, или вход не тот
+                raise ValueError("Unsupported document format (not a receiving invoice).")
+
+            df["row_key"] = tmp.astype(str)
+
+        except Exception as e:
+            # Помечаем как "неподдерживаемый импорт" вместо 500
+            df["__import_error__"] = f"Unsupported file type/format for receiving import: {e}"
+            return df
 
         if "__row_i" in df.columns:
             df = df.drop(columns=["__row_i"])
@@ -10840,6 +10854,11 @@ def import_parts_upload():
             flash(msg, "warning")
 
         norm = _ensure_norm_columns(norm, default_loc, path)
+        # graceful reject for non-receiving documents
+        if "__import_error__" in norm.columns:
+            msg = str(norm["__import_error__"].iloc[0])
+            flash(msg, "warning")
+            return redirect(request.referrer or url_for("inventory.import_parts_upload"))
         norm, subtotal_base, grand_total = _distribute_extra_and_adjust_costs(norm, 0.0)
 
         import pandas as pd
@@ -10896,7 +10915,7 @@ def mark_received(item_id):
     from flask_login import current_user
     from datetime import datetime
     from models import db
-    from models.order_item import OrderItem
+    from models import OrderItem
     from models import Part  # твоя существующая модель склада
 
     # Помощник: подобрать имена полей из твоей модели Part
