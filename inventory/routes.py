@@ -5973,9 +5973,23 @@ def wo_issue_instock(wo_id):
     wo = WorkOrder.query.get_or_404(wo_id)
     is_ins_job = ((wo.job_type or "").upper() == "INSURANCE")
 
+    # --- clear flags ONLY when line is fully satisfied ---
+    def _clear_bo_and_ord(line: WorkOrderPart):
+        # B/O
+        line.backorder_flag = False
+
+        # ORD: clear flag + date
+        line.ordered_flag = False
+        line.ordered_date = None
+
+        # ensure is_ordered() doesn't stay True via status/line_status == "ordered"
+        if (line.status or "").strip().lower() == "ordered":
+            line.status = "search_ordered"
+        if (line.line_status or "").strip().lower() == "ordered":
+            line.line_status = "search_ordered"
+
     # --- audit helper: who changed WO ---
     def _touch_wo():
-        # safe even if columns differ
         try:
             if hasattr(wo, "updated_by_id"):
                 wo.updated_by_id = getattr(current_user, "id", None)
@@ -5988,7 +6002,6 @@ def wo_issue_instock(wo_id):
         except Exception:
             pass
         db.session.add(wo)
-
 
     set_status = (request.form.get("set_status") or "").strip().lower()
 
@@ -6092,6 +6105,9 @@ def wo_issue_instock(wo_id):
     new_records: list[IssuedPartRecord] = []
     issue_date = datetime.utcnow()
 
+    # IMPORTANT: track EXACT qty issued per WO line (prevents "auto-dowing" remainder)
+    issued_delta_by_line_id: dict[int, int] = {}
+
     raw_ins_ids = (request.form.get("ins_ids") or "").strip()
     ins_ids: set[int] = set()
     if raw_ins_ids:
@@ -6135,8 +6151,7 @@ def wo_issue_instock(wo_id):
             inv_now = (inv_now_by_line_id.get(int(line.id)) or "").strip().upper()[:32]
 
             # ✅ if user typed INV# but didn't Save — save it now
-            # (safe: just one field, minimal risk)
-            if inv_now and hasattr(line, "invoice_number"):
+            if inv_now:
                 try:
                     line.invoice_number = inv_now
                     db.session.add(line)
@@ -6158,11 +6173,10 @@ def wo_issue_instock(wo_id):
                 part = q_base.first()
 
             hint_norm = (hint_map.get(pn) or "STOCK").upper()
-            if hasattr(line, "stock_hint"):
-                try:
-                    line.stock_hint = hint_norm
-                except Exception:
-                    pass
+            try:
+                line.stock_hint = hint_norm
+            except Exception:
+                pass
 
             # ========== A) INS ==========
             if is_ins_job and is_ins_line:
@@ -6190,10 +6204,8 @@ def wo_issue_instock(wo_id):
                     is_insurance_supplied=True,
                     location=getattr(part, "location", "INS"),
                 )
-                # store INV# separately if field exists
                 if hasattr(rec, "inv_ref"):
                     rec.inv_ref = inv_now or None
-
                 if hasattr(rec, "part_number"):
                     rec.part_number = pn
                 if hasattr(rec, "name_at_issue"):
@@ -6202,16 +6214,7 @@ def wo_issue_instock(wo_id):
                 db.session.add(rec)
                 new_records.append(rec)
                 issued_row_ids.append(line.id)
-
-                issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
-                line.issued_qty = issued_so_far + qty_req
-                try:
-                    line.status = "done"
-                except Exception:
-                    pass
-                if hasattr(line, "last_issued_at"):
-                    line.last_issued_at = issue_date
-                db.session.add(line)
+                issued_delta_by_line_id[int(line.id)] = issued_delta_by_line_id.get(int(line.id), 0) + qty_req
                 continue
 
             # ========== B) STOCK ==========
@@ -6228,6 +6231,7 @@ def wo_issue_instock(wo_id):
             ok = can_issue(pn, qty_req)
 
             if not ok and part:
+                # fallback to DB "real" quantity if stock_map was stale
                 try:
                     real_left = int(getattr(part, "quantity", 0) or 0)
                 except Exception:
@@ -6238,11 +6242,10 @@ def wo_issue_instock(wo_id):
                     ok = True
 
             hint_norm = (hint_map.get(pn) or ("STOCK" if ok else "WAIT"))
-            if hasattr(line, "stock_hint"):
-                try:
-                    line.stock_hint = hint_norm
-                except Exception:
-                    pass
+            try:
+                line.stock_hint = hint_norm
+            except Exception:
+                pass
 
             if not ok:
                 skipped_rows.append({
@@ -6263,9 +6266,10 @@ def wo_issue_instock(wo_id):
                 "part_id": part.id,
                 "qty": qty_req,
                 "unit_price": real_cost,
-                "inv_ref": inv_now,  # ✅ IMPORTANT: goes into IssuedPartRecord.inv_ref via helper
+                "inv_ref": inv_now,  # goes into IssuedPartRecord.inv_ref via helper
             })
             issued_row_ids.append(line.id)
+            issued_delta_by_line_id[int(line.id)] = issued_delta_by_line_id.get(int(line.id), 0) + qty_req
 
         # --- issue stock items in bulk ---
         if items_to_issue:
@@ -6284,24 +6288,26 @@ def wo_issue_instock(wo_id):
                 flash(f"Error issuing stock items: {e}", "danger")
                 return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-            # update issued_qty/status/last_issued_at for selected lines
+        # --- apply issued deltas to WO lines (INS + STOCK) ---
+        if issued_row_ids:
             now = datetime.utcnow()
-            for line in WorkOrderPart.query.filter(
-                WorkOrderPart.id.in_(issued_row_ids)
-            ).all():
+            for line in WorkOrderPart.query.filter(WorkOrderPart.id.in_(issued_row_ids)).all():
                 qty_needed = int(line.quantity or 0)
-                issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
-                issue_now = max(qty_needed - issued_so_far, 0)
-                if issue_now > 0:
-                    line.issued_qty = issued_so_far + issue_now
-                    if line.issued_qty >= qty_needed:
-                        try:
-                            line.status = "done"
-                        except Exception:
-                            pass
-                    if hasattr(line, "last_issued_at"):
-                        line.last_issued_at = now
-                    db.session.add(line)
+                issued_so_far = int(line.issued_qty or 0)
+                delta = int(issued_delta_by_line_id.get(int(line.id), 0) or 0)
+                if delta <= 0:
+                    continue
+
+                line.issued_qty = issued_so_far + delta
+                line.last_issued_at = now
+
+                # only when fully satisfied -> done + clear flags
+                if line.issued_qty >= qty_needed:
+                    line.status = "done"
+                    line.line_status = "done"
+                    _clear_bo_and_ord(line)
+
+                db.session.add(line)
 
         if issued_row_ids or new_records or items_to_issue:
             _touch_wo()
@@ -6378,7 +6384,7 @@ def wo_issue_instock(wo_id):
             issued_ids=",".join(map(str, issued_row_ids))
         ))
 
-    # === 3) Not selected mode (mass in-stock) — unchanged ===
+    # === 3) Not selected mode (mass in-stock) ===
     pn_issue_map = {}
     items_to_issue = []
 
@@ -6438,22 +6444,19 @@ def wo_issue_instock(wo_id):
                 break
 
             qty_needed = int(line.quantity or 0)
-            issued_so_far = int(getattr(line, "issued_qty", 0) or 0)
+            issued_so_far = int(line.issued_qty or 0)
             remaining = max(qty_needed - issued_so_far, 0)
             if remaining <= 0:
                 continue
 
             delta = min(remaining, need_to_apply)
             line.issued_qty = issued_so_far + delta
+            line.last_issued_at = now
 
             if line.issued_qty >= qty_needed:
-                try:
-                    line.status = "done"
-                except Exception:
-                    pass
-
-            if hasattr(line, "last_issued_at"):
-                line.last_issued_at = now
+                line.status = "done"
+                line.line_status = "done"
+                _clear_bo_and_ord(line)
 
             db.session.add(line)
             need_to_apply -= delta
@@ -6468,7 +6471,7 @@ def wo_issue_instock(wo_id):
         reference_job=wo.canonical_job,
         issue_date=issue_date,
         location=None,
-        work_order_id=wo.id,  # 🔑 КЛЮЧ
+        work_order_id=wo.id,
     )
     db.session.add(batch)
     db.session.flush()
@@ -6485,7 +6488,6 @@ def wo_issue_instock(wo_id):
             db.session.commit()
         except Exception:
             db.session.rollback()
-
     else:
         try:
             still_wait = any(
@@ -6867,7 +6869,6 @@ def wo_issue_instock_unit(wo_id, unit_id):
 
     from models import WorkOrder, Part, IssuedPartRecord, IssuedBatch, WorkOrderPart
 
-
     wo = WorkOrder.query.get_or_404(wo_id)
     unit = next((u for u in (wo.units or []) if u.id == unit_id), None)
     if not unit:
@@ -6877,63 +6878,57 @@ def wo_issue_instock_unit(wo_id, unit_id):
     # флаг автосмены статуса
     set_status = (request.form.get("set_status") or "").strip().lower()
 
+    # clear flags ONLY when line is fully satisfied
+    def _clear_bo_and_ord(line: WorkOrderPart):
+        line.backorder_flag = False
+        line.ordered_flag = False
+        line.ordered_date = None
+        if (line.status or "").strip().lower() == "ordered":
+            line.status = "search_ordered"
+        if (line.line_status or "").strip().lower() == "ordered":
+            line.line_status = "search_ordered"
+
     rows = compute_availability_unit(unit, wo.status)
 
     items = []
-    # --- map PN -> INV# из WorkOrderPart.invoice_number ---
-    pn_to_inv = {}
-    for p in (wo.parts or []):
-        pn_key = (getattr(p, "part_number", "") or "").strip().upper()
-        inv = (getattr(p, "invoice_number", "") or "").strip()
-        if pn_key and inv:
-            pn_to_inv[pn_key] = inv[:32]
 
     for r in rows:
-        if int(r.get("issue_now", 0)) > 0:
-            pn = (r.get("part_number") or "").strip().upper()
-            if not pn:
-                continue
+        issue_now = int(r.get("issue_now", 0) or 0)
+        if issue_now <= 0:
+            continue
 
-            part = Part.query.filter_by(part_number=pn).first()
-            if not part:
-                continue
+        pn = (r.get("part_number") or "").strip().upper()
+        if not pn:
+            continue
 
-            # ✅ фиксируем себестоимость склада в момент выдачи
-            try:
-                real_cost = float(part.unit_cost or 0.0)
-            except Exception:
-                real_cost = 0.0
+        part = Part.query.filter(func.upper(Part.part_number) == pn).first()
+        if not part:
+            continue
 
-            # берём INV# прямо из WorkOrderPart для этой unit + pn
+        # ✅ фиксируем себестоимость склада в момент выдачи
+        try:
+            real_cost = float(part.unit_cost or 0.0)
+        except Exception:
+            real_cost = 0.0
+
+        # INV# берём из WorkOrderPart.invoice_number по unit_id + part_number
+        wop_inv = ""
+        try:
+            wop = next(
+                (p for p in (wo.parts or [])
+                 if p.unit_id == unit_id and (p.part_number or "").strip().upper() == pn),
+                None
+            )
+            wop_inv = (getattr(wop, "invoice_number", "") or "").strip()
+        except Exception:
             wop_inv = ""
-            try:
-                wop = next(
-                    (p for p in (wo.parts or [])
-                     if p.unit_id == unit_id and (p.part_number or "").strip().upper() == pn),
-                    None
-                )
-                wop_inv = (getattr(wop, "invoice_number", "") or "").strip()
-            except Exception:
-                wop_inv = ""
 
-            # INV# берём из WorkOrderPart.invoice_number по unit_id + part_number
-            wop_inv = ""
-            try:
-                wop = next(
-                    (p for p in (wo.parts or [])
-                     if p.unit_id == unit_id and (p.part_number or "").strip().upper() == pn),
-                    None
-                )
-                wop_inv = (getattr(wop, "invoice_number", "") or "").strip()
-            except Exception:
-                wop_inv = ""
-
-            items.append({
-                "part_id": part.id,
-                "qty": int(r["issue_now"]),
-                "unit_price": real_cost,
-                "inv_ref": wop_inv,  # ✅ вот это критично
-            })
+        items.append({
+            "part_id": part.id,
+            "qty": issue_now,
+            "unit_price": real_cost,
+            "inv_ref": (wop_inv or "")[:32],
+        })
 
     if not items:
         flash("Nothing available to issue for this unit.", "warning")
@@ -6964,7 +6959,6 @@ def wo_issue_instock_unit(wo_id, unit_id):
         ).all()
 
     if not new_records:
-        # даже если не нашли "new_records" (крайне редко), мы всё равно можем завершить
         if set_status == "done":
             try:
                 wo.status = "done"
@@ -6974,7 +6968,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         flash("Issued items saved, but could not collect records for invoice.", "warning")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # --- формируем инвойс/батч БЕЗ внешних хелперов ---
+    # --- формируем инвойс/батч ---
     try:
         inv_no = _reserve_invoice_number()
 
@@ -6993,7 +6987,56 @@ def wo_issue_instock_unit(wo_id, unit_id):
             r.batch_id = batch.id
             r.invoice_number = inv_no
 
+        # ✅ apply issued_qty to WorkOrderPart rows of this unit; clear bo/ord only when fully satisfied
+        now = datetime.utcnow()
+
+        pn_need_to_apply: dict[str, int] = {}
+        for rr in rows:
+            delta = int(rr.get("issue_now", 0) or 0)
+            if delta > 0:
+                ppn = (rr.get("part_number") or "").strip().upper()
+                if ppn:
+                    pn_need_to_apply[ppn] = pn_need_to_apply.get(ppn, 0) + delta
+
+        for pn, need_to_apply in pn_need_to_apply.items():
+            if need_to_apply <= 0:
+                continue
+
+            wop_rows = (
+                WorkOrderPart.query
+                .filter(
+                    WorkOrderPart.work_order_id == wo.id,
+                    WorkOrderPart.unit_id == unit_id,
+                    func.upper(WorkOrderPart.part_number) == pn
+                )
+                .order_by(WorkOrderPart.id.asc())
+                .all()
+            )
+
+            for line in wop_rows:
+                if need_to_apply <= 0:
+                    break
+
+                qty_needed = int(line.quantity or 0)
+                issued_so_far = int(line.issued_qty or 0)
+                remaining = max(qty_needed - issued_so_far, 0)
+                if remaining <= 0:
+                    continue
+
+                delta = min(remaining, need_to_apply)
+                line.issued_qty = issued_so_far + delta
+                line.last_issued_at = now
+
+                if line.issued_qty >= qty_needed:
+                    line.status = "done"
+                    line.line_status = "done"
+                    _clear_bo_and_ord(line)
+
+                db.session.add(line)
+                need_to_apply -= delta
+
         db.session.commit()
+
     except Exception as e:
         db.session.rollback()
         if set_status == "done":
