@@ -5021,7 +5021,8 @@ def wo_save():
     wo.markup_percent  = _f(f.get("markup_percent"), 0) or 0.0
 
     st_field = (f.get("status") or "search_ordered").strip()
-    wo.status = st_field if st_field in ("search_ordered", "ordered", "done") else "search_ordered"
+    ALLOWED_WO_STATUSES = ("search_ordered", "ordered", "done", "cancel_job")
+    wo.status = st_field if st_field in ALLOWED_WO_STATUSES else "search_ordered"
 
     # Customer PO (только для INSURANCE, иначе чистим)
     po = (f.get("customer_po") or "").strip().upper()
@@ -5676,7 +5677,7 @@ def wo_list():
       to      - date (YYYY-MM-DD)
       tech_id - technician id (admin/superadmin only; technicians ignored)
       type    - BASE | INSURANCE
-      status  - search_ordered | ordered | done
+      status  - search_ordered | ordered | done | cancel_job
     """
     from datetime import datetime, timedelta
     from sqlalchemy import and_, or_, func, String
@@ -5727,7 +5728,8 @@ def wo_list():
 
     tech_id = int(tech_id_raw) if tech_id_raw.isdigit() else None
     job_type = type_raw if type_raw in ("BASE", "INSURANCE") else ""
-    status   = status_raw if status_raw in ("search_ordered", "ordered", "done") else ""
+    ALLOWED_STATUSES = ("search_ordered", "ordered", "done", "cancel_job")
+    status = status_raw if status_raw in ALLOWED_STATUSES else ""
 
     # --- UI markers (so you can show: "Matched by Invoice #1005") ---
     matched_by_invoice = False

@@ -15,6 +15,7 @@
 </style>
 
 {# ---------- header row with actions ---------- #}
+<div class="{% if wo.status == 'cancel_job' %}wo-cancelled-page{% endif %}">
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3 class="mb-0">Work Order #{{ wo.id }}</h3>
 
@@ -131,12 +132,14 @@
     <div><strong>Status:</strong></div>
     <div>
       {% if wo.status == 'done' %}
-        <span class="badge bg-success">done</span>
-      {% elif wo.status == 'ordered' %}
-        <span class="badge bg-info text-dark">ordered</span>
-      {% else %}
-        <span class="badge bg-secondary">search_ordered</span>
-      {% endif %}
+      <span class="badge bg-success">done</span>
+    {% elif wo.status == 'ordered' %}
+      <span class="badge bg-info text-dark">ordered</span>
+    {% elif wo.status == 'cancel_job' %}
+      <span class="badge bg-danger">cancel_job</span>
+    {% else %}
+      <span class="badge bg-secondary">search_ordered</span>
+    {% endif %}
     </div>
   </div>
 
@@ -176,6 +179,13 @@
   .name-ordered  { color:#0d6efd; font-weight:600; }
   .name-invoiced { color:#198754; font-weight:600; }
   .name-ins      { color:#fd7e14; font-weight:600; }
+
+  .wo-cancelled-page {
+  background: #fff5f5;
+  border: 1px solid #f1aeb5;
+  border-radius: 12px;
+  padding: 12px;
+}
 
   /* widths */
   .col-supplier { width: 88px; }
@@ -697,6 +707,7 @@
       Print
     </button>
   {% endif %}
+</div>
 </div>
 
 {% endblock %}

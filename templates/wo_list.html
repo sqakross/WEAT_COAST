@@ -347,6 +347,7 @@
                 <option value="search_ordered" {{ 'selected' if filters and filters.status=='search_ordered' }}>search_ordered</option>
                 <option value="ordered"        {{ 'selected' if filters and filters.status=='ordered' }}>ordered</option>
                 <option value="done"           {{ 'selected' if filters and filters.status=='done' }}>done</option>
+                <option value="cancel_job" {{ 'selected' if filters and filters.status=='cancel_job' }}>cancel_job</option>
               </select>
             </div>
 
@@ -482,14 +483,16 @@
             {% endif %}
           </td>
           <td class="text-center">
-            {% if w.status == 'done' %}
-              <span class="badge bg-success">done</span>
-            {% elif w.status == 'ordered' %}
-              <span class="badge bg-info text-dark">ordered</span>
-            {% else %}
-              <span class="badge bg-secondary">search_ordered</span>
-            {% endif %}
-          </td>
+          {% if w.status == 'done' %}
+            <span class="badge bg-success">done</span>
+          {% elif w.status == 'ordered' %}
+            <span class="badge bg-info text-dark">ordered</span>
+          {% elif w.status == 'cancel_job' %}
+            <span class="badge bg-danger">cancel_job</span>
+          {% else %}
+            <span class="badge bg-secondary">search_ordered</span>
+          {% endif %}
+        </td>
 
           <!-- ✅ AUDIT CELL: Updated first, then Created -->
 
