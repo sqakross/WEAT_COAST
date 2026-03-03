@@ -11315,15 +11315,14 @@ def return_selected():
 
         base_cost = round(float(receipt_line_base_cost(line) or 0.0), 2)
 
-        used_inv = None
-        try:
-            used_inv = getattr(line.goods_receipt, "invoice_number", None)
-        except Exception:
-            used_inv = None
-
-        if used_inv:
-            used_inv = str(used_inv).strip()
-            used_inv = used_inv.lstrip("0") or used_inv
+        # ✅ invoice key of the ISSUED row (used for remaining checks per invoice card)
+        src_inv_no = getattr(src, "invoice_number", None)
+        src_inv_key = None
+        if src_inv_no is not None:
+            try:
+                src_inv_key = str(int(src_inv_no))  # "002177" -> "2177"
+            except Exception:
+                src_inv_key = (str(src_inv_no).strip() or None)
 
         ret = IssuedPartRecord(
             part_id=src.part_id,
@@ -11332,13 +11331,18 @@ def return_selected():
             issued_by=issued_by,
             reference_job=return_reference,
             issue_date=now_dt,
-            unit_cost_at_issue=base_cost,  # ✅ BASE ONLY (no expenses)
+            unit_cost_at_issue=base_cost,  # ✅ BASE ONLY (no expenses) — НЕ МЕНЯЕМ
             location=src.location,
 
-            # Link to original invoice (for "already returned per invoice")
-            inv_ref=(used_inv or None),
+            # ✅ Link to ORIGINAL ISSUED invoice (so already_returned works per invoice)
+            inv_ref=(src_inv_key or None),
+
             return_to=r_to,
             return_destination_id=dest_id,
+
+            # ✅ keep trace to receipt line used for base cost (doesn't affect logic)
+            source_receipt_line_id=getattr(line, "id", None),
+            cost_source="BASE_RETURN",
         )
 
         db.session.add(ret)
@@ -11377,67 +11381,45 @@ from sqlalchemy import func
 
 def _already_returned_qty_for_source(src) -> int:
     """
-    How many units were already returned for this *same source context*.
+    How many units were already returned for this *same source line context*.
 
-    Strategy:
-    1) Strict: if src has invoice_number -> count RETURN rows linked via inv_ref == invoice_number.
-    2) Fallback: count RETURN rows for same part_id + issued_to + SAME source reference_job (RETURN <ref>),
-       so returns from other jobs/invoices do NOT block this invoice.
-    3) Last resort: old global fallback (part_id + issued_to) only if source ref is empty.
+    FIX: scope returns by SAME:
+      - part_id
+      - issued_to
+      - RETURN <job_ref>
+      - AND same unit_cost_at_issue (price)  ✅ <-- key fix for multi-price invoices
     """
 
-    src_inv = getattr(src, "invoice_number", None)
-    if src_inv is not None:
-        inv_key = str(int(src_inv))
-        total_neg_strict = (
-            db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
-            .filter(
-                IssuedPartRecord.part_id == src.part_id,
-                IssuedPartRecord.issued_to == src.issued_to,
-                IssuedPartRecord.reference_job.ilike("RETURN%"),
-                IssuedPartRecord.quantity < 0,
-                IssuedPartRecord.inv_ref == inv_key,
-            )
-            .scalar()
-            or 0
-        )
-        strict_abs = abs(int(total_neg_strict))
-        if strict_abs > 0:
-            return strict_abs
-
-    # ---- fallback narrowed to SAME source reference_job ----
+    # source reference job (ex: "997191")
     src_ref = (getattr(src, "reference_job", None) or "").strip()
-    if src_ref:
-        # normalize exactly like you create it: "RETURN <SOURCE_REF_IN_UPPER>"
-        want_return_ref = f"RETURN {src_ref.upper()}"
+    if not src_ref:
+        return 0
 
-        total_neg_same_ref = (
-            db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
-            .filter(
-                IssuedPartRecord.part_id == src.part_id,
-                IssuedPartRecord.issued_to == src.issued_to,
-                IssuedPartRecord.quantity < 0,
-                func.upper(IssuedPartRecord.reference_job) == want_return_ref,
-            )
-            .scalar()
-            or 0
-        )
-        return abs(int(total_neg_same_ref))
+    want_return_ref = f"RETURN {src_ref.upper()}"
 
-    # ---- last resort (old behavior) ----
-    total_neg_fallback = (
+    # price from source line (round like UI)
+    try:
+        src_cost = round(float(getattr(src, "unit_cost_at_issue", 0.0) or 0.0), 2)
+    except Exception:
+        src_cost = 0.0
+
+    # Sum negative qty only for same RETURN ref and same cost
+    total_neg_same_ref_same_cost = (
         db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
         .filter(
             IssuedPartRecord.part_id == src.part_id,
             IssuedPartRecord.issued_to == src.issued_to,
-            IssuedPartRecord.reference_job.ilike("RETURN%"),
             IssuedPartRecord.quantity < 0,
+            func.upper(func.coalesce(IssuedPartRecord.reference_job, "")) == want_return_ref,
+
+            # ✅ IMPORTANT: match by price to avoid cross-blocking between different costs
+            func.round(func.coalesce(IssuedPartRecord.unit_cost_at_issue, 0.0), 2) == src_cost,
         )
         .scalar()
         or 0
     )
-    return abs(int(total_neg_fallback))
 
+    return abs(int(total_neg_same_ref_same_cost))
 
 @inventory_bp.get("/receiving/by-invoice/<path:inv>", endpoint="receiving_by_invoice")
 @login_required
