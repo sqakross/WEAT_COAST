@@ -55,9 +55,10 @@
       <th style="width:80px;">Stock</th>
       <th style="width:80px;" class="text-end">Qty</th>
       <th style="width:140px;" class="text-end">Total Cost</th>
-      {% if can_super %}
-        <th style="width:260px;">Actions</th>
-      {% endif %}
+        <th style="width:180px;">Audit</th>
+        {% if can_super %}
+          <th style="width:260px;">Actions</th>
+        {% endif %}
     </tr>
   </thead>
   <tbody>
@@ -100,16 +101,29 @@
 
       <td class="text-end">{{ ns.qty }}</td>
       <td class="text-end">
-        {{ b.currency|default('USD', true) }}
-        {{
-          '%.2f' % (
-            (totals.get(b.id) if (totals is defined and b.id in totals) else ns.total)
-          )
-        }}
-      </td>
+  {{ b.currency|default('USD', true) }}
+  {{
+    '%.2f' % (
+      (totals.get(b.id) if (totals is defined and b.id in totals) else ns.total)
+    )
+  }}
+</td>
 
-      {% if can_super %}
-      <td onclick="event.stopPropagation();">
+<td class="small text-nowrap">
+  {% if b.updated_at %}
+    <div>upd: {{ b.updated_at_local.strftime('%Y-%m-%d') if b.updated_at_local else '—' }}</div>
+    <div>by {{ user_map.get(b.updated_by, b.updated_by or '—') }}</div>
+  {% elif b.posted_at %}
+    <div>post: {{ b.posted_at_local.strftime('%Y-%m-%d') if b.posted_at_local else '—' }}</div>
+    <div>by {{ user_map.get(b.posted_by, b.posted_by or '—') }}</div>
+  {% else %}
+    <div>crt: {{ b.created_at_local.strftime('%Y-%m-%d') if b.created_at_local else '—' }}</div>
+    <div>by {{ user_map.get(b.created_by, b.created_by or '—') }}</div>
+  {% endif %}
+</td>
+
+{% if can_super %}
+<td onclick="event.stopPropagation();">
         <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}"
               method="post" style="display:inline;">
           <button class="btn btn-sm {{ 'btn-warning' if is_posted else 'btn-primary' }}" type="submit">

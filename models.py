@@ -714,10 +714,16 @@ class GoodsReceipt(db.Model):
     currency = db.Column(db.String(8), default="USD")
     notes = db.Column(db.Text)
     status = db.Column(db.String(16), default="draft", nullable=False)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    created_by = db.Column(db.Integer)
+    created_by = db.Column(db.Integer, nullable=True, index=True)
+
+    updated_at = db.Column(db.DateTime, nullable=True, index=True)
+    updated_by = db.Column(db.Integer, nullable=True, index=True)
+
     posted_at = db.Column(db.DateTime)
     posted_by = db.Column(db.Integer)
+
     attachment_path = db.Column(db.String(512))
     extra_expenses = db.Column(db.Float, default=0.0)
 
@@ -728,6 +734,10 @@ class GoodsReceipt(db.Model):
     @property
     def created_at_local(self):
         return utc_to_local(self.created_at)
+
+    @property
+    def updated_at_local(self):
+        return utc_to_local(self.updated_at)
 
     @property
     def posted_at_local(self):

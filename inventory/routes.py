@@ -11478,7 +11478,8 @@ def receiving_by_invoice(inv):
 @inventory_bp.get("/receiving", endpoint="receiving_list")
 @login_required
 def receiving_list():
-    from sqlalchemy import func  # or_ можно удалить, если больше не нужен
+    from sqlalchemy import func
+    from models import User
 
     current_app.logger.debug(
         "### DEBUG receiving_list USING MODEL %s FROM %s TABLENAME=%s",
@@ -11488,18 +11489,14 @@ def receiving_list():
     q = ReceivingBatch.query
     DEFAULT_LIMIT = 200
 
-    # ОДНА строка поиска
     global_q = (request.args.get("q") or "").strip()
-
-    d1     = (request.args.get("date_from") or "").strip()
-    d2     = (request.args.get("date_to") or "").strip()
+    d1 = (request.args.get("date_from") or "").strip()
+    d2 = (request.args.get("date_to") or "").strip()
     status = (request.args.get("status") or "").strip()
 
-    # --- статус ---
     if status in ("draft", "posted"):
         q = q.filter(ReceivingBatch.status == status)
 
-    # --- даты ---
     def _parse_date(s):
         try:
             return datetime.strptime(s, "%Y-%m-%d").date()
@@ -11507,38 +11504,39 @@ def receiving_list():
             return None
 
     d1p, d2p = _parse_date(d1), _parse_date(d2)
-    if d1p:
-        q = q.filter(or_(ReceivingBatch.invoice_date.is_(None),
-                         ReceivingBatch.invoice_date >= d1p))
-    if d2p:
-        q = q.filter(or_(ReceivingBatch.invoice_date.is_(None),
-                         ReceivingBatch.invoice_date <= d2p))
 
-    # Забираем батчи из БД (без текстового фильтра)
+    if d1p:
+        q = q.filter(or_(
+            ReceivingBatch.invoice_date.is_(None),
+            ReceivingBatch.invoice_date >= d1p
+        ))
+
+    if d2p:
+        q = q.filter(or_(
+            ReceivingBatch.invoice_date.is_(None),
+            ReceivingBatch.invoice_date <= d2p
+        ))
+
     qry = q.order_by(
         ReceivingBatch.invoice_date.desc().nullslast(),
         ReceivingBatch.id.desc()
     )
 
-    # IMPORTANT: limit only when NO filters (иначе пропадают “старые” инвойсы)
     if not global_q and not d1p and not d2p and not status:
         qry = qry.limit(DEFAULT_LIMIT)
 
     batches = qry.all()
 
-    # --- текстовый поиск по Supplier / Invoice / Part # / Part Name ---
     if global_q:
         needle = global_q.lower()
         filtered = []
 
         for b in batches:
-            # supplier / invoice
             sup = (getattr(b, "supplier_name", "") or "").lower()
             inv = (getattr(b, "invoice_number", "") or "").lower()
 
             match_batch = (needle in sup) or (needle in inv)
 
-            # если по заголовку не нашли — ищем в строках
             if not match_batch:
                 lines = getattr(b, "items", None) or getattr(b, "lines", None) or []
                 for ln in lines:
@@ -11565,14 +11563,13 @@ def receiving_list():
 
         batches = filtered
 
-    # --- Totals ---
     totals = {}
     for b in batches:
         try:
             lines = getattr(b, "items", []) or getattr(b, "lines", []) or []
             total = 0.0
             for ln in lines:
-                qty  = getattr(ln, "qty", None) or getattr(ln, "quantity", 0) or 0
+                qty = getattr(ln, "qty", None) or getattr(ln, "quantity", 0) or 0
                 cost = getattr(ln, "unit_cost", None) or getattr(ln, "price", None) or 0.0
                 try:
                     total += float(cost) * int(qty)
@@ -11582,12 +11579,30 @@ def receiving_list():
         except Exception:
             totals[b.id] = 0.0
 
-    # --- права админа ---
     can_admin = bool(
         getattr(current_user, "is_superadmin", False) or
         getattr(current_user, "is_super_admin", False) or
         getattr(current_user, "is_admin", False)
     )
+
+    # --- user map for audit display ---
+    user_ids = set()
+    for b in batches:
+        for uid in (
+            getattr(b, "created_by", None),
+            getattr(b, "updated_by", None),
+            getattr(b, "posted_by", None),
+        ):
+            if uid:
+                try:
+                    user_ids.add(int(uid))
+                except Exception:
+                    pass
+
+    user_map = {}
+    if user_ids:
+        rows = User.query.filter(User.id.in_(list(user_ids))).all()
+        user_map = {u.id: u.username for u in rows}
 
     return render_template(
         "receiving_list.html",
@@ -11595,6 +11610,7 @@ def receiving_list():
         totals=totals,
         can_admin=can_admin,
         limit=DEFAULT_LIMIT,
+        user_map=user_map,
         filters={
             "q": global_q,
             "date_from": d1,
