@@ -11292,15 +11292,35 @@ def return_selected():
             p = Part.query.get(src.part_id)
             pn = (p.part_number or "").strip() if p else None
 
-        # ✅ supplier receipt invoice must come from src.inv_ref (vendor invoice like 9611597)
+        # supplier receipt invoice comes from src.inv_ref when available
+        # STOCK-issued rows may legitimately have empty inv_ref
         receipt_inv = (getattr(src, "inv_ref", None) or "").strip()
 
-        if not pn or not receipt_inv:
+        if not pn:
             flash(
-                f"Cannot create BASE return: missing part_number or supplier invoice (inv_ref) "
-                f"for source row id={src.id}.",
+                f"Cannot create BASE return: missing part_number for source row id={src.id}.",
                 "danger",
             )
+            db.session.rollback()
+            return _back_to_same_invoice(inv_no_first)
+
+        line, cs = pick_receipt_line_for_return(
+            part_number=pn,
+            inv_ref=(receipt_inv or None),
+        )
+        if not line:
+            if receipt_inv:
+                msg = (
+                    f"Cannot create BASE return: receipt line not found for part {pn} "
+                    f"with supplier invoice '{receipt_inv}'. "
+                    f"Tip: if invoice contains multiple numbers, separate them with space/comma."
+                )
+            else:
+                msg = (
+                    f"Cannot create BASE return: no posted stock receipt line found for part {pn}."
+                )
+
+            flash(msg, "danger")
             db.session.rollback()
             return _back_to_same_invoice(inv_no_first)
 

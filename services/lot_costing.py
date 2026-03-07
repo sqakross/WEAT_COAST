@@ -43,36 +43,58 @@ def _split_invoice_refs(raw: str | None) -> list[str]:
 def _is_posted(status_col):
     return func.lower(func.coalesce(status_col, "")) == "posted"
 
-
 def pick_receipt_line_for_return(*, part_number: str, inv_ref: str | None):
     pn = (part_number or "").strip().upper()
     invs = _split_invoice_refs(inv_ref)
 
     if not pn:
         return None, "missing_part_number"
-    if not invs:
-        return None, "missing_invoice"
 
-    # Try each invoice token strictly (most recent lot inside that invoice)
-    for inv in invs:
-        q1 = (
-            db.session.query(GoodsReceiptLine)
-            .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
-            .filter(func.upper(GoodsReceiptLine.part_number) == pn)
-            .filter(_is_posted(GoodsReceipt.status))
-            .filter(func.ltrim(func.coalesce(GoodsReceipt.invoice_number, ""), "0") == inv)
-            .order_by(
-                GoodsReceipt.posted_at.desc().nullslast(),
-                GoodsReceipt.id.desc(),
-                GoodsReceiptLine.id.desc(),
+    # ============================================================
+    # A) STRICT invoice match
+    #    If source row has invoice ref -> must match that invoice only
+    # ============================================================
+    if invs:
+        for inv in invs:
+            q1 = (
+                db.session.query(GoodsReceiptLine)
+                .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
+                .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+                .filter(_is_posted(GoodsReceipt.status))
+                .filter(func.ltrim(func.coalesce(GoodsReceipt.invoice_number, ""), "0") == inv)
+                .order_by(
+                    GoodsReceipt.posted_at.desc().nullslast(),
+                    GoodsReceipt.id.desc(),
+                    GoodsReceiptLine.id.desc(),
+                )
             )
-        )
-        line = q1.first()
-        if line is not None:
-            return line, "goods_receipt_match"
+            line = q1.first()
+            if line is not None:
+                return line, "goods_receipt_match"
 
-    # none matched
-    return None, "receipt_inv_not_found"
+        return None, "receipt_inv_not_found"
+
+    # ============================================================
+    # B) STOCK mode
+    #    No invoice on source row -> return back to stock by part_number only
+    # ============================================================
+    q2 = (
+        db.session.query(GoodsReceiptLine)
+        .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
+        .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+        .filter(_is_posted(GoodsReceipt.status))
+        .order_by(
+            GoodsReceipt.posted_at.desc().nullslast(),
+            GoodsReceipt.id.desc(),
+            GoodsReceiptLine.id.desc(),
+        )
+    )
+
+    line = q2.first()
+    if line is not None:
+        return line, "stock_no_invoice"
+
+    return None, "no_stock_receipt_found"
 
 def receipt_line_base_cost(line: "GoodsReceiptLine") -> float:
     def _f(x):
