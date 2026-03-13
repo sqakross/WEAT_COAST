@@ -11327,10 +11327,10 @@ def return_selected():
 
         # ---- RETURN COST LOGIC ----
         # Rules:
-        # 1) If issued row has supplier receipt invoice (src.inv_ref) ->
+        # 1) If issued row has a real supplier receipt invoice in src.inv_ref ->
         #    use BASE cost from that receipt line (NO extra expenses).
-        # 2) If issued row has no supplier receipt invoice (stock-issued item) ->
-        #    use the same unit cost the item was issued with (src.unit_cost_at_issue).
+        # 2) If issued row has no invoice OR src.inv_ref == "STOCK" ->
+        #    treat it as stock-issued and use src.unit_cost_at_issue.
 
         pn = None
         if getattr(src, "part", None) and getattr(src.part, "part_number", None):
@@ -11339,7 +11339,9 @@ def return_selected():
             p = Part.query.get(src.part_id)
             pn = (p.part_number or "").strip() if p else None
 
-        receipt_inv = (getattr(src, "inv_ref", None) or "").strip()
+        raw_inv_ref = (getattr(src, "inv_ref", None) or "").strip()
+        receipt_inv = raw_inv_ref
+        is_stock_issue = (not raw_inv_ref) or (raw_inv_ref.upper() == "STOCK")
 
         if not pn:
             flash(
@@ -11352,7 +11354,7 @@ def return_selected():
         line = None
         cs = None
 
-        if receipt_inv:
+        if not is_stock_issue:
             # Vendor-received item: return by BASE cost from the matched receipt invoice
             line, cs = pick_receipt_line_for_return(
                 part_number=pn,
@@ -11371,7 +11373,7 @@ def return_selected():
             base_cost = round(float(receipt_line_base_cost(line) or 0.0), 2)
 
         else:
-            # Stock-issued item: no supplier invoice, use the same cost it was issued with
+            # Stock-issued item: no supplier invoice / explicit STOCK -> use issued cost
             issued_cost = getattr(src, "unit_cost_at_issue", None)
             if issued_cost is None:
                 issued_cost = 0.0
@@ -11397,7 +11399,7 @@ def return_selected():
             issued_by=issued_by,
             reference_job=return_reference,
             issue_date=now_dt,
-            unit_cost_at_issue=base_cost,  # BASE ONLY for vendor-received; issued cost for stock-issued
+            unit_cost_at_issue=base_cost,
             location=src.location,
 
             # ✅ Link to ORIGINAL ISSUED invoice (so already_returned works per invoice)
