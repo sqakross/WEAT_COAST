@@ -428,25 +428,42 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
 @inventory_bp.get("/api/job_reserve", endpoint="api_job_reserve")
 @login_required
 def api_job_reserve():
-    from flask import request, jsonify
+    from flask import request, jsonify, current_app, make_response
     from models import JobReservation, WorkOrder
     from extensions import db
-    from datetime import timezone  # ✅ add
+    from datetime import timezone
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
     if role not in ("admin", "superadmin"):
-        return jsonify({"ok": False, "error": "Access denied"}), 403
+        resp = make_response(jsonify({"ok": False, "error": "Access denied"}), 403)
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
     job_numbers = (request.args.get("job_numbers") or "").strip()
     tokens = _job_tokens_from_text(job_numbers)
+
+    current_app.logger.debug(
+        "API_JOB_RESERVE start user_id=%r user=%r raw=%r tokens=%r",
+        getattr(current_user, "id", None),
+        getattr(current_user, "username", None),
+        job_numbers,
+        tokens,
+    )
+
     if not tokens:
-        return jsonify({"ok": True, "tokens": [], "status": "empty"})
+        resp = make_response(jsonify({"ok": True, "tokens": [], "status": "empty"}))
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
     now = datetime.utcnow()
-    ttl = timedelta(minutes=15)
+    ttl_minutes = 20
+    ttl = timedelta(minutes=ttl_minutes)
     exp = now + ttl
 
-    # ✅ helper: always return UTC with Z so frontend converts correctly
     def _iso_utc_z(dt):
         if not dt:
             return None
@@ -455,7 +472,7 @@ def api_job_reserve():
     # clean expired
     JobReservation.query.filter(JobReservation.expires_at < now).delete(synchronize_session=False)
 
-    # 1) if WO exists -> duplicate
+    # duplicate check against existing WO
     for t in tokens:
         wo = (
             WorkOrder.query
@@ -464,60 +481,88 @@ def api_job_reserve():
             .first()
         )
         if wo:
-            return jsonify({
+            current_app.logger.debug(
+                "API_JOB_RESERVE exists token=%r existing_wo=%r", t, wo.id
+            )
+            resp = make_response(jsonify({
                 "ok": True,
                 "status": "exists",
                 "existing_id": wo.id,
                 "token": t
-            })
+            }))
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+            return resp
+
+    uid = getattr(current_user, "id", None)
+    uname = getattr(current_user, "username", None)
 
     blocked = []
     reserved = []
+
     for t in tokens:
         row = JobReservation.query.filter_by(job_token=t).first()
-        if row and row.expires_at >= now:
-            if row.holder_user_id == getattr(current_user, "id", None):
+
+        if row and row.expires_at and row.expires_at >= now:
+            if row.holder_user_id == uid:
                 row.expires_at = exp
-                row.holder_username = getattr(current_user, "username", None)
+                row.holder_username = uname
                 db.session.add(row)
                 reserved.append(t)
+                current_app.logger.debug(
+                    "API_JOB_RESERVE refresh token=%r user_id=%r exp=%r",
+                    t, uid, exp
+                )
             else:
                 blocked.append({
                     "token": t,
                     "holder": row.holder_username or "unknown",
-                    "expires_at": _iso_utc_z(row.expires_at)  # ✅ fixed
+                    "expires_at": _iso_utc_z(row.expires_at)
                 })
+                current_app.logger.debug(
+                    "API_JOB_RESERVE blocked token=%r holder_user_id=%r holder=%r exp=%r",
+                    t, row.holder_user_id, row.holder_username, row.expires_at
+                )
         else:
             if not row:
                 row = JobReservation(job_token=t)
-            row.holder_user_id = getattr(current_user, "id", None)
-            row.holder_username = getattr(current_user, "username", None)
+
+            row.holder_user_id = uid
+            row.holder_username = uname
             row.expires_at = exp
             db.session.add(row)
             reserved.append(t)
 
+            current_app.logger.debug(
+                "API_JOB_RESERVE new token=%r user_id=%r exp=%r",
+                t, uid, exp
+            )
+
     db.session.commit()
 
-    if blocked:
-        return jsonify({
-            "ok": True,
-            "status": "locked",
-            "reserved": reserved,
-            "blocked": blocked,
-            "ttl_seconds": 15 * 60
-        })
-
-    return jsonify({
+    payload = {
         "ok": True,
-        "status": "reserved",
+        "status": "locked" if blocked else "reserved",
         "reserved": reserved,
-        "ttl_seconds": 15 * 60
-    })
+        "blocked": blocked,
+        "ttl_seconds": ttl_minutes * 60,
+        "expires_at": _iso_utc_z(exp),
+    }
+
+    current_app.logger.debug("API_JOB_RESERVE done payload=%r", payload)
+
+    resp = make_response(jsonify(payload))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
 
 @inventory_bp.post("/api/job_release", endpoint="api_job_release")
 @login_required
 def api_job_release():
-    from flask import request, jsonify
+    from flask import request, jsonify, current_app
     from models import JobReservation
     from extensions import db
 
@@ -531,11 +576,30 @@ def api_job_release():
         return jsonify({"ok": True})
 
     uid = getattr(current_user, "id", None)
+
+    current_app.logger.debug(
+        "API_JOB_RELEASE start user_id=%r user=%r raw=%r tokens=%r",
+        uid,
+        getattr(current_user, "username", None),
+        job_numbers,
+        tokens,
+    )
+
     for t in tokens:
-        JobReservation.query.filter_by(job_token=t, holder_user_id=uid).delete(synchronize_session=False)
+        JobReservation.query.filter_by(
+            job_token=t,
+            holder_user_id=uid
+        ).delete(synchronize_session=False)
 
     db.session.commit()
+
+    current_app.logger.debug(
+        "API_JOB_RELEASE done user_id=%r tokens=%r",
+        uid, tokens
+    )
+
     return jsonify({"ok": True})
+
 
 @inventory_bp.post("/receiving/<int:batch_id>/delete", endpoint="receiving_delete")
 @login_required
@@ -543,7 +607,7 @@ def receiving_delete(batch_id: int):
     from flask import current_app, flash, redirect, url_for
     from flask_login import current_user
     from extensions import db
-    from sqlalchemy import func
+    # from sqlalchemy import func
     from models import ReceivingBatch
     from services.receiving import unpost_receiving_batch
 
@@ -1476,7 +1540,7 @@ def issued_confirm_toggle():
 
 # ---------- STOCK HINT API ----------
 from flask import jsonify, request
-from sqlalchemy import func
+# from sqlalchemy import func
 
 # ...
 
@@ -2354,7 +2418,7 @@ def unconsume_invoice():
         flash("Access denied (unconsume is superadmin only).", "danger")
         return redirect(url_for("inventory.reports_grouped"))
 
-    from sqlalchemy import func
+    # from sqlalchemy import func
     from extensions import db
     from models import IssuedPartRecord, IssuedBatch, IssuedConsumptionLog
 
@@ -2491,7 +2555,7 @@ def consume_invoice():
     Доступно для admin/superadmin/user.
     """
     from flask_login import current_user
-    from sqlalchemy import func
+    # from sqlalchemy import func
     from models import IssuedPartRecord, IssuedBatch, IssuedConsumptionLog
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
@@ -2626,7 +2690,7 @@ def consume_invoice():
 def wo_confirm_lines(wo_id: int):
     from flask import request, flash, redirect, url_for
     from datetime import datetime
-    from sqlalchemy import func, or_
+    # from sqlalchemy import func, or_
     from flask_login import current_user
     from extensions import db
     from models import WorkOrder, IssuedPartRecord, IssuedBatch
@@ -4287,7 +4351,7 @@ def download_stock_xlsx():
     from flask import request, send_file
     from datetime import datetime
     from io import BytesIO
-    from sqlalchemy import func
+    # from sqlalchemy import func
     from sqlalchemy import or_
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -4785,15 +4849,14 @@ def wo_save():
     import re
     from datetime import date
     from sqlalchemy import or_
-    from flask import request
     import json
+    import os
 
     # ---------- helpers ----------
     def _clip(s, n):
         return (s or "").strip()[:n]
 
     def _wo_audit(wo_id: int, action: str, message: str, meta: dict | None = None):
-        # meta хранится как JSON текст
         a = WorkOrderAudit(
             work_order_id=wo_id,
             action=(action or "note")[:40],
@@ -4841,13 +4904,12 @@ def wo_save():
                 cleaned.append(p)
         return cleaned
 
-        # ✅ IMPORTANT: must exist before _rerender_same_screen uses it (early returns)
-        units_payload = None
+    # ✅ IMPORTANT: must exist before _rerender_same_screen uses it (early returns)
+    units_payload = None
 
     def _rerender_same_screen(msg_text: str, errors=None):
         db.session.rollback()
 
-        # ✅ restore audit after rollback (so UI shows correct actor)
         from datetime import datetime as _dt
         actor_id = getattr(current_user, "id", None)
         now = _dt.utcnow()
@@ -4879,7 +4941,6 @@ def wo_save():
                     f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
                     f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
                 )
-
         except Exception:
             pass
 
@@ -4924,7 +4985,6 @@ def wo_save():
             errors=(errors or {}),
         ), 400
 
-
     def _jobs_set_from_wo(wo_obj) -> set[str]:
         return set(_parse_jobs(getattr(wo_obj, "job_numbers", "") or ""))
 
@@ -4937,8 +4997,6 @@ def wo_save():
     f = request.form
 
     # --- DEBUG FILE (form keys with invoice_number) ---
-    import os
-    from datetime import datetime
     dbg_path = os.path.join(current_app.instance_path, "wo_save_debug.txt")
     inv_keys = [k for k in f.keys() if "invoice_number" in k]
     with open(dbg_path, "a", encoding="utf-8") as fp:
@@ -4961,7 +5019,7 @@ def wo_save():
     current_app.logger.debug("WO_SAVE keys (%s): %s", len(log_keys), log_keys[:200])
 
     # new vs edit
-    wo_id  = (f.get("wo_id") or "").strip()
+    wo_id = (f.get("wo_id") or "").strip()
     is_new = not wo_id
 
     # взять WorkOrder
@@ -4986,13 +5044,11 @@ def wo_save():
             "parts_count": len(getattr(wo, "parts", []) or []),
         }
 
-    from datetime import datetime as _dt
-
     # ---------- заголовок / шапка ----------
-    tech_id_raw   = (f.get("technician_id")   or f.get("technician") or "").strip()
+    tech_id_raw = (f.get("technician_id") or f.get("technician") or "").strip()
     tech_name_raw = (f.get("technician_name") or f.get("technician") or "").strip()
 
-    tech_id_val   = None
+    tech_id_val = None
     tech_name_val = None
 
     if tech_id_raw.isdigit():
@@ -5000,7 +5056,7 @@ def wo_save():
             tid = int(tech_id_raw)
             u = User.query.get(tid)
             if u:
-                tech_id_val   = tid
+                tech_id_val = tid
                 tech_name_val = (u.username or "").strip().upper()
         except Exception:
             pass
@@ -5011,14 +5067,14 @@ def wo_save():
         else:
             tech_name_val = None
 
-    wo.technician_id   = tech_id_val
+    wo.technician_id = tech_id_val
     wo.technician_name = (tech_name_val or "").strip().upper() if tech_name_val else ""
 
     # job_numbers всегда в UPPER
-    wo.job_numbers     = (f.get("job_numbers") or "").upper().strip()
-    wo.job_type        = (f.get("job_type") or "BASE").strip().upper()
-    wo.delivery_fee    = _f(f.get("delivery_fee"), 0) or 0.0
-    wo.markup_percent  = _f(f.get("markup_percent"), 0) or 0.0
+    wo.job_numbers = (f.get("job_numbers") or "").upper().strip()
+    wo.job_type = (f.get("job_type") or "BASE").strip().upper()
+    wo.delivery_fee = _f(f.get("delivery_fee"), 0) or 0.0
+    wo.markup_percent = _f(f.get("markup_percent"), 0) or 0.0
 
     st_field = (f.get("status") or "search_ordered").strip()
     ALLOWED_WO_STATUSES = ("search_ordered", "ordered", "done", "cancel_job")
@@ -5032,8 +5088,8 @@ def wo_save():
         wo.customer_po = None
 
     # Эти поля сейчас мало используются в multi-appliance, но приводим к UPPER на всякий случай
-    brand_hdr_raw  = (f.get("brand")  or "").strip().upper()
-    model_hdr_raw  = _clip(f.get("model"), 25).upper() if f.get("model") else ""
+    brand_hdr_raw = (f.get("brand") or "").strip().upper()
+    model_hdr_raw = _clip(f.get("model"), 25).upper() if f.get("model") else ""
     serial_hdr_raw = _clip(f.get("serial"), 25).upper() if f.get("serial") else ""
     if brand_hdr_raw:
         wo.brand = brand_hdr_raw
@@ -5154,13 +5210,13 @@ def wo_save():
             units_map[ui]["rows"].setdefault(ri, {})
             if name in ("ordered_flag", "backorder_flag", "is_insurance_supplied"):
                 vals = request.form.getlist(key)
-                val  = vals[-1] if vals else f.get(key)
+                val = vals[-1] if vals else f.get(key)
             else:
-                val  = f.get(key)
+                val = f.get(key)
             units_map[ui]["rows"][ri][name] = val
 
     # превратить units_map -> units_payload
-    units_payload  = []
+    units_payload = []
     new_rows_count = 0
 
     for ui in sorted(units_map.keys()):
@@ -5174,25 +5230,23 @@ def wo_save():
             qty = _i(r.get("quantity") or 0, 0)
 
             alt_raw = (r.get("alt_numbers") or r.get("alt_part_numbers") or "").strip()
-            wh_raw  = (r.get("warehouse")   or r.get("unit_label")        or "").strip()
-            sup_raw = (r.get("supplier")    or r.get("supplier_name")     or "").strip()
+            wh_raw = (r.get("warehouse") or r.get("unit_label") or "").strip()
+            sup_raw = (r.get("supplier") or r.get("supplier_name") or "").strip()
 
-            # ВСЕ PN-подобные поля в UPPER
             alt_raw = alt_raw.upper()
-            wh_raw  = wh_raw.upper()
+            wh_raw = wh_raw.upper()
             sup_raw = sup_raw.upper()
 
             inv_raw = (r.get("invoice_number") or "").strip().upper()
             inv_raw = inv_raw[:32] if inv_raw else ""
 
-            ucost   = _f(r.get("unit_cost"), None)
+            ucost = _f(r.get("unit_cost"), None)
             bo_flag = _b(r.get("backorder_flag"))
             lstatus = (r.get("status") or "search_ordered").strip()
             ord_flag = _b(r.get("ordered_flag"))
             ins_flag = _b(r.get("is_insurance_supplied"))
 
-            # PART NAME всегда в верхнем регистре
-            part_name_raw  = (r.get("part_name") or "").strip().upper()
+            part_name_raw = (r.get("part_name") or "").strip().upper()
             part_name_clip = _clip(part_name_raw, 120)
 
             qty_eff = qty if qty else 1
@@ -5220,10 +5274,10 @@ def wo_save():
                     fp.write(f"ROWS_PARSED: ui={ui} ri={ri} pn={pn!r} inv={inv_raw!r}\n")
 
         units_payload.append({
-            "brand":  (u_blk.get("brand")  or "").strip().upper(),
-            "model":  _clip(u_blk.get("model"), 25).upper(),
+            "brand": (u_blk.get("brand") or "").strip().upper(),
+            "model": _clip(u_blk.get("model"), 25).upper(),
             "serial": _clip(u_blk.get("serial"), 25).upper(),
-            "rows":   rows_payload,
+            "rows": rows_payload,
         })
 
     current_app.logger.debug(
@@ -5251,7 +5305,6 @@ def wo_save():
             db.session.rollback()
             flash("Job number is required.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
-
 
     if is_new:
         db.session.add(wo)
@@ -5285,7 +5338,7 @@ def wo_save():
         for old_u in (wo.units or []):
             uk = _unit_key(old_u.brand or "", old_u.model or "", old_u.serial or "")
             for old_p in (old_u.parts or []):
-                pn   = ((old_p.part_number or "").strip().upper())
+                pn = ((old_p.part_number or "").strip().upper())
                 supn = _norm_supplier(old_p.supplier)
                 was_ordered = (
                     bool(getattr(old_p, "ordered_flag", False)) or
@@ -5301,7 +5354,6 @@ def wo_save():
     # AUDIT: snapshot parts BEFORE rebuild (for diff)
     # =========================================================
     def _part_key(unit_obj_or_tuple, pn: str, sup: str):
-        # key = (unit_key, part_number, supplier_norm)
         if isinstance(unit_obj_or_tuple, tuple):
             uk = unit_obj_or_tuple
         else:
@@ -5350,7 +5402,7 @@ def wo_save():
                     "supplier": (sup or "")[:80],
                     "inv": ((r.get("invoice_number") or "")[:32]).strip().upper(),
                     "ordered_flag": bool(r.get("ordered_flag")),
-                    "ordered_date": "",  # payload doesn't carry old date; ok
+                    "ordered_date": "",
                     "backorder_flag": bool(r.get("backorder_flag")),
                     "is_insurance_supplied": bool(r.get("is_insurance_supplied")),
                     "unit": {
@@ -5363,11 +5415,11 @@ def wo_save():
 
     def _diff_parts(before_snap: dict, after_snap: dict):
         before_keys = set(before_snap.keys())
-        after_keys  = set(after_snap.keys())
+        after_keys = set(after_snap.keys())
 
-        added_keys   = sorted(list(after_keys - before_keys))
+        added_keys = sorted(list(after_keys - before_keys))
         removed_keys = sorted(list(before_keys - after_keys))
-        common_keys  = sorted(list(before_keys & after_keys))
+        common_keys = sorted(list(before_keys & after_keys))
 
         changed = []
         for k in common_keys:
@@ -5385,26 +5437,23 @@ def wo_save():
                     "changes": delta
                 })
 
-        # detailed meta
         meta = {
             "parts": {
                 "added_count": len(added_keys),
                 "removed_count": len(removed_keys),
                 "changed_count": len(changed),
-                "added": [after_snap[k] for k in added_keys[:50]],     # safety cap
-                "removed": [before_snap[k] for k in removed_keys[:50]], # safety cap
-                "changed": changed[:50],                                # safety cap
+                "added": [after_snap[k] for k in added_keys[:50]],
+                "removed": [before_snap[k] for k in removed_keys[:50]],
+                "changed": changed[:50],
             }
         }
 
-        # short summary for UI
         summary = f"parts +{len(added_keys)} ~{len(changed)} -{len(removed_keys)}"
         return summary, meta
 
     parts_before_snap = _snap_from_existing_workorder(wo) if not is_new else {}
-    parts_after_snap  = _snap_from_units_payload(units_payload or [])
+    parts_after_snap = _snap_from_units_payload(units_payload or [])
     parts_summary, parts_meta = _diff_parts(parts_before_snap, parts_after_snap)
-
 
     # ---------- удалить старые юниты/parts и пересоздать ----------
     for u in list(getattr(wo, "units", []) or []):
@@ -5421,8 +5470,8 @@ def wo_save():
 
     if units_payload:
         first_unit = units_payload[0]
-        wo.brand  = (first_unit.get("brand")  or "").strip() or None
-        wo.model  = _clip(first_unit.get("model"), 25) or None
+        wo.brand = (first_unit.get("brand") or "").strip() or None
+        wo.model = _clip(first_unit.get("model"), 25) or None
         wo.serial = _clip(first_unit.get("serial"), 25) or None
 
     suppliers_seen = []
@@ -5459,7 +5508,7 @@ def wo_save():
             pn_upper = (r.get("part_number") or "").strip().upper()
             sup_norm = _norm_supplier(sup)
 
-            ord_in   = bool(r.get("ordered_flag"))
+            ord_in = bool(r.get("ordered_flag"))
             ins_flag = bool(r.get("is_insurance_supplied"))
 
             prev_state = old_index.get((uk, pn_upper, sup_norm))
@@ -5472,9 +5521,8 @@ def wo_save():
                     ord_date = date.today()
             else:
                 ord_date = None
-                ord_in   = False
+                ord_in = False
 
-            # ✅ invoice_number: нормализуем ОДИН РАЗ
             inv = (r.get("invoice_number") or "").strip().upper()
             inv = inv[:32] if inv else None
 
@@ -5513,17 +5561,14 @@ def wo_save():
 
             db.session.add(wop)
 
-            # --- DEBUG write (no flush inside loop) ---
             with open(dbg_path, "a", encoding="utf-8") as fp:
                 fp.write(
                     f"BEFORE COMMIT: wo={getattr(wo,'id',None)} pn={pn_upper} inv={inv!r} obj_inv={getattr(wop,'invoice_number',None)!r}\n"
                 )
 
-    # ---------- commit ----------
     # ---------- FINAL AUDIT (MUST BE RIGHT BEFORE COMMIT) ----------
-    from datetime import datetime as _dt
     actor_id = getattr(current_user, "id", None)
-    now = _dt.utcnow()
+    now = datetime.utcnow()
 
     if is_new and not getattr(wo, "created_by_id", None):
         wo.created_by_id = actor_id
@@ -5549,17 +5594,17 @@ def wo_save():
 
     try:
         if is_new:
-            # wo.id появится после flush/commit; но у тебя уже были flush-и раньше.
             db.session.flush()
             _wo_audit(getattr(wo, "id", None) or 0, "created", "Work order created", meta=after)
         else:
             header_changed = {}
-            for k in ("technician_id", "technician_name", "job_numbers", "job_type", "delivery_fee", "markup_percent",
-                      "status", "customer_po"):
+            for k in (
+                "technician_id", "technician_name", "job_numbers", "job_type",
+                "delivery_fee", "markup_percent", "status", "customer_po"
+            ):
                 if (before or {}).get(k) != after.get(k):
                     header_changed[k] = {"from": (before or {}).get(k), "to": after.get(k)}
 
-            # short message (UI)
             msg_bits = []
             if header_changed:
                 msg_bits.append("header (" + ", ".join(header_changed.keys()) + ")")
@@ -5571,7 +5616,6 @@ def wo_save():
             else:
                 msg = "Updated: saved (no changes)"
 
-            # detailed meta_json
             meta = {
                 "header": header_changed,
                 **(parts_meta or {}),
@@ -5580,14 +5624,12 @@ def wo_save():
             _wo_audit(wo.id, "updated", msg, meta=meta)
 
     except Exception:
-        # если лог не записался — не ломаем сохранение WO
         pass
-    # ---------- /activity log ----------
 
-    # ---------- /FINAL AUDIT ----------
-
+    # ---------- MAIN COMMIT ----------
     try:
         db.session.commit()
+
         fresh = WorkOrder.query.get(wo.id)
         with open(dbg_path, "a", encoding="utf-8") as fp:
             fp.write(
@@ -5600,22 +5642,29 @@ def wo_save():
 
         flash("Work Order saved.", "success")
 
-        # --- DEBUG: verify WO audit in DB right after commit ---
         fresh = WorkOrder.query.get(wo.id)
         with open(dbg_path, "a", encoding="utf-8") as fp:
             fp.write("AFTER COMMIT WO AUDIT:\n")
             fp.write(
-                f"  current_user.id={getattr(current_user, 'id', None)} username={getattr(current_user, 'username', None)!r}\n")
+                f"  current_user.id={getattr(current_user, 'id', None)} "
+                f"username={getattr(current_user, 'username', None)!r}\n"
+            )
             fp.write(f"  wo.id={wo.id}\n")
             fp.write(
-                f"  db.created_by_id={getattr(fresh, 'created_by_id', None)} created_by_user={(fresh.created_by_user.username if fresh.created_by_user else None)!r}\n")
+                f"  db.created_by_id={getattr(fresh, 'created_by_id', None)} "
+                f"created_by_user={(fresh.created_by_user.username if fresh.created_by_user else None)!r}\n"
+            )
             fp.write(
-                f"  db.updated_by_id={getattr(fresh, 'updated_by_id', None)} updated_by_user={(fresh.updated_by_user.username if fresh.updated_by_user else None)!r}\n")
+                f"  db.updated_by_id={getattr(fresh, 'updated_by_id', None)} "
+                f"updated_by_user={(fresh.updated_by_user.username if fresh.updated_by_user else None)!r}\n"
+            )
 
-        rows = (WorkOrderPart.query
-                .filter_by(work_order_id=wo.id)
-                .with_entities(WorkOrderPart.part_number, WorkOrderPart.invoice_number)
-                .all())
+        rows = (
+            WorkOrderPart.query
+            .filter_by(work_order_id=wo.id)
+            .with_entities(WorkOrderPart.part_number, WorkOrderPart.invoice_number)
+            .all()
+        )
 
         with open(dbg_path, "a", encoding="utf-8") as fp:
             fp.write("AFTER COMMIT DB:\n")
@@ -5624,31 +5673,23 @@ def wo_save():
 
     except Exception as e:
         db.session.rollback()
+        current_app.logger.exception("WO_SAVE commit failed")
+        flash(f"Failed to save Work Order: {e}", "danger")
+        return _safe_detail_redirect(wo)
+
+    # ✅ RELEASE reservation only after successful NEW WO save
+    if is_new:
         try:
-            db.session.commit()
-
-            # ✅ RELEASE reservation right after successful NEW WO save
-            if is_new:
-                try:
-                    now2 = datetime.utcnow()
-                    tokens2 = _job_tokens(wo.job_numbers)
-                    if tokens2:
-                        JobReservation.query.filter(
-                            JobReservation.job_token.in_(tokens2),
-                            JobReservation.holder_user_id == actor_id
-                        ).delete(synchronize_session=False)
-                        db.session.commit()  # отдельный commit на удаление резерва — ок
-                except Exception:
-                    db.session.rollback()
-
-            flash("Work Order saved.", "success")
-
-        except Exception as e:
+            tokens2 = _job_tokens(wo.job_numbers)
+            if tokens2:
+                JobReservation.query.filter(
+                    JobReservation.job_token.in_(tokens2),
+                    JobReservation.holder_user_id == actor_id
+                ).delete(synchronize_session=False)
+                db.session.commit()
+        except Exception:
             db.session.rollback()
-            flash(f"Failed to save Work Order: {e}", "danger")
-            return redirect(url_for("inventory.wo_list"))
-
-        return redirect(url_for("inventory.wo_list"))
+            current_app.logger.exception("WO_SAVE failed to release job reservation")
 
     # ---------- remember suppliers ----------
     if suppliers_seen:
@@ -5965,7 +6006,7 @@ def wo_issue_instock(wo_id):
     import re
     from urllib.parse import urlencode
     from markupsafe import Markup
-    from sqlalchemy import func
+    # from sqlalchemy import func
     from datetime import datetime
     from flask import request, session
 
@@ -11284,7 +11325,13 @@ def return_selected():
                     db.session.flush()
                 dest_id = existing.id
 
-        # ---- BASE COST for RETURNS (STRICT supplier invoice match) ----
+        # ---- RETURN COST LOGIC ----
+        # Rules:
+        # 1) If issued row has supplier receipt invoice (src.inv_ref) ->
+        #    use BASE cost from that receipt line (NO extra expenses).
+        # 2) If issued row has no supplier receipt invoice (stock-issued item) ->
+        #    use the same unit cost the item was issued with (src.unit_cost_at_issue).
+
         pn = None
         if getattr(src, "part", None) and getattr(src.part, "part_number", None):
             pn = (src.part.part_number or "").strip()
@@ -11292,50 +11339,47 @@ def return_selected():
             p = Part.query.get(src.part_id)
             pn = (p.part_number or "").strip() if p else None
 
-        # supplier receipt invoice comes from src.inv_ref when available
-        # STOCK-issued rows may legitimately have empty inv_ref
         receipt_inv = (getattr(src, "inv_ref", None) or "").strip()
 
         if not pn:
             flash(
-                f"Cannot create BASE return: missing part_number for source row id={src.id}.",
+                f"Cannot create return: missing part_number for source row id={src.id}.",
                 "danger",
             )
             db.session.rollback()
             return _back_to_same_invoice(inv_no_first)
 
-        line, cs = pick_receipt_line_for_return(
-            part_number=pn,
-            inv_ref=(receipt_inv or None),
-        )
-        if not line:
-            if receipt_inv:
-                msg = (
+        line = None
+        cs = None
+
+        if receipt_inv:
+            # Vendor-received item: return by BASE cost from the matched receipt invoice
+            line, cs = pick_receipt_line_for_return(
+                part_number=pn,
+                inv_ref=receipt_inv,
+            )
+            if not line:
+                flash(
                     f"Cannot create BASE return: receipt line not found for part {pn} "
                     f"with supplier invoice '{receipt_inv}'. "
-                    f"Tip: if invoice contains multiple numbers, separate them with space/comma."
+                    f"Tip: if invoice contains multiple numbers, separate them with space/comma.",
+                    "danger",
                 )
-            else:
-                msg = (
-                    f"Cannot create BASE return: no posted stock receipt line found for part {pn}."
-                )
+                db.session.rollback()
+                return _back_to_same_invoice(inv_no_first)
 
-            flash(msg, "danger")
-            db.session.rollback()
-            return _back_to_same_invoice(inv_no_first)
+            base_cost = round(float(receipt_line_base_cost(line) or 0.0), 2)
 
-        line, cs = pick_receipt_line_for_return(part_number=pn, inv_ref=receipt_inv)
-        if not line:
-            flash(
-                f"Cannot create BASE return: receipt line not found for part {pn} "
-                f"with supplier invoice '{receipt_inv}'. "
-                f"Tip: if invoice contains multiple numbers, separate them with space/comma.",
-                "danger",
-            )
-            db.session.rollback()
-            return _back_to_same_invoice(inv_no_first)
+        else:
+            # Stock-issued item: no supplier invoice, use the same cost it was issued with
+            issued_cost = getattr(src, "unit_cost_at_issue", None)
+            if issued_cost is None:
+                issued_cost = 0.0
 
-        base_cost = round(float(receipt_line_base_cost(line) or 0.0), 2)
+            try:
+                base_cost = round(float(issued_cost or 0.0), 2)
+            except Exception:
+                base_cost = 0.0
 
         # ✅ invoice key of the ISSUED row (used for remaining checks per invoice card)
         src_inv_no = getattr(src, "invoice_number", None)
@@ -11353,7 +11397,7 @@ def return_selected():
             issued_by=issued_by,
             reference_job=return_reference,
             issue_date=now_dt,
-            unit_cost_at_issue=base_cost,  # ✅ BASE ONLY (no expenses) — НЕ МЕНЯЕМ
+            unit_cost_at_issue=base_cost,  # BASE ONLY for vendor-received; issued cost for stock-issued
             location=src.location,
 
             # ✅ Link to ORIGINAL ISSUED invoice (so already_returned works per invoice)
@@ -11362,7 +11406,7 @@ def return_selected():
             return_to=r_to,
             return_destination_id=dest_id,
 
-            # ✅ keep trace to receipt line used for base cost (doesn't affect logic)
+            # ✅ keep trace to receipt line used for base cost when available
             source_receipt_line_id=getattr(line, "id", None),
             cost_source="BASE_RETURN",
         )
@@ -11398,8 +11442,6 @@ def return_selected():
 
     flash(f"Return invoice #{batch.invoice_number} created ({len(created)} lines).", "success")
     return redirect(url_for('inventory.reports_grouped', invoice_number=batch.invoice_number))
-
-from sqlalchemy import func
 
 def _already_returned_qty_for_source(src) -> int:
     """
