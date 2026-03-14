@@ -248,6 +248,12 @@
           id="btnCopyWO">
     Copy WO
   </button>
+
+  <button type="button"
+          class="btn btn-sm btn-outline-secondary"
+          id="btnCopyParts">
+    Copy Parts
+  </button>
 </div>
 
 {% if IS_EDIT %}
@@ -1506,10 +1512,132 @@ function wccrToast(msg) {
 
 <script>
 (function(){
+  const btn = document.getElementById('btnCopyParts');
+  const unitsWrap = document.getElementById('unitsWrap');
+  const grandTotalEl = document.getElementById('grandTotal');
+
+  if (!btn || !unitsWrap) return;
+
+  function clean(val){
+    return String(val || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function money(val){
+    const n = parseFloat(val || '0');
+    return isNaN(n) ? '0.00' : n.toFixed(2);
+  }
+
+  btn.addEventListener('click', async () => {
+
+    const cards = unitsWrap.querySelectorAll('.card');
+    const blocks = [];
+
+    cards.forEach((card, idx) => {
+
+      const brand  = clean(card.querySelector('input[name$="[brand]"]')?.value);
+      const model  = clean(card.querySelector('input[name$="[model]"]')?.value);
+      const serial = clean(card.querySelector('input[name$="[serial]"]')?.value);
+
+      const rows = card.querySelectorAll('tbody tr');
+      const partLines = [];
+
+      rows.forEach(tr => {
+
+        const pn   = clean(tr.querySelector('.pn')?.value);
+        const name = clean(tr.querySelector('.part-name')?.value);
+        const qtyRaw = clean(tr.querySelector('.qty')?.value);
+
+        const qty = parseFloat(qtyRaw);
+
+        const totalSpan = tr.querySelector('.line-total');
+        const totalVal = totalSpan
+          ? clean(totalSpan.dataset.value || totalSpan.textContent)
+          : '0';
+
+        if (!pn || !name) return;
+        if (!qty || qty <= 0) return;
+
+        partLines.push(`${pn} ${name} x${qty} total $${money(totalVal)}`);
+
+      });
+
+      if (partLines.length === 0) return;
+
+      const meta = [brand, model, serial].filter(Boolean).join(' / ');
+      const header = meta
+        ? `APPLIANCE ${idx + 1} — ${meta}`
+        : `APPLIANCE ${idx + 1}`;
+
+      const unitSubtotalEl = card.querySelector('.unit-subtotal');
+      const unitSubtotal = unitSubtotalEl
+        ? money(unitSubtotalEl.textContent)
+        : '0.00';
+
+      const block = [
+        header,
+        '',
+        ...partLines,
+        '',
+        `--- SUBTOTAL $${unitSubtotal} ---`
+      ].join('\n');
+
+      blocks.push(block);
+
+    });
+
+    if (blocks.length === 0) {
+      wccrToast('Nothing to copy');
+      return;
+    }
+
+    const grandTotal = grandTotalEl
+      ? money(grandTotalEl.textContent)
+      : '0.00';
+
+    const finalText = [
+      ...blocks,
+      '',
+      `=== TOTAL PARTS $${grandTotal} ===`
+    ].join('\n\n');
+
+    try {
+      await navigator.clipboard.writeText(finalText);
+    } catch (err) {
+      const ta = document.createElement('textarea');
+      ta.value = finalText;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+
+    wccrToast('All appliance parts copied');
+
+  });
+
+})();
+</script>
+
+<script>
+(function(){
   const unitsWrap = document.getElementById('unitsWrap');
   if (!unitsWrap) return;
 
+  function money(val){
+    const n = parseFloat(val || '0');
+    return isNaN(n) ? '0.00' : n.toFixed(2);
+  }
+
+  function clean(val){
+    return String(val || '')
+      .replace(/\s+/g,' ')
+      .trim();
+  }
+
   unitsWrap.addEventListener('click', async (e) => {
+
     const btn = e.target.closest('.btn-copy-appliance');
     if (!btn) return;
 
@@ -1520,30 +1648,38 @@ function wccrToast(msg) {
     let lines = [];
 
     rows.forEach(tr => {
-      const pn   = tr.querySelector('.pn')?.value?.trim();
-      const name = tr.querySelector('.part-name')?.value?.trim();
-      const qty  = tr.querySelector('.qty')?.value?.trim();
+
+      const pn   = clean(tr.querySelector('.pn')?.value);
+      const name = clean(tr.querySelector('.part-name')?.value);
+      const qtyRaw = clean(tr.querySelector('.qty')?.value);
+
+      const qty = parseFloat(qtyRaw);
 
       const totalSpan = tr.querySelector('.line-total');
-      const totalValRaw = totalSpan
-        ? (totalSpan.getAttribute('data-value') || totalSpan.textContent || '').trim()
-        : '';
+      const totalVal = totalSpan
+        ? clean(totalSpan.dataset.value || totalSpan.textContent)
+        : '0';
 
-      if (pn || name) {
-        const q        = qty || '1';
-        const totalVal = totalValRaw || '0.00';
-        lines.push(`${pn || ''} ${name || ''} x${q} $${totalVal}`.trim());
-      }
+      // skip empty rows
+      if (!pn || !name) return;
+      if (!qty || qty <= 0) return;
+
+      lines.push(`${pn} ${name} x${qty} total $${money(totalVal)}`);
+
     });
 
-    const finalBlock = lines.join('\n');
-    if (!finalBlock) return;
+    const finalText = lines.join('\n');
+
+    if (!finalText){
+      wccrToast('Nothing to copy');
+      return;
+    }
 
     try {
-      await navigator.clipboard.writeText(finalBlock);
-    } catch (e2) {
+      await navigator.clipboard.writeText(finalText);
+    } catch (err) {
       const ta = document.createElement('textarea');
-      ta.value = finalBlock;
+      ta.value = finalText;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand('copy');
@@ -1552,6 +1688,7 @@ function wccrToast(msg) {
 
     wccrToast('Appliance parts copied');
   });
+
 })();
 </script>
 
