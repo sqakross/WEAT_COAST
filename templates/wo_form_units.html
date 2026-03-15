@@ -22,25 +22,29 @@
   .wo-form .unit-table td.issue-cell, .wo-form .unit-table td.issue-cell *{ pointer-events:auto!important; }
   .unit-table .ordered-col{ display:none; }
 
-  /* CANCELLED WO: слегка “приглушаем” форму */
-.wo-cancelled {
-  border: 2px solid #dc3545;
-  border-radius: 10px;
-  padding: 10px;
-  background: #fff5f5;
-}
+  .wo-cancelled {
+    border: 2px solid #dc3545;
+    border-radius: 10px;
+    padding: 10px;
+    background: #fff5f5;
+  }
 
-  /* ВСЕ текстовые поля формы показываем как UPPERCASE */
+  .pn {
+    cursor: pointer;
+  }
+
+  .wo-form .dropdown-menu .dropdown-item{
+    cursor: pointer;
+  }
+
   .wo-form input[type="text"] { text-transform: uppercase; }
 
-  /* ===== Parts table layout: make Part# + Part name usable ===== */
   .wo-form .unit-table{
     table-layout: fixed;
     width: 100%;
-    min-width: 0;            /* ✅ no forced horizontal scroll */
+    min-width: 0;
   }
 
-  /* 1) PART # (1-я колонка) */
   .wo-form .unit-table th:nth-child(1),
   .wo-form .unit-table td:nth-child(1){
     width: 140px;
@@ -50,35 +54,29 @@
     font-size: .88rem;
   }
 
-  /* 2) ALT PN# (2-я колонка) */
   .wo-form .unit-table th:nth-child(2),
   .wo-form .unit-table td:nth-child(2){
     width: 110px;
   }
 
-  /* 3) PART NAME (3-я колонка) — самая широкая */
   .wo-form .unit-table th:nth-child(3),
   .wo-form .unit-table td:nth-child(3){
     width: 320px;
   }
 
-  /* аккуратнее поля внутри таблицы */
   .wo-form .unit-table td .form-control{
     padding: .20rem .35rem;
     font-size: .90rem;
   }
 
-  /* чтобы длинное имя не выглядело “сломано” */
   .wo-form .unit-table td:nth-child(3) .part-name{
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  /* Чуть уменьшаем чекбоксы, сами поля не трогаем */
   .unit-table .form-check-input{ transform: scale(.9); }
 
-  /* ВИЗУАЛЬНАЯ ПОДСВЕТКА КАК В WORK ORDER */
   tr.issued-row{ background:#e6f4ea; }
   tr.issued-row .pn,
   tr.issued-row .part-name,
@@ -119,10 +117,6 @@
     outline: 2px solid #dc3545 !important;
     box-shadow: 0 0 0 .2rem rgba(220,53,69,.25) !important;
   }
-
-  /* ================================
-   P2) COMPACT MODE: fit all columns
-   ================================ */
 
   .wo-form .unit-table{
     table-layout: fixed;
@@ -197,27 +191,19 @@
     text-overflow: ellipsis;
   }
 
-  /* =========================================================
-     WO LIST — FINAL FIX for Actions buttons
-     Open / Edit / Delete = identical size & shape
-     ========================================================= */
   .wo-list-table .wo-actions .btn,
   .wo-list-table .wo-actions button.btn{
     appearance: none !important;
     -webkit-appearance: none !important;
-
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
     box-sizing: border-box !important;
-
     height: 30px !important;
     min-width: 64px !important;
     padding: 0 .5rem !important;
-
     font-size: .875rem !important;
     line-height: 1 !important;
-
     border-radius: .25rem !important;
     border-width: 1px !important;
   }
@@ -243,15 +229,11 @@
 <div class="wo-header-line">
   <h3>{{ RO and 'View' or (IS_EDIT and 'Edit' or 'New') }} Work Order (multi-appliance)</h3>
 
-  <button type="button"
-          class="btn btn-sm btn-outline-primary"
-          id="btnCopyWO">
+  <button type="button" class="btn btn-sm btn-outline-primary" id="btnCopyWO">
     Copy WO
   </button>
 
-  <button type="button"
-          class="btn btn-sm btn-outline-secondary"
-          id="btnCopyParts">
+  <button type="button" class="btn btn-sm btn-outline-secondary" id="btnCopyParts">
     Copy Parts
   </button>
 </div>
@@ -277,8 +259,7 @@
   </div>
 {% endif %}
 
-<form method="post" action="{{ url_for('inventory.wo_save') }}" id="woForm" class="wo-form">
-  <form method="post"
+<form method="post"
       action="{{ url_for('inventory.wo_save') }}"
       id="woForm"
       class="wo-form {% if IS_EDIT and wo.status == 'cancel_job' %}wo-cancelled{% endif %}">
@@ -366,7 +347,7 @@
         <option value="search_ordered" {{ 'selected' if st=='search_ordered' else '' }}>search_ordered</option>
         <option value="ordered" {{ 'selected' if st=='ordered' else '' }}>ordered</option>
         <option value="done" {{ 'selected' if st=='done' else '' }}>done</option>
-        <option value="cancel_job"     {{ 'selected' if st=='cancel_job' else '' }}>cancel_job</option>
+        <option value="cancel_job" {{ 'selected' if st=='cancel_job' else '' }}>cancel_job</option>
       </select>
     </div>
 
@@ -441,7 +422,6 @@
                                (r.status is defined and (r.status or '')|lower == 'ordered') or
                                (r.line_status is defined and (r.line_status or '')|lower == 'ordered') %}
 
-              {# формируем css-классы строки #}
               {% set row_class = '' %}
               {% if issued_full %}
                 {% set row_class = row_class + ' issued-row' %}
@@ -496,12 +476,12 @@
 
                 <td class="col-inv">
                   <input class="form-control inv-input"
-                       name="units[{{ ui }}][rows][{{ ri }}][invoice_number]"
-                       value="{{ (r.invoice_number or '')|upper }}"
-                       data-wop-id="{{ wop_id or '' }}"
-                       maxlength="32"
-                       placeholder="INV#"
-                       {{ ro }} {{ dis }}>
+                         name="units[{{ ui }}][rows][{{ ri }}][invoice_number]"
+                         value="{{ (r.invoice_number or '')|upper }}"
+                         data-wop-id="{{ wop_id or '' }}"
+                         maxlength="32"
+                         placeholder="INV#"
+                         {{ ro }} {{ dis }}>
                 </td>
 
                 <td class="text-center">
@@ -515,9 +495,9 @@
                 <td class="text-center ins-col">
                   <div class="form-check d-flex justify-content-center m-0">
                     <input class="form-check-input ins-check" type="checkbox"
-                       name="units[{{ ui }}][rows][{{ ri }}][is_insurance_supplied]"
-                       data-wop-id="{{ r.id or '' }}"
-                       {% if r.is_insurance_supplied %}checked{% endif %} {{ dis }}>
+                           name="units[{{ ui }}][rows][{{ ri }}][is_insurance_supplied]"
+                           data-wop-id="{{ r.id or '' }}"
+                           {% if r.is_insurance_supplied %}checked{% endif %} {{ dis }}>
                   </div>
                 </td>
 
@@ -543,14 +523,12 @@
                   {% if not RO %}
                     <div class="form-check d-flex justify-content-center m-0">
                       {% set wop_id = r.get('id') %}
-                        <input type="checkbox" class="form-check-input issue-check"
-                               name="issue_ids"
-                               value="{{ wop_id or '' }}"
-                               data-wop-id="{{ wop_id or '' }}"
-                               {% if wop_id is none %}disabled{% endif %}
-                               {% if issued_full %}disabled{% endif %}
-
-
+                      <input type="checkbox" class="form-check-input issue-check"
+                             name="issue_ids"
+                             value="{{ wop_id or '' }}"
+                             data-wop-id="{{ wop_id or '' }}"
+                             {% if wop_id is none %}disabled{% endif %}
+                             {% if issued_full %}disabled{% endif %}>
                     </div>
                   {% else %}
                     <span class="text-muted">—</span>
@@ -575,9 +553,25 @@
               + Add part row
             </button>
 
-            <button type="button" class="btn btn-outline-primary btn-copy-appliance">
-              Copy
-            </button>
+            <div class="btn-group" role="group">
+              <button type="button" class="btn btn-outline-primary btn-copy-appliance">
+                Copy
+              </button>
+              <button type="button"
+                      class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split"
+                      data-bs-toggle="dropdown"
+                      aria-expanded="false"
+                      title="Search appliance parts by supplier">
+                <span class="visually-hidden">Toggle Search Parts</span>
+              </button>
+              <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="marcone">Search in Marcone</button></li>
+                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="reliable">Search in Reliable Parts</button></li>
+                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="encompass">Search in Encompass</button></li>
+                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="coast">Search in Coast Parts</button></li>
+                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="amazon">Search in Amazon</button></li>
+              </ul>
+            </div>
           </div>
           {% else %}
           <span></span>
@@ -645,6 +639,140 @@
 
 {% block extra_js %}
 <script>
+function wccrToast(msg) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  Object.assign(t.style, {
+    position: 'fixed',
+    bottom: '20px',
+    right: '20px',
+    background: '#0d6efd',
+    color: '#fff',
+    padding: '6px 12px',
+    borderRadius: '8px',
+    fontSize: '.85rem',
+    boxShadow: '0 2px 8px rgba(0,0,0,.3)',
+    zIndex: 9999
+  });
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2000);
+}
+</script>
+
+<script>
+(function(){
+  const unitsWrap = document.getElementById('unitsWrap');
+  if (!unitsWrap) return;
+
+  const MAX_SEARCH_PARTS = 12;
+
+  function clean(val){
+    return String(val || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+  }
+
+  function getUniquePartNumbers(card){
+    const seen = new Set();
+    const parts = [];
+
+    card.querySelectorAll('tbody tr').forEach(tr => {
+      const pn = clean(tr.querySelector('.pn')?.value);
+      if (!pn) return;
+      if (seen.has(pn)) return;
+      seen.add(pn);
+      parts.push(pn);
+    });
+
+    return parts;
+  }
+
+  function buildSupplierUrl(supplier, pn){
+    const part = encodeURIComponent(pn);
+
+    switch ((supplier || '').toLowerCase()) {
+      case 'marcone':
+        return `https://my.marcone.com/search?text=${part}`;
+
+      case 'reliable':
+        return `https://www.google.com/search?q=${encodeURIComponent('site:reliableparts.net "' + pn + '"')}`;
+
+      case 'encompass':
+        return `https://encompass.com/search?searchTerm=${part}`;
+
+      case 'coast':
+        return `https://www.coastparts.com/parts/SQ-${part}`;
+
+      case 'amazon':
+        return `https://www.amazon.com/s?k=${part}`;
+
+      default:
+        return '';
+    }
+  }
+
+  function openUrlsOneByOne(urls){
+    if (!urls.length) return;
+
+    let i = 0;
+
+    function openNext(){
+      if (i >= urls.length) return;
+
+      const a = document.createElement('a');
+      a.href = urls[i];
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      i += 1;
+
+      if (i < urls.length) {
+        setTimeout(openNext, 250);
+      }
+    }
+
+    openNext();
+  }
+
+  unitsWrap.addEventListener('click', (e) => {
+    const btn = e.target.closest('.btn-search-supplier');
+    if (!btn) return;
+
+    const card = btn.closest('.card');
+    if (!card) return;
+
+    const parts = getUniquePartNumbers(card);
+    if (!parts.length) {
+      wccrToast('No part numbers to search');
+      return;
+    }
+
+    const limited = parts.slice(0, MAX_SEARCH_PARTS);
+
+    if (parts.length > MAX_SEARCH_PARTS) {
+      wccrToast(`Opening first ${MAX_SEARCH_PARTS} unique part numbers`);
+    }
+
+    const urls = limited
+      .map(pn => buildSupplierUrl(btn.dataset.supplier, pn))
+      .filter(Boolean);
+
+    if (!urls.length) {
+      wccrToast('Search URL is not configured');
+      return;
+    }
+
+    openUrlsOneByOne(urls);
+    wccrToast(`Opening ${urls.length} tabs...`);
+  });
+})();
+</script>
+
+<script>
 (function(){
   const sel  = document.querySelector('select[name="technician_id"]');
   const hidN = document.querySelector('input[name="technician_name"]');
@@ -659,7 +787,6 @@
 })();
 </script>
 
-{# === NEW: авто-UPPERCASE на фронте для нужных полей === #}
 <script>
 (function(){
   const form = document.getElementById('woForm');
@@ -705,25 +832,41 @@
 
 <script>
 (function(){
-  // STOCK API
+  const unitsWrap = document.getElementById('unitsWrap');
+  if (!unitsWrap) return;
+
+  unitsWrap.addEventListener('click', async function(e){
+    const pnInput = e.target.closest('.pn');
+    if (!pnInput) return;
+
+    const pn = (pnInput.value || '').trim();
+    if (!pn) return;
+
+    try{
+      await navigator.clipboard.writeText(pn);
+    }catch(err){
+      const ta = document.createElement('textarea');
+      ta.value = pn;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+
+    wccrToast('Part number copied');
+  });
+})();
+</script>
+
+<script>
+(function(){
   const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
   const API_DUP   = "{{ url_for('inventory.api_job_duplicate_check') }}";
-  const IS_EDIT_TPL = {{ 'true' if IS_EDIT else 'false' }}; // оставим для справки
-  const IS_EDIT = !!(document.querySelector('#woForm input[name="wo_id"]')?.value || '').trim(); // ✅ реально из DOM
-
-  const IS_RO     = {{ 'true' if RO else 'false' }};
+  const IS_EDIT = !!(document.querySelector('#woForm input[name="wo_id"]')?.value || '').trim();
+  const IS_RO   = {{ 'true' if RO else 'false' }};
 
   const form         = document.getElementById('woForm');
   const unitsWrap    = document.getElementById('unitsWrap');
-
-  // P3) Tooltip: show full value on hover for Part# and Part name
-  unitsWrap?.addEventListener('mouseover', (e)=>{
-    const inp = e.target.closest('input.part-name, input.pn');
-    if (!inp) return;
-    const v = (inp.value || '').trim();
-    if (v) inp.title = v;
-  });
-
   const grandTotalEl = document.getElementById('grandTotal');
   const deliveryEl   = document.getElementById('deliveryFee');
   const markupEl     = document.getElementById('markupPercent');
@@ -733,17 +876,23 @@
   const addUnitBtn   = document.getElementById('addUnit');
   const jobTypeSel   = document.querySelector('select[name="job_type"]');
 
-  // --- helpers для INS-логики ---
+  unitsWrap?.addEventListener('mouseover', (e)=>{
+    const inp = e.target.closest('input.part-name, input.pn');
+    if (!inp) return;
+    const v = (inp.value || '').trim();
+    if (v) inp.title = v;
+  });
+
   function isInsuranceJob(){
     return jobTypeSel && jobTypeSel.value === 'INSURANCE';
   }
+
   function isRowInsuranceSupplied(tr){
     if (!tr) return false;
     const cb = tr.querySelector('.ins-check');
     return !!(cb && cb.checked);
   }
 
-  // --- UNSAVED CHANGES GUARD ---
   let isDirty = false;
   let isSubmitting = false;
 
@@ -766,9 +915,7 @@
     form.addEventListener('input', markDirty);
     form.addEventListener('change', markDirty);
   }
-  // --- /UNSAVED CHANGES GUARD ---
 
-  // we'll need current WO id for duplicate logic
   const currentWOInput = form.querySelector('input[name="wo_id"]');
   const CURRENT_WO_ID  = currentWOInput ? String(currentWOInput.value || '').trim() : '';
 
@@ -779,6 +926,7 @@
       else     inp.removeAttribute('required');
     });
   }
+
   statusSel?.addEventListener('change', ()=>{
     updateSupplierRequired();
     reevaluateWOStatusFromOrd();
@@ -791,15 +939,16 @@
       if (cb && !IS_RO) cb.disabled = false;
     });
   }
+
   statusSel?.addEventListener('change', toggleOrderedCols);
 
-  // показ/скрытие INS-колонки в зависимости от Job type
   function updateInsColumns(){
     const show = jobTypeSel && jobTypeSel.value === 'INSURANCE';
     document.querySelectorAll('.ins-col').forEach(el=>{
       el.style.display = show ? 'table-cell' : 'none';
     });
   }
+
   jobTypeSel?.addEventListener('change', updateInsColumns);
 
   function updatePOField(){
@@ -813,6 +962,7 @@
       if (!show) inp.value = '';
     }
   }
+
   jobTypeSel?.addEventListener('change', updatePOField);
 
   function hasAnyOrderedChecked(){
@@ -821,25 +971,24 @@
   }
 
   function reevaluateWOStatusFromOrd(){
-  if (!statusSel) return;
-  const cur = statusSel.value;
+    if (!statusSel) return;
+    const cur = statusSel.value;
 
-  // ✅ если done или cancel_job — НЕ трогаем статус автоматикой
-  if (cur === 'done' || cur === 'cancel_job') return;
+    if (cur === 'done' || cur === 'cancel_job') return;
 
-  if (hasAnyOrderedChecked()){
-    if (cur !== 'ordered'){
-      statusSel.value = 'ordered';
-      toggleOrderedCols();
-      updateSupplierRequired();
-    }
-  } else {
-    if (cur !== 'search_ordered'){
-      statusSel.value = 'search_ordered';
-      updateSupplierRequired();
+    if (hasAnyOrderedChecked()){
+      if (cur !== 'ordered'){
+        statusSel.value = 'ordered';
+        toggleOrderedCols();
+        updateSupplierRequired();
+      }
+    } else {
+      if (cur !== 'search_ordered'){
+        statusSel.value = 'search_ordered';
+        updateSupplierRequired();
+      }
     }
   }
-}
 
   function syncOrderedFlagsBeforeSubmit(){
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
@@ -962,50 +1111,43 @@
     });
   });
 
-  // ✅ FIXED: deterministic enable/disable
   function setIssueEnabled(tr, enabled){
-  const cb = tr.querySelector('.issue-check');
-  if (!cb) return;
+    const cb = tr.querySelector('.issue-check');
+    if (!cb) return;
 
-  // already issued => never allow
-  if (tr.classList.contains('issued-row')){
-    cb.checked = false;
-    cb.disabled = true;
-    cb.setAttribute('disabled','disabled');
-    cb.title = ''; // ✅ чистим
-    return;
+    if (tr.classList.contains('issued-row')){
+      cb.checked = false;
+      cb.disabled = true;
+      cb.setAttribute('disabled','disabled');
+      cb.title = '';
+      return;
+    }
+
+    const isINSJob = (jobTypeSel && jobTypeSel.value === 'INSURANCE');
+    const insCheckbox = tr.querySelector('.ins-check');
+    const isINSLine = !!(insCheckbox && insCheckbox.checked);
+    const allowIssue = enabled || (isINSJob && isINSLine);
+
+    if (!IS_EDIT){
+      cb.checked = false;
+      cb.disabled = true;
+      cb.setAttribute('disabled','disabled');
+      cb.title = "Save WO first";
+      return;
+    }
+
+    if (!allowIssue){
+      cb.checked = false;
+      cb.disabled = true;
+      cb.setAttribute('disabled','disabled');
+      cb.title = "";
+      return;
+    }
+
+    cb.disabled = false;
+    cb.removeAttribute('disabled');
+    cb.title = "";
   }
-
-  const isINSJob = (jobTypeSel && jobTypeSel.value === 'INSURANCE');
-  const insCheckbox = tr.querySelector('.ins-check');
-  const isINSLine = !!(insCheckbox && insCheckbox.checked);
-
-  const allowIssue = enabled || (isINSJob && isINSLine);
-
-  // если WO не сохранён — всегда блок
-  if (!IS_EDIT){
-    cb.checked = false;
-    cb.disabled = true;
-    cb.setAttribute('disabled','disabled');
-    cb.title = "Save WO first";
-    return;
-  }
-
-  // WO сохранён
-  if (!allowIssue){
-    cb.checked = false;
-    cb.disabled = true;
-    cb.setAttribute('disabled','disabled');
-    cb.title = ""; // ✅ важно: иначе tooltip может остаться
-    return;
-  }
-
-  // разрешаем
-  cb.disabled = false;
-  cb.removeAttribute('disabled');
-  cb.title = ""; // ✅ убрать "Save WO first"
-}
-
 
   function fetchHint(tr){
     const pnInput  = tr.querySelector('.pn');
@@ -1019,7 +1161,6 @@
     const pnMain = (pnInput?.value || '').trim().toUpperCase();
     const pnAlt  = (altInput?.value || '').trim().toUpperCase();
     const pn     = pnMain || pnAlt;
-
     const qty = parseInt(qtyInput?.value || '0', 10) || 0;
 
     if (!pn || qty <= 0) {
@@ -1069,11 +1210,7 @@
             (curCost === 0 || !costInp.value) &&
             costGuess !== undefined &&
             !isNaN(Number(costGuess))) {
-
-          const newCost = (
-            Math.round((Number(costGuess)+Number.EPSILON)*100)/100
-          ).toFixed(2);
-
+          const newCost = (Math.round((Number(costGuess)+Number.EPSILON)*100)/100).toFixed(2);
           costInp.value = newCost;
           const card = tr.closest('.card');
           if (card) recomputeUnitSubtotal(card);
@@ -1127,7 +1264,6 @@
 
   <td class="hint">—</td>
 
-  <!-- ✅ FIX: unsaved rows must not have fake value; keep disabled until WO saved -->
   <td class="text-center issue-cell">
     <div class="form-check d-flex justify-content-center m-0">
       <input type="checkbox" class="form-check-input issue-check"
@@ -1140,7 +1276,7 @@
   </td>
 
   <td class="text-center">
-    ${IS_RO?'':'<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>'}
+    ${IS_RO ? '' : '<button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button>'}
   </td>
 </tr>`;
   }
@@ -1202,9 +1338,26 @@
         <button type="button" class="btn btn-outline-secondary add-row">
           + Add part row
         </button>
-        <button type="button" class="btn btn-outline-primary btn-copy-appliance">
-          Copy
-        </button>
+
+        <div class="btn-group" role="group">
+          <button type="button" class="btn btn-outline-primary btn-copy-appliance">
+            Copy
+          </button>
+          <button type="button"
+                  class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split"
+                  data-bs-toggle="dropdown"
+                  aria-expanded="false"
+                  title="Search appliance parts by supplier">
+            <span class="visually-hidden">Toggle Search Parts</span>
+          </button>
+          <ul class="dropdown-menu">
+            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="marcone">Search in Marcone</button></li>
+            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="reliable">Search in Reliable Parts</button></li>
+            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="encompass">Search in Encompass</button></li>
+            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="coast">Search in Coast Parts</button></li>
+            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="amazon">Search in Amazon</button></li>
+          </ul>
+        </div>
       </div>`}
       <div class="text-end ms-auto">
         <strong>Unit subtotal:</strong>
@@ -1220,10 +1373,9 @@
     const card = e.target.closest('.card');
     if (!card) return;
 
-    // ✅ INV normalization on input (keep single spaces between tokens)
     if (tr && e.target.classList.contains('inv-input')) {
       const v  = (e.target.value || '').toUpperCase();
-      const nv = v.replace(/\s+/g, ' ').trim();   // <-- keep spaces, collapse multiple to one
+      const nv = v.replace(/\s+/g, ' ').trim();
       if (e.target.value !== nv) {
         const s = e.target.selectionStart, e2 = e.target.selectionEnd;
         e.target.value = nv;
@@ -1231,10 +1383,10 @@
       }
     }
 
-
     if (tr && (e.target.classList.contains('qty') || e.target.classList.contains('unit-cost'))){
       recomputeUnitSubtotal(card);
     }
+
     if (tr && (
       e.target.classList.contains('pn') ||
       e.target.classList.contains('alt-pn') ||
@@ -1274,7 +1426,6 @@
     const btn = e.target.closest('button');
     if(!btn) return;
 
-    // ✅ FIX: delete unit reliably
     if (btn.classList.contains('del-unit')) {
       const targetCard = btn.closest('.card');
       if (targetCard) {
@@ -1424,8 +1575,7 @@
         if (!selected.includes(wopId)) return;
 
         let invVal = (tr.querySelector('.inv-input')?.value || '').toUpperCase();
-        invVal = invVal.replace(/\s+/g, ' ').trim();   // <-- keep spaces, collapse
-
+        invVal = invVal.replace(/\s+/g, ' ').trim();
 
         const h = document.createElement('input');
         h.type = 'hidden';
@@ -1444,37 +1594,17 @@
     document.getElementById('issueForm').submit();
   });
 
-  // initial calc / hints
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
   document.querySelectorAll('#unitsWrap tbody tr').forEach(fetchHint);
   updateSupplierRequired();
   toggleOrderedCols();
   updateInsColumns();
-  updatePOField();                 // ✅ FIX: run on load
+  updatePOField();
   reevaluateWOStatusFromOrd();
 })();
 </script>
 
 <script>
-function wccrToast(msg) {
-  const t = document.createElement('div');
-  t.textContent = msg;
-  Object.assign(t.style, {
-    position: 'fixed',
-    bottom: '20px',
-    right: '20px',
-    background: '#0d6efd',
-    color: '#fff',
-    padding: '6px 12px',
-    borderRadius: '8px',
-    fontSize: '.85rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,.3)',
-    zIndex: 9999
-  });
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2000);
-}
-
 (function(){
   const btnWO = document.getElementById('btnCopyWO');
   if (!btnWO) return;
@@ -1530,26 +1660,23 @@ function wccrToast(msg) {
   }
 
   btn.addEventListener('click', async () => {
-
     const cards = unitsWrap.querySelectorAll('.card');
     const blocks = [];
 
     cards.forEach((card, idx) => {
-
       const brand  = clean(card.querySelector('input[name$="[brand]"]')?.value);
       const model  = clean(card.querySelector('input[name$="[model]"]')?.value);
       const serial = clean(card.querySelector('input[name$="[serial]"]')?.value);
 
       const rows = card.querySelectorAll('tbody tr');
       const partLines = [];
+      let partIndex = 1;
 
       rows.forEach(tr => {
-
-        const pn   = clean(tr.querySelector('.pn')?.value);
-        const name = clean(tr.querySelector('.part-name')?.value);
+        const pn     = clean(tr.querySelector('.pn')?.value);
+        const name   = clean(tr.querySelector('.part-name')?.value);
         const qtyRaw = clean(tr.querySelector('.qty')?.value);
-
-        const qty = parseFloat(qtyRaw);
+        const qty    = parseFloat(qtyRaw);
 
         const totalSpan = tr.querySelector('.line-total');
         const totalVal = totalSpan
@@ -1559,8 +1686,8 @@ function wccrToast(msg) {
         if (!pn || !name) return;
         if (!qty || qty <= 0) return;
 
-        partLines.push(`${pn} ${name} x${qty} total $${money(totalVal)}`);
-
+        partLines.push(`${partIndex}. ${pn} ${name} x${qty} total $${money(totalVal)}`);
+        partIndex++;
       });
 
       if (partLines.length === 0) return;
@@ -1584,7 +1711,6 @@ function wccrToast(msg) {
       ].join('\n');
 
       blocks.push(block);
-
     });
 
     if (blocks.length === 0) {
@@ -1614,9 +1740,7 @@ function wccrToast(msg) {
     }
 
     wccrToast('All appliance parts copied');
-
   });
-
 })();
 </script>
 
@@ -1632,48 +1756,68 @@ function wccrToast(msg) {
 
   function clean(val){
     return String(val || '')
-      .replace(/\s+/g,' ')
+      .replace(/\s+/g, ' ')
       .trim();
   }
 
   unitsWrap.addEventListener('click', async (e) => {
-
     const btn = e.target.closest('.btn-copy-appliance');
     if (!btn) return;
 
     const card = btn.closest('.card');
     if (!card) return;
 
+    const allCards = [...unitsWrap.querySelectorAll('.card')];
+    const applianceNumber = allCards.indexOf(card) + 1;
+
+    const brand  = clean(card.querySelector('input[name$="[brand]"]')?.value);
+    const model  = clean(card.querySelector('input[name$="[model]"]')?.value);
+    const serial = clean(card.querySelector('input[name$="[serial]"]')?.value);
+
+    const meta = [brand, model, serial].filter(Boolean).join(' / ');
+    const header = meta
+      ? `APPLIANCE ${applianceNumber} — ${meta}`
+      : `APPLIANCE ${applianceNumber}`;
+
     const rows = card.querySelectorAll('tbody tr');
-    let lines = [];
+    const lines = [];
+    let partIndex = 1;
 
     rows.forEach(tr => {
-
-      const pn   = clean(tr.querySelector('.pn')?.value);
-      const name = clean(tr.querySelector('.part-name')?.value);
+      const pn     = clean(tr.querySelector('.pn')?.value);
+      const name   = clean(tr.querySelector('.part-name')?.value);
       const qtyRaw = clean(tr.querySelector('.qty')?.value);
-
-      const qty = parseFloat(qtyRaw);
+      const qty    = parseFloat(qtyRaw);
 
       const totalSpan = tr.querySelector('.line-total');
       const totalVal = totalSpan
         ? clean(totalSpan.dataset.value || totalSpan.textContent)
         : '0';
 
-      // skip empty rows
       if (!pn || !name) return;
       if (!qty || qty <= 0) return;
 
-      lines.push(`${pn} ${name} x${qty} total $${money(totalVal)}`);
-
+      lines.push(`${partIndex}. ${pn} ${name} x${qty} total $${money(totalVal)}`);
+      partIndex++;
     });
 
-    const finalText = lines.join('\n');
-
-    if (!finalText){
+    if (lines.length === 0){
       wccrToast('Nothing to copy');
       return;
     }
+
+    const unitSubtotalEl = card.querySelector('.unit-subtotal');
+    const unitSubtotal = unitSubtotalEl
+      ? money(unitSubtotalEl.textContent)
+      : '0.00';
+
+    const finalText = [
+      header,
+      '',
+      ...lines,
+      '',
+      `--- SUBTOTAL $${unitSubtotal} ---`
+    ].join('\n');
 
     try {
       await navigator.clipboard.writeText(finalText);
@@ -1688,118 +1832,99 @@ function wccrToast(msg) {
 
     wccrToast('Appliance parts copied');
   });
-
 })();
 </script>
 
 <script>
 (function(){
   const IS_RO = {{ 'true' if RO else 'false' }};
-
-  // ✅ Надежно определяем EDIT по hidden wo_id (а не по Jinja)
   const woIdEl = document.querySelector('#woForm input[name="wo_id"]');
   const IS_EDIT_REAL = !!(woIdEl && String(woIdEl.value || '').trim());
 
-  // не лочим в режиме Edit или Readonly
   if (IS_EDIT_REAL || IS_RO) return;
-
 
   const API_RESERVE = "{{ url_for('inventory.api_job_reserve') }}";
   const API_RELEASE = "{{ url_for('inventory.api_job_release') }}";
 
   const form = document.getElementById('woForm');
-
-
   if (!form) return;
 
   const jobInput  = form.querySelector('input[name="job_numbers"]');
   const saveBtn   = form.querySelector('button[type="submit"]');
-  const issueBtn  = document.getElementById('issueSelectedBtn'); // у тебя уже есть
+  const issueBtn  = document.getElementById('issueSelectedBtn');
   if (!jobInput) return;
 
-  // --- UI: status line under job field ---
   const statusLine = document.createElement('div');
   statusLine.className = "form-text";
   statusLine.style.marginTop = "6px";
   jobInput.insertAdjacentElement('afterend', statusLine);
 
-  // --- helpers ---
   function setButtonsEnabled(enabled){
     if (saveBtn) saveBtn.disabled = !enabled;
-    if (issueBtn) issueBtn.disabled = !enabled; // пока WO new — issue всё равно disabled у тебя, но пусть будет
+    if (issueBtn) issueBtn.disabled = !enabled;
   }
 
   function escapeHtml(s){
-      return String(s || "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
+    return String(s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
 
-    function setOk(msg){
-      jobInput.classList.remove('is-invalid');
-      statusLine.className = "form-text text-success";
-      statusLine.innerHTML = msg ? escapeHtml(msg) : "Reserved";
-      setButtonsEnabled(true);
-    }
+  function setOk(msg){
+    jobInput.classList.remove('is-invalid');
+    statusLine.className = "form-text text-success";
+    statusLine.innerHTML = msg ? escapeHtml(msg) : "Reserved";
+    setButtonsEnabled(true);
+  }
 
-    function setWarn(html){
-      jobInput.classList.add('is-invalid');
-      statusLine.className = "form-text text-danger";
-      // тут мы УЖЕ хотим поддержать HTML (кнопку/ссылку)
-      statusLine.innerHTML = html || "Locked / Duplicate";
-      setButtonsEnabled(false);
-    }
-
+  function setWarn(html){
+    jobInput.classList.add('is-invalid');
+    statusLine.className = "form-text text-danger";
+    statusLine.innerHTML = html || "Locked / Duplicate";
+    setButtonsEnabled(false);
+  }
 
   function parseISO(iso){
-      if (!iso) return null;
-      // if string has timezone (Z or +hh:mm) -> ok
-      if (/[zZ]|[+-]\d\d:\d\d$/.test(iso)) return new Date(iso);
-      // otherwise treat as UTC
-      return new Date(iso + 'Z');
-    }
-
+    if (!iso) return null;
+    if (/[zZ]|[+-]\d\d:\d\d$/.test(iso)) return new Date(iso);
+    return new Date(iso + 'Z');
+  }
 
   function setIdle(){
     jobInput.classList.remove('is-invalid');
     statusLine.className = "form-text text-muted";
     statusLine.textContent = "Enter job number(s) to reserve.";
-    setButtonsEnabled(true); // пусть можно, пока поле пустое
+    setButtonsEnabled(true);
   }
 
-  // convert ISO UTC -> local string (PST will show automatically in browser)
   function fmtLocalPT(iso){
-  try{
-    const d = parseISO(iso) || new Date(iso);
-    if (isNaN(d.getTime())) return "";
+    try{
+      const d = parseISO(iso) || new Date(iso);
+      if (isNaN(d.getTime())) return "";
 
-    // Always show Pacific Time (America/Los_Angeles)
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Los_Angeles',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: 'numeric',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-      timeZoneName: 'short' // PST / PDT automatically
-    }).format(d);
-  }catch(e){
-    return "";
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Los_Angeles',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+        timeZoneName: 'short'
+      }).format(d);
+    }catch(e){
+      return "";
+    }
   }
-}
 
-
-  // normalize same way as your backend tokenization prefers numbers
   function hasAnyToken(s){
     return /\d+/.test((s||"").trim());
   }
 
-  // --- debounce reserve ---
   let tmr = null;
   let lastSent = "";
   let lastStatus = "idle";
@@ -1813,19 +1938,14 @@ function wccrToast(msg) {
       return;
     }
 
-    // avoid spam if unchanged
     if (raw === lastSent && (lastStatus === "reserved")) return;
-
     lastSent = raw;
 
-    // show "checking..."
     statusLine.className = "form-text text-muted";
     statusLine.textContent = "Checking…";
 
     let resp, data;
     try{
-      // твой api_job_reserve сейчас GET, поэтому отправляю GET.
-      // Если переделаешь на POST — скажи, я дам вариант.
       const qs = new URLSearchParams({ job_numbers: raw }).toString();
       resp = await fetch(API_RESERVE + "?" + qs, {
         method: "GET",
@@ -1834,7 +1954,6 @@ function wccrToast(msg) {
       });
       data = await resp.json();
     }catch(e){
-      // при ошибке сети — не блокируем, но показываем предупреждение
       lastStatus = "neterr";
       statusLine.className = "form-text text-warning";
       statusLine.textContent = "Reserve check failed (network). You can try Save, server will still protect.";
@@ -1854,7 +1973,7 @@ function wccrToast(msg) {
       const existingId = String(data.existing_id || '').trim();
       const token = escapeHtml(data.token || '');
 
-      const urlTpl = "{{ url_for('inventory.wo_detail', wo_id=0) }}";  // /work_orders/0
+      const urlTpl = "{{ url_for('inventory.wo_detail', wo_id=0) }}";
       const url = urlTpl.replace("0", existingId);
 
       setWarn(
@@ -1880,7 +1999,6 @@ function wccrToast(msg) {
       return;
     }
 
-    // unknown status
     lastStatus = "unknown";
     statusLine.className = "form-text text-warning";
     statusLine.textContent = "Unknown reserve status. Server will still protect on Save.";
@@ -1896,15 +2014,12 @@ function wccrToast(msg) {
   jobInput.addEventListener('input', scheduleReserve);
   jobInput.addEventListener('blur', reserveNow);
 
-  // initial state
   setIdle();
 
-  // --- best effort release on leave ---
   function releaseLock(){
     const raw = (jobInput.value || "").trim();
     if (!hasAnyToken(raw)) return;
 
-    // sendBeacon is best, but it requires simple payload
     try{
       const body = new URLSearchParams({ job_numbers: raw }).toString();
       if (navigator.sendBeacon){
@@ -1914,7 +2029,6 @@ function wccrToast(msg) {
       }
     }catch(e){}
 
-    // fallback fetch keepalive
     try{
       fetch(API_RELEASE, {
         method: "POST",
@@ -1928,14 +2042,11 @@ function wccrToast(msg) {
 
   window.addEventListener('beforeunload', releaseLock);
 
-  // --- extra safety: on submit, re-check reserve immediately ---
   form.addEventListener('submit', async (e)=>{
-    // если уже заблокировано/дубликат — стоп
     if (lastStatus === "locked" || lastStatus === "exists"){
       e.preventDefault();
       return;
     }
-    // финальный моментальный чек
     try{
       await reserveNow();
       if (lastStatus === "locked" || lastStatus === "exists"){
@@ -1944,8 +2055,6 @@ function wccrToast(msg) {
       }
     }catch(err){}
   });
-
 })();
 </script>
-
 {% endblock %}
