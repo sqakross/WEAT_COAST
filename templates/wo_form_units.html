@@ -29,9 +29,11 @@
     background: #fff5f5;
   }
 
-  .pn {
-    cursor: pointer;
-  }
+  .pn,
+    .model-copy,
+    .serial-copy {
+      cursor: pointer;
+    }
 
   .wo-form .dropdown-menu .dropdown-item{
     cursor: pointer;
@@ -835,25 +837,41 @@ function wccrToast(msg) {
   const unitsWrap = document.getElementById('unitsWrap');
   if (!unitsWrap) return;
 
-  unitsWrap.addEventListener('click', async function(e){
-    const pnInput = e.target.closest('.pn');
-    if (!pnInput) return;
-
-    const pn = (pnInput.value || '').trim();
-    if (!pn) return;
-
-    try{
-      await navigator.clipboard.writeText(pn);
-    }catch(err){
+  async function copyText(text){
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
       const ta = document.createElement('textarea');
-      ta.value = pn;
+      ta.value = text;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand('copy');
       ta.remove();
     }
+  }
 
-    wccrToast('Part number copied');
+  unitsWrap.addEventListener('click', async function(e){
+    const target = e.target;
+    if (!(target instanceof HTMLInputElement)) return;
+
+    const isPart   = target.classList.contains('pn');
+    const isModel  = target.name.includes('[model]');
+    const isSerial = target.name.includes('[serial]');
+
+    if (!isPart && !isModel && !isSerial) return;
+
+    const value = (target.value || '').trim();
+    if (!value) return;
+
+    await copyText(value);
+
+    if (isPart) {
+      wccrToast('Part number copied');
+    } else if (isModel) {
+      wccrToast('Model copied');
+    } else if (isSerial) {
+      wccrToast('Serial copied');
+    }
   });
 })();
 </script>
