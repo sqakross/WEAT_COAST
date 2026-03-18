@@ -31,7 +31,8 @@
 
   .pn,
     .model-copy,
-    .serial-copy {
+    .serial-copy,
+    .part-name {
       cursor: pointer;
     }
 
@@ -555,25 +556,9 @@
               + Add part row
             </button>
 
-            <div class="btn-group" role="group">
-              <button type="button" class="btn btn-outline-primary btn-copy-appliance">
-                Copy
-              </button>
-              <button type="button"
-                      class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split"
-                      data-bs-toggle="dropdown"
-                      aria-expanded="false"
-                      title="Search appliance parts by supplier">
-                <span class="visually-hidden">Toggle Search Parts</span>
-              </button>
-              <ul class="dropdown-menu">
-                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="marcone">Search in Marcone</button></li>
-                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="reliable">Search in Reliable Parts</button></li>
-                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="encompass">Search in Encompass</button></li>
-                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="coast">Search in Coast Parts</button></li>
-                <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="amazon">Search in Amazon</button></li>
-              </ul>
-            </div>
+           <button type="button" class="btn btn-outline-primary btn-copy-appliance">
+                  Copy
+                </button>
           </div>
           {% else %}
           <span></span>
@@ -663,119 +648,6 @@ function wccrToast(msg) {
 
 <script>
 (function(){
-  const unitsWrap = document.getElementById('unitsWrap');
-  if (!unitsWrap) return;
-
-  const MAX_SEARCH_PARTS = 12;
-
-  function clean(val){
-    return String(val || '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toUpperCase();
-  }
-
-  function getUniquePartNumbers(card){
-    const seen = new Set();
-    const parts = [];
-
-    card.querySelectorAll('tbody tr').forEach(tr => {
-      const pn = clean(tr.querySelector('.pn')?.value);
-      if (!pn) return;
-      if (seen.has(pn)) return;
-      seen.add(pn);
-      parts.push(pn);
-    });
-
-    return parts;
-  }
-
-  function buildSupplierUrl(supplier, pn){
-    const part = encodeURIComponent(pn);
-
-    switch ((supplier || '').toLowerCase()) {
-      case 'marcone':
-        return `https://my.marcone.com/search?text=${part}`;
-
-      case 'reliable':
-        return `https://www.google.com/search?q=${encodeURIComponent('site:reliableparts.net "' + pn + '"')}`;
-
-      case 'encompass':
-        return `https://encompass.com/search?searchTerm=${part}`;
-
-      case 'coast':
-        return `https://www.coastparts.com/parts/SQ-${part}`;
-
-      case 'amazon':
-        return `https://www.amazon.com/s?k=${part}`;
-
-      default:
-        return '';
-    }
-  }
-
-  function openUrlsOneByOne(urls){
-    if (!urls.length) return;
-
-    let i = 0;
-
-    function openNext(){
-      if (i >= urls.length) return;
-
-      const a = document.createElement('a');
-      a.href = urls[i];
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      i += 1;
-
-      if (i < urls.length) {
-        setTimeout(openNext, 250);
-      }
-    }
-
-    openNext();
-  }
-
-  unitsWrap.addEventListener('click', (e) => {
-    const btn = e.target.closest('.btn-search-supplier');
-    if (!btn) return;
-
-    const card = btn.closest('.card');
-    if (!card) return;
-
-    const parts = getUniquePartNumbers(card);
-    if (!parts.length) {
-      wccrToast('No part numbers to search');
-      return;
-    }
-
-    const limited = parts.slice(0, MAX_SEARCH_PARTS);
-
-    if (parts.length > MAX_SEARCH_PARTS) {
-      wccrToast(`Opening first ${MAX_SEARCH_PARTS} unique part numbers`);
-    }
-
-    const urls = limited
-      .map(pn => buildSupplierUrl(btn.dataset.supplier, pn))
-      .filter(Boolean);
-
-    if (!urls.length) {
-      wccrToast('Search URL is not configured');
-      return;
-    }
-
-    openUrlsOneByOne(urls);
-    wccrToast(`Opening ${urls.length} tabs...`);
-  });
-})();
-</script>
-
-<script>
-(function(){
   const sel  = document.querySelector('select[name="technician_id"]');
   const hidN = document.querySelector('input[name="technician_name"]');
   if (sel && hidN) {
@@ -857,8 +729,9 @@ function wccrToast(msg) {
     const isPart   = target.classList.contains('pn');
     const isModel  = target.name.includes('[model]');
     const isSerial = target.name.includes('[serial]');
+    const isName   = target.classList.contains('part-name');
 
-    if (!isPart && !isModel && !isSerial) return;
+    if (!isPart && !isModel && !isSerial && !isName) return;
 
     const value = (target.value || '').trim();
     if (!value) return;
@@ -871,6 +744,8 @@ function wccrToast(msg) {
       wccrToast('Model copied');
     } else if (isSerial) {
       wccrToast('Serial copied');
+    } else if (isName) {
+      wccrToast('Part name copied');
     }
   });
 })();
@@ -1357,25 +1232,7 @@ function wccrToast(msg) {
           + Add part row
         </button>
 
-        <div class="btn-group" role="group">
-          <button type="button" class="btn btn-outline-primary btn-copy-appliance">
-            Copy
-          </button>
-          <button type="button"
-                  class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split"
-                  data-bs-toggle="dropdown"
-                  aria-expanded="false"
-                  title="Search appliance parts by supplier">
-            <span class="visually-hidden">Toggle Search Parts</span>
-          </button>
-          <ul class="dropdown-menu">
-            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="marcone">Search in Marcone</button></li>
-            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="reliable">Search in Reliable Parts</button></li>
-            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="encompass">Search in Encompass</button></li>
-            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="coast">Search in Coast Parts</button></li>
-            <li><button type="button" class="dropdown-item btn-search-supplier" data-supplier="amazon">Search in Amazon</button></li>
-          </ul>
-        </div>
+
       </div>`}
       <div class="text-end ms-auto">
         <strong>Unit subtotal:</strong>
