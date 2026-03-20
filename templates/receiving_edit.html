@@ -76,14 +76,17 @@
           </div>
 
           <div class="col-md-4">
-            <label class="form-label fw-semibold" style="font-size:.9rem;">Invoice Date</label>
-            <input name="invoice_date"
-                   type="date"
-                   class="form-control form-control-sm"
-                   max="{{ today }}"
-                   value="{{ batch.invoice_date if batch else today }}"
-                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
-          </div>
+              <label class="form-label fw-semibold" style="font-size:.9rem;">
+                Invoice Date <span class="text-danger">*</span>
+              </label>
+              <input name="invoice_date"
+                     type="date"
+                     class="form-control form-control-sm"
+                     max="{{ today }}"
+                     value="{{ batch.invoice_date if batch else '' }}"
+                     required
+                     {% if is_posted and not is_superadmin %}readonly{% endif %}>
+            </div>
 
           <div class="col-md-2">
             <label class="form-label fw-semibold" style="font-size:.9rem;">Currency</label>
@@ -343,31 +346,50 @@
 </div>
 
 <script>
-// ===== helper: get current supplier value =====
 function getSupplierValue() {
   const supplierInput = document.getElementById('supplier_input');
   return supplierInput ? supplierInput.value.trim() : '';
 }
 
-// ===== apply supplier to all EMPTY location cells =====
+function supplierDefaultFromHint(hint) {
+  const s = (hint || '').toLowerCase().trim();
+
+  if (s.includes('reliable') || s === 'rel') return 'REL';
+
+  if (
+    s.includes('marcone') ||
+    s.includes('marcon') ||
+    s === 'mar' ||
+    s.startsWith('mar')
+  ) return 'MAR';
+
+  if (s.includes('sears')) return 'SEARS';
+
+  return 'MAIN';
+}
+
+function getDefaultLocationFromSupplier() {
+  return supplierDefaultFromHint(getSupplierValue());
+}
+
 function syncLocationsFromSupplier() {
-  const supplier = getSupplierValue();
-  if (!supplier) return;
+  const defaultLoc = getDefaultLocationFromSupplier();
+  if (!defaultLoc) return;
 
   document.querySelectorAll('.row-loc').forEach((inp) => {
     if (!inp.value.trim()) {
-      inp.value = supplier;
+      inp.value = defaultLoc;
     }
   });
 }
 
-// ===== apply supplier to a single row (for new rows) =====
 function applySupplierToRow(tr) {
-  const supplier = getSupplierValue();
-  if (!supplier || !tr) return;
+  const defaultLoc = getDefaultLocationFromSupplier();
+  if (!defaultLoc || !tr) return;
+
   const locInput = tr.querySelector('.row-loc');
   if (locInput && !locInput.value.trim()) {
-    locInput.value = supplier;
+    locInput.value = defaultLoc;
   }
 }
 

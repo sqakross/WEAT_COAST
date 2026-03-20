@@ -98,7 +98,8 @@
                  type="date"
                  name="invoice_date"
                  form="import-form"
-                 value="{{ invoice_date or '' }}">
+                 value="{{ invoice_date or '' }}"
+                 required>
           <small class="text-muted" style="font-size:.7rem; line-height:1.2;">
             Will be saved on the created Goods Receipt.
           </small>
@@ -375,12 +376,21 @@
   }
 
   function supplierDefaultFromHint(hint) {
-    const s = (hint || '').toLowerCase();
-    if (s.includes('reliable')) return 'REL';
-    if (s.includes('marcon'))   return 'MAR';
-    if (s.includes('sears'))    return 'SEARS';
-    return 'MAIN';
-  }
+        const s = (hint || '').toLowerCase().trim();
+
+        if (s.includes('reliable') || s === 'rel') return 'REL';
+
+        if (
+            s.includes('marcone') ||
+            s.includes('marcon') ||
+            s === 'mar' ||
+            s.startsWith('mar')
+        ) return 'MAR';
+
+        if (s.includes('sears')) return 'SEARS';
+
+        return 'MAIN'; // ✅ обязательно return
+    }
   function looksLikeReliable(source, hint) {
     return /reliable/i.test(source || '') || /reliable/i.test(hint || '');
   }
@@ -450,7 +460,7 @@
         <input class="form-control form-control-sm loc-input"
                style="border-radius:.5rem; font-size:.8rem; text-align:center;"
                name="units[0][rows][${idx}][location]"
-               value="MAIN">
+               value="${supplierDefaultFromHint(document.querySelector('input[name="supplier_hint"]')?.value || '')}"
       </td>
       <td style="width:50px;">
         <button class="btn btn-sm btn-outline-danger del-row"
