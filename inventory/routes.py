@@ -7751,7 +7751,7 @@ def issue_part():
 
                 # 🔥 STRICT RULE:
                 # if inv_ref is set (and not STOCK) → MUST match a posted receipt invoice AND return a line
-                if inv_ref and (line is None or src not in ("fifo_inv_ref_receipt",)):
+                if inv_ref and line is None:
                     raise ValueError(
                         f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
                         f"Nothing was issued."

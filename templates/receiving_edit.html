@@ -351,21 +351,9 @@ function getSupplierValue() {
   return supplierInput ? supplierInput.value.trim() : '';
 }
 
-function supplierDefaultFromHint(hint) {
-  const s = (hint || '').toLowerCase().trim();
-
-  if (s.includes('reliable') || s === 'rel') return 'REL';
-
-  if (
-    s.includes('marcone') ||
-    s.includes('marcon') ||
-    s === 'mar' ||
-    s.startsWith('mar')
-  ) return 'MAR';
-
-  if (s.includes('sears')) return 'SEARS';
-
-  return 'MAIN';
+function getSupplierValue() {
+  const supplierInput = document.getElementById('supplier_input');
+  return supplierInput ? supplierInput.value.trim() : '';
 }
 
 function getDefaultLocationFromSupplier() {
@@ -373,23 +361,24 @@ function getDefaultLocationFromSupplier() {
 }
 
 function syncLocationsFromSupplier() {
-  const defaultLoc = getDefaultLocationFromSupplier();
-  if (!defaultLoc) return;
+  const supplier = getSupplierValue();
+  if (!supplier) return;
 
   document.querySelectorAll('.row-loc').forEach((inp) => {
-    if (!inp.value.trim()) {
-      inp.value = defaultLoc;
+    if (!inp.value.trim() || inp.value.trim() === 'MAIN') {
+      inp.value = supplier;
     }
   });
 }
 
 function applySupplierToRow(tr) {
-  const defaultLoc = getDefaultLocationFromSupplier();
-  if (!defaultLoc || !tr) return;
+  if (!tr) return;
 
+  const supplier = getSupplierValue();
   const locInput = tr.querySelector('.row-loc');
-  if (locInput && !locInput.value.trim()) {
-    locInput.value = defaultLoc;
+
+  if (locInput && (!locInput.value.trim() || locInput.value.trim() === 'MAIN')) {
+    locInput.value = supplier;
   }
 }
 

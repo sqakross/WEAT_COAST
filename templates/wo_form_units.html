@@ -1466,6 +1466,21 @@ function wccrToast(msg) {
     document.getElementById('issue_set_status').value = 'done';
     document.getElementById('issue_part_ids').value  = selected.join(',');
     document.getElementById('issue_ins_ids').value   = insSelected.join(',');
+    // 🔥 копируем invoice значения из UI в issueForm
+    selected.forEach((wopId) => {
+      const tr = document.querySelector(`.issue-check[data-wop-id="${wopId}"]`)?.closest('tr');
+      if (!tr) return;
+
+      let invVal = (tr.querySelector('.inv-input')?.value || '').toUpperCase();
+      invVal = invVal.replace(/\s+/g, ' ').trim();
+
+      const h = document.createElement('input');
+      h.type = 'hidden';
+      h.name = `inv_${wopId}`;
+      h.value = invVal;
+
+      document.getElementById('issueForm').appendChild(h);
+    });
     document.getElementById('issueForm').submit();
   });
 
