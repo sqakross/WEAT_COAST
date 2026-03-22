@@ -3507,6 +3507,7 @@ def wo_detail(wo_id):
         grouped[key].append(r)
 
     net_by_pn = _dd(int)
+    issued_info_by_pn = {}
     batches = []
     for _, recs in grouped.items():
         b = recs[0].batch if recs and getattr(recs[0], "batch", None) else None
@@ -3528,6 +3529,12 @@ def wo_detail(wo_id):
             if not pn or qty == 0:
                 continue
             line_total = qty * price
+            info = issued_info_by_pn.get(pn)
+            if not info:
+                info = {"qty": 0, "value": 0.0}
+                issued_info_by_pn[pn] = info
+            info["qty"] += qty
+            info["value"] += line_total
             total_value_raw += line_total
 
             is_item_return = ref_is_return or (qty < 0)
@@ -3585,21 +3592,6 @@ def wo_detail(wo_id):
     if (not all_rows) and getattr(wo, "parts", None):
         all_rows.extend(wo.parts)
 
-    issued_info_by_pn = {}
-    for rec in issued_items:
-        pn = (getattr(rec.part, "part_number", "") or "").strip().upper()
-        if not pn:
-            continue
-        q = int(rec.quantity or 0)
-        cost_at_issue = float(rec.unit_cost_at_issue or 0.0)
-        val = q * cost_at_issue
-
-        info = issued_info_by_pn.get(pn)
-        if not info:
-            info = {"qty": 0, "value": 0.0}
-            issued_info_by_pn[pn] = info
-        info["qty"] += q
-        info["value"] += val
 
     pn_list = []
     for r in all_rows:
@@ -3610,13 +3602,14 @@ def wo_detail(wo_id):
     inv_cost_map = {}
     if pn_list:
         part_rows = (
-            db.session.query(Part)
+            db.session.query(Part.part_number, Part.unit_cost)
             .filter(func.upper(Part.part_number).in_(pn_list))
             .all()
         )
-        for pr in part_rows:
-            key = (pr.part_number or "").strip().upper()
-            inv_cost_map[key] = float(pr.unit_cost or 0.0)
+        for part_number, unit_cost in part_rows:
+            key = (part_number or "").strip().upper()
+            if key:
+                inv_cost_map[key] = float(unit_cost or 0.0)
 
     display_parts = []
     grand_total_display = 0.0
@@ -6573,7 +6566,7 @@ def wo_edit(wo_id: int):
     from collections import defaultdict
 
     from extensions import db
-    from models import WorkOrder, WorkUnit, WorkOrderPart, IssuedPartRecord, IssuedBatch
+    from models import WorkOrder, WorkUnit, WorkOrderPart, IssuedPartRecord, IssuedBatch, Part
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
     readonly_param = request.args.get("readonly", type=int) == 1
@@ -6605,32 +6598,36 @@ def wo_edit(wo_id: int):
                     break
 
     # ==================================================
-    # 1) Фактическая выдача по этому WO (как в wo_detail)
+    # 1) Фактическая выдача по этому WO (агрегировано, без загрузки всех rows)
     # ==================================================
     canon = (wo.canonical_job or "").strip()
-    issued_items = []
-    if canon:
-        base_q = (
-            db.session.query(IssuedPartRecord)
-            .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
-        ).filter(
-            or_(
-                func.trim(IssuedPartRecord.reference_job) == canon,
-                func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
-                func.trim(IssuedBatch.reference_job) == canon,
-            )
-        )
-        issued_items = base_q.all()
-
     issued_qty_by_pn = defaultdict(int)
-    for rec in issued_items:
-        pn = (getattr(rec.part, "part_number", "") or "").strip().upper()
-        if not pn:
-            continue
-        q = int(rec.quantity or 0)
-        if q == 0:
-            continue
-        issued_qty_by_pn[pn] += q
+
+    if canon:
+        qty_rows = (
+            db.session.query(
+                func.upper(func.trim(Part.part_number)).label("pn"),
+                func.coalesce(func.sum(IssuedPartRecord.quantity), 0).label("qty"),
+            )
+            .select_from(IssuedPartRecord)
+            .join(Part, Part.id == IssuedPartRecord.part_id)
+            .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
+            .filter(
+                or_(
+                    func.trim(IssuedPartRecord.reference_job) == canon,
+                    func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
+                    func.trim(IssuedBatch.reference_job) == canon,
+                )
+            )
+            .group_by(func.upper(func.trim(Part.part_number)))
+            .all()
+        )
+
+        for row in qty_rows:
+            pn = (row.pn or "").strip().upper()
+            qty = int(row.qty or 0)
+            if pn and qty:
+                issued_qty_by_pn[pn] = qty
 
     remaining_issued = dict(issued_qty_by_pn)
 
