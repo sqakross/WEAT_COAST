@@ -415,9 +415,20 @@
                                name="edit_issued_to_{{ it.id }}" value="{{ it.issued_to }}" form="{{ form_id }}">
                       </td>
                       <td>
-                        <input type="text" class="form-control form-control-sm"
-                               name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="{{ form_id }}">
-                      </td>
+                          <div>
+                            <input type="text" class="form-control form-control-sm"
+                                   name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="{{ form_id }}">
+                          </div>
+
+                          {% if it.consumption_logs %}
+                            <div class="small text-success mt-1">
+                              Consumed for:
+                              {% for log in it.consumption_logs %}
+                                {{ log.job_ref }} ({{ log.qty }}){% if not loop.last %}, {% endif %}
+                              {% endfor %}
+                            </div>
+                          {% endif %}
+                        </td>
                     {% else %}
                       <td class="text-end col-qty">{{ it_qty }}</td>
                       <td class="text-end">{{ it_used }}</td>
@@ -427,13 +438,24 @@
 
                       <td>{{ it.issued_to }}</td>
                       <td>
-                        {% if IS_ADMIN %}
-                          <input type="text" class="form-control form-control-sm"
-                                 name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="{{ form_id }}">
-                        {% else %}
-                          {{ it.reference_job }}
-                        {% endif %}
-                      </td>
+                          <div>
+                            {% if IS_ADMIN %}
+                              <input type="text" class="form-control form-control-sm"
+                                     name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="{{ form_id }}">
+                            {% else %}
+                              {{ it.reference_job or '-' }}
+                            {% endif %}
+                          </div>
+
+                          {% if it.consumption_logs %}
+                            <div class="small text-muted mt-1">
+                              Consumed for:
+                              {% for log in it.consumption_logs %}
+                                {{ log.job_ref }} ({{ log.qty }}){% if not loop.last %}, {% endif %}
+                              {% endfor %}
+                            </div>
+                          {% endif %}
+                        </td>
                     {% endif %}
 
                     <td>

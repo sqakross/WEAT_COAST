@@ -7918,7 +7918,8 @@ def reports_grouped():
     from flask_login import current_user
 
     from extensions import db
-    from models import IssuedPartRecord, IssuedBatch, Part, utc_to_local
+    from models import IssuedPartRecord, IssuedBatch, Part, utc_to_local, IssuedConsumptionLog
+
 
     # ✅ SAFE import: если модель/таблица ещё не существует — отчёт не падает
     try:
@@ -7995,6 +7996,7 @@ def reports_grouped():
         .options(
             selectinload(IssuedPartRecord.part),
             selectinload(IssuedPartRecord.batch),
+            selectinload(IssuedPartRecord.consumption_logs),
         )
     )
 
@@ -8155,6 +8157,7 @@ def reports_grouped():
                 .options(
                     selectinload(IssuedPartRecord.part),
                     selectinload(IssuedPartRecord.batch),
+                    selectinload(IssuedPartRecord.consumption_logs),
                 )
                 .filter(IssuedPartRecord.invoice_number.in_(recent_inv_numbers))
             )
