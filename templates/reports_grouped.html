@@ -420,15 +420,36 @@
                                    name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="{{ form_id }}">
                           </div>
 
-                          {% if it.consumption_logs %}
-                            <div class="small text-success mt-1">
-                              Consumed for:
-                              {% for log in it.consumption_logs %}
-                                {{ log.job_ref }} ({{ log.qty }}){% if not loop.last %}, {% endif %}
-                              {% endfor %}
+                          <td>
+  <
+
+                      {% if it.consumption_logs %}
+                        <div class="small text-success mt-1">
+                          <div>Consumed for:</div>
+
+                          {% for log in it.consumption_logs|sort(attribute='id', reverse=True) %}
+                            <div class="d-flex align-items-center gap-2 mt-1 flex-wrap">
+                              <span>{{ log.job_ref or '-' }} ({{ log.qty }})</span>
+
+                              {% if role_low in ['superadmin', 'user'] %}
+                                <form method="post"
+                                      action="{{ url_for('inventory.undo_consumption_log', log_id=log.id) }}"
+                                      style="display:inline;">
+                                  {% if inv.invoice_number %}
+                                    <input type="hidden" name="invoice_number" value="{{ inv.invoice_number }}">
+                                  {% endif %}
+                                  <button type="submit"
+                                          class="btn btn-outline-danger btn-sm"
+                                          onclick="return confirm('Undo consumed job {{ log.job_ref or '-' }} ({{ log.qty }})?');">
+                                    Undo
+                                  </button>
+                                </form>
+                              {% endif %}
                             </div>
-                          {% endif %}
-                        </td>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                    </td>
                     {% else %}
                       <td class="text-end col-qty">{{ it_qty }}</td>
                       <td class="text-end">{{ it_used }}</td>
@@ -448,10 +469,28 @@
                           </div>
 
                           {% if it.consumption_logs %}
-                            <div class="small text-muted mt-1">
-                              Consumed for:
-                              {% for log in it.consumption_logs %}
-                                {{ log.job_ref }} ({{ log.qty }}){% if not loop.last %}, {% endif %}
+                            <div class="small text-success mt-1">
+                              <div>Consumed for:</div>
+
+                              {% for log in it.consumption_logs|sort(attribute='id', reverse=True) %}
+                                <div class="d-flex align-items-center gap-2 mt-1 flex-wrap">
+                                  <span>{{ log.job_ref or '-' }} ({{ log.qty }})</span>
+
+                                  {% if role_low in ['superadmin', 'user'] %}
+                                    <form method="post"
+                                          action="{{ url_for('inventory.undo_consumption_log', log_id=log.id) }}"
+                                          style="display:inline;">
+                                      {% if inv.invoice_number %}
+                                        <input type="hidden" name="invoice_number" value="{{ inv.invoice_number }}">
+                                      {% endif %}
+                                      <button type="submit"
+                                              class="btn btn-outline-danger btn-sm"
+                                              onclick="return confirm('Undo consumed job {{ log.job_ref or '-' }} ({{ log.qty }})?');">
+                                        Undo
+                                      </button>
+                                    </form>
+                                  {% endif %}
+                                </div>
                               {% endfor %}
                             </div>
                           {% endif %}

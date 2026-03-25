@@ -2544,6 +2544,66 @@ def unconsume_invoice():
     flash(f"Unconsumed {changed} row(s).", "success")
     return redirect(url_for("inventory.reports_grouped"))
 
+@inventory_bp.post("/reports/consume/log/<int:log_id>/undo")
+@login_required
+def undo_consumption_log(log_id):
+    from flask import request, redirect, url_for, flash
+    from flask_login import current_user
+
+    from extensions import db
+    from models import IssuedPartRecord, IssuedBatch, IssuedConsumptionLog
+
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role not in ("superadmin", "user"):
+        flash("Access denied.", "danger")
+        return redirect(url_for("inventory.reports_grouped"))
+
+    log = IssuedConsumptionLog.query.get_or_404(log_id)
+    r = IssuedPartRecord.query.get(log.issued_part_id)
+
+    if not r:
+        flash("Issued row not found.", "warning")
+        return redirect(url_for("inventory.reports_grouped"))
+
+    log_qty = int(log.qty or 0)
+    used = int(r.consumed_qty or 0)
+
+    if log_qty > 0 and used > 0:
+        new_used = max(0, used - log_qty)
+        r.consumed_qty = new_used if new_used > 0 else None
+
+        if new_used <= 0:
+            r.consumed_flag = False
+            r.consumed_at = None
+            r.consumed_by = None
+            r.consumed_note = None
+        else:
+            r.consumed_flag = (new_used >= int(r.quantity or 0))
+
+        db.session.add(r)
+
+    batch_id = r.batch_id
+
+    db.session.delete(log)
+
+    if batch_id:
+        b = IssuedBatch.query.get(batch_id)
+        if b:
+            try:
+                _recompute_batch_consumption(b)
+            except NameError:
+                pass
+
+    db.session.commit()
+
+    flash("Consumption entry was undone.", "success")
+
+    invoice_number = request.form.get("invoice_number", type=int)
+    if invoice_number:
+        return redirect(url_for("inventory.reports_grouped", q=invoice_number))
+
+    return redirect(url_for("inventory.reports_grouped"))
+
 # ====== CONSUME (partial usage) ===============================================
 @inventory_bp.post("/invoices/consume")
 @login_required
