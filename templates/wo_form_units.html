@@ -5,6 +5,8 @@
 {% set RO = readonly or False %}
 {% set dis = 'disabled' if RO else '' %}
 {% set ro  = 'readonly' if RO else '' %}
+{% set ro_copy = 'readonly' if RO else '' %}
+{% set dis_copy = '' %}
 
 <style>
   .col-wh{width:58px}
@@ -304,10 +306,10 @@
 
       {% set job_err = (errors and errors.get('job_numbers')) %}
       <input name="job_numbers"
-             class="form-control {{ 'is-invalid' if job_err else '' }}"
-             placeholder=""
-             value="{{ (IS_EDIT and wo.job_numbers or wo.job_numbers or '')|upper }}"
-             {{ ro }} {{ dis }}>
+           class="form-control {{ 'is-invalid' if job_err else '' }}"
+           placeholder=""
+           value="{{ (IS_EDIT and wo.job_numbers or wo.job_numbers or '')|upper }}"
+           {{ ro_copy }} {{ dis_copy }}>
 
       {% if job_err %}
         <div class="invalid-feedback">{{ job_err }}</div>
@@ -386,12 +388,12 @@
           <div class="col-md-4">
             <label class="form-label">Model #</label>
             <input name="units[{{ ui }}][model]" class="form-control" maxlength="25"
-                   value="{{ (u.model  or '')|upper }}" {{ ro }} {{ dis }}>
+                value="{{ (u.model  or '')|upper }}" {{ ro_copy }} {{ dis_copy }}>
           </div>
           <div class="col-md-4">
             <label class="form-label">Serial #</label>
             <input name="units[{{ ui }}][serial]" class="form-control" maxlength="25"
-                   value="{{ (u.serial or '')|upper }}" {{ ro }} {{ dis }}>
+                   value="{{ (u.serial or '')|upper }}" {{ ro_copy }} {{ dis_copy }}>
           </div>
         </div>
 
@@ -440,7 +442,7 @@
                   <input class="form-control pn"
                          name="units[{{ ui }}][rows][{{ ri }}][part_number]"
                          value="{{ (r.part_number or '')|upper }}"
-                         maxlength="80" {{ ro }} {{ dis }}>
+                         maxlength="80" {{ ro_copy }} {{ dis_copy }}>
                 </td>
                 <td>
                   <input class="form-control alt-pn"
@@ -452,7 +454,7 @@
                   <input class="form-control part-name"
                          name="units[{{ ui }}][rows][{{ ri }}][part_name]"
                          value="{{ r.part_name or '' }}"
-                         maxlength="120" {{ ro }} {{ dis }}>
+                         maxlength="120" {{ ro_copy }} {{ dis_copy }}>
                 </td>
                 <td class="num">
                   <input class="form-control qty"
