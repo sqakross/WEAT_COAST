@@ -1818,6 +1818,7 @@ function wccrToast(msg) {
   let tmr = null;
   let lastSent = "";
   let lastStatus = "idle";
+  let suppressBlurReserve = false;
 
   async function reserveNow(){
     const raw = (jobInput.value || "").trim();
@@ -1902,9 +1903,30 @@ function wccrToast(msg) {
   }
 
   jobInput.addEventListener('input', scheduleReserve);
-  jobInput.addEventListener('blur', reserveNow);
+
+    jobInput.addEventListener('blur', () => {
+      if (suppressBlurReserve) {
+        suppressBlurReserve = false;
+        return;
+      }
+      reserveNow();
+    });
 
   setIdle();
+
+      statusLine.addEventListener('mousedown', (e) => {
+      const link = e.target.closest('a[href]');
+      if (!link) return;
+
+      suppressBlurReserve = true;
+    });
+
+    statusLine.addEventListener('click', (e) => {
+      const link = e.target.closest('a[href]');
+      if (!link) return;
+
+      suppressBlurReserve = true;
+    });
 
   function releaseLock(){
     const raw = (jobInput.value || "").trim();
