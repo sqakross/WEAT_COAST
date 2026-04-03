@@ -2937,6 +2937,7 @@ def wo_new():
         delivery_fee = 0.0
         markup_percent = 0.0
         status = "search_ordered"
+        note = ""
 
     wo = _WO()
 
@@ -5140,6 +5141,9 @@ def wo_save():
     else:
         wo.customer_po = None
 
+    note_raw = (f.get("note") or "").strip()
+    wo.note = note_raw or None
+
     # Эти поля сейчас мало используются в multi-appliance, но приводим к UPPER на всякий случай
     brand_hdr_raw = (f.get("brand") or "").strip().upper()
     model_hdr_raw = _clip(f.get("model"), 25).upper() if f.get("model") else ""
@@ -5641,6 +5645,7 @@ def wo_save():
         "markup_percent": float(getattr(wo, "markup_percent", 0.0) or 0.0),
         "status": (getattr(wo, "status", "") or ""),
         "customer_po": (getattr(wo, "customer_po", None) or ""),
+        "note": (getattr(wo, "note", None) or ""),
         "units_count": len(getattr(wo, "units", []) or []),
         "parts_count": len(getattr(wo, "parts", []) or []),
     }

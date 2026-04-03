@@ -184,6 +184,7 @@ class WorkOrder(db.Model):
 
     ordered_date = db.Column(db.Date, nullable=True)
     customer_po  = db.Column(db.String(64), nullable=True, index=True)
+    note = db.Column(db.Text, nullable=True)
 
     # ---------- timezone helpers for UI ----------
     @property

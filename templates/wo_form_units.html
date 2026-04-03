@@ -365,6 +365,15 @@
              {% if IS_INS %}required{% endif %}
              {{ ro }} {{ dis }}>
     </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Note</label>
+      <textarea name="note"
+                class="form-control"
+                rows="3"
+                placeholder="Additional information for this work order"
+                {{ ro }} {{ dis }}>{{ (wo.note or '') }}</textarea>
+    </div>
   </div>
 
   <div id="unitsWrap" class="d-flex flex-column gap-4">
