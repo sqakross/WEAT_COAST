@@ -24,3 +24,10 @@ class Config:
     # Import feature flags (keep your defaults)
     WCCR_IMPORT_ENABLED = int(os.environ.get("WCCR_IMPORT_ENABLED", "1"))  # default 1 = применять
     WCCR_IMPORT_DRY_RUN = int(os.environ.get("WCCR_IMPORT_DRY_RUN", "0"))  # default 0 = не dry
+
+    SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+    SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "")
+    SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+    SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USERNAME)
+    EMAIL_ORDERS_TO = os.environ.get("EMAIL_ORDERS_TO", "lion7500000@gmail.com")

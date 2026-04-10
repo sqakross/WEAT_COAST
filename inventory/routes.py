@@ -9,7 +9,7 @@ from services.receiving import post_receiving_batch
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, send_file, jsonify, after_this_request,
-    current_app,abort, session,                   # NEW
+    current_app,abort, session,current_app,                   # NEW
 )
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -17,14 +17,15 @@ from werkzeug.exceptions import abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlencode
 import re,sqlite3,os
-
+import smtplib
+from email.message import EmailMessage
 import pandas as pd
 from io import BytesIO
 from datetime import datetime, timedelta, time, date
 from collections import defaultdict
 from extensions import db
 from utils.invoice_generator import generate_invoice_pdf
-from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER,ROLE_TECHNICIAN, Part, WorkOrder, WorkOrderPart
+from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER,ROLE_TECHNICIAN, Part, WorkOrder, WorkOrderPart,EmailOutbox, WorkOrderAudit
 from reportlab.lib.pagesizes import letter, landscape
 from compare_cart.run_compare import get_marcone_items, check_cart_items, export_to_docx
 from compare_cart.run_compare_reliable import get_reliable_items
@@ -33,6 +34,121 @@ from .import_ledger import has_key, add_key
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
+
+# email
+def _send_email_smtp(to_email: str, subject: str, body: str):
+    msg = EmailMessage()
+    msg["Subject"] = (subject or "").strip()
+    msg["From"] = current_app.config.get("SMTP_FROM")
+    msg["To"] = (to_email or "").strip()
+    msg.set_content(body or "")
+
+    with smtplib.SMTP(
+        current_app.config.get("SMTP_HOST"),
+        int(current_app.config.get("SMTP_PORT", 587)),
+        timeout=10,
+    ) as smtp:
+        smtp.starttls()
+        smtp.login(
+            current_app.config.get("SMTP_USERNAME"),
+            current_app.config.get("SMTP_PASSWORD"),
+        )
+        smtp.send_message(msg)
+
+def process_email_queue(limit: int = 10):
+    rows = (
+        EmailOutbox.query
+        .filter_by(status="pending")
+        .order_by(EmailOutbox.created_at.asc())
+        .limit(limit)
+        .all()
+    )
+
+    sent_count = 0
+    error_count = 0
+
+    for row in rows:
+        try:
+            _send_email_smtp(row.to_email, row.subject, row.body)
+
+            row.status = "sent"
+            row.sent_at = datetime.utcnow()
+            row.error = None
+
+            if row.work_order_id:
+                _add_wo_audit(
+                    wo_id=row.work_order_id,
+                    action="email_sent",
+                    message=f"Email sent to {row.to_email}",
+                    meta={
+                        "batch_id": row.batch_id,
+                        "subject": row.subject,
+                        "email_outbox_id": row.id,
+                    },
+                    actor_username="system",
+                )
+
+            sent_count += 1
+
+        except Exception as e:
+            row.status = "error"
+            row.error = str(e)[:1000]
+            error_count += 1
+
+    db.session.commit()
+    return {"sent": sent_count, "errors": error_count, "processed": len(rows)}
+
+def _add_wo_audit(
+    wo_id: int,
+    action: str,
+    message: str,
+    meta: dict | None = None,
+    actor_user_id: int | None = None,
+    actor_username: str | None = None,
+):
+    row = WorkOrderAudit(
+        work_order_id=wo_id,
+        action=(action or "note")[:40],
+        message=(message or "")[:255],
+        meta_json=json.dumps(meta or {}, ensure_ascii=False),
+        actor_user_id=actor_user_id if actor_user_id is not None else getattr(current_user, "id", None),
+        actor_username=(
+            (actor_username or "").strip()[:64]
+            or ((getattr(current_user, "username", None) or "").strip()[:64] or None)
+        ),
+        created_at=datetime.utcnow(),
+    )
+    db.session.add(row)
+    return row
+
+def _enqueue_email_once(
+    *,
+    unique_key: str,
+    to_email: str,
+    subject: str,
+    body: str,
+    work_order_id: int | None = None,
+    batch_id: int | None = None,
+    kind: str = "tech_first_confirm",
+):
+    existing = EmailOutbox.query.filter_by(unique_key=(unique_key or "").strip()).first()
+    if existing:
+        return existing, False
+
+    row = EmailOutbox(
+        kind=(kind or "tech_first_confirm")[:50],
+        unique_key=(unique_key or "").strip()[:120],
+        to_email=(to_email or "").strip()[:255],
+        subject=(subject or "").strip()[:255],
+        body=(body or "").strip(),
+        status="pending",
+        created_at=datetime.utcnow(),
+        work_order_id=work_order_id,
+        batch_id=batch_id,
+    )
+    db.session.add(row)
+    return row, True
+# email end
 
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -1530,7 +1646,69 @@ def issued_confirm_toggle():
         rec.confirmed_by = None
         rec.confirmed_at = None
 
-    db.session.commit()
+    try:
+        db.session.flush()
+
+        # queue email only once per batch:
+        # only for technician, only on first positive confirm, only if record belongs to a batch
+        if is_techlike and new_state and getattr(rec, "batch_id", None):
+            batch = IssuedBatch.query.filter_by(id=rec.batch_id).first()
+
+            if batch and not getattr(batch, "first_confirm_email_sent_at", None):
+                tech_name = (
+                    (getattr(batch, "issued_to", None) or "").strip()
+                    or (getattr(wo, "technician_username", None) or "").strip()
+                    or (getattr(wo, "technician_name", None) or "").strip()
+                    or (username or "TECH")
+                )
+
+                jobs_text = (getattr(wo, "job_numbers", None) or "").strip()
+                if not jobs_text:
+                    jobs_text = (getattr(batch, "reference_job", None) or "").strip()
+                if not jobs_text:
+                    jobs_text = (getattr(wo, "canonical_job", None) or "").strip()
+
+                subject = f"Tech have picked up all the parts. — {tech_name} — {jobs_text}".strip(" —")
+                body = f"{tech_name} {jobs_text} have picked up all the parts.".strip()
+
+                unique_key = f"batch:{batch.id}:first_confirm_email"
+
+                _, created_new = _enqueue_email_once(
+                    unique_key=unique_key,
+                    to_email=current_app.config.get("EMAIL_ORDERS_TO"),
+                    subject=subject,
+                    body=body,
+                    work_order_id=getattr(wo, "id", None),
+                    batch_id=getattr(batch, "id", None),
+                    kind="tech_first_confirm",
+                )
+
+                if created_new:
+                    batch.first_confirm_email_sent_at = datetime.utcnow()
+
+                    _add_wo_audit(
+                        wo_id=wo.id,
+                        action="email_queued",
+                        message=f"Queued email to orders@chiefappliance.com after first tech confirm (batch #{batch.invoice_number or batch.id}).",
+                        meta={
+                            "event": "tech_first_confirm",
+                            "batch_id": batch.id,
+                            "invoice_number": getattr(batch, "invoice_number", None),
+                            "record_id": rec.id,
+                            "to_email": "orders@chiefappliance.com",
+                            "subject": subject,
+                            "technician": tech_name,
+                            "job_numbers": jobs_text,
+                        },
+                    )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        if is_adminlike:
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
+        return jsonify({"ok": False, "error": "CONFIRM_SAVE_FAILED"}), 500
 
     if is_adminlike:
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))

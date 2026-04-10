@@ -373,6 +373,49 @@ class WorkOrderAudit(db.Model):
     def __repr__(self):
         return f"<WorkOrderAudit id={self.id} wo={self.work_order_id} action={self.action} by={self.actor_username}>"
 
+class EmailOutbox(db.Model):
+    __tablename__ = "email_outbox"
+    __table_args__ = {"extend_existing": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    kind = db.Column(db.String(50), nullable=False)
+    unique_key = db.Column(db.String(120), nullable=False, unique=True, index=True)
+
+    to_email = db.Column(db.String(255), nullable=False)
+    subject = db.Column(db.String(255), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+
+    status = db.Column(db.String(20), nullable=False, default="pending", index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    sent_at = db.Column(db.DateTime, nullable=True)
+    error = db.Column(db.Text, nullable=True)
+
+    work_order_id = db.Column(
+        db.Integer,
+        db.ForeignKey("work_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    batch_id = db.Column(
+        db.Integer,
+        db.ForeignKey("issued_batch.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def sent_at_local(self):
+        return utc_to_local(self.sent_at)
+
+    def __repr__(self):
+        return f"<EmailOutbox id={self.id} kind={self.kind} status={self.status}>"
+
 # --------------------------------
 # Inventory Part
 # --------------------------------
@@ -641,6 +684,7 @@ class IssuedBatch(db.Model):
     reference_job = db.Column(db.String(255))
     issue_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     location = db.Column(db.String(120))
+    first_confirm_email_sent_at = db.Column(db.DateTime, nullable=True)
 
     parts = db.relationship("IssuedPartRecord", back_populates="batch", lazy="selectin")
 

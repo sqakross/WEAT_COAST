@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, request, redirect, url_for, send_file, abort
 from config import Config
 import os, sys, io, logging, time, ipaddress
