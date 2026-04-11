@@ -1549,11 +1549,11 @@ def _parse_units_form(form):
 @login_required
 def issued_confirm_toggle():
     """Техник ставит подтверждение через fetch (one-way), админ может ставить/снимать через форму."""
-    from flask import request, redirect, url_for, jsonify
+    from flask import request, redirect, url_for, jsonify, current_app
     from datetime import datetime, timezone
     from flask_login import current_user
     from extensions import db
-    from models import IssuedPartRecord, WorkOrder
+    from models import IssuedPartRecord, WorkOrder, IssuedBatch
 
     payload = request.get_json(silent=True) or {}
 
@@ -1668,10 +1668,16 @@ def issued_confirm_toggle():
                 if not jobs_text:
                     jobs_text = (getattr(wo, "canonical_job", None) or "").strip()
 
-                subject = f"Tech have picked up all the parts. — {tech_name} — {jobs_text}".strip(" —")
-                body = f"{tech_name} {jobs_text} have picked up all the parts.".strip()
+                subject = f"Tech has picked up all the parts. — {tech_name} — {jobs_text}".strip(" —")
+                body = f"{tech_name} {jobs_text} has picked up all the parts.".strip()
 
-                unique_key = f"batch:{batch.id}:first_confirm_email"
+                issue_stamp = batch.issue_date.isoformat() if getattr(batch, "issue_date", None) else "na"
+                unique_key = (
+                    f"batch:{batch.id}:"
+                    f"inv:{getattr(batch, 'invoice_number', 'na')}:"
+                    f"ts:{issue_stamp}:"
+                    f"first_confirm_email"
+                )
 
                 _, created_new = _enqueue_email_once(
                     unique_key=unique_key,
@@ -1686,22 +1692,23 @@ def issued_confirm_toggle():
                 if created_new:
                     batch.first_confirm_email_sent_at = datetime.utcnow()
 
+                    target_email = (current_app.config.get("EMAIL_ORDERS_TO") or "").strip()
+
                     _add_wo_audit(
                         wo_id=wo.id,
                         action="email_queued",
-                        message=f"Queued email to orders@chiefappliance.com after first tech confirm (batch #{batch.invoice_number or batch.id}).",
+                        message=f"Queued email to {target_email} after first tech confirm (batch #{batch.invoice_number or batch.id}).",
                         meta={
                             "event": "tech_first_confirm",
                             "batch_id": batch.id,
                             "invoice_number": getattr(batch, "invoice_number", None),
                             "record_id": rec.id,
-                            "to_email": "orders@chiefappliance.com",
+                            "to_email": target_email,
                             "subject": subject,
                             "technician": tech_name,
                             "job_numbers": jobs_text,
                         },
                     )
-
         db.session.commit()
 
     except Exception:
