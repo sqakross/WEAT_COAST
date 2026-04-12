@@ -391,6 +391,10 @@ class EmailOutbox(db.Model):
     sent_at = db.Column(db.DateTime, nullable=True)
     error = db.Column(db.Text, nullable=True)
 
+    attempt_count = db.Column(db.Integer, nullable=False, default=0)
+    last_attempt_at = db.Column(db.DateTime, nullable=True)
+    next_retry_at = db.Column(db.DateTime, nullable=True)
+
     work_order_id = db.Column(
         db.Integer,
         db.ForeignKey("work_orders.id", ondelete="SET NULL"),

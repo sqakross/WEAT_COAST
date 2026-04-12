@@ -22,7 +22,6 @@ from email.message import EmailMessage
 import pandas as pd
 from io import BytesIO
 from datetime import datetime, timedelta, time, date
-from collections import defaultdict
 from extensions import db
 from utils.invoice_generator import generate_invoice_pdf
 from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER,ROLE_TECHNICIAN, Part, WorkOrder, WorkOrderPart,EmailOutbox, WorkOrderAudit
@@ -55,10 +54,19 @@ def _send_email_smtp(to_email: str, subject: str, body: str):
         )
         smtp.send_message(msg)
 
+
 def process_email_queue(limit: int = 10):
+    now = datetime.utcnow()
+
     rows = (
         EmailOutbox.query
-        .filter_by(status="pending")
+        .filter(
+            EmailOutbox.status == "pending",
+            or_(
+                EmailOutbox.next_retry_at.is_(None),
+                EmailOutbox.next_retry_at <= now
+            )
+        )
         .order_by(EmailOutbox.created_at.asc())
         .limit(limit)
         .all()
@@ -71,9 +79,11 @@ def process_email_queue(limit: int = 10):
         try:
             _send_email_smtp(row.to_email, row.subject, row.body)
 
+            # ✅ SUCCESS
             row.status = "sent"
             row.sent_at = datetime.utcnow()
             row.error = None
+            row.next_retry_at = None
 
             if row.work_order_id:
                 _add_wo_audit(
@@ -88,15 +98,31 @@ def process_email_queue(limit: int = 10):
                     actor_username="system",
                 )
 
+            db.session.commit()
             sent_count += 1
 
         except Exception as e:
-            row.status = "error"
+            # ❌ FAIL → retry logic
+            row.attempt_count = int(row.attempt_count or 0) + 1
+            row.last_attempt_at = datetime.utcnow()
             row.error = str(e)[:1000]
+
+            if row.attempt_count >= 3:
+                row.status = "error"
+                row.next_retry_at = None
+            else:
+                row.status = "pending"
+                delay_minutes = [2, 10, 30][row.attempt_count - 1]
+                row.next_retry_at = datetime.utcnow() + timedelta(minutes=delay_minutes)
+
+            db.session.commit()
             error_count += 1
 
-    db.session.commit()
-    return {"sent": sent_count, "errors": error_count, "processed": len(rows)}
+    return {
+        "sent": sent_count,
+        "errors": error_count,
+        "processed": len(rows),
+    }
 
 def _add_wo_audit(
     wo_id: int,
