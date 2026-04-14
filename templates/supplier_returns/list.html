@@ -80,7 +80,12 @@
             {% for r in rows %}
               <tr>
                 <td>#{{ r.id }}</td>
-                <td>{{ r.supplier_name or '—' }}</td>
+                <td>
+                  {{ r.supplier_name or '—' }}
+                  {% if r.source_kind == 'reports_return' %}
+                    <span class="badge bg-info ms-1" title="Auto created from Reports return">AUTO</span>
+                  {% endif %}
+                </td>
 
                 <td>
                   {% if r.status == 'posted' %}
@@ -93,7 +98,12 @@
                 <td class="text-end">{{ r.total_items or 0 }}</td>
                 <td class="text-end">${{ '%.2f'|format(r.total_value or 0) }}</td>
 
-                <td>{{ r.created_at|local_dt }}</td>
+                <td>
+                  {{ r.created_at|local_dt }}
+                  <div class="text-muted" style="font-size:11px;">
+                    {{ r.created_by or '—' }}
+                  </div>
+                </td>
                 <td>{{ r.posted_at|local_dt }}</td>
 
                 <td>

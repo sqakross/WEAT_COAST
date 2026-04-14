@@ -15,13 +15,17 @@
         <div>
           <h5 class="mb-0">Supplier Return #{{ b.id }}</h5>
           <small class="text-muted">
-            Status:
-            {% if b.status == 'posted' %}
-              <span class="badge bg-success">posted</span>
-            {% else %}
-              <span class="badge bg-secondary">draft</span>
-            {% endif %}
-          </small>
+              Status:
+              {% if b.status == 'posted' %}
+                <span class="badge bg-success">posted</span>
+              {% else %}
+                <span class="badge bg-secondary">draft</span>
+              {% endif %}
+
+              {% if b.source_kind == 'reports_return' %}
+                <span class="badge bg-info ms-1" title="Auto created from Reports return">AUTO</span>
+              {% endif %}
+            </small>
         </div>
       </div>
 
@@ -41,7 +45,7 @@
                   title="Decrement stock">Post</button>
 
           <form method="post" action="{{ url_for('supplier_returns.delete_return', batch_id=b.id) }}"
-                onsubmit="return confirm('Delete draft?');">
+                onsubmit="return confirm('{% if b.source_kind == "reports_return" %}This is AUTO return from Reports. Are you sure?{% else %}Delete draft?{% endif %}');">
             <button class="btn btn-outline-danger btn-sm">Delete</button>
           </form>
         {% else %}
@@ -72,6 +76,11 @@
         <div class="row g-3 mb-2">
           <div class="col-md-6">
             <label class="form-label">Supplier</label>
+            {% if b.source_kind == 'reports_return' %}
+              <div class="mb-2">
+                <span class="badge bg-info" title="Auto created from Reports return">AUTO</span>
+              </div>
+            {% endif %}
             <input class="form-control" name="supplier_name" value="{{ b.supplier_name or '' }}" required>
           </div>
         </div>
