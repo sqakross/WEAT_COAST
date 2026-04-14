@@ -8981,13 +8981,16 @@ def update_invoice():
     - `apply_scope`: 'all' (default) or 'selected'.
     - Invoice number is assigned only for scope='all' and only if ALL rows in the group have no number yet.
     - When scope='all' and there's no number, records are resolved by the group's legacy keys.
-    - **Hard cap for Return Selected**: you cannot return more than has been issued for that line.
+    - **Hard cap for Delete Return**: you cannot return more than has been issued for that line.
       The backend calculates already-returned quantity and trims the requested amount accordingly.
     """
     from extensions import db
     from models import IssuedPartRecord, IssuedBatch, Part
     from datetime import datetime, time as _time
     from sqlalchemy import func
+    from models import SupplierReturnBatch, SupplierReturnItem
+    from services.supplier_returns_services import post_batch
+    from services.supplier_returns_services import unpost_batch
 
     # ---------- helpers ----------
     def _is_return_row(r):
@@ -9186,6 +9189,23 @@ def update_invoice():
             for r in recs:
                 if not _is_return_row(r):
                     continue
+                sr = (
+                    db.session.query(SupplierReturnBatch)
+                    .filter(
+                        SupplierReturnBatch.source_kind == "reports_return",
+                        SupplierReturnBatch.source_return_record_id == r.id
+                    )
+                    .first()
+                )
+
+                if sr:
+                    try:
+                        if (sr.status or "draft") == "posted":
+                            unpost_batch(batch_id=sr.id, actor=current_user.username)
+
+                        db.session.delete(sr)
+                    except Exception as e:
+                        print("AUTO DELETE SUPPLIER RETURN ERROR:", e)
                 if r.part and (r.quantity or 0) < 0:
                     # Deleting a return (negative) reduces stock back
                     r.part.quantity = int(r.part.quantity or 0) - abs(int(r.quantity or 0))
@@ -9210,6 +9230,7 @@ def update_invoice():
         try:
             created = 0
             trimmed_any = False
+            created_returns = []
 
             for r in recs:
                 # Only process against a positive "issued" row
@@ -9257,7 +9278,26 @@ def update_invoice():
                     invoice_number=None,
                     batch_id=None
                 )
+
+                # читаем destination максимально терпимо
+                ret.return_to = (
+                        request.form.get(f"return_to_{r.id}")
+                        or request.form.get("return_to")
+                        or "STOCK"
+                ).upper()
+
+                dest_id_raw = (
+                        request.form.get(f"return_destination_id_{r.id}")
+                        or request.form.get("return_destination_id")
+                        or ""
+                ).strip()
+                if dest_id_raw.isdigit():
+                    ret.return_destination_id = int(dest_id_raw)
+
                 db.session.add(ret)
+                db.session.flush()  # важно: сразу получить ret.id
+
+                created_returns.append(ret)
 
                 if r.part:
                     r.part.quantity = int(r.part.quantity or 0) + qty_req
@@ -9265,27 +9305,52 @@ def update_invoice():
                 created += 1
 
             # assign a fresh invoice number for the newly created return rows
-            if created:
-                new_returns = (
-                    db.session.query(IssuedPartRecord)
-                    .filter(IssuedPartRecord.invoice_number.is_(None))
-                    .filter(IssuedPartRecord.quantity < 0)
-                    .order_by(IssuedPartRecord.id.desc())
-                    .limit(created)
-                    .all()
-                )
-                if new_returns:
-                    return_ref = getattr(new_returns[0], "reference_job", None) or "RETURN"
-                    _ensure_invoice_number_for_records(
-                        records=new_returns,
-                        issued_to=getattr(new_returns[0], "issued_to", None),
-                        issued_by=issued_by,
-                        reference_job=return_ref,
-                        issue_date=datetime.utcnow(),
-                        location=getattr(new_returns[0], "location", None) or location,
-                        force_new=True
-                    )
+            if created_returns:
+                for ret in created_returns:
+                    if (ret.return_to or "").upper() != "VENDOR":
+                        continue
 
+                    part = ret.part
+                    if not part:
+                        continue
+
+                    batch = SupplierReturnBatch(
+                        supplier_name=(ret.return_destination.name if ret.return_destination else "VENDOR"),
+                        status="draft",
+                        created_by=current_user.username,
+                        source_kind="reports_return",
+                        source_return_record_id=ret.id
+                    )
+                    db.session.add(batch)
+                    db.session.flush()
+
+                    item = SupplierReturnItem(
+                        batch_id=batch.id,
+                        part_number=part.part_number,
+                        part_name=part.name,
+                        qty_returned=abs(int(ret.quantity or 0)),
+                        unit_cost=float(ret.unit_cost_at_issue or 0.0),
+                        location=ret.location,
+                        tech_note=ret.reference_job,
+                    )
+                    db.session.add(item)
+                    db.session.flush()
+
+                    try:
+                        post_batch(batch_id=batch.id, actor=current_user.username)
+                    except Exception as e:
+                        raise RuntimeError(f"AUTO SUPPLIER RETURN ERROR: {e}")
+
+                return_ref = getattr(created_returns[0], "reference_job", None) or "RETURN"
+                _ensure_invoice_number_for_records(
+                    records=created_returns,
+                    issued_to=getattr(created_returns[0], "issued_to", None),
+                    issued_by=issued_by,
+                    reference_job=return_ref,
+                    issue_date=datetime.utcnow(),
+                    location=getattr(created_returns[0], "location", None) or location,
+                    force_new=True
+                )
             db.session.commit()
 
             if created:
@@ -11487,25 +11552,26 @@ def return_selected():
     from extensions import db
     from flask_login import current_user
 
-    from models import IssuedPartRecord, ReturnDestination, Part
+    from models import (
+        IssuedPartRecord,
+        ReturnDestination,
+        Part,
+        SupplierReturnBatch,
+        SupplierReturnItem,
+    )
     from services.lot_costing import pick_receipt_line_for_return, receipt_line_base_cost
+    from services.supplier_returns_services import post_batch
 
     def _back_to_same_invoice(default_invoice_number=None):
-        """
-        Prefer returning back to the same invoice card.
-        1) If we know invoice_number -> reports_grouped?invoice_number=...
-        2) Else use referrer (keeps filters/search/date range)
-        3) Else fallback to reports_grouped
-        """
         inv_no = default_invoice_number
 
-        # try to infer invoice from selected rows (safe)
         if inv_no is None:
             raw_ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
             try:
                 ids = [int(x) for x in raw_ids if str(x).strip()]
             except ValueError:
                 ids = []
+
             if ids:
                 first_row = IssuedPartRecord.query.filter(IssuedPartRecord.id == ids[0]).first()
                 if first_row:
@@ -11548,18 +11614,19 @@ def return_selected():
     return_reference = f"RETURN {batch_reference.upper()}"
     batch_location = first.location
 
-    created = []
+    created: list[IssuedPartRecord] = []
+    vendor_groups: dict[str, list[dict]] = {}
 
     for src in rows:
         try:
             want = int(request.form.get(f"qty_{src.id}", "1") or "1")
         except ValueError:
             want = 1
+
         if want <= 0:
             continue
 
         already = _already_returned_qty_for_source(src)
-
         issued_qty = int(src.quantity or 0)
         if issued_qty <= 0:
             continue
@@ -11574,7 +11641,6 @@ def return_selected():
 
         dest_id = None
 
-        # ✅ VALIDATION — if missing, STAY on same invoice
         if r_to not in ("STOCK", "VENDOR"):
             flash("Please select Return To (STOCK or VENDOR) for all returned lines.", "danger")
             db.session.rollback()
@@ -11601,13 +11667,6 @@ def return_selected():
                     db.session.flush()
                 dest_id = existing.id
 
-        # ---- RETURN COST LOGIC ----
-        # Rules:
-        # 1) If issued row has a real supplier receipt invoice in src.inv_ref ->
-        #    use BASE cost from that receipt line (NO extra expenses).
-        # 2) If issued row has no invoice OR src.inv_ref == "STOCK" ->
-        #    treat it as stock-issued and use src.unit_cost_at_issue.
-
         pn = None
         if getattr(src, "part", None) and getattr(src.part, "part_number", None):
             pn = (src.part.part_number or "").strip()
@@ -11620,19 +11679,14 @@ def return_selected():
         is_stock_issue = (not raw_inv_ref) or (raw_inv_ref.upper() == "STOCK")
 
         if not pn:
-            flash(
-                f"Cannot create return: missing part_number for source row id={src.id}.",
-                "danger",
-            )
+            flash(f"Cannot create return: missing part_number for source row id={src.id}.", "danger")
             db.session.rollback()
             return _back_to_same_invoice(inv_no_first)
 
         line = None
-        cs = None
 
         if not is_stock_issue:
-            # Vendor-received item: return by BASE cost from the matched receipt invoice
-            line, cs = pick_receipt_line_for_return(
+            line, _cs = pick_receipt_line_for_return(
                 part_number=pn,
                 inv_ref=receipt_inv,
             )
@@ -11647,24 +11701,20 @@ def return_selected():
                 return _back_to_same_invoice(inv_no_first)
 
             base_cost = round(float(receipt_line_base_cost(line) or 0.0), 2)
-
         else:
-            # Stock-issued item: no supplier invoice / explicit STOCK -> use issued cost
             issued_cost = getattr(src, "unit_cost_at_issue", None)
             if issued_cost is None:
                 issued_cost = 0.0
-
             try:
                 base_cost = round(float(issued_cost or 0.0), 2)
             except Exception:
                 base_cost = 0.0
 
-        # ✅ invoice key of the ISSUED row (used for remaining checks per invoice card)
         src_inv_no = getattr(src, "invoice_number", None)
         src_inv_key = None
         if src_inv_no is not None:
             try:
-                src_inv_key = str(int(src_inv_no))  # "002177" -> "2177"
+                src_inv_key = str(int(src_inv_no))
             except Exception:
                 src_inv_key = (str(src_inv_no).strip() or None)
 
@@ -11677,31 +11727,97 @@ def return_selected():
             issue_date=now_dt,
             unit_cost_at_issue=base_cost,
             location=src.location,
-
-            # ✅ Link to ORIGINAL ISSUED invoice (so already_returned works per invoice)
             inv_ref=(src_inv_key or None),
-
             return_to=r_to,
             return_destination_id=dest_id,
-
-            # ✅ keep trace to receipt line used for base cost when available
             source_receipt_line_id=getattr(line, "id", None),
             cost_source="BASE_RETURN",
         )
 
         db.session.add(ret)
+        db.session.flush()  # важно: нужен ret.id для связи с supplier return
         created.append(ret)
 
-        # ✅ Always return stock qty (even if src.part relationship isn't loaded)
         p_obj = getattr(src, "part", None) or Part.query.get(src.part_id)
         if p_obj:
             p_obj.quantity = (p_obj.quantity or 0) + qty
             db.session.add(p_obj)
 
+        if r_to == "VENDOR":
+            try:
+                part = getattr(src, "part", None) or Part.query.get(src.part_id)
+                if not part:
+                    continue
+
+                supplier_label = None
+                if dest_id:
+                    dest_obj = db.session.get(ReturnDestination, dest_id)
+                    if dest_obj and dest_obj.name:
+                        supplier_label = dest_obj.name
+
+                if not supplier_label:
+                    supplier_label = (r_dest_raw or "").strip() or "VENDOR"
+
+                # можно добавить дату к supplier, как у тебя в других batch
+                supplier_label = f"{supplier_label} {now_la.strftime('%m/%d/%y')}"
+
+                tech_job_label = f"{(src.issued_to or '').strip()} {(src.reference_job or '').strip()}".strip()
+
+                vendor_groups.setdefault(supplier_label, []).append({
+                    "ret": ret,
+                    "part_number": part.part_number,
+                    "part_name": part.name,
+                    "qty": qty,
+                    "unit_cost": ret.unit_cost_at_issue or 0.0,
+                    "location": ret.location,
+                    "tech_note": tech_job_label,
+                })
+
+            except Exception as e:
+                print("AUTO SUPPLIER RETURN PREP ERROR:", e)
+                flash(f"Vendor return failed: {e}", "danger")
+
     if not created:
         flash("Nothing to return.", "warning")
         db.session.rollback()
         return _back_to_same_invoice(inv_no_first)
+
+    # one supplier batch per supplier
+    for supplier_label, items in vendor_groups.items():
+        try:
+            first_ret = items[0]["ret"]
+
+            batch_sr = SupplierReturnBatch(
+                supplier_name=supplier_label,
+                status="draft",
+                created_by=current_user.username,
+                source_kind="reports_return",
+                source_return_record_id=first_ret.id,
+            )
+            db.session.add(batch_sr)
+            db.session.flush()
+
+            for row in items:
+                item_sr = SupplierReturnItem(
+                    batch_id=batch_sr.id,
+                    part_number=row["part_number"],
+                    part_name=row["part_name"],
+                    qty_returned=row["qty"],
+                    unit_cost=row["unit_cost"],
+                    location=row["location"],
+                    tech_note=row["tech_note"],
+                )
+                db.session.add(item_sr)
+
+            db.session.flush()
+
+            res = post_batch(batch_id=batch_sr.id, actor=current_user.username)
+            if not res.get("ok"):
+                raise RuntimeError(res.get("errors"))
+
+        except Exception as e:
+            print("AUTO SUPPLIER RETURN ERROR:", e)
+            flash(f"Vendor return failed for {supplier_label}: {e}", "danger")
 
     try:
         batch = _create_batch_for_records(

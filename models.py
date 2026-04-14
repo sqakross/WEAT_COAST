@@ -883,6 +883,9 @@ class SupplierReturnBatch(db.Model):
     total_items = db.Column(db.Integer, nullable=False, default=0)
     total_value = db.Column(db.Float, nullable=False, default=0.0)
 
+    source_kind = db.Column(db.String(32), nullable=True, index=True)
+    source_return_record_id = db.Column(db.Integer, nullable=True, index=True)
+
     items = db.relationship(
         "SupplierReturnItem",
         back_populates="batch",
