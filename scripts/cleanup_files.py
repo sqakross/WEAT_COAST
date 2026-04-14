@@ -5,13 +5,19 @@ from datetime import datetime, timedelta, timezone
 BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOADS = BASE_DIR / "uploads"
 LOGS = BASE_DIR / "logs"
+INSTANCE = BASE_DIR / "instance"
 
 # ЛОГИ — по возрасту
 KEEP_LOGS_DAYS = 14
 LOG_PATTERNS = ["*.log", "*.log.*", "*-out.log", "*-err.log"]
 
-# UPLOADS — УДАЛЯЕМ ВСЕ invoice pdf сразу
-UPLOAD_DELETE_PATTERNS_ALWAYS = ["invoice-*.pdf"]
+# INSTANCE files — по возрасту
+INSTANCE_LOG_PATTERNS = [
+    "email_queue.log",
+    "email_queue.log.*",
+    "wo_save_debug.txt",
+    "wo_save_debug*.txt",
+]
 
 def _older_than(path: Path, days: int) -> bool:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -62,33 +68,49 @@ def _delete_older(dir_path: Path, patterns: list[str], keep_days: int) -> tuple[
 def main():
     print("BASE_DIR =", BASE_DIR)
     print("UPLOADS  =", UPLOADS.resolve())
+    print("LOGS     =", LOGS.resolve())
+    print("INSTANCE =", INSTANCE.resolve())
 
     deleted = 0
     failed = 0
     skipped = 0
 
+    # -------------------------
+    # UPLOADS: delete invoice*.pdf
+    # -------------------------
     if not UPLOADS.exists():
         print("Uploads folder not found")
-        return
+    else:
+        for p in UPLOADS.iterdir():
+            if not p.is_file():
+                continue
 
-    for p in UPLOADS.iterdir():
-        if not p.is_file():
-            continue
+            name = p.name.lower()
 
-        name = p.name.lower()
+            # УДАЛЯЕМ ВСЕ invoice*.pdf
+            if name.startswith("invoice") and name.endswith(".pdf"):
+                try:
+                    p.unlink()
+                    deleted += 1
+                except Exception as e:
+                    failed += 1
+                    print(f"[FAIL] {p.name} -> {type(e).__name__}: {e}")
+            else:
+                skipped += 1
 
-        # УДАЛЯЕМ ВСЕ invoice*.pdf (и invoice- и invoice_ и Invoice и .PDF)
-        if name.startswith("invoice") and name.endswith(".pdf"):
-            try:
-                p.unlink()
-                deleted += 1
-            except Exception as e:
-                failed += 1
-                print(f"[FAIL] {p.name} -> {type(e).__name__}: {e}")
-        else:
-            skipped += 1
+    print(f"UPLOAD cleanup: deleted={deleted}, failed={failed}, skipped={skipped}")
 
-    print(f"Done. deleted={deleted}, failed={failed}, skipped={skipped}")
+    # -------------------------
+    # LOGS: delete old log files
+    # -------------------------
+    d1, s1, f1 = _delete_older(LOGS, LOG_PATTERNS, KEEP_LOGS_DAYS)
+    print(f"LOGS cleanup: deleted={d1}, scanned={s1}, failed={f1}")
+
+    # -------------------------
+    # INSTANCE: delete old queue/debug logs
+    # -------------------------
+    d2, s2, f2 = _delete_older(INSTANCE, INSTANCE_LOG_PATTERNS, KEEP_LOGS_DAYS)
+    print(f"INSTANCE cleanup: deleted={d2}, scanned={s2}, failed={f2}")
 
 if __name__ == "__main__":
     main()

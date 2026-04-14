@@ -11,6 +11,12 @@ import traceback
 
 PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
+now = datetime.now(ZoneInfo("America/Los_Angeles"))
+# Mon–Fri, 8am–6pm
+if not (0 <= now.weekday() <= 4 and 8 <= now.hour < 18):
+    print("Outside working hours, skipping")
+    exit()
+
 
 def write_log(message: str):
     try:

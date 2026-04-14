@@ -12,9 +12,9 @@
   z-index: 2000;
 }
 .dashboard-page-wrapper {
-  max-width: 1400px;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 88px 20px 40px;
+  padding: 88px 16px 40px;
   font-family: "Segoe UI", Roboto, sans-serif;
   color: #111;
   font-size: 15px;
@@ -123,58 +123,116 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
   overflow-x: auto;
 }
+
 .inventory-table {
   width: 100%;
+  min-width: 1100px;
   border-collapse: collapse;
-  font-size: 14px;
+  table-layout: auto;
+  font-size: clamp(11px, 0.72vw, 14px);
 }
+
 .inventory-table thead th {
   background: #f9fafb;
   color: #374151;
   text-align: left;
-  padding: 12px 16px;
+  padding: 9px 10px;
   border-bottom: 1px solid #e5e7eb;
   text-transform: uppercase;
-  font-size: 12px;
+  font-size: clamp(10px, 0.62vw, 12px);
   letter-spacing: 0.03em;
+  white-space: nowrap;
 }
+
 .inventory-table tbody tr {
   border-bottom: 1px solid #f0f0f0;
 }
+
 .inventory-table tbody tr:hover {
   background: #f8fafc;
 }
+
 .inventory-table td {
-  padding: 10px 16px;
+  padding: 7px 8px;
   vertical-align: middle;
+}
+
+/* column tuning */
+.inventory-table th:nth-child(1),
+.inventory-table td:nth-child(1) {
+  min-width: 120px;
+}
+
+.inventory-table th:nth-child(2),
+.inventory-table td:nth-child(2) {
+  min-width: 140px;
+}
+
+.inventory-table th:nth-child(3),
+.inventory-table td:nth-child(3) {
+  min-width: 92px;
+}
+
+.inventory-table th:nth-child(4),
+.inventory-table td:nth-child(4) {
+  min-width: 105px;
+}
+
+.inventory-table th:nth-child(5),
+.inventory-table td:nth-child(5) {
+  min-width: 70px;
+}
+
+.inventory-table th:nth-child(6),
+.inventory-table td:nth-child(6) {
+  min-width: 150px;
 }
 
 /* ====== INLINE EDIT ====== */
 .inline-edit-form {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  flex-wrap: nowrap;
 }
+
 .inline-input {
-  width: 80px;
-  padding: 6px 8px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   text-align: right;
+  font-size: clamp(10px, 0.68vw, 12px);
+  line-height: 1.2;
 }
+
+.qty-input {
+  width: 52px;
+  min-width: 52px;
+  padding: 4px 6px;
+}
+
+.cost-input {
+  width: 70px;
+  min-width: 70px;
+  padding: 4px 6px;
+}
+
 .inline-input:focus {
   border-color: #10b981;
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+  outline: none;
 }
+
 .save-btn {
   background-color: #10b981;
   color: #fff;
   border: none;
-  padding: 6px 10px;
+  padding: 4px 7px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: clamp(10px, 0.64vw, 11px);
+  line-height: 1.1;
   cursor: pointer;
   transition: background 0.15s;
+  white-space: nowrap;
 }
 .save-btn:hover {
   background-color: #059669;
@@ -182,33 +240,47 @@
 
 /* ====== LOCATION ====== */
 .location-pill {
+  display: inline-block;
   background: #eef2ff;
   color: #1e3a8a;
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: 3px 8px;
+  font-size: clamp(10px, 0.62vw, 12px);
   font-weight: 600;
+  white-space: nowrap;
 }
 
 /* ====== ACTION BUTTONS ====== */
 .action-cell {
-  min-width: 250px;
+  min-width: 150px;
 }
+
 .row-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
+
+.row-actions form {
+  margin: 0;
+}
+
 .action-btn {
-  font-size: 13px;
+  font-size: clamp(10px, 0.68vw, 12px);
   font-weight: 600;
-  padding: 8px 12px;
+  padding: 4px 7px;
   border-radius: 6px;
   cursor: pointer;
   text-decoration: none;
   transition: background 0.15s;
+  white-space: nowrap;
+  line-height: 1.1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
+
 .action-issue {
   background-color: #1e40af;
   color: #fff;
@@ -217,13 +289,16 @@
 .action-issue:hover {
   background-color: #1d4ed8;
 }
+
 .action-edit {
   background-color: #e5e7eb;
   color: #111;
+  border: none;
 }
 .action-edit:hover {
   background-color: #d1d5db;
 }
+
 .action-delete {
   background-color: #fff;
   border: 1px solid #dc2626;
@@ -232,11 +307,75 @@
 .action-delete:hover {
   background-color: #fee2e2;
 }
+
+/* ====== RESPONSIVE ====== */
+@media (max-width: 1600px) {
+  .dashboard-page-wrapper {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .inventory-table {
+    min-width: 1000px;
+    font-size: 12px;
+  }
+
+  .inventory-table thead th {
+    padding: 8px 8px;
+    font-size: 10px;
+  }
+
+  .inventory-table td {
+    padding: 6px 6px;
+  }
+
+  .qty-input {
+    width: 48px;
+    min-width: 48px;
+    padding: 3px 5px;
+    font-size: 11px;
+  }
+
+  .cost-input {
+    width: 64px;
+    min-width: 64px;
+    padding: 3px 5px;
+    font-size: 11px;
+  }
+
+  .save-btn,
+  .action-btn {
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+
+  .row-actions {
+    gap: 3px;
+  }
+
+  .action-cell {
+    min-width: 135px;
+  }
+}
+
+@media (max-width: 1300px) {
+  .inventory-table {
+    min-width: 940px;
+  }
+
+  .inventory-table th:nth-child(2),
+  .inventory-table td:nth-child(2) {
+    min-width: 120px;
+  }
+
+  .action-cell {
+    min-width: 125px;
+  }
+}
 </style>
 
 <div class="dashboard-page-wrapper">
 
-  <!-- TOOLBAR -->
   <div class="sticky-toolbar">
     <div class="toolbar-row-top">
       <h2>Inventory Dashboard</h2>
@@ -259,7 +398,6 @@
     </form>
   </div>
 
-  <!-- TABLE -->
   {% if parts %}
   <div class="table-card">
     <table class="inventory-table">
@@ -282,13 +420,13 @@
           {% if current_user.role == 'superadmin' %}
           <td>
             <form class="inline-edit-form" method="POST" action="{{ url_for('inventory.update_part_field', part_id=part.id) }}">
-              <input class="inline-input" type="number" name="quantity" value="{{ part.quantity }}" min="0" required>
+              <input class="inline-input qty-input" type="number" name="quantity" value="{{ part.quantity }}" min="0" required>
               <button type="submit" class="save-btn">Save</button>
             </form>
           </td>
           <td>
             <form class="inline-edit-form" method="POST" action="{{ url_for('inventory.update_part_field', part_id=part.id) }}">
-              <input class="inline-input" type="text" name="unit_cost" value="{{ '%.2f'|format(part.unit_cost) }}" required>
+              <input class="inline-input cost-input" type="text" name="unit_cost" value="{{ '%.2f'|format(part.unit_cost) }}" required>
               <button type="submit" class="save-btn">Save</button>
             </form>
           </td>
@@ -328,5 +466,4 @@
 </div>
 
 {% endblock %}
-
 
