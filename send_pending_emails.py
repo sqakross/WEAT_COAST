@@ -91,22 +91,24 @@ def log_failed_rows(limit: int = 10):
 if __name__ == "__main__":
     try:
         with app.app_context():
-            log_queue_snapshot()
+            pending = EmailOutbox.query.filter_by(status="pending").count()
 
-            result = process_email_queue(limit=20) or {}
+            if pending == 0:
+                write_log("SKIP | queue empty")
+            else:
+                write_log(f"QUEUE SNAPSHOT | pending={pending}")
 
-            msg = (
-                f"RESULT | sent={result.get('sent', 0)} "
-                f"errors={result.get('errors', 0)} "
-                f"processed={result.get('processed', 0)}"
-            )
-            print(msg)
-            write_log(msg)
+                result = process_email_queue(limit=20) or {}
+                msg = (
+                    f"RESULT | sent={result.get('sent', 0)} "
+                    f"errors={result.get('errors', 0)} "
+                    f"processed={result.get('processed', 0)}"
+                )
+                print(msg)
+                write_log(msg)
 
-            log_queue_snapshot()
-
-            if result.get("errors", 0):
-                log_failed_rows(limit=10)
+                if result.get("errors", 0):
+                    log_failed_rows(limit=10)
 
     except Exception as e:
         err = f"SCRIPT ERROR | {str(e)}"

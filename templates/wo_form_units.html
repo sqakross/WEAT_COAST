@@ -520,7 +520,8 @@
                          name="units[{{ ui }}][rows][{{ ri }}][supplier]"
                          list="suppliers_datalist"
                          value="{{ (r.supplier or '')|upper }}"
-                         {{ ro }} {{ dis }}>
+                         {% if not is_ord %}disabled{% endif %}
+                         {{ ro }}>
                 </td>
 
                 <td class="text-center ordered-col">
@@ -823,11 +824,41 @@ function wccrToast(msg) {
   const currentWOInput = form.querySelector('input[name="wo_id"]');
   const CURRENT_WO_ID  = currentWOInput ? String(currentWOInput.value || '').trim() : '';
 
-  function updateSupplierRequired(){
-    const must = statusSel && statusSel.value === 'ordered';
-    document.querySelectorAll('.supplier-input').forEach(inp=>{
-      if(must) inp.setAttribute('required','required');
-      else     inp.removeAttribute('required');
+    function syncSupplierState(tr){
+    if (!tr) return;
+
+    const ordCb = tr.querySelector('.ordered-check');
+    const supInp = tr.querySelector('.supplier-input');
+    if (!supInp) return;
+
+    const shouldEnable = !!(ordCb && ordCb.checked) && !IS_RO;
+
+    if (shouldEnable){
+      supInp.disabled = false;
+      supInp.removeAttribute('disabled');
+    } else {
+      supInp.disabled = true;
+      supInp.setAttribute('disabled', 'disabled');
+      // esli hochesh sohranyat tekst pri snyatii galochki — etu stroku udali
+      // supInp.value = '';
+    }
+  }
+
+  function syncAllSupplierStates(){
+    document.querySelectorAll('#unitsWrap tbody tr').forEach(syncSupplierState);
+  }
+
+    function updateSupplierRequired(){
+    document.querySelectorAll('#unitsWrap tbody tr').forEach(tr=>{
+      const ordCb = tr.querySelector('.ordered-check');
+      const supInp = tr.querySelector('.supplier-input');
+      if (!supInp) return;
+
+      if (ordCb && ordCb.checked) {
+        supInp.setAttribute('required','required');
+      } else {
+        supInp.removeAttribute('required');
+      }
     });
   }
 
@@ -1159,7 +1190,7 @@ function wccrToast(msg) {
     </div>
   </td>
 
-  <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" ${ro}></td>
+  <td><input class="form-control supplier-input" name="units[${ui}][rows][${ri}][supplier]" list="suppliers_datalist" disabled ${ro}></td>
 
   <td class="text-center ordered-col">
     <input type="hidden" class="ordered-val" name="units[${ui}][rows][${ri}][ordered_flag]" value="0">
@@ -1297,12 +1328,14 @@ function wccrToast(msg) {
       setIssueEnabled(tr, isStock);
     }
 
-    if (target.classList.contains('ordered-check')) {
+        if (target.classList.contains('ordered-check')) {
+      const tr   = target.closest('tr');
       const cell = target.closest('.ordered-col');
       const hid  = cell && cell.querySelector('.ordered-val');
 
       if (hid) hid.value = target.checked ? '1' : '0';
 
+      syncSupplierState(tr);
       reevaluateWOStatusFromOrd();
       updateSupplierRequired();
     }
@@ -1338,6 +1371,7 @@ function wccrToast(msg) {
       updateSupplierRequired();
       recomputeUnitSubtotal(card);
       fetchHint(tbody.lastElementChild);
+      syncSupplierState(tbody.lastElementChild);
       toggleOrderedCols();
       updateInsColumns();
       updatePOField();
@@ -1495,8 +1529,11 @@ function wccrToast(msg) {
     document.getElementById('issueForm').submit();
   });
 
-  document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
-  document.querySelectorAll('#unitsWrap tbody tr').forEach(fetchHint);
+    document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
+  document.querySelectorAll('#unitsWrap tbody tr').forEach(tr => {
+    fetchHint(tr);
+    syncSupplierState(tr);
+  });
   updateSupplierRequired();
   toggleOrderedCols();
   updateInsColumns();
