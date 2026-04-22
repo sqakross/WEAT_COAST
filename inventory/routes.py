@@ -1755,6 +1755,60 @@ from flask import jsonify, request
 
 # ...
 
+def _stock_hint_payload(pn: str, qty_needed: int = 0, wh: str = ""):
+    pn = (pn or "").strip().upper()
+    wh = (wh or "").strip()
+
+    try:
+        qty_needed = int(qty_needed or 0)
+    except (ValueError, TypeError):
+        qty_needed = 0
+
+    if not pn:
+        return {
+            "ok": False,
+            "error": "NO_PN",
+            "hint": "WAIT",
+            "qty_available": 0,
+            "location": None,
+            "unit_cost": None,
+            "name": None,
+            "part_number": "",
+        }
+
+    q = db.session.query(Part).filter(Part.part_number == pn)
+
+    if wh:
+        q = q.filter(func.lower(Part.location) == func.lower(wh))
+
+    part = q.first()
+
+    if not part:
+        return {
+            "ok": True,
+            "part_number": pn,
+            "qty_available": 0,
+            "hint": "WAIT",
+            "location": None,
+            "unit_cost": None,
+            "name": None,
+        }
+
+    qty_available = int(part.quantity or 0)
+    is_stock = qty_available >= qty_needed if qty_needed > 0 else qty_available > 0
+    hint = "STOCK" if is_stock else "WAIT"
+
+    return {
+        "ok": True,
+        "part_number": pn,
+        "qty_available": qty_available,
+        "hint": hint,
+        "location": part.location,
+        "unit_cost": part.unit_cost,
+        "name": part.name,
+    }
+
+
 @inventory_bp.get("/api/stock_hint", endpoint="api_stock_hint")
 @login_required
 def api_stock_hint():
@@ -1779,38 +1833,69 @@ def api_stock_hint():
             "qty_available": 0
         }), 400
 
-    # базовый запрос по Part
-    q = db.session.query(Part).filter(Part.part_number == pn)
+    return jsonify(_stock_hint_payload(pn=pn, qty_needed=qty_needed, wh=wh))
 
-    # если указан склад – фильтруем по location (регистр не важен)
-    if wh:
-        q = q.filter(func.lower(Part.location) == func.lower(wh))
 
-    part = q.first()
+@inventory_bp.post("/api/stock_hint_bulk", endpoint="api_stock_hint_bulk")
+@login_required
+def api_stock_hint_bulk():
+    """
+    Bulk API для stock hint.
+    Принимает JSON:
+    {
+      "items": [
+        {"pn": "241505301", "qty": 2, "wh": "MAR"},
+        {"pn": "ABC123", "qty": 1}
+      ]
+    }
 
-    if not part:
-        return jsonify({
-            "ok": True,
-            "part_number": pn,
-            "qty_available": 0,
-            "hint": "WAIT",
-            "location": None,
-            "unit_cost": None,
-            "name": None,
-        })
+    Возвращает:
+    {
+      "ok": True,
+      "items": {
+        "241505301|2|MAR": {...},
+        "ABC123|1|": {...}
+      }
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    items = data.get("items") or []
 
-    qty_available = int(part.quantity or 0)
-    is_stock = qty_available >= qty_needed if qty_needed > 0 else qty_available > 0
-    hint = "STOCK" if is_stock else "WAIT"
+    result = {}
+
+    for item in items:
+        pn = (item.get("pn") or "").strip().upper()
+        wh = (item.get("wh") or "").strip()
+
+        try:
+            qty_needed = int(item.get("qty") or 0)
+        except (ValueError, TypeError):
+            qty_needed = 0
+
+        key = f"{pn}|{qty_needed}|{wh.upper()}"
+
+        if not pn:
+            result[key] = {
+                "ok": False,
+                "error": "NO_PN",
+                "hint": "WAIT",
+                "qty_available": 0,
+                "location": None,
+                "unit_cost": None,
+                "name": None,
+                "part_number": "",
+            }
+            continue
+
+        result[key] = _stock_hint_payload(
+            pn=pn,
+            qty_needed=qty_needed,
+            wh=wh,
+        )
 
     return jsonify({
         "ok": True,
-        "part_number": pn,
-        "qty_available": qty_available,
-        "hint": hint,
-        "location": part.location,
-        "unit_cost": part.unit_cost,
-        "name": part.name,
+        "items": result
     })
 
 @inventory_bp.get("/debug/db_objects")

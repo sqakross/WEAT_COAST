@@ -30,4 +30,4 @@ class Config:
     SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "")
     SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
     SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USERNAME)
-    EMAIL_ORDERS_TO = os.environ.get("EMAIL_ORDERS_TO", "lion7500000@gmail.com")
+    EMAIL_ORDERS_TO = os.environ.get("EMAIL_ORDERS_TO")

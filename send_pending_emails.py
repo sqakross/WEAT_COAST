@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 load_dotenv(override=True)
+
 from app import app
 from inventory.routes import process_email_queue
 from models import EmailOutbox
@@ -60,6 +61,36 @@ def log_queue_snapshot():
     write_log(f"QUEUE SNAPSHOT | pending={pending} error={error} sent={sent}")
 
 
+def log_pending_rows(limit: int = 10):
+    rows = (
+        EmailOutbox.query
+        .filter_by(status="pending")
+        .order_by(EmailOutbox.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    if not rows:
+        write_log("PENDING ROWS | none")
+        return
+
+    for row in rows:
+        to_email = (row.to_email or "").strip()
+
+        warning = ""
+        if not to_email or "@" not in to_email or " " in to_email:
+            warning = " | WARNING=invalid_to_email"
+
+        write_log(
+            f"PENDING ROW | "
+            f"id={row.id} "
+            f"attempts={getattr(row, 'attempt_count', None)} "
+            f"to={to_email!r} "
+            f"subject={row.subject!r}"
+            f"{warning}"
+        )
+
+
 def log_failed_rows(limit: int = 10):
     rows = (
         EmailOutbox.query
@@ -97,6 +128,7 @@ if __name__ == "__main__":
                 write_log("SKIP | queue empty")
             else:
                 write_log(f"QUEUE SNAPSHOT | pending={pending}")
+                log_pending_rows(limit=10)
 
                 result = process_email_queue(limit=20) or {}
                 msg = (
