@@ -1576,97 +1576,84 @@ function applyHintResult(tr, j){
   });
 
   issueBtn?.addEventListener('click', ()=>{
-    const selected    = [];
-    const insSelected = [];
-    const isINSJob    = isInsuranceJob();
+  const isINSJob = isInsuranceJob();
+  const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
+  const issueFormEl = document.getElementById('issueForm');
 
-    document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
-      if (tr.classList.contains('issued-row')) return;
+  if (!issueFormEl) return;
 
-      const cb = tr.querySelector('.issue-check');
-      if (!cb || !cb.checked) return;
+  const selected = [];
+  const insSelected = [];
+  let firstEmpty = null;
 
-      const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
-      if (!/^\d+$/.test(wopId)) return;
+  issueFormEl.querySelectorAll('input[data-invcopy="1"]').forEach(x => x.remove());
 
-      const raw    = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
-      const status = raw.split('/')[0];
-      const insLine = isRowInsuranceSupplied(tr);
+  for (const tr of rows) {
+    if (tr.classList.contains('issued-row')) continue;
 
-      if (status === 'STOCK' || (isINSJob && insLine)) {
-        selected.push(wopId);
-        if (isINSJob && insLine) insSelected.push(wopId);
-      }
-    });
+    const cb = tr.querySelector('.issue-check');
+    if (!cb || !cb.checked) continue;
 
-    if (selected.length === 0) {
-      alert(isINSJob
-        ? 'Select at least one in-stock or INS part (saved rows only).'
-        : 'Select at least one in-stock part (saved rows only).'
-      );
-      return;
+    const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
+    if (!/^\d+$/.test(wopId)) continue;
+
+    const raw = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
+    const status = raw.startsWith('STOCK') ? 'STOCK' : 'WAIT';
+    const insLine = isRowInsuranceSupplied(tr);
+
+    if (!(status === 'STOCK' || (isINSJob && insLine))) continue;
+
+    const invInput = tr.querySelector('.inv-input');
+    let invVal = (invInput?.value || '').toUpperCase().replace(/\s+/g, ' ').trim();
+
+    if (!invVal && !firstEmpty) {
+      firstEmpty = tr;
     }
 
-    let firstEmpty = null;
-    document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
-      if (tr.classList.contains('issued-row')) return;
+    selected.push(wopId);
+    if (isINSJob && insLine) insSelected.push(wopId);
 
-      const cb = tr.querySelector('.issue-check');
-      if (!cb) return;
+    const h = document.createElement('input');
+    h.type = 'hidden';
+    h.name = `inv_${wopId}`;
+    h.value = invVal;
+    h.setAttribute('data-invcopy', '1');
+    issueFormEl.appendChild(h);
+  }
 
-      const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
-      if (!selected.includes(wopId)) return;
+  if (selected.length === 0) {
+    alert(isINSJob
+      ? 'Select at least one in-stock or INS part (saved rows only).'
+      : 'Select at least one in-stock part (saved rows only).'
+    );
+    return;
+  }
 
-      const inv = (tr.querySelector('.inv-input')?.value || '').trim();
-      if (!inv && !firstEmpty) firstEmpty = tr;
-    });
-
-    if (firstEmpty){
-      alert('Invoice # is required for all selected lines before issuing.');
-      const inp = firstEmpty.querySelector('.inv-input');
-      if (inp){
-        inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        inp.focus();
-        inp.classList.add('inv-missing');
-        setTimeout(() => inp.classList.remove('inv-missing'), 2000);
-      }
-      return;
+  if (firstEmpty){
+    alert('Invoice # is required for all selected lines before issuing.');
+    const inp = firstEmpty.querySelector('.inv-input');
+    if (inp){
+      inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      inp.focus();
+      inp.classList.add('inv-missing');
+      setTimeout(() => inp.classList.remove('inv-missing'), 2000);
     }
 
-    const issueFormEl = document.getElementById('issueForm');
-    if (issueFormEl) {
-      issueFormEl.querySelectorAll('input[data-invcopy="1"]').forEach(x => x.remove());
+    issueFormEl.querySelectorAll('input[data-invcopy="1"]').forEach(x => x.remove());
+    return;
+  }
 
-      document.querySelectorAll('#unitsWrap tbody tr').forEach((tr)=>{
-        if (tr.classList.contains('issued-row')) return;
+  if (statusSel) statusSel.value = 'done';
 
-        const cb = tr.querySelector('.issue-check');
-        if (!cb) return;
+  document.getElementById('issue_set_status').value = 'done';
+  document.getElementById('issue_part_ids').value = selected.join(',');
+  document.getElementById('issue_ins_ids').value = insSelected.join(',');
 
-        const wopId = (cb.getAttribute('data-wop-id') || cb.value || '').trim();
-        if (!selected.includes(wopId)) return;
+  issueBtn.disabled = true;
+  issueBtn.textContent = 'Issuing...';
 
-        let invVal = (tr.querySelector('.inv-input')?.value || '').toUpperCase();
-        invVal = invVal.replace(/\s+/g, ' ').trim();
-
-        const h = document.createElement('input');
-        h.type = 'hidden';
-        h.name = `inv_${wopId}`;
-        h.value = invVal;
-        h.setAttribute('data-invcopy', '1');
-        issueFormEl.appendChild(h);
-      });
-    }
-
-    if (statusSel) statusSel.value = 'done';
-
-    document.getElementById('issue_set_status').value = 'done';
-    document.getElementById('issue_part_ids').value  = selected.join(',');
-    document.getElementById('issue_ins_ids').value   = insSelected.join(',');
-
-
-    document.getElementById('issueForm').submit();
-  });
+  document.getElementById('issueForm').submit();
+});
 
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
   warmupHintsBulk();

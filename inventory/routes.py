@@ -6550,6 +6550,42 @@ def wo_issue_instock(wo_id):
         for line in wops:
             inv_now_by_line_id[int(line.id)] = _read_inv_for_line(int(line.id))
 
+        # --- preload all candidate Part rows once (big speedup, same logic) ---
+        selected_pns = sorted({
+            (line.part_number or "").strip().upper()
+            for line in wops
+            if (line.part_number or "").strip()
+        })
+
+        part_rows = []
+        if selected_pns:
+            part_rows = (
+                Part.query
+                .filter(func.upper(Part.part_number).in_(selected_pns))
+                .all()
+            )
+
+        parts_by_pn: dict[str, list[Part]] = {}
+        for p in part_rows:
+            key = (getattr(p, "part_number", "") or "").strip().upper()
+            if not key:
+                continue
+            parts_by_pn.setdefault(key, []).append(p)
+
+        def _pick_part_for_line(pn: str, warehouse: str | None):
+            candidates = parts_by_pn.get((pn or "").strip().upper(), []) or []
+            if not candidates:
+                return None
+
+            wh_norm = (warehouse or "").strip().lower()
+            if wh_norm and part_has_location:
+                for p in candidates:
+                    loc = (getattr(p, "location", "") or "").strip().lower()
+                    if loc == wh_norm:
+                        return p
+
+            return candidates[0]
+
         for line in wops:
             pn = (line.part_number or "").strip().upper()
             qty_req = int(line.quantity or 0)
@@ -6572,14 +6608,7 @@ def wo_issue_instock(wo_id):
                 or bool(getattr(line, "is_insurance_supplied", False))
             )
 
-            q_base = Part.query.filter(func.upper(Part.part_number) == pn)
-            part = None
-            if part_has_location and getattr(line, "warehouse", None):
-                part = q_base.filter(
-                    func.coalesce(Part.location, "") == (line.warehouse or "")
-                ).first()
-            if not part:
-                part = q_base.first()
+            part = _pick_part_for_line(pn, getattr(line, "warehouse", None))
 
             hint_norm = (hint_map.get(pn) or "STOCK").upper()
             try:
