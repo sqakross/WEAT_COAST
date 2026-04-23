@@ -1751,9 +1751,6 @@ def issued_confirm_toggle():
 
 # ---------- STOCK HINT API ----------
 from flask import jsonify, request
-# from sqlalchemy import func
-
-# ...
 
 def _stock_hint_payload(pn: str, qty_needed: int = 0, wh: str = ""):
     pn = (pn or "").strip().upper()
@@ -1776,14 +1773,9 @@ def _stock_hint_payload(pn: str, qty_needed: int = 0, wh: str = ""):
             "part_number": "",
         }
 
-    q = db.session.query(Part).filter(Part.part_number == pn)
+    parts = db.session.query(Part).filter(Part.part_number == pn).all()
 
-    if wh:
-        q = q.filter(func.lower(Part.location) == func.lower(wh))
-
-    part = q.first()
-
-    if not part:
+    if not parts:
         return {
             "ok": True,
             "part_number": pn,
@@ -1794,7 +1786,28 @@ def _stock_hint_payload(pn: str, qty_needed: int = 0, wh: str = ""):
             "name": None,
         }
 
-    qty_available = int(part.quantity or 0)
+    qty_available = sum(int(p.quantity or 0) for p in parts)
+
+    locations = []
+    for p in parts:
+        loc = (p.location or "").strip().upper()
+        if loc and loc not in locations:
+            locations.append(loc)
+
+    location_value = "/".join(locations) if locations else None
+
+    unit_cost = None
+    for p in parts:
+        if p.unit_cost is not None:
+            unit_cost = p.unit_cost
+            break
+
+    name = None
+    for p in parts:
+        if p.name:
+            name = p.name
+            break
+
     is_stock = qty_available >= qty_needed if qty_needed > 0 else qty_available > 0
     hint = "STOCK" if is_stock else "WAIT"
 
@@ -1803,11 +1816,10 @@ def _stock_hint_payload(pn: str, qty_needed: int = 0, wh: str = ""):
         "part_number": pn,
         "qty_available": qty_available,
         "hint": hint,
-        "location": part.location,
-        "unit_cost": part.unit_cost,
-        "name": part.name,
+        "location": location_value,
+        "unit_cost": unit_cost,
+        "name": name,
     }
-
 
 @inventory_bp.get("/api/stock_hint", endpoint="api_stock_hint")
 @login_required

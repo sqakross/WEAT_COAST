@@ -1195,7 +1195,12 @@ function applyHintResult(tr, j){
   const okFlag  = !!flat.ok;
   const isStock = okFlag && qa > 0;
 
-  if (hintEl) hintEl.textContent = (isStock ? 'STOCK' : 'WAIT') + '/' + qa;
+  const locationText = (flat.location || flat.warehouse || flat.wh || '').toString().trim();
+    const baseHint = (isStock ? 'STOCK' : 'WAIT') + '/' + qa;
+
+    if (hintEl) {
+      hintEl.textContent = locationText ? `${baseHint} (${locationText})` : baseHint;
+    }
   setIssueEnabled(tr, isStock);
 
   const nameGuess = flat.part_name || flat.name || flat.title || flat.description;
