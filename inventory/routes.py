@@ -1786,13 +1786,21 @@ def _stock_hint_payload(pn: str, qty_needed: int = 0, wh: str = ""):
             "name": None,
         }
 
-    qty_available = sum(int(p.quantity or 0) for p in parts)
-
+    qty_available = 0
     locations = []
+
     for p in parts:
-        loc = (p.location or "").strip().upper()
-        if loc and loc not in locations:
-            locations.append(loc)
+        try:
+            part_qty = int(p.quantity or 0)
+        except (ValueError, TypeError):
+            part_qty = 0
+
+        qty_available += part_qty
+
+        if part_qty > 0:
+            loc = (p.location or "").strip().upper()
+            if loc and loc not in locations:
+                locations.append(loc)
 
     location_value = "/".join(locations) if locations else None
 
@@ -3611,6 +3619,47 @@ def _serialize_batches_for_wo_detail(db_batches, wo):
         })
     return result
 
+@inventory_bp.get("/api/work_orders/<int:wo_id>/stamp", endpoint="api_work_order_stamp")
+@login_required
+def api_work_order_stamp(wo_id):
+    from flask import jsonify
+    from flask_login import current_user
+    from extensions import db
+    from models import WorkOrder
+
+    wo = db.session.query(WorkOrder).get(wo_id)
+    if not wo:
+        return jsonify({"ok": False, "error": "NOT_FOUND"}), 404
+
+    role_raw = (getattr(current_user, "role", "") or "").strip().lower()
+    me_id = getattr(current_user, "id", None)
+    me_name = (getattr(current_user, "username", "") or "").strip().lower()
+
+    wo_tech_id = getattr(wo, "technician_id", None)
+    wo_tech_name = (wo.technician_username or wo.technician_name or "").strip().lower()
+
+    is_admin_like = role_raw in ("admin", "superadmin")
+    is_technician = role_raw in ("technician", "tech")
+    is_user = (role_raw == "user")
+
+    is_my_wo = False
+    if wo_tech_id and me_id and wo_tech_id == me_id:
+        is_my_wo = True
+    elif wo_tech_name and me_name and wo_tech_name == me_name:
+        is_my_wo = True
+
+    if is_technician and not is_my_wo:
+        return jsonify({"ok": False, "error": "FORBIDDEN"}), 403
+
+    can_view = is_admin_like or is_my_wo or is_user
+    if not can_view:
+        return jsonify({"ok": False, "error": "FORBIDDEN"}), 403
+
+    return jsonify({
+        "ok": True,
+        "wo_id": wo.id,
+        "updated_at": wo.updated_at.isoformat() if wo.updated_at else None,
+    })
 
 # --- Work Order details ---
 @inventory_bp.get("/work_orders/<int:wo_id>", endpoint="wo_detail")
@@ -3728,9 +3777,18 @@ def wo_detail(wo_id):
         c = func.upper(func.coalesce(func.trim(col), ""))
         return or_(
             c == tok,
-            c.op("GLOB")(f"{tok}[^0-9A-Za-z]*"),
-            c.op("GLOB")(f"*[^0-9A-Za-z]{tok}[^0-9A-Za-z]*"),
-            c.op("GLOB")(f"*[^0-9A-Za-z]{tok}"),
+            c.like(f"{tok} %"),
+            c.like(f"% {tok} %"),
+            c.like(f"% {tok}"),
+            c.like(f"{tok},%"),
+            c.like(f"%,{tok},%"),
+            c.like(f"%,{tok}"),
+            c.like(f"{tok}/%"),
+            c.like(f"%/{tok}/%"),
+            c.like(f"%/{tok}"),
+            c.like(f"{tok}-%"),
+            c.like(f"%-{tok}-%"),
+            c.like(f"%-{tok}"),
         )
 
     base_q = (
@@ -6070,6 +6128,11 @@ def wo_save():
         session["recent_suppliers"] = merged[:20]
         session.modified = True
 
+    after_save = (request.form.get("_after_save") or "").strip()
+
+    if after_save == "edit_auto_issue":
+        return redirect(url_for("inventory.wo_edit", wo_id=wo.id, auto_issue=1))
+
     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
 @inventory_bp.get("/work_orders")
@@ -6108,20 +6171,14 @@ def wo_list():
 
         c = func.coalesce(func.trim(col), "")
 
-        if tok.isdigit():
-            return or_(
-                c == tok,
-                c.op("GLOB")(f"{tok}[^0-9]*"),            # starts with tok then non-digit boundary
-                c.op("GLOB")(f"*[^0-9]{tok}[^0-9]*"),     # middle token
-                c.op("GLOB")(f"*[^0-9]{tok}"),            # ends with tok
-            )
-
         return or_(
             c == tok,
             c.like(f"{tok} %"),
             c.like(f"% {tok} %"),
             c.like(f"% {tok}"),
-            c.like(f"%{tok},%"),
+            c.like(f"{tok},%"),
+            c.like(f"%,{tok},%"),
+            c.like(f"%,{tok}"),
         )
 
     # ---- incoming params ----
@@ -6956,6 +7013,11 @@ def wo_issue_instock(wo_id):
         f'Issued in-stock items. '
         f'<a href="{link}" target="_blank" rel="noopener">Open invoice group</a> to print.'
     ), "success")
+
+    after_save = (request.form.get("_after_save") or "").strip()
+
+    if after_save == "edit_auto_issue":
+        return redirect(url_for("inventory.wo_edit", wo_id=wo.id, auto_issue=1))
 
     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 

@@ -270,7 +270,12 @@
       class="wo-form {% if IS_EDIT and wo.status == 'cancel_job' %}wo-cancelled{% endif %}">
   {% if IS_EDIT %}
     <input type="hidden" name="wo_id" value="{{ wo.id }}">
+    <input type="hidden" name="_after_save" id="afterSaveAction" value="">
   {% endif %}
+
+  {% if IS_EDIT %}
+      <input type="hidden" id="woUpdatedAt" value="{{ wo.updated_at.isoformat() if wo.updated_at else '' }}">
+    {% endif %}
 
   <div class="row g-3 mb-3">
     <div class="col-md-3">
@@ -825,6 +830,94 @@ function wccrToast(msg) {
   const currentWOInput = form.querySelector('input[name="wo_id"]');
   const CURRENT_WO_ID  = currentWOInput ? String(currentWOInput.value || '').trim() : '';
 
+    const woUpdatedAtEl = document.getElementById('woUpdatedAt');
+  let knownWOUpdatedAt = (woUpdatedAtEl?.value || '').trim();
+  let woReloadPromptShown = false;
+  let woStampTimer = null;
+  const WO_STAMP_URL = CURRENT_WO_ID
+    ? "{{ url_for('inventory.api_work_order_stamp', wo_id=0) }}".replace("0", CURRENT_WO_ID)
+    : "";
+
+  function showReloadBanner(){
+    if (woReloadPromptShown) return;
+    woReloadPromptShown = true;
+
+    const bar = document.createElement('div');
+    bar.id = 'woReloadBanner';
+    bar.className = 'alert alert-warning d-flex justify-content-between align-items-center mt-2';
+    bar.innerHTML = `
+      <div>This Work Order was updated in another tab/window.</div>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-outline-dark" id="woReloadNowBtn">Reload</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="woReloadLaterBtn">Later</button>
+      </div>
+    `;
+
+    const formEl = document.getElementById('woForm');
+    if (formEl) {
+      formEl.insertAdjacentElement('beforebegin', bar);
+    } else {
+      document.body.prepend(bar);
+    }
+
+    document.getElementById('woReloadNowBtn')?.addEventListener('click', () => {
+      isSubmitting = true;
+      isDirty = false;
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.location.reload();
+    });
+
+    document.getElementById('woReloadLaterBtn')?.addEventListener('click', () => {
+      bar.remove();
+      woReloadPromptShown = false;
+    });
+  }
+
+  async function checkWorkOrderFreshness(forceReloadIfClean = true){
+    if (!CURRENT_WO_ID || !WO_STAMP_URL || IS_RO) return;
+
+    try {
+      const resp = await fetch(WO_STAMP_URL, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!resp.ok) return;
+
+      const data = await resp.json();
+      if (!data?.ok) return;
+
+      const incoming = (data.updated_at || '').trim();
+      if (!incoming || !knownWOUpdatedAt) {
+        knownWOUpdatedAt = incoming || knownWOUpdatedAt;
+        return;
+      }
+
+      if (incoming !== knownWOUpdatedAt) {
+        if (!isDirty && forceReloadIfClean) {
+          isSubmitting = true;
+          window.removeEventListener('beforeunload', handleBeforeUnload);
+          window.location.reload();
+          return;
+        }
+        showReloadBanner();
+      }
+    } catch (err) {
+      console.warn('WO freshness check failed', err);
+    }
+  }
+
+  function scheduleWOStampPolling(){
+    if (!CURRENT_WO_ID || IS_RO) return;
+    if (woStampTimer) clearInterval(woStampTimer);
+
+    woStampTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        checkWorkOrderFreshness(true);
+      }
+    }, 15000);
+  }
+
     function syncSupplierState(tr){
     if (!tr) return;
 
@@ -1085,9 +1178,10 @@ function wccrToast(msg) {
     cb.title = "";
   }
 
-  const stockHintCache = new Map();
-const stockHintTimers = new WeakMap();
-const stockHintInflight = new WeakMap();
+  const STOCK_HINT_TTL_MS = 5000;
+  const stockHintCache = new Map();   // key -> { ts, payload }
+    const stockHintTimers = new WeakMap();
+    const stockHintInflight = new WeakMap();
 
 function getHintKey(tr){
   const pnMain = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
@@ -1108,7 +1202,7 @@ function scheduleFetchHint(tr, delay = 350){
   stockHintTimers.set(tr, t);
 }
 
-  function fetchHint(tr){
+  function fetchHint(tr, force = false){
   const pnInput  = tr.querySelector('.pn');
   const altInput = tr.querySelector('.alt-pn');
   const qtyInput = tr.querySelector('.qty');
@@ -1127,21 +1221,19 @@ function scheduleFetchHint(tr, delay = 350){
     if (hintEl) hintEl.textContent = '—';
     setIssueEnabled(tr, false);
     tr.dataset.lastHintKey = '';
-    return;
+    return Promise.resolve();
   }
 
   const key = `${pn}|${qty}|${wh}`;
-
-  if (tr.dataset.lastHintKey === key && hintEl?.textContent && hintEl.textContent !== '—') {
-    return;
-  }
   tr.dataset.lastHintKey = key;
 
   const cached = stockHintCache.get(key);
-    if (cached) {
-      applyHintResult(tr, cached);
-      return;
-    }
+  const isFresh = cached && ((Date.now() - cached.ts) < STOCK_HINT_TTL_MS);
+
+  if (!force && isFresh) {
+    applyHintResult(tr, cached.payload);
+    return Promise.resolve(cached.payload);
+  }
 
   const prevController = stockHintInflight.get(tr);
   if (prevController) prevController.abort();
@@ -1157,11 +1249,12 @@ function scheduleFetchHint(tr, delay = 350){
     '&qty=' + qty +
     '&wh=' + encodeURIComponent(wh);
 
-  fetch(url, { signal: controller.signal })
+  return fetch(url, { signal: controller.signal })
     .then(r => r.ok ? r.json() : Promise.reject())
     .then(j => {
-      stockHintCache.set(key, j);
+      stockHintCache.set(key, { ts: Date.now(), payload: j });
       applyHintResult(tr, j);
+      return j;
     })
     .catch((err) => {
       if (err?.name === 'AbortError') return;
@@ -1284,7 +1377,7 @@ function applyHintResult(tr, j){
     const payloads = data.items || {};
 
     Object.entries(payloads).forEach(([key, payload]) => {
-      stockHintCache.set(key, payload);
+      stockHintCache.set(key, { ts: Date.now(), payload });
 
       const linkedRows = rowMap.get(key) || [];
       linkedRows.forEach((tr) => {
@@ -1307,6 +1400,81 @@ function applyHintResult(tr, j){
 
   rows.slice(0, 10).forEach((tr) => fetchHint(tr));
 }
+}
+async function refreshVisibleHints(force = false){
+  const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
+  const targets = rows.filter(tr => {
+    const pnMain = (tr.querySelector('.pn')?.value || '').trim();
+    const pnAlt  = (tr.querySelector('.alt-pn')?.value || '').trim();
+    const qty    = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
+    return (pnMain || pnAlt) && qty > 0;
+  });
+
+  if (!targets.length) return;
+
+  const items = [];
+  const rowMap = new Map();
+
+  targets.forEach((tr) => {
+    const pnMain = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
+    const pnAlt  = (tr.querySelector('.alt-pn')?.value || '').trim().toUpperCase();
+    const pn     = pnMain || pnAlt;
+    const qty    = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
+    const wh     = (tr.querySelector('.wh-input')?.value || '').trim().toUpperCase();
+    const key    = `${pn}|${qty}|${wh}`;
+
+    const cached = stockHintCache.get(key);
+    const isFresh = cached && ((Date.now() - cached.ts) < STOCK_HINT_TTL_MS);
+
+    if (!force && isFresh) {
+      applyHintResult(tr, cached.payload);
+      return;
+    }
+
+    if (!rowMap.has(key)) {
+      rowMap.set(key, []);
+      items.push({ pn, qty, wh });
+    }
+    rowMap.get(key).push(tr);
+  });
+
+  if (!items.length) return;
+
+  try {
+    const resp = await fetch(API_STOCK_BULK, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ items })
+    });
+
+    if (!resp.ok) throw new Error('bulk failed');
+
+    const data = await resp.json();
+    const payloads = data.items || {};
+
+    Object.entries(payloads).forEach(([key, payload]) => {
+      stockHintCache.set(key, { ts: Date.now(), payload });
+
+      const linkedRows = rowMap.get(key) || [];
+      linkedRows.forEach((tr) => {
+        tr.dataset.lastHintKey = key;
+        applyHintResult(tr, payload);
+      });
+    });
+  } catch (err) {
+    await Promise.allSettled(targets.map(tr => fetchHint(tr, true)));
+  }
+}
+
+function clearHintCacheForRow(tr){
+  if (!tr) return;
+  const oldKey = tr.dataset.lastHintKey;
+  if (oldKey) stockHintCache.delete(oldKey);
+  tr.dataset.lastHintKey = '';
 }
 
   function rowTemplate(ui, ri){
@@ -1456,6 +1624,7 @@ function applyHintResult(tr, j){
       e.target.classList.contains('alt-pn') ||
       e.target.classList.contains('qty')
     )){
+      clearHintCacheForRow(tr);
       scheduleFetchHint(tr, 400);
     }
   });
@@ -1465,7 +1634,10 @@ function applyHintResult(tr, j){
 
     if (target.classList.contains('wh-input')) {
       const tr = target.closest('tr');
-      if (tr) scheduleFetchHint(tr, 300);
+      if (tr) {
+        clearHintCacheForRow(tr);
+        scheduleFetchHint(tr, 300);
+      }
       return;
     }
 
@@ -1555,27 +1727,69 @@ function applyHintResult(tr, j){
   });
 
   selectAllBtn?.addEventListener('click', ()=>{
-    const rows = [...document.querySelectorAll('#unitsWrap tbody tr')].filter(tr=>{
-      if (tr.classList.contains('issued-row')) return false;
+      refreshVisibleHints(false);
 
-      const cb = tr.querySelector('.issue-check');
-      if (!cb || cb.disabled) return false;
+      const rows = [...document.querySelectorAll('#unitsWrap tbody tr')].filter(tr=>{
+        if (tr.classList.contains('issued-row')) return false;
 
-      const raw    = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
-      const status = raw.split('/')[0];
-      const isStock = (status === 'STOCK');
+        const cb = tr.querySelector('.issue-check');
+        if (!cb || cb.disabled) return false;
 
-      const isInsEligible = isInsuranceJob() && isRowInsuranceSupplied(tr);
-      return isStock || isInsEligible;
+        const raw    = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
+        const status = raw.split('/')[0];
+        const isStock = (status === 'STOCK');
+
+        const isInsEligible = isInsuranceJob() && isRowInsuranceSupplied(tr);
+        return isStock || isInsEligible;
+      });
+
+      const needCheck = rows.some(tr => !tr.querySelector('.issue-check').checked);
+      rows.forEach(tr=>{
+        tr.querySelector('.issue-check').checked = needCheck;
+      });
     });
 
-    const needCheck = rows.some(tr => !tr.querySelector('.issue-check').checked);
-    rows.forEach(tr=>{
-      tr.querySelector('.issue-check').checked = needCheck;
-    });
-  });
+  issueBtn?.addEventListener('click', async ()=>{
 
-  issueBtn?.addEventListener('click', ()=>{
+    if (isDirty && IS_EDIT && !window.WCCR_AUTO_ISSUE_RUNNING) {
+    const selectedPositions = [];
+
+    document.querySelectorAll('#unitsWrap .card').forEach((card, ui) => {
+      card.querySelectorAll('tbody tr').forEach((tr, ri) => {
+        const cb = tr.querySelector('.issue-check');
+        if (cb && cb.checked) {
+          selectedPositions.push(`${ui}:${ri}`);
+        }
+      });
+    });
+
+    if (!selectedPositions.length) {
+      alert('Select at least one saved in-stock part before issuing.');
+      return;
+    }
+
+    sessionStorage.setItem(
+      'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID,
+      selectedPositions.join(',')
+    );
+
+    const afterSaveInput = document.getElementById('afterSaveAction');
+    if (afterSaveInput) afterSaveInput.value = 'edit_auto_issue';
+
+    syncOrderedFlagsBeforeSubmit();
+
+    issueBtn.disabled = true;
+    issueBtn.textContent = 'Saving...';
+    isSubmitting = true;
+    isDirty = false;
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+
+    form.requestSubmit();
+    return;
+  }
+  if (!window.WCCR_AUTO_ISSUE_RUNNING) {
+      await refreshVisibleHints(true);
+    }
   const isINSJob = isInsuranceJob();
   const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
   const issueFormEl = document.getElementById('issueForm');
@@ -1649,19 +1863,233 @@ function applyHintResult(tr, j){
   document.getElementById('issue_part_ids').value = selected.join(',');
   document.getElementById('issue_ins_ids').value = insSelected.join(',');
 
-  issueBtn.disabled = true;
-  issueBtn.textContent = 'Issuing...';
+      issueBtn.disabled = true;
+      issueBtn.textContent = 'Issuing...';
 
-  document.getElementById('issueForm').submit();
+      const detailUrl = "{{ url_for('inventory.wo_detail', wo_id=wo.id) if IS_EDIT else '' }}";
+
+      try {
+        const resp = await fetch(issueFormEl.action, {
+          method: 'POST',
+          body: new FormData(issueFormEl),
+          credentials: 'same-origin',
+          redirect: 'follow'
+        });
+
+        if (!resp.ok) {
+          throw new Error('Issue request failed');
+        }
+
+        isSubmitting = true;
+        isDirty = false;
+        window.WCCR_AUTO_ISSUE_RUNNING = false;
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+
+        const finalUrl = resp.url || detailUrl;
+
+        if (finalUrl) {
+          window.location.replace(finalUrl);
+        } else if (detailUrl) {
+          window.location.replace(detailUrl);
+        } else {
+          window.location.reload();
+        }
+
+      } catch (err) {
+        console.error('Issue failed:', err);
+        alert('Issue failed. Please try again.');
+
+        issueBtn.disabled = false;
+        issueBtn.textContent = 'Issue selected';
+      }
+    });
+
+  let stockRefreshTimer = null;
+
+function scheduleVisibleRefresh(delay = 150){
+  if (window.WCCR_AUTO_ISSUE_RUNNING) return;
+
+  const autoIssueKey = 'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID;
+  if (CURRENT_WO_ID && sessionStorage.getItem(autoIssueKey)) return;
+
+  if (stockRefreshTimer) clearTimeout(stockRefreshTimer);
+  stockRefreshTimer = setTimeout(() => {
+    refreshVisibleHints(true);
+  }, delay);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    scheduleVisibleRefresh(100);
+  }
 });
 
+window.addEventListener('focus', () => {
+  scheduleVisibleRefresh(100);
+});
+
+window.addEventListener('pageshow', () => {
+  scheduleVisibleRefresh(100);
+});
+
+    document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkWorkOrderFreshness(true);
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    checkWorkOrderFreshness(true);
+  });
+
+  window.addEventListener('pageshow', () => {
+    checkWorkOrderFreshness(true);
+  });
+
+    scheduleWOStampPolling();
+
+      function getSelectedAutoIssueRows(saved){
+    const positions = (saved || '').split(',').map(x => x.trim()).filter(Boolean);
+    const result = [];
+
+    positions.forEach(pos => {
+      const [uiRaw, riRaw] = pos.split(':');
+      const ui = parseInt(uiRaw, 10);
+      const ri = parseInt(riRaw, 10);
+
+      const card = document.querySelectorAll('#unitsWrap .card')[ui];
+      const tr = card?.querySelectorAll('tbody tr')[ri];
+      if (tr) result.push(tr);
+    });
+
+    return result;
+  }
+
+  function waitForAutoIssueRowsReady(saved, timeoutMs = 5000){
+    return new Promise(resolve => {
+      const started = Date.now();
+
+      function check(){
+        const rows = getSelectedAutoIssueRows(saved);
+
+        const ready = rows.some(tr => {
+          const cb = tr.querySelector('.issue-check');
+          return cb && !cb.disabled;
+        });
+
+        if (ready) return resolve(true);
+
+        if (Date.now() - started >= timeoutMs) {
+          return resolve(false);
+        }
+
+        requestAnimationFrame(check);
+      }
+
+      check();
+    });
+  }
+      async function refreshAutoIssueRowsHints(saved){
+    const rows = getSelectedAutoIssueRows(saved);
+    if (!rows.length) return rows;
+
+    const items = [];
+    const rowMap = new Map();
+
+    rows.forEach((tr) => {
+      const pnMain = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
+      const pnAlt  = (tr.querySelector('.alt-pn')?.value || '').trim().toUpperCase();
+      const pn     = pnMain || pnAlt;
+      const qty    = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
+      const wh     = (tr.querySelector('.wh-input')?.value || '').trim().toUpperCase();
+
+      if (!pn || qty <= 0) {
+        setIssueEnabled(tr, false);
+        return;
+      }
+
+      const key = `${pn}|${qty}|${wh}`;
+      if (!rowMap.has(key)) {
+        rowMap.set(key, []);
+        items.push({ pn, qty, wh });
+      }
+      rowMap.get(key).push(tr);
+    });
+
+    if (!items.length) return rows;
+
+    try {
+      const resp = await fetch(API_STOCK_BULK, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ items })
+      });
+
+      if (!resp.ok) throw new Error('bulk failed');
+
+      const data = await resp.json();
+      const payloads = data.items || {};
+
+      Object.entries(payloads).forEach(([key, payload]) => {
+        stockHintCache.set(key, { ts: Date.now(), payload });
+        (rowMap.get(key) || []).forEach(tr => applyHintResult(tr, payload));
+      });
+
+    } catch (err) {
+      await Promise.allSettled(rows.map(tr => fetchHint(tr, true)));
+    }
+
+    return rows;
+  }
+
+    async function runAutoIssueAfterSave(){
+    if (!CURRENT_WO_ID || !issueBtn) return;
+
+    const key = 'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID;
+    const saved = sessionStorage.getItem(key);
+    if (!saved) return;
+
+    const rows = await refreshAutoIssueRowsHints(saved);
+    const isReady = await waitForAutoIssueRowsReady(saved, 5000);
+
+    let checkedCount = 0;
+
+    rows.forEach(tr => {
+      const cb = tr.querySelector('.issue-check');
+      if (cb && !cb.disabled) {
+        cb.checked = true;
+        checkedCount++;
+      }
+    });
+
+    if (!isReady || !checkedCount) {
+      sessionStorage.removeItem(key);
+      alert('Saved changes, but selected parts are not available for issue. Please check Stock Hint and click Issue selected again.');
+      return;
+    }
+
+    sessionStorage.removeItem(key);
+
+    window.WCCR_AUTO_ISSUE_RUNNING = true;
+    isDirty = false;
+    issueBtn.click();
+  }
+
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
-  warmupHintsBulk();
+  const autoIssueKey = 'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID;
+
+    if (CURRENT_WO_ID && sessionStorage.getItem(autoIssueKey)) {
+      runAutoIssueAfterSave();
+    } else {
+      warmupHintsBulk();
+    }
   updateSupplierRequired();
   toggleOrderedCols();
   updateInsColumns();
-  updatePOField();
-  reevaluateWOStatusFromOrd();
 })();
 </script>
 
