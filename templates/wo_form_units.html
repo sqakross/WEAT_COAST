@@ -611,7 +611,7 @@
 
   <div class="d-flex gap-2">
     {% if not RO %}
-      <button type="submit" class="btn btn-primary">Save</button>
+      <button type="submit" class="btn btn-primary" id="saveBtn" name="_save_clicked" value="1">Save</button>
 
       <button type="button" id="selectAllInStockBtn" class="btn btn-outline-secondary">
         Select all in-stock
@@ -782,6 +782,7 @@ function wccrToast(msg) {
   const deliveryEl   = document.getElementById('deliveryFee');
   const markupEl     = document.getElementById('markupPercent');
   const issueBtn     = document.getElementById('issueSelectedBtn');
+  const saveBtn      = document.getElementById('saveBtn');
   const selectAllBtn = document.getElementById('selectAllInStockBtn');
   const statusSel    = document.querySelector('select[name="status"]');
   const addUnitBtn   = document.getElementById('addUnit');
@@ -826,6 +827,17 @@ function wccrToast(msg) {
     form.addEventListener('input', markDirty);
     form.addEventListener('change', markDirty);
   }
+
+  saveBtn?.addEventListener('click', () => {
+  const afterSaveInput = document.getElementById('afterSaveAction');
+  if (afterSaveInput) afterSaveInput.value = '';
+
+  if (CURRENT_WO_ID) {
+    sessionStorage.removeItem('WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID);
+  }
+
+  window.WCCR_AUTO_ISSUE_RUNNING = false;
+});
 
   const currentWOInput = form.querySelector('input[name="wo_id"]');
   const CURRENT_WO_ID  = currentWOInput ? String(currentWOInput.value || '').trim() : '';
@@ -874,6 +886,7 @@ function wccrToast(msg) {
   }
 
   async function checkWorkOrderFreshness(forceReloadIfClean = true){
+      if (isSubmitting || window.WCCR_AUTO_ISSUE_RUNNING || window.WCCR_NAVIGATING_TO_DETAIL) return;
     if (!CURRENT_WO_ID || !WO_STAMP_URL || IS_RO) return;
 
     try {
@@ -907,16 +920,6 @@ function wccrToast(msg) {
     }
   }
 
-  function scheduleWOStampPolling(){
-    if (!CURRENT_WO_ID || IS_RO) return;
-    if (woStampTimer) clearInterval(woStampTimer);
-
-    woStampTimer = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        checkWorkOrderFreshness(true);
-      }
-    }, 15000);
-  }
 
     function syncSupplierState(tr){
     if (!tr) return;
@@ -1078,8 +1081,19 @@ function wccrToast(msg) {
   if (form) {
     form.addEventListener('submit', async (e)=>{
       e.preventDefault();
+    if (e.submitter && e.submitter.id === 'saveBtn') {
+      const afterSaveInput = document.getElementById('afterSaveAction');
+      if (afterSaveInput) afterSaveInput.value = '';
 
-      const okToSubmit = await handleDuplicateCheckBeforeSubmit();
+      if (CURRENT_WO_ID) {
+        sessionStorage.removeItem('WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID);
+      }
+
+      window.WCCR_AUTO_ISSUE_RUNNING = false;
+    }
+
+
+    const okToSubmit = await handleDuplicateCheckBeforeSubmit();
       if (!okToSubmit) return;
 
       syncOrderedFlagsBeforeSubmit();
@@ -1726,28 +1740,29 @@ function clearHintCacheForRow(tr){
     reevaluateWOStatusFromOrd();
   });
 
-  selectAllBtn?.addEventListener('click', ()=>{
-      refreshVisibleHints(false);
+     selectAllBtn?.addEventListener('click', async ()=>{
+        await refreshVisibleHints(false);
 
-      const rows = [...document.querySelectorAll('#unitsWrap tbody tr')].filter(tr=>{
-        if (tr.classList.contains('issued-row')) return false;
+        const rows = [...document.querySelectorAll('#unitsWrap tbody tr')].filter(tr=>{
+          if (tr.classList.contains('issued-row')) return false;
 
-        const cb = tr.querySelector('.issue-check');
-        if (!cb || cb.disabled) return false;
+          const cb = tr.querySelector('.issue-check');
+          if (!cb || cb.disabled) return false;
 
-        const raw    = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
-        const status = raw.split('/')[0];
-        const isStock = (status === 'STOCK');
+          const raw = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
+          const status = raw.split('/')[0];
+          const isStock = (status === 'STOCK');
 
-        const isInsEligible = isInsuranceJob() && isRowInsuranceSupplied(tr);
-        return isStock || isInsEligible;
+          const isInsEligible = isInsuranceJob() && isRowInsuranceSupplied(tr);
+          return isStock || isInsEligible;
+        });
+
+        const needCheck = rows.some(tr => !tr.querySelector('.issue-check').checked);
+
+        rows.forEach(tr=>{
+          tr.querySelector('.issue-check').checked = needCheck;
+        });
       });
-
-      const needCheck = rows.some(tr => !tr.querySelector('.issue-check').checked);
-      rows.forEach(tr=>{
-        tr.querySelector('.issue-check').checked = needCheck;
-      });
-    });
 
   issueBtn?.addEventListener('click', async ()=>{
 
@@ -1788,7 +1803,7 @@ function clearHintCacheForRow(tr){
     return;
   }
   if (!window.WCCR_AUTO_ISSUE_RUNNING) {
-      await refreshVisibleHints(true);
+      await refreshVisibleHints(false);
     }
   const isINSJob = isInsuranceJob();
   const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
@@ -1866,42 +1881,13 @@ function clearHintCacheForRow(tr){
       issueBtn.disabled = true;
       issueBtn.textContent = 'Issuing...';
 
-      const detailUrl = "{{ url_for('inventory.wo_detail', wo_id=wo.id) if IS_EDIT else '' }}";
+      window.WCCR_NAVIGATING_TO_DETAIL = true;
+      isSubmitting = true;
+      isDirty = false;
+      window.removeEventListener('beforeunload', handleBeforeUnload);
 
-      try {
-        const resp = await fetch(issueFormEl.action, {
-          method: 'POST',
-          body: new FormData(issueFormEl),
-          credentials: 'same-origin',
-          redirect: 'follow'
-        });
-
-        if (!resp.ok) {
-          throw new Error('Issue request failed');
-        }
-
-        isSubmitting = true;
-        isDirty = false;
-        window.WCCR_AUTO_ISSUE_RUNNING = false;
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-
-        const finalUrl = resp.url || detailUrl;
-
-        if (finalUrl) {
-          window.location.replace(finalUrl);
-        } else if (detailUrl) {
-          window.location.replace(detailUrl);
-        } else {
-          window.location.reload();
-        }
-
-      } catch (err) {
-        console.error('Issue failed:', err);
-        alert('Issue failed. Please try again.');
-
-        issueBtn.disabled = false;
-        issueBtn.textContent = 'Issue selected';
-      }
+      issueFormEl.submit();
+      return;
     });
 
   let stockRefreshTimer = null;
@@ -1918,6 +1904,21 @@ function scheduleVisibleRefresh(delay = 150){
   }, delay);
 }
 
+// --- SMART WORK ORDER SYNC (без polling) ---
+window.addEventListener('focus', () => {
+  checkWorkOrderFreshness(false);
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    checkWorkOrderFreshness(false);
+  }
+});
+
+window.addEventListener('pageshow', () => {
+  checkWorkOrderFreshness(false);
+});
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     scheduleVisibleRefresh(100);
@@ -1932,21 +1933,6 @@ window.addEventListener('pageshow', () => {
   scheduleVisibleRefresh(100);
 });
 
-    document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      checkWorkOrderFreshness(true);
-    }
-  });
-
-  window.addEventListener('focus', () => {
-    checkWorkOrderFreshness(true);
-  });
-
-  window.addEventListener('pageshow', () => {
-    checkWorkOrderFreshness(true);
-  });
-
-    scheduleWOStampPolling();
 
       function getSelectedAutoIssueRows(saved){
     const positions = (saved || '').split(',').map(x => x.trim()).filter(Boolean);

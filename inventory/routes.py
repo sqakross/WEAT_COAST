@@ -6129,7 +6129,13 @@ def wo_save():
         session.modified = True
 
     after_save = (request.form.get("_after_save") or "").strip()
+    save_clicked = (request.form.get("_save_clicked") or "").strip()
 
+    # если это обычный Save — игнорируем auto_issue полностью
+    if save_clicked:
+        return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+
+    # только если это реально Issue flow
     if after_save == "edit_auto_issue":
         return redirect(url_for("inventory.wo_edit", wo_id=wo.id, auto_issue=1))
 
