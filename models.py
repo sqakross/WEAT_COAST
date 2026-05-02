@@ -282,6 +282,7 @@ class WorkOrderPart(db.Model):
 
     ordered_flag = db.Column(db.Boolean, default=False, index=True)
     ordered_date = db.Column(db.Date, nullable=True)
+    eta_date = db.Column(db.Date, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

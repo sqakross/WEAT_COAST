@@ -192,6 +192,7 @@
   .col-inv      { width: 120px; }  /* wider */
   .col-ord      { width: 60px; }
   .col-orddate  { width: 110px; }
+  .col-eta      { width: 110px; }
   .col-bo       { width: 56px; }
 
   .cell-tight { padding-left:.35rem !important; padding-right:.35rem !important; }
@@ -211,6 +212,7 @@
         <th class="text-center text-nowrap col-inv cell-tight">INV#</th>
         <th class="text-center text-nowrap col-ord cell-tight">Ord</th>
         <th class="text-center text-nowrap col-orddate cell-tight">Ord date</th>
+        <th class="text-center text-nowrap col-eta cell-tight">ETA</th>
         <th class="text-center text-nowrap col-bo cell-tight">B/O</th>
       </tr>
     </thead>
@@ -287,6 +289,16 @@
             {% endif %}
           </td>
 
+          <td class="text-center text-nowrap col-eta cell-tight">
+              {% if row.eta_date %}
+                <span class="badge bg-secondary">
+                  {{ row.eta_date|local_date }}
+                </span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+
           <td class="text-center text-nowrap col-bo cell-tight">
             {% if row.backorder_flag %}
               <span class="badge bg-warning text-dark">B/O</span>
@@ -302,7 +314,7 @@
       <tr class="table-light">
         <th colspan="5" class="text-end">Grand total (plan):</th>
         <th class="num">{{ '%.2f'|format(grand_total_display or 0) }}</th>
-        <th colspan="5"></th>
+        <th colspan="6"></th>
       </tr>
     </tfoot>
   </table>

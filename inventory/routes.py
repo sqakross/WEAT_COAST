@@ -213,6 +213,8 @@ SUPPLIER_LOC_DEFAULTS = {
     "reliable": "REL",
     "marcone":  "MAR",
     "marcon":   "MAR",
+    "amazon": "AMAZ",
+    "encompass": "ENC",
 }
 
 # inventory/routes.py  (добавь рядом с _create_batch_for_records)
@@ -2541,6 +2543,242 @@ def dataframe_from_pdf(path, try_ocr: bool = False):
     except Exception as e:
         log(f"[PDF] text-parse failed: {e}")
 
+    # ---------- AMAZON PARSER ----------
+    try:
+        full_text = ""
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                full_text += "\n" + (page.extract_text() or "")
+
+        lines = [x.strip() for x in full_text.splitlines() if x.strip()]
+
+        amazon_rows = []
+        money_re = r"\$[\d,]+\.\d{2}"
+        item_start_re = re.compile(r"^\s*(?P<qty>\d+)\s+of:\s+(?P<body>.+)$", re.I)
+
+        i = 0
+        while i < len(lines):
+            m = item_start_re.match(lines[i])
+            if not m:
+                i += 1
+                continue
+
+            qty = int(m.group("qty") or 1)
+            body = m.group("body").strip()
+
+            block = [body]
+            j = i + 1
+
+            while j < len(lines):
+                if item_start_re.match(lines[j]):
+                    break
+                if lines[j].lower().startswith("shipping address:"):
+                    break
+                block.append(lines[j])
+                j += 1
+
+            # price: prefer money AFTER "Condition: New"
+            price = 0.0
+            for k, b in enumerate(block):
+                if b.lower().startswith("condition:"):
+                    for x in block[k + 1:]:
+                        mp = re.search(money_re, x)
+                        if mp:
+                            price = float(mp.group(0).replace("$", "").replace(",", ""))
+                            break
+                    break
+
+            # fallback: last money inside this item block
+            if price == 0.0:
+                all_prices = []
+                for b in block:
+                    for mp in re.finditer(money_re, b):
+                        all_prices.append(mp.group(0))
+                if all_prices:
+                    price = float(all_prices[-1].replace("$", "").replace(",", ""))
+
+            # clean description: remove seller/condition/price lines
+            clean_parts = []
+            for b in block:
+                bl = b.lower()
+                if bl.startswith("sold by"):
+                    continue
+                if bl.startswith("condition:"):
+                    continue
+                if re.fullmatch(money_re, b):
+                    continue
+                clean_parts.append(b)
+
+            desc = " ".join(clean_parts).strip()
+
+            # part number: take first useful code after "of:"
+            # Skip marketing words like Upgraded, Compatible, etc.
+            pn = ""
+            tokens = re.findall(r"[A-Z0-9][A-Z0-9\-]{4,24}", body.upper())
+            skip_words = {
+                "UPGRADED", "COMPATIBLE", "REFRIGERATOR", "DRYER",
+                "REPLACES", "MOTOR", "PARTS", "ALLIANCE"
+            }
+            for t in tokens:
+                if t not in skip_words:
+                    pn = t
+                    break
+
+            amazon_rows.append({
+                "PART #": pn,
+                "DESCR.": desc,
+                "QTY": qty,
+                "UNIT COST": price,
+                "SUPPLIER": "Amazon",
+            })
+
+            i = j
+
+        if amazon_rows:
+            df_amz = pd.DataFrame(amazon_rows)
+            log(f"[PDF-AMAZON] parsed rows={len(df_amz)}")
+            return df_amz
+
+    except Exception as e:
+        log(f"[PDF-AMAZON] failed: {e}")
+
+        # ---------- ENCOMPASS PARSER ----------
+    try:
+        full_text = ""
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                full_text += "\n" + (page.extract_text() or "")
+
+        tl = full_text.lower()
+        if "encompass" in tl:
+            lines = [x.strip() for x in full_text.splitlines() if x.strip()]
+            text_one = " ".join(lines)
+
+            enc_rows = []
+
+            pat = re.compile(
+                r"\b(?P<seq>\d+)\s+(?P<ord>\d+)\s+(?P<ship>\d+)\s+(?P<bo>\d+)\s+"
+                r"(?P<mfg>[A-Z0-9]{2,10})\s+"
+                r"(?P<pn>[A-Z0-9\-]{3,25})\s+"
+                r"(?P<desc>.+?)\s+"
+                r"(?P<core>\d+\.\d{2})\s+"
+                r"(?P<price>\d+\.\d{2})\s+"
+                r"(?P<ext>\d+\.\d{2})",
+                re.I,
+            )
+
+            for m in pat.finditer(text_one):
+                enc_rows.append({
+                    "PART #": m.group("pn").strip().upper(),
+                    "DESCR.": m.group("desc").strip(),
+                    "QTY": int(m.group("ship") or 0),
+                    "UNIT COST": float(m.group("price")),
+                    "SUPPLIER": "Encompass",
+                })
+
+            if enc_rows:
+                df_enc = pd.DataFrame(enc_rows)
+                log(f"[PDF-ENCOMPASS] parsed rows={len(df_enc)}")
+                return df_enc
+
+    except Exception as e:
+        log(f"[PDF-ENCOMPASS] failed: {e}")
+    # ---------- A2) MARCONE TEXT PARSER FALLBACK ----------
+    # Some Marcone PDFs do not expose page 2 as a real table.
+    # So parse full text from ALL pages before returning extracted tables.
+    try:
+        full_text = ""
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                full_text += "\n" + (page.extract_text() or "")
+
+        marcone_rows = []
+        lines = [x.strip() for x in full_text.splitlines() if x.strip()]
+
+        money_re = r"\$[\d,]+\.\d{2}"
+        part_re = r"[A-Z0-9][A-Z0-9\-\/\.]{2,24}"
+
+        # Example:
+        # 1 1 0 WP74009917 THRMST-OVN $116.06 $224.76 $116.06
+        # or:
+        # 1 WR14X29372 REFRIGERATOR DOOR
+        # GASKET WHITE
+        # 1 0 $44.63 $93.55 $44.63
+
+        i = 0
+        while i < len(lines):
+            ln = lines[i]
+
+            m = re.match(
+                rf"^\s*(?P<ord>\d+)\s+(?P<ship>\d+)\s+(?P<bo>\d+)\s+"
+                rf"(?P<pn>{part_re})\s+(?P<desc>.+?)\s+"
+                rf"(?P<unit>{money_re})\s+(?P<msrp>{money_re})\s+(?P<total>{money_re})\s*$",
+                ln,
+                flags=re.I,
+            )
+
+            if m:
+                qty = int(m.group("ship") or 0)
+                marcone_rows.append({
+                    "PART #": m.group("pn").strip().upper(),
+                    "DESCR.": m.group("desc").strip(),
+                    "QTY": qty,
+                    "UNIT COST": float(m.group("unit").replace("$", "").replace(",", "")),
+                    "SUPPLIER": "Marcone",
+                })
+                i += 1
+                continue
+
+            # multiline format:
+            # 1 WR14X29372 REFRIGERATOR DOOR
+            # GASKET WHITE
+            # 1 0 $44.63 $93.55 $44.63
+            m2 = re.match(
+                rf"^\s*(?P<ord>\d+)\s+(?P<pn>{part_re})\s+(?P<desc>.+?)\s*$",
+                ln,
+                flags=re.I,
+            )
+
+            if m2 and i + 1 < len(lines):
+                desc = m2.group("desc").strip()
+                j = i + 1
+
+                # collect description continuation lines until money line
+                while j < len(lines) and not re.search(money_re, lines[j]):
+                    if not lines[j].startswith("REF:"):
+                        desc += " " + lines[j].strip()
+                    j += 1
+
+                if j < len(lines):
+                    price_line = lines[j]
+                    m3 = re.match(
+                        rf"^\s*(?P<ship>\d+)\s+(?P<bo>\d+)\s+"
+                        rf"(?P<unit>{money_re})\s+(?P<msrp>{money_re})\s+(?P<total>{money_re})\s*$",
+                        price_line,
+                        flags=re.I,
+                    )
+
+                    if m3:
+                        marcone_rows.append({
+                            "PART #": m2.group("pn").strip().upper(),
+                            "DESCR.": desc.strip(),
+                            "QTY": int(m3.group("ship") or 0),
+                            "UNIT COST": float(m3.group("unit").replace("$", "").replace(",", "")),
+                            "SUPPLIER": "Marcone",
+                        })
+                        i = j + 1
+                        continue
+
+            i += 1
+
+        if marcone_rows:
+            df_marcone = pd.DataFrame(marcone_rows)
+            log(f"[PDF-MARCONE-TEXT] parsed rows={len(df_marcone)}")
+            return df_marcone
+
+    except Exception as e:
+        log(f"[PDF-MARCONE-TEXT] failed: {e}")
+
     if frames:
         out = pd.concat(frames, ignore_index=True)
         log(f"[PDF] text tables found, shape={out.shape}")
@@ -4099,6 +4337,7 @@ def wo_detail(wo_id):
                 "supplier": getattr(r, "supplier", "") or "",
                 "is_ordered": is_ordered,
                 "ordered_date": getattr(r, "ordered_date", None) or getattr(r, "ordered_on", None),
+                "eta_date": getattr(r, "eta_date", None),
                 "backorder_flag": bool(getattr(r, "backorder_flag", False)),
                 "is_invoiced": is_invoiced,
                 "is_insurance_supplied": is_ins,
@@ -4131,6 +4370,105 @@ def wo_detail(wo_id):
         can_view_docs=can_view_docs,
         current_user=current_user,
         audit_log=audit_log,
+    )
+
+@inventory_bp.app_context_processor
+def inject_alerts_count():
+    from datetime import date, timedelta
+    from models import WorkOrderPart, WorkOrder
+
+    today = date.today()
+    overdue_cutoff = today - timedelta(days=3)
+
+    count = db.session.query(WorkOrderPart).join(WorkOrder).filter(
+        WorkOrder.status != "done",
+        WorkOrder.status != "cancel_job",
+        WorkOrderPart.ordered_date.isnot(None),
+        WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+        WorkOrderPart.backorder_flag.is_(False),
+        WorkOrderPart.ordered_date <= overdue_cutoff
+    ).count()
+
+    return {"alerts_count": count}
+
+@inventory_bp.get("/work_orders/alerts", endpoint="wo_alerts")
+@login_required
+def wo_alerts():
+    from flask import request, render_template
+    from datetime import date, timedelta
+    from sqlalchemy import or_
+    from models import WorkOrder, WorkOrderPart, WorkUnit
+
+    def _days_int(name, default):
+        try:
+            v = int(request.args.get(name, default))
+            return max(v, 1)
+        except Exception:
+            return default
+
+    overdue_days = _days_int("overdue_days", 3)
+    bo_days = _days_int("bo_days", 14)
+
+    today = date.today()
+    overdue_cutoff = today - timedelta(days=overdue_days)
+    bo_cutoff = today - timedelta(days=bo_days)
+
+    base_q = (
+        db.session.query(WorkOrderPart, WorkOrder, WorkUnit)
+        .join(WorkOrder, WorkOrder.id == WorkOrderPart.work_order_id)
+        .outerjoin(WorkUnit, WorkUnit.id == WorkOrderPart.unit_id)
+        .filter(
+            WorkOrder.status != "done",
+            WorkOrder.status != "cancel_job",
+            WorkOrderPart.ordered_date.isnot(None),
+            WorkOrderPart.quantity > 0,
+            WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+        )
+        .order_by(WorkOrderPart.ordered_date.asc())
+    )
+
+    overdue_rows = (
+        base_q
+        .filter(
+            WorkOrderPart.backorder_flag.is_(False),
+            WorkOrderPart.ordered_date <= overdue_cutoff,
+        )
+        .all()
+    )
+
+    backorder_rows = (
+        base_q
+        .filter(
+            WorkOrderPart.backorder_flag.is_(True),
+            WorkOrderPart.ordered_date <= bo_cutoff,
+        )
+        .all()
+    )
+
+    eta_passed_rows = (
+        db.session.query(WorkOrderPart, WorkOrder, WorkUnit)
+        .join(WorkOrder, WorkOrder.id == WorkOrderPart.work_order_id)
+        .outerjoin(WorkUnit, WorkUnit.id == WorkOrderPart.unit_id)
+        .filter(
+            WorkOrder.status != "done",
+            WorkOrder.status != "cancel_job",
+            WorkOrderPart.eta_date.isnot(None),
+            WorkOrderPart.eta_date < today,
+            WorkOrderPart.quantity > 0,
+            WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+        )
+        .order_by(WorkOrderPart.eta_date.asc())
+        .all()
+    )
+
+    return render_template(
+        "wo_alerts.html",
+        overdue_rows=overdue_rows,
+        backorder_rows=backorder_rows,
+        eta_passed_rows=eta_passed_rows,
+        overdue_days=overdue_days,
+        bo_days=bo_days,
+        today=today,
     )
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
@@ -5276,6 +5614,15 @@ def wo_save():
     def _clip(s, n):
         return (s or "").strip()[:n]
 
+    def _date_or_none(x):
+        x = (x or "").strip()
+        if not x:
+            return None
+        try:
+            return date.fromisoformat(x)
+        except Exception:
+            return None
+
     def _wo_audit(wo_id: int, action: str, message: str, meta: dict | None = None):
         a = WorkOrderAudit(
             work_order_id=wo_id,
@@ -5614,7 +5961,7 @@ def wo_save():
     re_row = re.compile(
         r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|"
         r"alt_numbers|alt_part_numbers|warehouse|unit_label|supplier|supplier_name|"
-        r"invoice_number|"
+        r"invoice_number|eta_date|"
         r"backorder_flag|status|unit_cost|ordered_flag|is_insurance_supplied)\]$"
     )
 
@@ -5662,6 +6009,7 @@ def wo_save():
 
             inv_raw = (r.get("invoice_number") or "").strip().upper()
             inv_raw = inv_raw[:32] if inv_raw else ""
+            eta_val = _date_or_none(r.get("eta_date"))
 
             ucost = _f(r.get("unit_cost"), None)
             bo_flag = _b(r.get("backorder_flag"))
@@ -5683,6 +6031,7 @@ def wo_save():
                 "warehouse": _clip(wh_raw, 120),
                 "supplier": _clip(sup_raw, 80),
                 "invoice_number": inv_raw,
+                "eta_date": eta_val,
                 "backorder_flag": bo_flag,
                 "line_status": lstatus if lstatus in ("search_ordered", "ordered", "done") else "search_ordered",
                 "unit_cost": (ucost if (ucost is not None) else 0.0),
@@ -5961,6 +6310,7 @@ def wo_save():
                 status=("ordered" if ord_in else "search_ordered"),
                 is_insurance_supplied=ins_flag,
                 invoice_number=inv,
+                eta_date=r.get("eta_date"),
             )
 
             if hasattr(wop, "warehouse"):
@@ -6086,14 +6436,14 @@ def wo_save():
         rows = (
             WorkOrderPart.query
             .filter_by(work_order_id=wo.id)
-            .with_entities(WorkOrderPart.part_number, WorkOrderPart.invoice_number)
+            .with_entities(WorkOrderPart.part_number, WorkOrderPart.invoice_number, WorkOrderPart.eta_date)
             .all()
         )
 
         with open(dbg_path, "a", encoding="utf-8") as fp:
             fp.write("AFTER COMMIT DB:\n")
-            for pn, inv in rows:
-                fp.write(f"  pn={pn} inv={inv!r}\n")
+            for pn, inv, eta in rows:
+                fp.write(f"  pn={pn} inv={inv!r} eta={eta!r}\n")
 
     except Exception as e:
         db.session.rollback()
@@ -7154,8 +7504,9 @@ def wo_edit(wo_id: int):
                     getattr(p, "is_insurance_supplied", False)
                 ),
                 "invoice_number": (getattr(p, "invoice_number", "") or ""),
+                "eta_date": getattr(p, "eta_date", None),
 
-            })
+                })
 
         if not rows:
             rows = [{
@@ -7168,6 +7519,8 @@ def wo_edit(wo_id: int):
                 "issued_qty": 0,
                 "is_ordered": False,
                 "is_insurance_supplied": False,
+                "invoice_number": "",
+                "eta_date": None,
             }]
 
         units.append({
@@ -7193,6 +7546,8 @@ def wo_edit(wo_id: int):
                 "issued_qty": 0,
                 "is_ordered": False,
                 "is_insurance_supplied": False,
+                "invoice_number": "",
+                "eta_date": None,
             }],
         }]
 
@@ -10567,28 +10922,29 @@ def import_parts_upload():
             return None
 
     def _infer_invoice_number(norm_df, source_file: str, supplier_hint: str | None) -> str:
-        # unchanged logic, но с правильным импортом pdfminer
-        if norm_df is not None:
-            for col in ("invoice_no", "invoice", "order_no", "ref", "reference"):
-                if col in norm_df.columns:
-                    vals = [str(x).strip() for x in norm_df[col].dropna().astype(str).tolist()]
-                    vals = [v for v in vals if v and v.lower() not in ("nan", "none", "null")]
-                    if vals:
-                        from collections import Counter
-                        c = Counter(vals)
-                        best = c.most_common(1)[0][0]
-                        m = re.search(r"\b\d{6,}\b", best.replace(" ", ""))
-                        if m:
-                            return m.group(0)
-                        return best
+        import os
+        import re
 
         base = os.path.basename(source_file or "")
-        m2 = re.findall(r"\d{6,}", base)
-        if m2:
-            return max(m2, key=len)
+        supplier_l = (supplier_hint or "").lower()
 
+        # ---------- 1) ENCOMPASS FROM FILE NAME ----------
+        # Examples:
+        # I1-257939-0426.pdf  -> 1-257939-0426
+        # I12-581599-0426.pdf -> 12-581599-0426
+        m_enc_file = re.search(r"I?(\d{1,2}-\d{6}-\d{4})", base, flags=re.I)
+        if m_enc_file:
+            return m_enc_file.group(1)
+
+        # ---------- 2) AMAZON FROM FILE NAME / GENERIC ----------
+        m_amz_file = re.search(r"([0-9]{3}-[0-9]{7}-[0-9]{7})", base)
+        if m_amz_file:
+            return m_amz_file.group(1)
+
+        # ---------- 3) PDF TEXT ----------
         if str(source_file).lower().endswith(".pdf"):
             text = ""
+
             try:
                 import fitz
                 with fitz.open(source_file) as d:
@@ -10596,15 +10952,72 @@ def import_parts_upload():
                         text += d[i].get_text() + "\n"
             except Exception:
                 try:
-                    # <<< ВАЖНО: правильный модуль pdfminer >>>
                     from pdfminer.high_level import extract_text
                     text = extract_text(source_file) or ""
                 except Exception:
                     text = ""
+
             if text:
-                mm = re.search(r"Invoice[^0-9]*([0-9]{6,})", text, flags=re.I)
-                if mm:
-                    return mm.group(1)
+                tl = text.lower()
+
+                # ---------- ENCOMPASS FROM PDF TEXT ----------
+                if "encompass" in tl or "encompass" in supplier_l:
+                    mm_enc = re.search(r"I?(\d{1,2}-\d{6}-\d{4})", text, flags=re.I)
+                    if mm_enc:
+                        return mm_enc.group(1)
+
+                # ---------- AMAZON FROM PDF TEXT ----------
+                mm_amz = re.search(
+                    r"Amazon\.com\s+order\s+number:\s*([0-9]{3}-[0-9]{7}-[0-9]{7})",
+                    text,
+                    flags=re.I,
+                )
+                if mm_amz:
+                    return mm_amz.group(1)
+
+                mm_final = re.search(
+                    r"Final\s+Details\s+for\s+Order\s+#\s*([0-9]{3}-[0-9]{7}-[0-9]{7})",
+                    text,
+                    flags=re.I,
+                )
+                if mm_final:
+                    return mm_final.group(1)
+
+                # ---------- MARCONE / STANDARD INVOICE ----------
+                mm_invoice = re.search(r"Invoice[^0-9]*([0-9]{6,})", text, flags=re.I)
+                if mm_invoice:
+                    return mm_invoice.group(1)
+
+        # ---------- 4) DATAFRAME FALLBACK ----------
+        if norm_df is not None:
+            for col in ("invoice_no", "invoice", "order_no", "ref", "reference"):
+                if col in norm_df.columns:
+                    vals = [str(x).strip() for x in norm_df[col].dropna().astype(str).tolist()]
+                    vals = [v for v in vals if v and v.lower() not in ("nan", "none", "null")]
+                    if vals:
+                        from collections import Counter
+                        best = Counter(vals).most_common(1)[0][0]
+
+                        mm_enc = re.search(r"I?(\d{1,2}-\d{6}-\d{4})", best, flags=re.I)
+                        if mm_enc:
+                            return mm_enc.group(1)
+
+                        mm_amz = re.search(r"([0-9]{3}-[0-9]{7}-[0-9]{7})", best)
+                        if mm_amz:
+                            return mm_amz.group(1)
+
+                        m = re.search(r"\b\d{6,}\b", best.replace(" ", ""))
+                        if m:
+                            return m.group(0)
+
+                        return best
+
+        # ---------- 5) OLD FALLBACK FROM FILE NAME ----------
+        # IMPORTANT: this is last, because otherwise Encompass becomes only 581599.
+        m2 = re.findall(r"\d{6,}", base)
+        if m2:
+            return max(m2, key=len)
+
         return ""
 
     def _ensure_norm_columns(df, default_loc: str, saved_path: str):
@@ -10747,6 +11160,10 @@ def import_parts_upload():
                 return "Reliable Parts"
             if "marcone" in base or "marcon" in base:
                 return "Marcone"
+            if "amazon" in base or "order-document" in base:
+                return "Amazon"
+            if "encompass" in base:
+                return "Encompass"
 
             blob = ""
             # --- 1) df_hint: заголовки + первые строки
@@ -10767,6 +11184,10 @@ def import_parts_upload():
                 return "Reliable Parts"
             if "marcone" in blob_l or "marcon" in blob_l:
                 return "Marcone"
+            if "amazon" in blob_l:
+                return "Amazon"
+            if "encompass" in blob_l:
+                return "Encompass"
 
             # --- 2) PDF текст
             text = ""
@@ -10801,6 +11222,10 @@ def import_parts_upload():
                 return "Reliable Parts"
             if "marcone" in tl or "marcone supply" in tl:
                 return "Marcone"
+            if "amazon.com order number" in tl or "amazon.com" in tl or "amazon" in tl:
+                return "Amazon"
+            if "encompass" in tl:
+                return "Encompass"
         except Exception:
             pass
         return None

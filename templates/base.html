@@ -134,15 +134,25 @@
           </li>
 
           {% set is_wo = request.endpoint and request.endpoint.startswith('inventory.wo_') %}
-          <li class="nav-item">
-            <a class="nav-link{{ ' active' if is_wo else '' }}"
-               href="{{ url_for('inventory.wo_list') }}">WORK ORDERS</a>
-          </li>
+            <li class="nav-item">
+              <a class="nav-link{{ ' active' if is_wo and request.endpoint != 'inventory.wo_alerts' else '' }}"
+                 href="{{ url_for('inventory.wo_list') }}">WORK ORDERS</a>
+            </li>
 
-          <li class="nav-item">
-            <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.receiving') %} active{% endif %}"
-               href="{{ url_for('inventory.receiving_list') }}">RECEIVING</a>
-          </li>
+            <li class="nav-item">
+              <a class="nav-link{% if request.endpoint == 'inventory.wo_alerts' %} active{% endif %}"
+                 href="{{ url_for('inventory.wo_alerts') }}">
+                ALERTS
+                {% if alerts_count is defined and alerts_count > 0 %}
+                  <span class="badge bg-danger ms-1">{{ alerts_count }}</span>
+                {% endif %}
+              </a>
+            </li>
+
+            <li class="nav-item">
+              <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.receiving') %} active{% endif %}"
+                 href="{{ url_for('inventory.receiving_list') }}">RECEIVING</a>
+            </li>
 
           {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
           <li class="nav-item">

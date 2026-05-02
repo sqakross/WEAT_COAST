@@ -11,6 +11,7 @@
 <style>
   .col-wh{width:58px}
   .col-inv{width:90px}
+  .col-eta{width:108px}
   .col-hint{width:78px}
 
   .col-narrow{width:90px}
@@ -124,10 +125,10 @@
   }
 
   .wo-form .unit-table{
-    table-layout: fixed;
-    width: 100%;
-    min-width: 0 !important;
-  }
+      table-layout: fixed;
+      width: 100%;
+      min-width: 0 !important;
+    }
 
   .wo-form .unit-table th,
   .wo-form .unit-table td{
@@ -146,49 +147,52 @@
   .wo-form .unit-table .form-check-input{ transform: scale(.85); }
 
   .wo-form .unit-table th:nth-child(1),
-  .wo-form .unit-table td:nth-child(1){ width: 110px; }
+.wo-form .unit-table td:nth-child(1){ width: 95px; }
 
-  .wo-form .unit-table th:nth-child(2),
-  .wo-form .unit-table td:nth-child(2){ width: 85px; }
+.wo-form .unit-table th:nth-child(2),
+.wo-form .unit-table td:nth-child(2){ width: 70px; }
 
-  .wo-form .unit-table th:nth-child(3),
-  .wo-form .unit-table td:nth-child(3){ width: 170px; }
+.wo-form .unit-table th:nth-child(3),
+.wo-form .unit-table td:nth-child(3){ width: 145px; }
 
-  .wo-form .unit-table th:nth-child(4),
-  .wo-form .unit-table td:nth-child(4){ width: 48px; }
+.wo-form .unit-table th:nth-child(4),
+.wo-form .unit-table td:nth-child(4){ width: 42px; }
 
-  .wo-form .unit-table th:nth-child(5),
-  .wo-form .unit-table td:nth-child(5){ width: 70px; }
+.wo-form .unit-table th:nth-child(5),
+.wo-form .unit-table td:nth-child(5){ width: 60px; }
 
-  .wo-form .unit-table th:nth-child(6),
-  .wo-form .unit-table td:nth-child(6){ width: 70px; }
+.wo-form .unit-table th:nth-child(6),
+.wo-form .unit-table td:nth-child(6){ width: 60px; }
 
-  .wo-form .unit-table th:nth-child(7),
-  .wo-form .unit-table td:nth-child(7){ width: 46px; }
+.wo-form .unit-table th:nth-child(7),
+.wo-form .unit-table td:nth-child(7){ width: 42px; }
 
-  .wo-form .unit-table th:nth-child(8),
-  .wo-form .unit-table td:nth-child(8){ width: 60px; }
+.wo-form .unit-table th:nth-child(8),
+.wo-form .unit-table td:nth-child(8){ width: 62px; }
 
-  .wo-form .unit-table th:nth-child(9),
-  .wo-form .unit-table td:nth-child(9){ width: 36px; }
+.wo-form .unit-table th:nth-child(9),
+.wo-form .unit-table td:nth-child(9){ width: 96px; } /* ETA */
 
-  .wo-form .unit-table th:nth-child(10),
-  .wo-form .unit-table td:nth-child(10){ width: 36px; }
+.wo-form .unit-table th:nth-child(10),
+.wo-form .unit-table td:nth-child(10){ width: 34px; } /* B/O */
 
-  .wo-form .unit-table th:nth-child(11),
-  .wo-form .unit-table td:nth-child(11){ width: 60px; }
+.wo-form .unit-table th:nth-child(11),
+.wo-form .unit-table td:nth-child(11){ width: 34px; } /* INS */
 
-  .wo-form .unit-table th:nth-child(12),
-  .wo-form .unit-table td:nth-child(12){ width: 36px; }
+.wo-form .unit-table th:nth-child(12),
+.wo-form .unit-table td:nth-child(12){ width: 52px; } /* Sup */
 
-  .wo-form .unit-table th:nth-child(13),
-  .wo-form .unit-table td:nth-child(13){ width: 78px; }
+.wo-form .unit-table th:nth-child(13),
+.wo-form .unit-table td:nth-child(13){ width: 34px; } /* Ord */
 
-  .wo-form .unit-table th:nth-child(14),
-  .wo-form .unit-table td:nth-child(14){ width: 52px; }
+.wo-form .unit-table th:nth-child(14),
+.wo-form .unit-table td:nth-child(14){ width: 70px; } /* Stock hint */
 
-  .wo-form .unit-table th:nth-child(15),
-  .wo-form .unit-table td:nth-child(15){ width: 42px; }
+.wo-form .unit-table th:nth-child(15),
+.wo-form .unit-table td:nth-child(15){ width: 48px; } /* Issue */
+
+.wo-form .unit-table th:nth-child(16),
+.wo-form .unit-table td:nth-child(16){ width: 36px; } /* Delete */
 
   .wo-form .unit-table td:nth-child(3) .part-name{
     white-space: nowrap;
@@ -423,6 +427,7 @@
                 <th class="text-end col-money">Total ($)</th>
                 <th class="col-wh">WH</th>
                 <th class="col-inv">INV#</th>
+                <th class="col-eta">ETA</th>
                 <th style="width:80px;" title="Backorder">B/O</th>
                 <th class="ins-col" style="width:70px;">INS</th>
                 <th class="col-narrow">Sup</th>
@@ -500,6 +505,14 @@
                          data-wop-id="{{ wop_id or '' }}"
                          maxlength="32"
                          placeholder="INV#"
+                         {{ ro }} {{ dis }}>
+                </td>
+
+                <td class="col-eta">
+                  <input class="form-control eta-input"
+                         type="date"
+                         name="units[{{ ui }}][rows][{{ ri }}][eta_date]"
+                         value="{{ r.eta_date.isoformat() if r.eta_date else '' }}"
                          {{ ro }} {{ dis }}>
                 </td>
 
@@ -946,22 +959,35 @@ function wccrToast(msg) {
   }
 
     function updateSupplierRequired(){
-    document.querySelectorAll('#unitsWrap tbody tr').forEach(tr=>{
-      const ordCb = tr.querySelector('.ordered-check');
-      const supInp = tr.querySelector('.supplier-input');
-      if (!supInp) return;
+  document.querySelectorAll('#unitsWrap tbody tr').forEach(tr=>{
+    const ordCb = tr.querySelector('.ordered-check');
+    const supInp = tr.querySelector('.supplier-input');
+    const etaInp = tr.querySelector('.eta-input');
 
-      if (ordCb && ordCb.checked) {
+    const isOrdered = !!(ordCb && ordCb.checked);
+
+    if (supInp) {
+      if (isOrdered) {
         supInp.setAttribute('required','required');
       } else {
         supInp.removeAttribute('required');
       }
-    });
-  }
+    }
+
+    if (etaInp) {
+      if (isOrdered) {
+        etaInp.setAttribute('required','required');
+      } else {
+        etaInp.removeAttribute('required');
+      }
+    }
+  });
+}
 
   statusSel?.addEventListener('change', ()=>{
     updateSupplierRequired();
     reevaluateWOStatusFromOrd();
+
   });
 
   function toggleOrderedCols(){
@@ -1504,6 +1530,7 @@ function clearHintCacheForRow(tr){
   <td class="num"><span class="line-total ro-input" data-value="0.00">0.00</span></td>
   <td><input class="form-control wh-input" name="units[${ui}][rows][${ri}][warehouse]" maxlength="120" ${ro}></td>
   <td><input class="form-control inv-input" name="units[${ui}][rows][${ri}][invoice_number]" maxlength="32" placeholder="INV#" ${ro}></td>
+  <td><input class="form-control eta-input" type="date" name="units[${ui}][rows][${ri}][eta_date]" ${ro}></td>
 
   <td class="text-center">
     <div class="form-check d-flex justify-content-center m-0">
@@ -1580,6 +1607,7 @@ function clearHintCacheForRow(tr){
             <th class="text-end col-money">Total ($)</th>
             <th class="col-wh">WH</th>
             <th class="col-inv">INV#</th>
+            <th class="col-eta">ETA</th>
             <th style="width:80px;" title="Backorder">B/O</th>
             <th class="ins-col" style="width:70px;">INS</th>
             <th class="col-narrow">Sup</th>
@@ -1596,23 +1624,27 @@ function clearHintCacheForRow(tr){
       </table>
     </div>
 
-    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+   <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
       ${IS_RO ? '<span></span>' : `
-      <div class="d-flex flex-wrap gap-2">
-        <button type="button" class="btn btn-outline-secondary add-row">
-          + Add part row
-        </button>
+        <div class="d-flex flex-wrap gap-2">
+          <button type="button" class="btn btn-outline-secondary add-row">
+            + Add part row
+          </button>
 
+          <button type="button" class="btn btn-outline-primary btn-copy-appliance">
+            Copy
+          </button>
+        </div>
+      `}
 
-      </div>`}
       <div class="text-end ms-auto">
         <strong>Unit subtotal:</strong>
         <span class="unit-subtotal">0.00</span>
       </div>
     </div>
-  </div>
-</div>`;
-  }
+      </div>
+    </div>`;
+      }
 
   unitsWrap.addEventListener('input', (e)=>{
     const tr = e.target.closest('tr');
@@ -1714,6 +1746,7 @@ function clearHintCacheForRow(tr){
       updateInsColumns();
       updatePOField();
       reevaluateWOStatusFromOrd();
+      ensureCopyButtonsForAllAppliances();
       return;
     }
 
@@ -1740,29 +1773,47 @@ function clearHintCacheForRow(tr){
     reevaluateWOStatusFromOrd();
   });
 
-     selectAllBtn?.addEventListener('click', async ()=>{
-        await refreshVisibleHints(false);
+  function ensureCopyButtonsForAllAppliances(){
+      document.querySelectorAll('#unitsWrap .card').forEach(card => {
+        const controls = card.querySelector('.d-flex.flex-wrap.gap-2');
+        if (!controls) return;
 
-        const rows = [...document.querySelectorAll('#unitsWrap tbody tr')].filter(tr=>{
-          if (tr.classList.contains('issued-row')) return false;
+        if (controls.querySelector('.btn-copy-appliance')) return;
 
-          const cb = tr.querySelector('.issue-check');
-          if (!cb || cb.disabled) return false;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-outline-primary btn-copy-appliance';
+        btn.textContent = 'Copy';
 
-          const raw = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
-          const status = raw.split('/')[0];
-          const isStock = (status === 'STOCK');
-
-          const isInsEligible = isInsuranceJob() && isRowInsuranceSupplied(tr);
-          return isStock || isInsEligible;
-        });
-
-        const needCheck = rows.some(tr => !tr.querySelector('.issue-check').checked);
-
-        rows.forEach(tr=>{
-          tr.querySelector('.issue-check').checked = needCheck;
-        });
+        controls.appendChild(btn);
       });
+    }
+
+ensureCopyButtonsForAllAppliances();
+
+     selectAllBtn?.addEventListener('click', ()=>{
+      const rows = [...document.querySelectorAll('#unitsWrap tbody tr')].filter(tr=>{
+        if (tr.classList.contains('issued-row')) return false;
+
+        const cb = tr.querySelector('.issue-check');
+        if (!cb || cb.disabled) return false;
+
+        const raw = (tr.querySelector('.hint')?.textContent || '').trim().toUpperCase();
+        const status = raw.split('/')[0];
+        const isStock = (status === 'STOCK');
+
+        const isInsEligible = isInsuranceJob() && isRowInsuranceSupplied(tr);
+        return isStock || isInsEligible;
+      });
+
+      const needCheck = rows.some(tr => !tr.querySelector('.issue-check').checked);
+
+      rows.forEach(tr=>{
+        tr.querySelector('.issue-check').checked = needCheck;
+      });
+
+      refreshVisibleHints(false);
+    });
 
   issueBtn?.addEventListener('click', async ()=>{
 
