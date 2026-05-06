@@ -1573,6 +1573,76 @@ def _parse_units_form(form):
 
     return result
 
+@inventory_bp.post("/issued_batch/<int:batch_id>/update")
+@login_required
+def issued_batch_update(batch_id):
+    from flask import request, jsonify
+    from datetime import datetime
+    from models import IssuedBatch, IssuedPartRecord
+
+    if current_user.role != "superadmin":
+        return jsonify({"error": "forbidden"}), 403
+
+    batch = IssuedBatch.query.get_or_404(batch_id)
+    data = request.json or {}
+
+    # === UPDATE BATCH ===
+    if "issued_to" in data:
+        batch.issued_to = data["issued_to"]
+
+    if "reference_job" in data:
+        batch.reference_job = data["reference_job"]
+
+    if "issued_by" in data:
+        batch.issued_by = data["issued_by"]
+
+    if "invoice_number" in data:
+        try:
+            new_inv = int(data["invoice_number"])
+        except:
+            return jsonify({"error": "invalid invoice_number"}), 400
+
+        exists = IssuedBatch.query.filter(
+            IssuedBatch.invoice_number == new_inv,
+            IssuedBatch.id != batch.id
+        ).first()
+
+        if exists:
+            return jsonify({"error": "invoice exists"}), 400
+
+        batch.invoice_number = new_inv
+
+    if "issue_date" in data:
+        try:
+            batch.issue_date = datetime.strptime(data["issue_date"], "%Y-%m-%d")
+        except:
+            pass
+
+    # === 🔥 SYNC WITH IssuedPartRecord ===
+    IssuedPartRecord.query.filter_by(batch_id=batch.id).update({
+        "issued_to": batch.issued_to,
+        "reference_job": batch.reference_job,
+        "issued_by": batch.issued_by,
+        "invoice_number": batch.invoice_number,
+        "issue_date": batch.issue_date,
+    })
+
+    # === AUDIT ===
+    if getattr(batch, "work_order_id", None):
+        from models import WorkOrderAudit
+
+        db.session.add(WorkOrderAudit(
+            work_order_id=batch.work_order_id,
+            action="batch_updated",
+            message=f"Invoice batch #{batch.invoice_number} updated",
+            actor_user_id=current_user.id,
+            actor_username=current_user.username,
+        ))
+
+    db.session.commit()
+
+    return jsonify({"ok": True})
+
 @inventory_bp.post("/api/issued/confirm_toggle", endpoint="issued_confirm_toggle")
 @login_required
 def issued_confirm_toggle():
@@ -4397,7 +4467,7 @@ def wo_alerts():
     from flask import request, render_template
     from datetime import date, timedelta
     from sqlalchemy import or_
-    from models import WorkOrder, WorkOrderPart, WorkUnit
+    from models import WorkOrder, WorkOrderPart, WorkUnit, IssuedBatch, IssuedPartRecord
 
     def _days_int(name, default):
         try:
@@ -4408,10 +4478,12 @@ def wo_alerts():
 
     overdue_days = _days_int("overdue_days", 3)
     bo_days = _days_int("bo_days", 14)
+    pending_days = _days_int("pending_days", 3)
 
     today = date.today()
     overdue_cutoff = today - timedelta(days=overdue_days)
     bo_cutoff = today - timedelta(days=bo_days)
+    pending_cutoff = today - timedelta(days=pending_days)
 
     base_q = (
         db.session.query(WorkOrderPart, WorkOrder, WorkUnit)
@@ -4461,11 +4533,46 @@ def wo_alerts():
         .all()
     )
 
+    from sqlalchemy import func, case
+
+    pending_confirm_rows = (
+        db.session.query(
+            IssuedBatch,
+            WorkOrder,
+            func.count(IssuedPartRecord.id).label("items_count"),
+            func.sum(
+                case(
+                    (IssuedPartRecord.confirmed_by_tech == True, 1),
+                    else_=0
+                )
+            ).label("confirmed_count")
+        )
+        .join(WorkOrder, WorkOrder.id == IssuedBatch.work_order_id)
+        .join(IssuedPartRecord, IssuedPartRecord.batch_id == IssuedBatch.id)
+        .filter(
+            WorkOrder.status != "cancel_job",
+            IssuedBatch.issue_date <= pending_cutoff,
+        )
+        .group_by(IssuedBatch.id, WorkOrder.id)
+        .having(
+            func.sum(
+                case(
+                    (IssuedPartRecord.confirmed_by_tech == False, 1),
+                    else_=0
+                )
+            ) > 0
+        )
+        .order_by(IssuedBatch.issue_date.desc())
+        .all()
+    )
+
     return render_template(
         "wo_alerts.html",
         overdue_rows=overdue_rows,
         backorder_rows=backorder_rows,
+        pending_days=pending_days,
         eta_passed_rows=eta_passed_rows,
+        pending_confirm_rows=pending_confirm_rows,
         overdue_days=overdue_days,
         bo_days=bo_days,
         today=today,
@@ -6015,6 +6122,7 @@ def wo_save():
             bo_flag = _b(r.get("backorder_flag"))
             lstatus = (r.get("status") or "search_ordered").strip()
             ord_flag = _b(r.get("ordered_flag"))
+
             ins_flag = _b(r.get("is_insurance_supplied"))
 
             part_name_raw = (r.get("part_name") or "").strip().upper()
@@ -6338,6 +6446,59 @@ def wo_save():
                 fp.write(
                     f"BEFORE COMMIT: wo={getattr(wo,'id',None)} pn={pn_upper} inv={inv!r} obj_inv={getattr(wop,'invoice_number',None)!r}\n"
                 )
+
+    # =========================
+    # AUTO STATUS REEVALUATION
+    # =========================
+    db.session.flush()
+
+    all_parts = (
+        WorkOrderPart.query
+        .filter_by(work_order_id=wo.id)
+        .all()
+    )
+
+    has_ordered = False
+    all_issued = True
+
+    for p in all_parts:
+        is_ordered = (
+                bool(getattr(p, "ordered_flag", False)) or
+                ((getattr(p, "status", "") or "").lower() == "ordered") or
+                ((getattr(p, "line_status", "") or "").lower() == "ordered")
+        )
+
+        issued_qty = int(getattr(p, "issued_qty", 0) or 0)
+        qty = int(getattr(p, "quantity", 0) or 0)
+
+        if is_ordered:
+            has_ordered = True
+
+        if issued_qty < qty:
+            all_issued = False
+
+    is_superadmin = ((getattr(current_user, "role", "") or "").strip().lower() == "superadmin")
+    before_status = ((before or {}).get("status") or "").strip()
+    submitted_status = (f.get("status") or "").strip()
+
+    superadmin_changed_status = (
+            is_superadmin
+            and not is_new
+            and submitted_status
+            and submitted_status != before_status
+    )
+
+    # cancel_job is manual and must not be overwritten
+    # superadmin manual change is respected only when status was actually changed
+    if wo.status == "cancel_job" or superadmin_changed_status:
+        pass
+    else:
+        if has_ordered and not all_issued:
+            wo.status = "ordered"
+        elif all_issued and all_parts:
+            wo.status = "done"
+        else:
+            wo.status = "search_ordered"
 
     # ---------- FINAL AUDIT (MUST BE RIGHT BEFORE COMMIT) ----------
     actor_id = getattr(current_user, "id", None)
@@ -10111,11 +10272,64 @@ def import_parts():
                 continue
         return None
 
+    # ---------- PDF HEADER HELPERS ----------
+    def _pdf_text(path):
+        text = ""
+        try:
+            import fitz
+            with fitz.open(path) as d:
+                for i in range(min(3, d.page_count)):
+                    text += d[i].get_text() + "\n"
+        except Exception:
+            try:
+                from pdfminer.high_level import extract_text
+                text = extract_text(path) or ""
+            except Exception:
+                text = ""
+        return text or ""
+
+    def _extract_invoice_number_from_text(text):
+        import re
+
+        if not text:
+            return ""
+
+        patterns = [
+            # Marcone: Invoice: 73744988
+            r"\bInvoice\s*[:#]\s*(\d{6,})\b",
+
+            # Invoice No: 73744988 / Invoice No. 73744988
+            r"\bInvoice\s+No\.?\s*[:#]?\s*(\d{6,})\b",
+
+            # Invoice Number: 73744988
+            r"\bInvoice\s+Number\s*[:#]?\s*(\d{6,})\b",
+
+            # Inv #73744988 / Inv. # 73744988
+            r"\bInv\.?\s*#\s*(\d{6,})\b",
+        ]
+
+        for p in patterns:
+            m = re.search(p, text, flags=re.I)
+            if m:
+                return m.group(1).strip()
+
+        return ""
+
+    pdf_text = _pdf_text(pdf_path)
+
     # Метаданные заголовка (можно править на превью)
     supplier = (request.form.get("supplier") or rows[0].get("supplier") or "").strip()
-    invoice  = (request.form.get("invoice_number") or "").strip()
-    date_s   = (request.form.get("invoice_date") or "").strip()
-    notes    = (request.form.get("notes") or f"Imported from {src_name}").strip()
+
+    invoice = (
+            request.form.get("invoice_number")
+            or _extract_invoice_number_from_text(pdf_text)
+            or rows[0].get("invoice")
+            or rows[0].get("invoice_number")
+            or ""
+    ).strip()
+
+    date_s = (request.form.get("invoice_date") or "").strip()
+    notes = (request.form.get("notes") or f"Imported from {src_name}").strip()
 
     # ---- НЕ ДАЁМ использовать дату из будущего ----
     today = datetime.utcnow().date()
@@ -10983,10 +11197,18 @@ def import_parts_upload():
                 if mm_final:
                     return mm_final.group(1)
 
-                # ---------- MARCONE / STANDARD INVOICE ----------
-                mm_invoice = re.search(r"Invoice[^0-9]*([0-9]{6,})", text, flags=re.I)
-                if mm_invoice:
-                    return mm_invoice.group(1)
+                # ---------- MARCONE / STANDARD INVOICE (FIXED) ----------
+                patterns = [
+                    r"(?im)^[^\n\r]*\bInvoice\s*[:#]\s*(\d{6,})\b[^\n\r]*$",
+                    r"(?im)^[^\n\r]*\bInvoice\s+No\.?\s*[:#]?\s*(\d{6,})\b[^\n\r]*$",
+                    r"(?im)^[^\n\r]*\bInvoice\s+Number\s*[:#]?\s*(\d{6,})\b[^\n\r]*$",
+                    r"(?im)^[^\n\r]*\bInv\.?\s*#\s*(\d{6,})\b[^\n\r]*$",
+                ]
+
+                for p in patterns:
+                    m = re.search(p, text)
+                    if m:
+                        return m.group(1)
 
         # ---------- 4) DATAFRAME FALLBACK ----------
         if norm_df is not None:

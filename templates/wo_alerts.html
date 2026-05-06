@@ -3,7 +3,7 @@
 
 <h3 class="mb-3">Work Order Alerts</h3>
 
-<form method="get" class="card card-body mb-4">
+<form method="get" class="card card-body mb-3">
   <div class="row g-3 align-items-end">
     <div class="col-md-3">
       <label class="form-label">Overdue after days</label>
@@ -14,7 +14,10 @@
       <label class="form-label">Backorder after days</label>
       <input type="number" min="1" name="bo_days" class="form-control" value="{{ bo_days }}">
     </div>
-
+        <div class="col-md-3">
+      <label class="form-label">Pending confirmation after days</label>
+      <input type="number" min="1" name="pending_days" class="form-control" value="{{ pending_days }}">
+    </div>
     <div class="col-md-3">
       <button class="btn btn-primary">Apply</button>
       <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_alerts') }}">Reset</a>
@@ -22,32 +25,27 @@
   </div>
 </form>
 
-{% macro alerts_table(title, rows, color) %}
 <div class="card card-body mb-4 small">
   <div class="fw-bold mb-2">Color legend</div>
-
   <div class="d-flex flex-wrap gap-3">
-    <div>
-      <span class="badge bg-danger">Red</span>
-      ETA date has passed.
-    </div>
-
-    <div>
-      <span class="badge bg-warning text-dark">Yellow</span>
-      Ordered for more than 7 days.
-    </div>
-
-    <div>
-      <span class="badge bg-success">Green</span>
-      ETA is still in the future.
-    </div>
-
-    <div>
-      <span class="text-muted">No color</span>
-      No critical alert yet.
-    </div>
+    <div><span class="badge bg-danger">Red</span> ETA date has passed.</div>
+    <div><span class="badge bg-warning text-dark">Yellow</span> Ordered for more than 7 days.</div>
+    <div><span class="badge bg-success">Green</span> ETA is still in the future.</div>
+    <div><span class="text-muted">No color</span> No critical alert yet.</div>
   </div>
 </div>
+
+{% macro sort_th(label, key, align='') %}
+  <th class="{{ align }}">
+    <button type="button"
+            class="btn btn-link btn-sm p-0 text-decoration-none alert-sort"
+            data-sort="{{ key }}">
+      {{ label }} ↕
+    </button>
+  </th>
+{% endmacro %}
+
+{% macro alerts_table(title, rows, color) %}
   {% set groups = {} %}
   {% for p, wo, unit in rows %}
     {% set key = wo.id %}
@@ -60,15 +58,15 @@
   <h5 class="mt-4">{{ title }} <span class="badge bg-secondary">{{ groups|length }}</span></h5>
 
   <div class="table-responsive mb-4">
-    <table class="table table-sm table-bordered align-middle">
+    <table class="table table-sm table-bordered align-middle alert-table">
       <thead class="table-light">
         <tr>
-          <th>WO</th>
-          <th>Tech</th>
-          <th>Job(s)</th>
-          <th>Parts</th>
-          <th class="text-end">Oldest Days</th>
-          <th class="text-end">Worst ETA Days</th>
+          {{ sort_th("WO", "wo") }}
+          {{ sort_th("Tech", "tech") }}
+          {{ sort_th("Job(s)", "jobs") }}
+          {{ sort_th("Parts", "parts") }}
+          {{ sort_th("Oldest Days", "oldest", "text-end") }}
+          {{ sort_th("Worst ETA Days", "eta", "text-end") }}
           <th></th>
         </tr>
       </thead>
@@ -78,7 +76,6 @@
           {% for group in groups.values() %}
             {% set wo = group.wo %}
             {% set parts = group.parts %}
-
             {% set ns = namespace(oldest_days=0, worst_eta=None) %}
 
             {% for p in parts %}
@@ -97,8 +94,13 @@
               {% endif %}
             {% endfor %}
 
-            <tr>
-              <tr
+            <tr
+              data-wo="{{ wo.id }}"
+              data-tech="{{ (wo.technician_name or '')|lower }}"
+              data-jobs="{{ (wo.job_numbers or '')|lower }}"
+              data-parts="{{ parts|length }}"
+              data-oldest="{{ ns.oldest_days }}"
+              data-eta="{{ ns.worst_eta if ns.worst_eta is not none else -9999 }}"
               {% if ns.worst_eta is not none and ns.worst_eta > 0 %}
                 class="table-danger"
               {% elif ns.oldest_days > 7 %}
@@ -117,9 +119,9 @@
               <td>
                 <div class="small mb-1">
                   <strong>{{ parts|length }}</strong> part{% if parts|length != 1 %}s{% endif %}
-                    {% if ns.worst_eta is not none and ns.worst_eta > 0 %}
-                      <span class="text-danger fw-bold">⚠</span>
-                    {% endif %}
+                  {% if ns.worst_eta is not none and ns.worst_eta > 0 %}
+                    <span class="text-danger fw-bold">⚠</span>
+                  {% endif %}
                 </div>
 
                 <ul class="mb-0 ps-3 small">
@@ -187,5 +189,116 @@
 {{ alerts_table("🔴 Overdue Orders", overdue_rows, "bg-danger") }}
 {{ alerts_table("🟠 Backorders", backorder_rows, "bg-warning text-dark") }}
 {{ alerts_table("⚠️ ETA Passed", eta_passed_rows, "bg-danger") }}
+
+<h5 class="mt-4">
+  ✅ Technician Confirmations Pending
+  <span class="badge bg-secondary">{{ pending_confirm_rows|length }}</span>
+</h5>
+
+<div class="table-responsive mb-4">
+  <table class="table table-sm table-bordered align-middle">
+    <thead class="table-light">
+      <tr>
+        {{ sort_th("Issued At", "issued") }}
+        {{ sort_th("Technician", "tech") }}
+        {{ sort_th("WO", "wo") }}
+        {{ sort_th("Job(s)", "jobs") }}
+        {{ sort_th("Invoice #", "invoice") }}
+        {{ sort_th("Status", "status") }}
+        <th></th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {% if pending_confirm_rows %}
+        {% for batch, wo, items_count, confirmed_count in pending_confirm_rows %}
+          <tr class="table-info"
+            data-issued="{{ batch.issue_date.timestamp() if batch.issue_date else 0 }}"
+            data-tech="{{ (batch.issued_to or wo.technician_name or '')|lower }}"
+            data-wo="{{ wo.id }}"
+            data-jobs="{{ (wo.job_numbers or batch.reference_job or '')|lower }}"
+            data-invoice="{{ batch.invoice_number or 0 }}"
+            data-status="{{ confirmed }}">
+            <td>{{ batch.issue_date|local_dt if batch.issue_date else '—' }}</td>
+
+            <td>{{ batch.technician_name or wo.technician_name or '—' }}</td>
+            <td>#{{ wo.id }}</td>
+            <td>{{ wo.job_numbers or batch.reference_job or '—' }}</td>
+            <td>
+              {% if batch.invoice_number %}
+                {{ '%06d'|format(batch.invoice_number) }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>
+              {% set total = items_count or 0 %}
+                {% set confirmed = confirmed_count or 0 %}
+
+                {% if confirmed == 0 %}
+                  <span class="badge bg-danger">Not confirmed</span>
+                {% elif confirmed < total %}
+                  <span class="badge bg-warning text-dark">Partly confirmed</span>
+                {% else %}
+                  <span class="badge bg-success">All confirmed</span>
+                {% endif %}
+            </td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary"
+                 href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}"
+                 target="_blank"
+                 rel="noopener">
+                Open
+              </a>
+            </td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="7" class="text-muted text-center">No pending confirmations.</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const state = new WeakMap();
+
+  function getValue(row, key) {
+    const raw = row.dataset[key] || "";
+    if (["wo", "parts", "oldest", "eta", "issued", "invoice", "status"].includes(key)) {
+      return parseInt(raw, 10) || 0;
+    }
+    return raw.toLowerCase();
+  }
+
+  document.querySelectorAll(".alert-sort").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const table = btn.closest("table");
+      const tbody = table.querySelector("tbody");
+      const key = btn.dataset.sort;
+
+      const current = state.get(btn) || "desc";
+      const next = current === "asc" ? "desc" : "asc";
+      state.set(btn, next);
+
+      const rows = Array.from(tbody.querySelectorAll("tr[data-wo]"));
+
+      rows.sort((a, b) => {
+        const av = getValue(a, key);
+        const bv = getValue(b, key);
+
+        if (av < bv) return next === "asc" ? -1 : 1;
+        if (av > bv) return next === "asc" ? 1 : -1;
+        return 0;
+      });
+
+      rows.forEach(row => tbody.appendChild(row));
+    });
+  });
+});
+</script>
 
 {% endblock %}

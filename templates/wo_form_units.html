@@ -355,15 +355,32 @@
     </div>
 
     <div class="col-md-2">
-      <label class="form-label">Status</label>
-      {% set st = (IS_EDIT and wo.status or 'search_ordered') %}
-      <select name="status" class="form-select" {{ dis }}>
-        <option value="search_ordered" {{ 'selected' if st=='search_ordered' else '' }}>search_ordered</option>
-        <option value="ordered" {{ 'selected' if st=='ordered' else '' }}>ordered</option>
-        <option value="done" {{ 'selected' if st=='done' else '' }}>done</option>
-        <option value="cancel_job" {{ 'selected' if st=='cancel_job' else '' }}>cancel_job</option>
-      </select>
+  <label class="form-label">Status</label>
+  {% set st = (IS_EDIT and wo.status or 'search_ordered') %}
+  {% set role_low = (current_user.role or '')|lower %}
+
+  {% if role_low == 'superadmin' %}
+    <select name="status" class="form-select" {{ dis }}>
+      <option value="search_ordered" {{ 'selected' if st=='search_ordered' else '' }}>search_ordered</option>
+      <option value="ordered" {{ 'selected' if st=='ordered' else '' }}>ordered</option>
+      <option value="done" {{ 'selected' if st=='done' else '' }}>done</option>
+      <option value="cancel_job" {{ 'selected' if st=='cancel_job' else '' }}>cancel_job</option>
+    </select>
+  {% else %}
+    <div class="form-control-plaintext mb-1">
+      <span class="badge {% if st == 'cancel_job' %}bg-danger{% elif st == 'done' %}bg-success{% elif st == 'ordered' %}bg-primary{% else %}bg-secondary{% endif %}">
+        {{ st }}
+      </span>
     </div>
+
+    <select name="status" class="form-select" {{ dis }}>
+      <option value="{{ st }}" selected>{{ st }}</option>
+      {% if st != 'cancel_job' %}
+        <option value="cancel_job">cancel_job</option>
+      {% endif %}
+    </select>
+  {% endif %}
+</div>
 
     <div class="col-md-3" id="poWrap" style="{% if not IS_INS %}display:none{% endif %}">
       <label class="form-label">Customer PO # <span class="text-danger">*</span></label>
@@ -984,11 +1001,7 @@ function wccrToast(msg) {
   });
 }
 
-  statusSel?.addEventListener('change', ()=>{
-    updateSupplierRequired();
-    reevaluateWOStatusFromOrd();
 
-  });
 
   function toggleOrderedCols(){
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{
@@ -998,7 +1011,6 @@ function wccrToast(msg) {
     });
   }
 
-  statusSel?.addEventListener('change', toggleOrderedCols);
 
   function updateInsColumns(){
     const show = jobTypeSel && jobTypeSel.value === 'INSURANCE';
@@ -1029,24 +1041,10 @@ function wccrToast(msg) {
   }
 
   function reevaluateWOStatusFromOrd(){
-    if (!statusSel) return;
-    const cur = statusSel.value;
-
-    if (cur === 'done' || cur === 'cancel_job') return;
-
-    if (hasAnyOrderedChecked()){
-      if (cur !== 'ordered'){
-        statusSel.value = 'ordered';
-        toggleOrderedCols();
-        updateSupplierRequired();
-      }
-    } else {
-      if (cur !== 'search_ordered'){
-        statusSel.value = 'search_ordered';
-        updateSupplierRequired();
-      }
-    }
-  }
+  // Status is controlled by backend.
+  // Superadmin can manually change status.
+  // Admin can only send cancel_job.
+}
 
   function syncOrderedFlagsBeforeSubmit(){
     document.querySelectorAll('.unit-table .ordered-col').forEach(cell=>{

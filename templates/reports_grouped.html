@@ -347,7 +347,6 @@
                   <th>Issued To</th>
                   <th>Reference Job</th>
                   <th>Issue Date</th>
-                  <th>Location</th>
                   <th>INV#</th>
                   <th>Return To</th>
                   <th>Company</th>
@@ -411,9 +410,38 @@
                       </td>
 
                       <td>
-                        <input type="text" class="form-control form-control-sm"
-                               name="edit_issued_to_{{ it.id }}" value="{{ it.issued_to }}" form="{{ form_id }}">
-                      </td>
+  <div>
+    <input type="text" class="form-control form-control-sm"
+           name="edit_refjob_{{ it.id }}" value="{{ it.reference_job }}" form="{{ form_id }}">
+  </div>
+
+  {% if it.consumption_logs %}
+    <div class="small text-success mt-1">
+      <div>Consumed for:</div>
+
+      {% for log in it.consumption_logs|sort(attribute='id', reverse=True) %}
+        <div class="d-flex align-items-center gap-2 mt-1 flex-wrap">
+          <span>{{ log.job_ref or '-' }} ({{ log.qty }})</span>
+
+          {% if role_low in ['superadmin', 'user'] %}
+            <form method="post"
+                  action="{{ url_for('inventory.undo_consumption_log', log_id=log.id) }}"
+                  style="display:inline;">
+              {% if inv.invoice_number %}
+                <input type="hidden" name="invoice_number" value="{{ inv.invoice_number }}">
+              {% endif %}
+              <button type="submit"
+                      class="btn btn-outline-danger btn-sm"
+                      onclick="return confirm('Undo consumed job {{ log.job_ref or '-' }} ({{ log.qty }})?');">
+                Undo
+              </button>
+            </form>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</td>
                       <td>
                           <div>
                             <input type="text" class="form-control form-control-sm"
@@ -508,16 +536,6 @@
                       {% endif %}
                     </td>
 
-                    <td>
-                      {% if IS_SUPER %}
-                        <input type="text" class="form-control form-control-sm"
-                               name="edit_location_{{ it.id }}"
-                               value="{{ effective_loc }}"
-                               form="{{ form_id }}">
-                      {% else %}
-                        {{ effective_loc }}
-                      {% endif %}
-                    </td>
 
                     <td>
                       {% if IS_SUPER %}

@@ -114,17 +114,27 @@ def generate_invoice_pdf(records, invoice_number=None):
     c.drawCentredString(width / 2, height - 140, inv_title)
     c.line(width / 2 - 80, height - 143, width / 2 + 80, height - 143)
 
-    # ---------- header info ----------
+    # ---------- header info (2-column layout) ----------
     c.setFont("Helvetica", 11)
+
     y = height - 160
-    for line in [
-        f"Issue Date: {issue_date_s}",
-        f"Issued To: {issued_to}",
-        f"Issued By: {issued_by}",
-        f"Reference Job: {ref_job or 'N/A'}",
-    ]:
-        c.drawString(40, y, line)
-        y -= 15
+
+    LEFT_X = 40
+    RIGHT_X = width / 2 + 40
+
+    LINE_GAP = 15
+
+    # Row 1
+    c.drawString(LEFT_X, y, f"Issue Date: {issue_date_s}")
+    c.drawString(RIGHT_X, y, f"Issued By: {issued_by}")
+
+    y -= LINE_GAP
+
+    # Row 2
+    c.drawString(LEFT_X, y, f"Issued To: {issued_to}")
+    c.drawString(RIGHT_X, y, f"Reference Job: {ref_job or 'N/A'}")
+
+    y -= LINE_GAP
 
     # ================================================================
     # TABLE LAYOUT
@@ -133,19 +143,41 @@ def generate_invoice_pdf(records, invoice_number=None):
     TABLE_W = width - 80
     HEADER_H = 20
 
-    PAD = 6
-    GAP = 4
+    PAD = 3
+    GAP = 2
+    is_return_invoice = any((getattr(r, "quantity", 0) or 0) < 0 for r in records)
 
-    # tuned widths: PN + INV readable; LOC fully visible by shrinking font
-    col_defs = [
-        ("pnum",  "Part Number",  95, left_style,  "L"),
-        ("pname", "Part Name",   110, left_style,  "L"),
-        ("qty",   "Qty",          30, right_style, "R"),
-        ("ucost", "Unit Cost",    60, right_style, "R"),
-        ("total", "Total",        60, right_style, "R"),
-        ("loc",   "LOC",          42, small_left,  "L"),
-        ("inv",   "INV#",        102, small_right, "R"),
-    ]
+    if is_return_invoice:
+        col_defs = [
+            ("pnum", "Part Number", 72, left_style, "L"),
+            ("pname", "Part Name", 88, left_style, "L"),
+            ("qty", "Qty", 24, right_style, "R"),
+            ("ucost", "Unit Cost", 50, right_style, "R"),
+            ("total", "Total", 50, right_style, "R"),
+            ("inv", "INV#", 90, small_right, "R"),
+            ("returnto", "Return To", 52, small_left, "L"),
+            ("company", "Company", 70, small_left, "L"),
+        ]
+    else:
+        col_defs = [
+            ("pnum", "Part Number", 85, left_style, "L"),
+            ("pname", "Part Name", 130, left_style, "L"),
+            ("qty", "Qty", 30, right_style, "R"),
+            ("ucost", "Unit Cost", 60, right_style, "R"),
+            ("total", "Total", 60, right_style, "R"),
+            ("inv", "INV#", 70, small_right, "R"),
+            ("company", "Company", 110, small_left, "L"),
+        ]
+
+    # AUTO SCALE TABLE WIDTH
+    total_cols_width = sum(w for _, _, w, _, _ in col_defs) + GAP * (len(col_defs) - 1)
+
+    if total_cols_width > TABLE_W:
+        scale = TABLE_W / total_cols_width
+        col_defs = [
+            (k, l, max(20, int(w * scale)), s, a)
+            for (k, l, w, s, a) in col_defs
+        ]
 
     # x positions
     COLS = []
@@ -217,9 +249,9 @@ def generate_invoice_pdf(records, invoice_number=None):
             x = col["x"]
             w = col["w"]
             label = col["label"]
-            if col["key"] == "inv":
-                c.drawCentredString(x + (w / 2), y_top + 5, label)
-            elif col["align"] == "R":
+            key = col["key"]
+
+            if key in ("qty", "ucost", "total", "inv"):
                 c.drawRightString(x + w - PAD, y_top + 5, label)
             else:
                 c.drawString(x + PAD, y_top + 5, label)
@@ -254,29 +286,47 @@ def generate_invoice_pdf(records, invoice_number=None):
         if ucost is None:
             ucost = getattr(part, "unit_cost", 0.0) or 0.0
 
-        stored_loc = getattr(r, "location", None)
-        if stored_loc not in (None, "", " ", "  "):
-            loc = str(stored_loc).strip()
+        return_to = _one_line(getattr(r, "return_to", "") or "")
+        inv_ref_raw = _one_line(getattr(r, "inv_ref", None) or "")
+
+        src_line = getattr(r, "source_receipt_line", None)
+        receipt = getattr(src_line, "goods_receipt", None) if src_line else None
+        receipt_inv = _one_line(getattr(receipt, "invoice_number", "") if receipt else "")
+
+        if is_return_invoice:
+            dest = getattr(r, "return_destination", None)
+            company = _one_line(getattr(dest, "name", "") if dest else "")
+
+            # RETURN: show receiving invoice number, not issue invoice number
+            inv_ref = receipt_inv or inv_ref_raw or "—"
         else:
-            loc = (getattr(part, "location", "") or "").strip()
+            if not inv_ref_raw:
+                company = "STOCK"
+            else:
+                company = _one_line(getattr(receipt, "supplier_name", "") if receipt else "")
 
-        # LOC: up to 6 chars, but ALWAYS display fully (shrink font if needed)
-        loc_short = _one_line(loc).upper()[:6]
+            inv_ref = inv_ref_raw or "—"
 
-        inv_ref = _one_line(getattr(r, "inv_ref", None) or "") or "—"
+        if not company:
+            company = "—"
 
         line_total = (qty or 0) * float(ucost or 0.0)
 
         cell_map = {
-            "pnum":  pnum,
+            "pnum": pnum,
             "pname": pname,
-            "loc":   loc_short,
-            "inv":   inv_ref,
+            "inv": inv_ref,
+            "company": company,
 
-            "qty":   Paragraph(str(qty), right_style),
+            "qty": Paragraph(str(qty), right_style),
             "ucost": Paragraph(f"${float(ucost):.2f}", right_style),
             "total": Paragraph(f"${float(line_total):.2f}", right_style),
         }
+
+
+
+        if is_return_invoice:
+            cell_map["returnto"] = return_to
 
         # row height
         min_row_h = 14
@@ -286,7 +336,7 @@ def generate_invoice_pdf(records, invoice_number=None):
         for col in COLS:
             key = col["key"]
             ww = max(10, col["w"] - (PAD * 2))
-            if key in ("pnum", "pname", "loc", "inv"):
+            if key in ("pnum", "pname", "inv", "returnto", "company"):
                 h = 10
             else:
                 para = cell_map[key]
@@ -306,16 +356,27 @@ def generate_invoice_pdf(records, invoice_number=None):
             y_text = y - 10
 
             if key == "pnum":
-                _draw_cell_oneline(x0, y_text, w, cell_map["pnum"], align="L", font="Helvetica", size=8.5)
+                _draw_fit_left(
+                    x0,
+                    y_text,
+                    w,
+                    cell_map["pnum"],
+                    base_size=8.5,
+                    min_size=5.0
+                )
 
             elif key == "pname":
                 _draw_cell_oneline(x0, y_text, w, cell_map["pname"], align="L", font="Helvetica", size=8.5)
 
-            elif key == "loc":
-                _draw_fit_left(x0, y_text, w, cell_map["loc"], base_size=8.0, min_size=6.5)
-
             elif key == "inv":
-                _draw_fit_right(x0, y_text, w, cell_map["inv"], base_size=8.5, min_size=6.5)
+                _draw_fit_right(x0, y_text, w, cell_map["inv"], base_size=7.2, min_size=4.8)
+
+            elif key == "returnto":
+                _draw_fit_left(x0, y_text, w, cell_map["returnto"], base_size=7.5, min_size=5.5)
+
+
+            elif key == "company":
+                _draw_fit_left(x0, y_text, w, cell_map["company"].upper(), base_size=7.5, min_size=5.5)
 
             else:
                 para = cell_map[key]
@@ -326,10 +387,16 @@ def generate_invoice_pdf(records, invoice_number=None):
         y -= (row_h + ROW_PADDING)
         total_sum += float(line_total)
 
-    # total
-    y -= 20
-    c.setFont("Helvetica-Bold", 12)
-    c.drawRightString(width - 40, max(y, 60), f"TOTAL: ${total_sum:.2f}")
+    table_bottom_y = y
+    # total (привязан к таблице)
+    total_y = max(table_bottom_y - 25, 60)
+
+    c.setStrokeColor(colors.black)
+    c.setLineWidth(1)
+    c.line(TABLE_X, total_y + 10, TABLE_X + TABLE_W, total_y + 10)
+
+    c.setFont("Helvetica-Bold", 13)
+    c.drawRightString(width - 40, total_y - 10, f"TOTAL: ${total_sum:.2f}")
 
     # footer
     y -= 50
