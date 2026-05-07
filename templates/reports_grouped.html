@@ -203,16 +203,67 @@
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
           <div class="d-flex flex-wrap align-items-center gap-2">
             <div class="d-flex flex-wrap align-items-center gap-2">
-              <span><strong>Issued To:</strong> {{ inv.issued_to }}</span>
-              <span>•</span>
-              <span><strong>Ref:</strong> {{ inv.reference_job or 'N/A' }}</span>
-              <span>•</span>
-              <span><strong>Issued By:</strong> {{ inv.issued_by }}</span>
-              <span>•</span>
-              <span><strong>Date:</strong> {{ (inv.issue_date_local or inv.issue_date).strftime('%Y-%m-%d') }}</span>
-              <span>•</span>
-              <span><strong>Invoice #:</strong> {{ inv_no_str }}</span>
-            </div>
+
+              {% if IS_SUPER and batch %}
+                <div class="d-flex flex-wrap align-items-center gap-1 batch-edit-header"
+                     data-batch-id="{{ batch.id }}">
+
+                  <span><strong>Issued To:</strong></span>
+                  <input type="text"
+                         class="form-control form-control-sm batch-edit-input"
+                         style="width:90px;"
+                         data-field="issued_to"
+                         value="{{ inv.issued_to }}">
+
+                  <span>• <strong>Ref:</strong></span>
+                  <input type="text"
+                         class="form-control form-control-sm batch-edit-input"
+                         style="width:130px;"
+                         data-field="reference_job"
+                         value="{{ inv.reference_job or '' }}">
+
+                  <span>• <strong>Issued By:</strong></span>
+                  <input type="text"
+                         class="form-control form-control-sm batch-edit-input"
+                         style="width:100px;"
+                         data-field="issued_by"
+                         value="{{ inv.issued_by }}">
+
+                  <span>• <strong>Date:</strong></span>
+                  <input type="date"
+                         class="form-control form-control-sm batch-edit-input"
+                         style="width:145px;"
+                         data-field="issue_date"
+                         value="{{ (inv.issue_date_local or inv.issue_date).strftime('%Y-%m-%d') }}">
+
+                  <span>• <strong>Invoice #:</strong></span>
+                  <input type="text"
+                         class="form-control form-control-sm batch-edit-input"
+                         style="width:90px;"
+                         data-field="invoice_number"
+                         value="{{ inv_no_raw }}">
+
+                  <button type="button"
+                          class="btn btn-success btn-sm batch-edit-save">
+                    Save Header
+                  </button>
+                </div>
+
+  {% else %}
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <span><strong>Issued To:</strong> {{ inv.issued_to }}</span>
+      <span>•</span>
+      <span><strong>Ref:</strong> {{ inv.reference_job or 'N/A' }}</span>
+      <span>•</span>
+      <span><strong>Issued By:</strong> {{ inv.issued_by }}</span>
+      <span>•</span>
+      <span><strong>Date:</strong> {{ (inv.issue_date_local or inv.issue_date).strftime('%Y-%m-%d') }}</span>
+      <span>•</span>
+      <span><strong>Invoice #:</strong> {{ inv_no_str }}</span>
+    </div>
+  {% endif %}
+
+</div>
 
             <div class="d-flex flex-wrap align-items-center gap-2 ms-2">
               <span class="badge {{ badge_class }}">{{ status_text }}</span>
@@ -767,7 +818,53 @@ document.addEventListener('DOMContentLoaded', function () {
       syncRow(tr);
     }
   });
+    document.addEventListener("click", async function(e) {
+    const btn = e.target.closest(".batch-edit-save");
+    if (!btn) return;
 
+    const box = btn.closest(".batch-edit-header");
+    const batchId = box ? box.dataset.batchId : null;
+
+    if (!batchId) {
+      alert("Batch ID not found");
+      return;
+    }
+
+    const payload = {};
+    box.querySelectorAll(".batch-edit-input").forEach(function(inp) {
+      payload[inp.dataset.field] = inp.value.trim();
+    });
+
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+
+    try {
+      const res = await fetch(`/issued_batch/${batchId}/update`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.ok) {
+        alert(data.error || "Save failed");
+        btn.disabled = false;
+        btn.textContent = "Save Header";
+        return;
+      }
+
+      location.reload();
+
+    } catch (err) {
+      alert("Save failed");
+      btn.disabled = false;
+      btn.textContent = "Save Header";
+    }
+  });
   // ✅ key part: prevent leaving page for Return Selected until fixed
   document.querySelectorAll('form.invoice-toolbar').forEach(function(form) {
     form.addEventListener('submit', function(ev) {

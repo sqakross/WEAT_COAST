@@ -6858,7 +6858,37 @@ def wo_list():
     # ---- fetch rows ----
     MAX_LIMIT = 200
 
-    base_q = q.order_by(WorkOrder.created_at.desc())
+    # -------------------------------------------------
+    # Technician tablet view:
+    # newest issued invoice first
+    # Everyone else:
+    # default WO created_at sorting
+    # -------------------------------------------------
+    if is_technician():
+
+        last_issue_subq = (
+            db.session.query(
+                IssuedBatch.reference_job.label("ref_job"),
+                func.max(IssuedBatch.issue_date).label("last_issued_at")
+            )
+            .group_by(IssuedBatch.reference_job)
+            .subquery()
+        )
+
+        q = q.outerjoin(
+            last_issue_subq,
+            func.coalesce(WorkOrder.job_numbers, "").like(
+                "%" + func.coalesce(last_issue_subq.c.ref_job, "") + "%"
+            )
+        )
+
+        base_q = q.order_by(
+            last_issue_subq.c.last_issued_at.desc().nullslast(),
+            WorkOrder.created_at.desc()
+        )
+
+    else:
+        base_q = q.order_by(WorkOrder.created_at.desc())
 
     has_filters = any([
         bool(qtext),
@@ -6869,7 +6899,7 @@ def wo_list():
         bool(status),
     ])
 
-    # IMPORTANT: лимит только когда нет фильтров
+    # IMPORTANT: limit only when no filters
     if not has_filters:
         base_q = base_q.limit(MAX_LIMIT)
 
@@ -12335,28 +12365,39 @@ def delete_return_invoice():
         return redirect(url_for('inventory.reports_grouped'))
 
     raw_ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
+
     try:
         ids = [int(x) for x in raw_ids if str(x).strip()]
     except ValueError:
         ids = []
 
-    if not ids:
+    inv_raw = (request.form.get("invoice_number") or request.form.get("delete_return") or "").strip()
+    inv_no = int(inv_raw) if inv_raw.isdigit() else None
+
+    q = IssuedPartRecord.query
+
+    if ids:
+        rows = q.filter(IssuedPartRecord.id.in_(ids)).all()
+    elif inv_no is not None:
+        rows = q.filter(IssuedPartRecord.invoice_number == inv_no).all()
+    else:
         flash("Nothing selected to delete.", "warning")
         return redirect(url_for('inventory.reports_grouped'))
 
-    rows = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(ids)).all()
+    rows = [
+        r for r in rows
+        if (r.quantity or 0) < 0 or ((r.reference_job or '').upper().startswith('RETURN'))
+    ]
+
     if not rows:
-        flash("Records not found.", "warning")
+        flash("Return records not found.", "warning")
         return redirect(url_for('inventory.reports_grouped'))
 
     touched_batch_ids = set()
+
     try:
         for r in rows:
-            # удаляем только возвратные строки
-            if (r.quantity or 0) >= 0 and not ((r.reference_job or '').upper().startswith('RETURN')):
-                continue
-
-            # откатываем склад: удаляем возврат → уменьшаем склад
+            # delete return => subtract returned qty from stock
             if r.part and (r.quantity or 0) < 0:
                 r.part.quantity = (r.part.quantity or 0) - abs(int(r.quantity or 0))
 
@@ -12365,17 +12406,18 @@ def delete_return_invoice():
 
             db.session.delete(r)
 
-        # чистим пустые батчи
-        if touched_batch_ids:
-            for bid in list(touched_batch_ids):
-                still_has = db.session.query(IssuedPartRecord.id).filter_by(batch_id=bid).first()
-                if not still_has:
-                    b = db.session.get(IssuedBatch, bid)
-                    if b:
-                        db.session.delete(b)
+        db.session.flush()
+
+        for bid in list(touched_batch_ids):
+            still_has = db.session.query(IssuedPartRecord.id).filter_by(batch_id=bid).first()
+            if not still_has:
+                b = db.session.get(IssuedBatch, bid)
+                if b:
+                    db.session.delete(b)
 
         db.session.commit()
         flash("Return invoice deleted.", "success")
+
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to delete return invoice: {e}", "danger")

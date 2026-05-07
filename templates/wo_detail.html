@@ -392,15 +392,110 @@
   </span>
 </div>
 
-{# =========================================================
-   ISSUED BATCHES (Technician View)
-   ========================================================= #}
-
 <h5 class="mt-4">Issued Batches (Technician View)</h5>
+
 <style>
   .inv-return-row  { background:#fff5f5; }
   .inv-item-neg    { color:#c92a2a; }
   .inv-item        { line-height:1.25; }
+
+  /* Tablet technician view:
+     show only Issued At + Items.
+     Report/Print are hidden because Print already exists in sticky footer.
+  */
+  @media (max-width: 1400px){
+
+    /* hide Technician, Canonical Ref, Invoice Total, Report, Print, Confirm status */
+    .table th:nth-child(2),
+    .table td:nth-child(2),
+    .table th:nth-child(3),
+    .table td:nth-child(3),
+    .table th:nth-child(6),
+    .table td:nth-child(6),
+    .table th:nth-child(7),
+    .table td:nth-child(7),
+    .table th:nth-child(8),
+    .table td:nth-child(8){
+      display:none !important;
+    }
+
+    .table{
+      width:100% !important;
+      table-layout:fixed !important;
+      font-size:11px !important;
+    }
+
+    .table th,
+    .table td{
+      padding:5px 6px !important;
+      vertical-align:middle !important;
+    }
+
+    .table th:nth-child(1),
+    .table td:nth-child(1){
+      width:22% !important;
+      white-space:nowrap !important;
+      font-size:10px !important;
+    }
+
+    .table th:nth-child(4),
+    .table td:nth-child(4){
+      width:58% !important;
+    }
+
+    .table th:nth-child(5),
+    .table td:nth-child(5){
+      width:20% !important;
+      text-align:right !important;
+      white-space:nowrap !important;
+    }
+
+    .batch-items-cell{
+      min-width:0 !important;
+      width:auto !important;
+    }
+
+    .tech-confirm-all{
+      width:auto !important;
+      min-width:120px !important;
+      padding:6px 10px !important;
+      font-size:12px !important;
+      margin-bottom:6px !important;
+      white-space:nowrap !important;
+    }
+
+    .inv-item{
+      font-size:11px !important;
+      line-height:1.25 !important;
+      white-space:normal !important;
+      word-break:normal !important;
+      margin-bottom:4px !important;
+    }
+
+    .inv-item code{
+      font-size:10px !important;
+      word-break:break-all !important;
+    }
+
+    .confirm-meta{
+      font-size:10px !important;
+    }
+
+    .table-responsive{
+      overflow-x:hidden !important;
+    }
+
+    .batch-badge-holder{
+      display:block !important;
+      margin-left:0 !important;
+      margin-top:4px !important;
+    }
+
+    .inv-badge{
+      font-size:9px !important;
+      padding:2px 5px !important;
+    }
+  }
 </style>
 
 {% set col_count = 5 + (2 if can_view_docs else 0) + (1 if can_confirm_any else 0) %}
@@ -457,7 +552,19 @@
           <td>{{ b.get('technician') }}</td>
           <td>{{ b.get('canonical_ref') }}</td>
 
-          <td>
+                      <td class="batch-items-cell">
+            {% if is_tech and is_my_wo %}
+              <button type="button"
+                      class="btn btn-sm btn-outline-success mb-2 tech-confirm-all">
+                Confirm all
+              </button>
+            {% elif is_adminlike %}
+              <button type="button"
+                      class="btn btn-sm btn-outline-secondary mb-2 admin-toggle-all">
+                Check / Uncheck all
+              </button>
+            {% endif %}
+
             {% if items and (items|length) > 0 %}
               <ul class="mb-0 ps-3">
                 {% for it in items %}
@@ -523,7 +630,7 @@
 
           {% if can_view_docs %}
             <td class="text-nowrap">
-              <a class="btn btn-sm btn-outline-secondary"
+              <a class="btn btn-sm btn-outline-primary batch-btn"
                  href="{{ url_for('inventory.reports_grouped') }}?issued_to={{ tech_for_links|urlencode }}&technician={{ tech_for_links|urlencode }}&company={{ tech_for_links|urlencode }}&tech={{ tech_for_links|urlencode }}&reference_job={{ job_for_links|urlencode }}&ref_job={{ job_for_links|urlencode }}&ref={{ job_for_links|urlencode }}&job={{ job_for_links|urlencode }}&jobs={{ job_for_links|urlencode }}"
                  target="_blank" rel="noopener">
                 Open Report
@@ -789,6 +896,52 @@ document.addEventListener("DOMContentLoaded", () => {
       if (meta) meta.textContent = "✔ confirmed";
 
       if (window.showToast) showToast("Confirmed", {delay: 1200});
+    });
+  });
+    // ---- Technician: confirm all parts in one batch ----
+  document.querySelectorAll(".tech-confirm-all").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = btn.closest("tr");
+      const checks = Array.from(row.querySelectorAll("input.tech-confirm:not(:checked):not(:disabled)"));
+
+      if (!checks.length) {
+        if (window.showToast) showToast("All parts already confirmed", {delay: 1400});
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "Confirming...";
+
+      for (const cb of checks) {
+        cb.checked = true;
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise(r => setTimeout(r, 120));
+      }
+
+      btn.textContent = "All confirmed";
+      if (window.showToast) showToast("All parts confirmed", {delay: 1400});
+    });
+  });
+
+  // ---- Admin/Superadmin: check/uncheck all in batch ----
+  document.querySelectorAll(".admin-toggle-all").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const row = btn.closest("tr");
+      const checks = Array.from(row.querySelectorAll('input[type="checkbox"]'));
+
+      if (!checks.length) return;
+
+      const shouldCheck = checks.some(cb => !cb.checked);
+
+      checks.forEach(cb => {
+        cb.checked = shouldCheck;
+        const form = cb.closest("form");
+        const hidden = form?.querySelector(".state-hidden");
+        if (hidden) hidden.value = shouldCheck ? "1" : "0";
+      });
+
+      const firstForm = checks[0].closest("form");
+      if (firstForm) firstForm.submit();
     });
   });
 

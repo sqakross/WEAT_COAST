@@ -2,6 +2,82 @@
 {% block content %}
 
 <style>
+
+  /* =========================================================
+   TECHNICIAN TABLET VIEW — show only Jobs + Actions
+   ========================================================= */
+    {% set role_low = (current_user.role or '')|lower %}
+    {% if role_low in ['technician', 'tech'] %}
+    @media (pointer:coarse), (max-width: 1400px){
+
+      .sticky-tools{
+        position: static !important;
+      }
+
+      .table-responsive{
+        overflow-x: hidden !important;
+      }
+
+      .wo-list-table{
+        width: 100% !important;
+        table-layout: fixed !important;
+      }
+
+        /* Hide on technician tablet:
+         Brand/Model, Type, Status, Audit */
+      .wo-list-table th:nth-child(4),
+      .wo-list-table td:nth-child(4),
+      .wo-list-table th:nth-child(5),
+      .wo-list-table td:nth-child(5),
+      .wo-list-table th:nth-child(6),
+      .wo-list-table td:nth-child(6),
+      .wo-list-table th:nth-child(7),
+      .wo-list-table td:nth-child(7){
+        display: none !important;
+      }
+
+      .wo-list-table th:nth-child(3),
+      .wo-list-table td:nth-child(3){
+        width: 72% !important;
+        font-size: 18px !important;
+      }
+
+      .wo-list-table th:nth-child(8),
+      .wo-list-table td:nth-child(8){
+        width: 28% !important;
+        text-align: center !important;
+      }
+
+      .jobs-trunc{
+        max-width: 100% !important;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        font-weight: 600 !important;
+      }
+
+      .wo-list-table td:nth-child(3) .small{
+        font-size: 13px !important;
+      }
+
+      .wo-actions{
+        width: 100% !important;
+      }
+
+      .wo-actions .btn{
+        width: 100% !important;
+        font-size: 15px !important;
+        padding: 10px 6px !important;
+        margin-bottom: 6px !important;
+      }
+
+      /* technician does not need Form button on tablet */
+      .wo-actions a.btn-outline-secondary{
+        display: none !important;
+      }
+
+    }
+    {% endif %}
   /* ===== Общие карточки ===== */
   .card-lite      { border:1px solid #dee2e6; border-radius:.75rem; background:#fff; }
   .card-lite .hd  { background:#f8f9fa; border-bottom:1px solid #dee2e6; padding:.6rem .9rem; }
@@ -524,12 +600,12 @@
               <a class="btn btn-outline-primary btn-sm"
                  href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">Open</a>
               {% if current_user.role in ['admin','superadmin'] %}
-                <a class="btn btn-outline-secondary btn-sm"
-                   href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">Edit</a>
-              {% else %}
-                <a class="btn btn-outline-secondary btn-sm"
-                   href="{{ url_for('inventory.wo_edit', wo_id=w.id, readonly=1) }}">Form</a>
-              {% endif %}
+                  <a class="btn btn-outline-secondary btn-sm"
+                     href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">Edit</a>
+                {% elif current_user.role not in ['technician','tech'] %}
+                  <a class="btn btn-outline-secondary btn-sm"
+                     href="{{ url_for('inventory.wo_edit', wo_id=w.id, readonly=1) }}">Form</a>
+                {% endif %}
               {% if current_user.role == 'superadmin' %}
                 <form method="post"
                       action="{{ url_for('inventory.wo_delete', wo_id=w.id) }}"
