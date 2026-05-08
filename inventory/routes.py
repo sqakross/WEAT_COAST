@@ -1666,6 +1666,8 @@ def issued_confirm_toggle():
     rec_id_raw = _get("record_id")
     wo_id_raw = _get("wo_id")
     state_raw = _get("state")
+    send_confirm_message_raw = _get("send_confirm_message")
+    send_confirm_message = str(send_confirm_message_raw or "").strip().lower() in ("1", "true", "on", "yes")
 
     try:
         rec_id = int(rec_id_raw or 0)
@@ -1749,7 +1751,13 @@ def issued_confirm_toggle():
 
         # queue email only once per batch:
         # only for technician, only on first positive confirm, only if record belongs to a batch
-        if is_techlike and new_state and getattr(rec, "batch_id", None):
+        should_send_confirm_email = (
+                (is_techlike and new_state)
+                or
+                (role == "superadmin" and new_state and send_confirm_message)
+        )
+
+        if should_send_confirm_email and getattr(rec, "batch_id", None):
             batch = IssuedBatch.query.filter_by(id=rec.batch_id).first()
 
             if batch and not getattr(batch, "first_confirm_email_sent_at", None):
@@ -4154,63 +4162,27 @@ def wo_detail(wo_id):
         IssuedPartRecord.id.asc()
     ).all()
 
+    # ------------------------------------------------------------
+    # 4c) Totals from already loaded issued_items
+    # Avoid second heavy aggregate SQL query
+    # ------------------------------------------------------------
+    issued_total = 0.0
+    returned_total = 0.0
+    issued_qty = 0
+    returned_qty = 0
 
-    money_issued = func.coalesce(
-        func.sum(
-            case(
-                (
-                    IssuedPartRecord.quantity > 0,
-                    IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue,
-                ),
-                else_=0,
-            )
-        ),
-        0.0,
-    )
-    money_returned = func.coalesce(
-        func.sum(
-            case(
-                (
-                    IssuedPartRecord.quantity < 0,
-                    -IssuedPartRecord.quantity * IssuedPartRecord.unit_cost_at_issue,
-                ),
-                else_=0,
-            )
-        ),
-        0.0,
-    )
-    qty_issued = func.coalesce(
-        func.sum(
-            case(
-                (IssuedPartRecord.quantity > 0, IssuedPartRecord.quantity),
-                else_=0,
-            )
-        ),
-        0,
-    )
-    qty_returned = func.coalesce(
-        func.sum(
-            case(
-                (IssuedPartRecord.quantity < 0, -IssuedPartRecord.quantity),
-                else_=0,
-            )
-        ),
-        0,
-    )
+    for rec in issued_items:
+        qty = int(getattr(rec, "quantity", 0) or 0)
+        cost = float(getattr(rec, "unit_cost_at_issue", 0.0) or 0.0)
 
-    agg = (
-        db.session.query(money_issued, money_returned, qty_issued, qty_returned)
-        .select_from(IssuedPartRecord)
-        .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
-        .filter(base_q.whereclause if base_q.whereclause is not None else True)
-        .one()
-    )
+        if qty > 0:
+            issued_qty += qty
+            issued_total += qty * cost
+        elif qty < 0:
+            returned_qty += abs(qty)
+            returned_total += abs(qty) * cost
 
-    issued_total = float(agg[0] or 0.0)
-    returned_total = float(agg[1] or 0.0)
     net_total = issued_total - returned_total
-    issued_qty = int(agg[2] or 0)
-    returned_qty = int(agg[3] or 0)
     net_qty = issued_qty - returned_qty
 
     def _fmt(dt):
@@ -5784,9 +5756,10 @@ def wo_save():
     def _rerender_same_screen(msg_text: str, errors=None):
         db.session.rollback()
 
-        from datetime import datetime as _dt
+
         actor_id = getattr(current_user, "id", None)
-        now = _dt.utcnow()
+        actor_username = (getattr(current_user, "username", None) or "").strip()
+        now = datetime.utcnow()
 
         actor_username = (getattr(current_user, "username", None) or "").strip()
         actor_role = (getattr(current_user, "role", None) or "").strip()
@@ -5809,12 +5782,11 @@ def wo_save():
             wo.updated_by_id = actor_id
             wo.updated_at = now
 
-            with open(dbg_path, "a", encoding="utf-8") as fp:
-                fp.write(
-                    "WO_AFTER_SET: "
-                    f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
-                    f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
-                )
+            _debug_write(
+                "WO_AFTER_SET: "
+                f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
+                f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
+            )
         except Exception:
             pass
 
@@ -5871,23 +5843,36 @@ def wo_save():
     f = request.form
 
     # --- DEBUG FILE (form keys with invoice_number) ---
-    dbg_path = os.path.join(current_app.instance_path, "wo_save_debug.txt")
-    inv_keys = [k for k in f.keys() if "invoice_number" in k]
-    with open(dbg_path, "a", encoding="utf-8") as fp:
-        fp.write("\n" + "=" * 60 + "\n")
-        fp.write("TS: " + datetime.now().isoformat() + "\n")
-        fp.write("PATH: /work_orders/save hit\n")
-        fp.write("INV_KEYS_COUNT: " + str(len(inv_keys)) + "\n")
-        fp.write("INV_KEYS_SAMPLE:\n")
-        for k in inv_keys[:20]:
-            fp.write(f"  {k} = {f.get(k)!r}\n")
+    WO_SAVE_DEBUG = current_app.config.get("WO_SAVE_DEBUG", False)
 
-        pn_keys = [k for k in f.keys() if k.endswith("[part_number]")]
-        fp.write("PN_KEYS_COUNT: " + str(len(pn_keys)) + "\n")
-        fp.write("PN+INV SAMPLE:\n")
-        for k in pn_keys[:20]:
-            inv_k = k.replace("[part_number]", "[invoice_number]")
-            fp.write(f"  {k} = {f.get(k)!r} | {inv_k} = {f.get(inv_k)!r}\n")
+    dbg_path = os.path.join(current_app.instance_path, "wo_save_debug.txt")
+
+    def _debug_write(text: str):
+        if not WO_SAVE_DEBUG:
+            return
+        try:
+            with open(dbg_path, "a", encoding="utf-8") as fp:
+                fp.write(text)
+        except Exception:
+            pass
+
+    if WO_SAVE_DEBUG:
+        inv_keys = [k for k in f.keys() if "invoice_number" in k]
+        with open(dbg_path, "a", encoding="utf-8") as fp:
+            fp.write("\n" + "=" * 60 + "\n")
+            fp.write("TS: " + datetime.now().isoformat() + "\n")
+            fp.write("PATH: /work_orders/save hit\n")
+            fp.write("INV_KEYS_COUNT: " + str(len(inv_keys)) + "\n")
+            fp.write("INV_KEYS_SAMPLE:\n")
+            for k in inv_keys[:20]:
+                fp.write(f"  {k} = {f.get(k)!r}\n")
+
+            pn_keys = [k for k in f.keys() if k.endswith("[part_number]")]
+            fp.write("PN_KEYS_COUNT: " + str(len(pn_keys)) + "\n")
+            fp.write("PN+INV SAMPLE:\n")
+            for k in pn_keys[:20]:
+                inv_k = k.replace("[part_number]", "[invoice_number]")
+                fp.write(f"  {k} = {f.get(k)!r} | {inv_k} = {f.get(inv_k)!r}\n")
 
     log_keys = sorted(f.keys())
     current_app.logger.debug("WO_SAVE keys (%s): %s", len(log_keys), log_keys[:200])
@@ -6442,10 +6427,9 @@ def wo_save():
 
             db.session.add(wop)
 
-            with open(dbg_path, "a", encoding="utf-8") as fp:
-                fp.write(
-                    f"BEFORE COMMIT: wo={getattr(wo,'id',None)} pn={pn_upper} inv={inv!r} obj_inv={getattr(wop,'invoice_number',None)!r}\n"
-                )
+            _debug_write(
+                f"BEFORE COMMIT: wo={getattr(wo, 'id', None)} pn={pn_upper} inv={inv!r} obj_inv={getattr(wop, 'invoice_number', None)!r}\n"
+            )
 
     # =========================
     # AUTO STATUS REEVALUATION
@@ -6565,9 +6549,11 @@ def wo_save():
     try:
         db.session.commit()
 
-        fresh = WorkOrder.query.get(wo.id)
-        with open(dbg_path, "a", encoding="utf-8") as fp:
-            fp.write(
+        flash("Work Order saved.", "success")
+
+        if WO_SAVE_DEBUG:
+            fresh = WorkOrder.query.get(wo.id)
+            _debug_write(
                 "WO_AFTER_COMMIT: "
                 f"wo_id={wo.id} "
                 f"tech_id={getattr(fresh, 'technician_id', None)!r} "
@@ -6575,36 +6561,33 @@ def wo_save():
                 f"updated_by_id={getattr(fresh, 'updated_by_id', None)!r}\n"
             )
 
-        flash("Work Order saved.", "success")
-
-        fresh = WorkOrder.query.get(wo.id)
-        with open(dbg_path, "a", encoding="utf-8") as fp:
-            fp.write("AFTER COMMIT WO AUDIT:\n")
-            fp.write(
+            _debug_write("AFTER COMMIT WO AUDIT:\n")
+            _debug_write(
                 f"  current_user.id={getattr(current_user, 'id', None)} "
                 f"username={getattr(current_user, 'username', None)!r}\n"
             )
-            fp.write(f"  wo.id={wo.id}\n")
-            fp.write(
+            _debug_write(f"  wo.id={wo.id}\n")
+            _debug_write(
                 f"  db.created_by_id={getattr(fresh, 'created_by_id', None)} "
                 f"created_by_user={(fresh.created_by_user.username if fresh.created_by_user else None)!r}\n"
             )
-            fp.write(
+            _debug_write(
                 f"  db.updated_by_id={getattr(fresh, 'updated_by_id', None)} "
                 f"updated_by_user={(fresh.updated_by_user.username if fresh.updated_by_user else None)!r}\n"
             )
 
-        rows = (
-            WorkOrderPart.query
-            .filter_by(work_order_id=wo.id)
-            .with_entities(WorkOrderPart.part_number, WorkOrderPart.invoice_number, WorkOrderPart.eta_date)
-            .all()
-        )
+            rows = (
+                WorkOrderPart.query
+                .filter_by(work_order_id=wo.id)
+                .with_entities(WorkOrderPart.part_number, WorkOrderPart.invoice_number, WorkOrderPart.eta_date)
+                .all()
+            )
 
-        with open(dbg_path, "a", encoding="utf-8") as fp:
-            fp.write("AFTER COMMIT DB:\n")
+            _debug_write("AFTER COMMIT DB:\n")
             for pn, inv, eta in rows:
-                fp.write(f"  pn={pn} inv={inv!r} eta={eta!r}\n")
+                _debug_write(f"  pn={pn} inv={inv!r} eta={eta!r}\n")
+
+        flash("Work Order saved.", "success")
 
     except Exception as e:
         db.session.rollback()

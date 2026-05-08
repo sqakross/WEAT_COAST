@@ -502,6 +502,14 @@
 
 <div class="table-responsive">
   <table class="table table-sm table-hover align-middle">
+  {% if role_low == 'superadmin' %}
+      <div class="form-check form-switch mb-2">
+        <input class="form-check-input" type="checkbox" id="superadminSendConfirmMsg">
+        <label class="form-check-label" for="superadminSendConfirmMsg">
+          Send received-parts message when I confirm for technician
+        </label>
+      </div>
+    {% endif %}
     <thead class="table-light small">
       <tr>
         <th>Issued At</th>
@@ -585,10 +593,20 @@
                         <input type="hidden" name="record_id" value="{{ it.id }}">
                         <input type="hidden" name="wo_id" value="{{ wo.id }}">
                         <input type="hidden" name="state" value="{{ 1 if is_confirmed else 0 }}" class="state-hidden">
+                        <input type="hidden" name="send_confirm_message" value="0" class="send-confirm-message-hidden">
                         <input type="checkbox"
-                               class="form-check-input ms-2"
-                               {% if is_confirmed %}checked{% endif %}
-                               onchange="this.closest('form').querySelector('.state-hidden').value = this.checked ? '1':'0'; this.form.submit();">
+                           class="form-check-input ms-2"
+                           {% if is_confirmed %}checked{% endif %}
+                           onchange="
+                              const form = this.closest('form');
+                              form.querySelector('.state-hidden').value = this.checked ? '1':'0';
+
+                              const toggle = document.getElementById('superadminSendConfirmMsg');
+                              const msgHidden = form.querySelector('.send-confirm-message-hidden');
+                              if (msgHidden) msgHidden.value = (toggle && toggle.checked && this.checked) ? '1' : '0';
+
+                              this.form.submit();
+                            ">
                         <span class="small text-muted ms-1 confirm-meta">
                           {% if is_confirmed %}✔ confirmed{% else %}unchecked{% endif %}
                         </span>
@@ -938,6 +956,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const form = cb.closest("form");
         const hidden = form?.querySelector(".state-hidden");
         if (hidden) hidden.value = shouldCheck ? "1" : "0";
+        const msgHidden = form?.querySelector(".send-confirm-message-hidden");
+        const toggle = document.getElementById("superadminSendConfirmMsg");
+        if (msgHidden) {
+          msgHidden.value = (toggle && toggle.checked && shouldCheck) ? "1" : "0";
+        }
       });
 
       const firstForm = checks[0].closest("form");
