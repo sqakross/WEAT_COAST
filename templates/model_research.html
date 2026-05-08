@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+    <div>
+      <h3 class="mb-1">Parts Research by Model</h3>
+      <div class="text-muted small">
+        Search previous researched parts by appliance model.
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <form method="get" action="{{ url_for('inventory.model_research') }}" class="row g-2 align-items-end">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Model Number</label>
+          <input
+            type="text"
+            name="model"
+            value="{{ model_query }}"
+            class="form-control form-control-lg"
+            placeholder="Example: WDT750SAKZ0"
+            autocomplete="off"
+            autofocus
+          >
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Search Mode</label>
+          <select name="mode" class="form-select form-select-lg">
+            <option value="contains" {% if search_mode != 'exact' %}selected{% endif %}>Contains</option>
+            <option value="exact" {% if search_mode == 'exact' %}selected{% endif %}>Exact</option>
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <button class="btn btn-primary btn-lg w-100" type="submit">
+            Search
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% if grouped %}
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <label class="form-label fw-semibold">Filter Results by Part Number / Part Name</label>
+      <input
+        type="text"
+        id="partFilter"
+        class="form-control form-control-lg"
+        placeholder="Example: thermostat, pump, W110..."
+        autocomplete="off"
+      >
+      <div class="form-text">
+        Type to filter visible results without reloading the page.
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+  {% if model_query and not grouped %}
+    <div class="alert alert-warning">
+      No researched parts found for model: <strong>{{ model_query }}</strong>
+    </div>
+  {% endif %}
+
+  {% if grouped %}
+    {% for model, parts in grouped.items() %}
+      <div class="card shadow-sm mb-4 model-result-card">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+          <div>
+            <strong>Model:</strong> {{ model }}
+          </div>
+          <span class="badge bg-light text-dark visible-count-badge">
+            {{ parts|length }} part{{ '' if parts|length == 1 else 's' }}
+          </span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-hover table-striped align-middle mb-0 model-research-table">
+            <thead class="table-light">
+              <tr>
+                <th style="width: 260px;">Part Number</th>
+                <th>Part Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in parts %}
+                <tr>
+                  <td>
+                    <button
+                      type="button"
+                      class="btn btn-link p-0 fw-bold text-decoration-none copy-part-number"
+                      data-part-number="{{ p.part_number }}"
+                      title="Click to copy"
+                    >
+                      {{ p.part_number }}
+                    </button>
+                  </td>
+                  <td>{{ p.part_name or '' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endfor %}
+  {% endif %}
+
+</div>
+
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
+  <div id="copyToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="copyToastBody">
+        Copied
+      </div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .model-research-table td {
+    font-size: 1rem;
+  }
+
+  .model-research-table .copy-part-number {
+    font-size: 1rem;
+    letter-spacing: .03em;
+  }
+
+  .model-research-table .copy-part-number:hover {
+    text-decoration: underline !important;
+  }
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const buttons = document.querySelectorAll(".copy-part-number");
+  const toastEl = document.getElementById("copyToast");
+  const toastBody = document.getElementById("copyToastBody");
+
+  buttons.forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      const pn = btn.dataset.partNumber || btn.innerText.trim();
+
+      try {
+        await navigator.clipboard.writeText(pn);
+        toastBody.textContent = "Copied: " + pn;
+
+        if (window.bootstrap && toastEl) {
+          const toast = bootstrap.Toast.getOrCreateInstance(toastEl, { delay: 1600 });
+          toast.show();
+        }
+      } catch (e) {
+        alert("Copied: " + pn);
+      }
+    });
+  });
+
+  const filterInput = document.getElementById("partFilter");
+
+  if (filterInput) {
+    filterInput.addEventListener("input", function () {
+      const term = filterInput.value.trim().toLowerCase();
+      const cards = document.querySelectorAll(".model-result-card");
+
+      cards.forEach(function (card) {
+        let visibleCount = 0;
+        const rows = card.querySelectorAll("tbody tr");
+
+        rows.forEach(function (row) {
+          const text = row.innerText.toLowerCase();
+          const match = !term || text.includes(term);
+
+          row.style.display = match ? "" : "none";
+          if (match) visibleCount += 1;
+        });
+
+        const badge = card.querySelector(".visible-count-badge");
+        if (badge) {
+          badge.textContent = visibleCount + (visibleCount === 1 ? " part" : " parts");
+        }
+
+        card.style.display = visibleCount > 0 ? "" : "none";
+      });
+    });
+  }
+});
+</script>
+{% endblock %}

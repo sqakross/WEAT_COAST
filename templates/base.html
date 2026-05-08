@@ -150,6 +150,11 @@
             </li>
 
             <li class="nav-item">
+              <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.model_research' %} active{% endif %}"
+                 href="{{ url_for('inventory.model_research') }}">MODEL RESEARCH</a>
+            </li>
+
+            <li class="nav-item">
               <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.receiving') %} active{% endif %}"
                  href="{{ url_for('inventory.receiving_list') }}">RECEIVING</a>
             </li>

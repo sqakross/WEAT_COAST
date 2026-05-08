@@ -24,7 +24,7 @@ from io import BytesIO
 from datetime import datetime, timedelta, time, date
 from extensions import db
 from utils.invoice_generator import generate_invoice_pdf
-from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER,ROLE_TECHNICIAN, Part, WorkOrder, WorkOrderPart,EmailOutbox, WorkOrderAudit
+from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER, ROLE_TECHNICIAN, Part, WorkOrder, WorkUnit, WorkOrderPart, EmailOutbox, WorkOrderAudit
 from reportlab.lib.pagesizes import letter, landscape
 from compare_cart.run_compare import get_marcone_items, check_cart_items, export_to_docx
 from compare_cart.run_compare_reliable import get_reliable_items
@@ -569,6 +569,66 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
 
     return int(deleted or 0)
 
+@inventory_bp.get("/parts/model-research", endpoint="model_research")
+@login_required
+def model_research():
+    model_query = (request.args.get("model") or "").strip().upper()
+    search_mode = (request.args.get("mode") or "contains").strip().lower()
+
+    grouped = {}
+
+    if model_query:
+        q = (
+            db.session.query(
+                WorkUnit.model.label("model"),
+                WorkOrderPart.part_number.label("part_number"),
+                WorkOrderPart.part_name.label("part_name"),
+            )
+            .join(WorkOrderPart, WorkOrderPart.unit_id == WorkUnit.id)
+            .filter(WorkOrderPart.part_number.isnot(None))
+            .filter(func.trim(WorkOrderPart.part_number) != "")
+        )
+
+        if search_mode == "exact":
+            q = q.filter(func.upper(func.trim(WorkUnit.model)) == model_query)
+        else:
+            q = q.filter(func.upper(WorkUnit.model).like(f"%{model_query}%"))
+
+        rows = (
+            q.order_by(
+                func.upper(WorkUnit.model).asc(),
+                func.upper(WorkOrderPart.part_number).asc(),
+            )
+            .all()
+        )
+
+        seen = set()
+
+        for row in rows:
+            model = (row.model or "").strip().upper()
+            pn = (row.part_number or "").strip().upper()
+            name = (row.part_name or "").strip()
+
+            if not model or not pn:
+                continue
+
+            key = (model, pn, name.lower())
+            if key in seen:
+                continue
+
+            seen.add(key)
+
+            grouped.setdefault(model, []).append({
+                "part_number": pn,
+                "part_name": name,
+            })
+
+    return render_template(
+        "model_research.html",
+        model_query=model_query,
+        search_mode=search_mode,
+        grouped=grouped,
+    )
 @inventory_bp.get("/api/job_reserve", endpoint="api_job_reserve")
 @login_required
 def api_job_reserve():
