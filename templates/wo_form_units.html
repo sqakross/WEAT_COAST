@@ -854,8 +854,8 @@ function wccrToast(msg) {
   }
 
   if (form && !IS_RO) {
-    form.addEventListener('input', markDirty);
-    form.addEventListener('change', markDirty);
+    form.addEventListener('input', markDirty, { passive: true });
+    form.addEventListener('change', markDirty, { passive: true });
   }
 
   saveBtn?.addEventListener('click', () => {
@@ -1216,7 +1216,7 @@ function wccrToast(msg) {
     cb.title = "";
   }
 
-  const STOCK_HINT_TTL_MS = 5000;
+  const STOCK_HINT_TTL_MS = 15000;
   const stockHintCache = new Map();   // key -> { ts, payload }
     const stockHintTimers = new WeakMap();
     const stockHintInflight = new WeakMap();
@@ -1436,7 +1436,7 @@ function applyHintResult(tr, j){
   } catch (err) {
   console.warn('Bulk failed, fallback to limited fetch');
 
-  rows.slice(0, 10).forEach((tr) => fetchHint(tr));
+  rows.slice(0, 5).forEach((tr) => fetchHint(tr));
 }
 }
 async function refreshVisibleHints(force = false){
@@ -1504,7 +1504,7 @@ async function refreshVisibleHints(force = false){
       });
     });
   } catch (err) {
-    await Promise.allSettled(targets.map(tr => fetchHint(tr, true)));
+    await Promise.allSettled(targets.slice(0, 5).map(tr => fetchHint(tr, true)));
   }
 }
 
@@ -1660,7 +1660,10 @@ function clearHintCacheForRow(tr){
     }
 
     if (tr && (e.target.classList.contains('qty') || e.target.classList.contains('unit-cost'))){
-      recomputeUnitSubtotal(card);
+      clearTimeout(card._subtotalTimer);
+      card._subtotalTimer = setTimeout(() => {
+        recomputeUnitSubtotal(card);
+      }, 120);
     }
 
     if (tr && (
@@ -1810,7 +1813,7 @@ ensureCopyButtonsForAllAppliances();
         tr.querySelector('.issue-check').checked = needCheck;
       });
 
-      refreshVisibleHints(false);
+      // no extra refresh here; use current hints
     });
 
   issueBtn?.addEventListener('click', async ()=>{
@@ -1851,9 +1854,7 @@ ensureCopyButtonsForAllAppliances();
     form.requestSubmit();
     return;
   }
-  if (!window.WCCR_AUTO_ISSUE_RUNNING) {
-      await refreshVisibleHints(false);
-    }
+
   const isINSJob = isInsuranceJob();
   const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
   const issueFormEl = document.getElementById('issueForm');
@@ -1932,11 +1933,10 @@ ensureCopyButtonsForAllAppliances();
 
       window.WCCR_NAVIGATING_TO_DETAIL = true;
       isSubmitting = true;
-      isDirty = false;
-      window.removeEventListener('beforeunload', handleBeforeUnload);
 
       issueFormEl.submit();
       return;
+
     });
 
   let stockRefreshTimer = null;

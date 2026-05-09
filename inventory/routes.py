@@ -1999,41 +1999,43 @@ def api_stock_hint():
 @inventory_bp.post("/api/stock_hint_bulk", endpoint="api_stock_hint_bulk")
 @login_required
 def api_stock_hint_bulk():
-    """
-    Bulk API для stock hint.
-    Принимает JSON:
-    {
-      "items": [
-        {"pn": "241505301", "qty": 2, "wh": "MAR"},
-        {"pn": "ABC123", "qty": 1}
-      ]
-    }
-
-    Возвращает:
-    {
-      "ok": True,
-      "items": {
-        "241505301|2|MAR": {...},
-        "ABC123|1|": {...}
-      }
-    }
-    """
     data = request.get_json(silent=True) or {}
     items = data.get("items") or []
 
-    result = {}
+    normalized = []
+    pn_set = set()
 
     for item in items:
         pn = (item.get("pn") or "").strip().upper()
-        wh = (item.get("wh") or "").strip()
+        wh = (item.get("wh") or "").strip().upper()
 
         try:
             qty_needed = int(item.get("qty") or 0)
         except (ValueError, TypeError):
             qty_needed = 0
 
-        key = f"{pn}|{qty_needed}|{wh.upper()}"
+        key = f"{pn}|{qty_needed}|{wh}"
+        normalized.append((key, pn, qty_needed, wh))
 
+        if pn:
+            pn_set.add(pn)
+
+    # one SQL query instead of many
+    parts_by_pn = {}
+    if pn_set:
+        rows = (
+            db.session.query(Part)
+            .filter(Part.part_number.in_(pn_set))
+            .all()
+        )
+
+        for p in rows:
+            pnum = (p.part_number or "").strip().upper()
+            parts_by_pn.setdefault(pnum, []).append(p)
+
+    result = {}
+
+    for key, pn, qty_needed, wh in normalized:
         if not pn:
             result[key] = {
                 "ok": False,
@@ -2047,11 +2049,55 @@ def api_stock_hint_bulk():
             }
             continue
 
-        result[key] = _stock_hint_payload(
-            pn=pn,
-            qty_needed=qty_needed,
-            wh=wh,
-        )
+        parts = parts_by_pn.get(pn, [])
+
+        if not parts:
+            result[key] = {
+                "ok": True,
+                "part_number": pn,
+                "qty_available": 0,
+                "hint": "WAIT",
+                "location": None,
+                "unit_cost": None,
+                "name": None,
+            }
+            continue
+
+        qty_available = 0
+        locations = []
+        unit_cost = None
+        name = None
+
+        for p in parts:
+            try:
+                part_qty = int(p.quantity or 0)
+            except (ValueError, TypeError):
+                part_qty = 0
+
+            qty_available += part_qty
+
+            if part_qty > 0:
+                loc = (p.location or "").strip().upper()
+                if loc and loc not in locations:
+                    locations.append(loc)
+
+            if unit_cost is None and p.unit_cost is not None:
+                unit_cost = p.unit_cost
+
+            if name is None and p.name:
+                name = p.name
+
+        is_stock = qty_available >= qty_needed if qty_needed > 0 else qty_available > 0
+
+        result[key] = {
+            "ok": True,
+            "part_number": pn,
+            "qty_available": qty_available,
+            "hint": "STOCK" if is_stock else "WAIT",
+            "location": "/".join(locations) if locations else None,
+            "unit_cost": unit_cost,
+            "name": name,
+        }
 
     return jsonify({
         "ok": True,
@@ -6195,8 +6241,7 @@ def wo_save():
             if (pn or part_name_clip) and qty_eff > 0:
                 new_rows_count += 1
                 rows_payload.append(row_dict)
-                with open(dbg_path, "a", encoding="utf-8") as fp:
-                    fp.write(f"ROWS_PARSED: ui={ui} ri={ri} pn={pn!r} inv={inv_raw!r}\n")
+                _debug_write(f"ROWS_PARSED: ui={ui} ri={ri} pn={pn!r} inv={inv_raw!r}\n")
 
         units_payload.append({
             "brand": (u_blk.get("brand") or "").strip().upper(),
@@ -6609,7 +6654,7 @@ def wo_save():
     try:
         db.session.commit()
 
-        flash("Work Order saved.", "success")
+
 
         if WO_SAVE_DEBUG:
             fresh = WorkOrder.query.get(wo.id)
