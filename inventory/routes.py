@@ -1888,6 +1888,76 @@ def issued_confirm_toggle():
 
     return jsonify({"ok": True, "record_id": rec_id, "confirmed": bool(rec.confirmed_by_tech)})
 
+@inventory_bp.post("/api/issued/confirm_bulk", endpoint="issued_confirm_bulk")
+@login_required
+def issued_confirm_bulk():
+    from flask import request, jsonify, current_app
+    from datetime import datetime, timezone
+    from flask_login import current_user
+    from extensions import db
+    from models import IssuedPartRecord, WorkOrder, IssuedBatch
+
+    payload = request.get_json(silent=True) or {}
+
+    record_ids = payload.get("record_ids") or []
+    wo_id = payload.get("wo_id")
+    requested_checked = bool(payload.get("state"))
+    send_confirm_message = bool(payload.get("send_confirm_message"))
+
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+
+    if role not in ("admin", "superadmin"):
+        return jsonify({"ok": False, "error": "FORBIDDEN"}), 403
+
+    try:
+        wo_id = int(wo_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "BAD_WO"}), 400
+
+    wo = WorkOrder.query.get(wo_id)
+    if not wo:
+        return jsonify({"ok": False, "error": "WO_NOT_FOUND"}), 404
+
+    username = (
+        getattr(current_user, "username", "")
+        or getattr(current_user, "email", "")
+        or "admin"
+    )
+
+    now_utc = datetime.now(timezone.utc)
+
+    updated = []
+
+    try:
+        records = IssuedPartRecord.query.filter(
+            IssuedPartRecord.id.in_(record_ids)
+        ).all()
+
+        for rec in records:
+            rec.confirmed_by_tech = requested_checked
+
+            if requested_checked:
+                rec.confirmed_by = username
+                rec.confirmed_at = now_utc
+            else:
+                rec.confirmed_by = None
+                rec.confirmed_at = None
+
+            updated.append(rec.id)
+
+        db.session.commit()
+
+        return jsonify({
+            "ok": True,
+            "updated": updated
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "ok": False,
+            "error": str(e)
+        }), 500
 
 # ---------- STOCK HINT API ----------
 from flask import jsonify, request
@@ -4544,7 +4614,7 @@ def inject_alerts_count():
 def wo_alerts():
     from flask import request, render_template
     from datetime import date, timedelta
-    from sqlalchemy import or_
+    from sqlalchemy import or_, func, case
     from models import WorkOrder, WorkOrderPart, WorkUnit, IssuedBatch, IssuedPartRecord
 
     def _days_int(name, default):
@@ -4563,6 +4633,51 @@ def wo_alerts():
     bo_cutoff = today - timedelta(days=bo_days)
     pending_cutoff = today - timedelta(days=pending_days)
 
+    def sort_alert_rows(rows):
+        groups = {}
+
+        for p, wo, unit in rows:
+            groups.setdefault(wo.id, {
+                "wo": wo,
+                "rows": [],
+                "oldest_days": 0,
+                "worst_eta": None,
+            })
+
+            groups[wo.id]["rows"].append((p, wo, unit))
+
+            if p.ordered_date:
+                d = (today - p.ordered_date).days
+                groups[wo.id]["oldest_days"] = max(groups[wo.id]["oldest_days"], d)
+
+            if p.eta_date:
+                ed = (today - p.eta_date).days
+                if groups[wo.id]["worst_eta"] is None or ed > groups[wo.id]["worst_eta"]:
+                    groups[wo.id]["worst_eta"] = ed
+
+        def severity_rank(g):
+            worst_eta = g["worst_eta"]
+            oldest_days = g["oldest_days"]
+
+            if worst_eta is not None and worst_eta > 0:
+                return 0  # Red: ETA passed
+            if oldest_days > 7:
+                return 1  # Yellow: ordered > 7 days
+            if worst_eta is not None and worst_eta < 0:
+                return 2  # Green: ETA future
+            return 3  # No color
+
+        sorted_groups = sorted(
+            groups.values(),
+            key=lambda g: (
+                severity_rank(g),
+                (g["wo"].technician_name or "").lower(),
+                g["wo"].id,
+            )
+        )
+
+        return [row for g in sorted_groups for row in g["rows"]]
+
     base_q = (
         db.session.query(WorkOrderPart, WorkOrder, WorkUnit)
         .join(WorkOrder, WorkOrder.id == WorkOrderPart.work_order_id)
@@ -4573,8 +4688,18 @@ def wo_alerts():
             WorkOrderPart.ordered_date.isnot(None),
             WorkOrderPart.quantity > 0,
             WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+
+            # not received yet: no INV/STOCK
+            or_(
+                WorkOrderPart.invoice_number.is_(None),
+                WorkOrderPart.invoice_number == "",
+            ),
         )
-        .order_by(WorkOrderPart.ordered_date.asc())
+        .order_by(
+            WorkOrder.technician_name.asc(),
+            WorkOrderPart.eta_date.asc(),
+            WorkOrderPart.ordered_date.asc(),
+        )
     )
 
     overdue_rows = (
@@ -4600,10 +4725,11 @@ def wo_alerts():
         .join(WorkOrder, WorkOrder.id == WorkOrderPart.work_order_id)
         .outerjoin(WorkUnit, WorkUnit.id == WorkOrderPart.unit_id)
         .filter(
-            WorkOrder.status != "done",
-            WorkOrder.status != "cancel_job",
+            WorkOrder.status == "ordered",
+            WorkOrderPart.ordered_date.isnot(None),
             WorkOrderPart.eta_date.isnot(None),
             WorkOrderPart.eta_date < today,
+            WorkOrderPart.invoice_number.is_(None),
             WorkOrderPart.quantity > 0,
             WorkOrderPart.issued_qty < WorkOrderPart.quantity,
         )
@@ -4611,7 +4737,67 @@ def wo_alerts():
         .all()
     )
 
-    from sqlalchemy import func, case
+    received_ready_wo_ids = (
+        db.session.query(WorkOrder.id)
+        .join(WorkOrderPart, WorkOrderPart.work_order_id == WorkOrder.id)
+        .filter(
+            WorkOrder.status == "ordered",
+            WorkOrderPart.quantity > 0,
+            WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+        )
+        .group_by(WorkOrder.id)
+        .having(
+            func.sum(
+                case(
+                    (
+                        or_(
+                            WorkOrderPart.invoice_number.is_(None),
+                            WorkOrderPart.invoice_number == "",
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ) == 0
+        )
+        .all()
+    )
+
+    received_ready_wo_ids = [x[0] for x in received_ready_wo_ids]
+    received_ready_wo_ids_set = set(received_ready_wo_ids)
+
+    overdue_rows = [
+        row for row in overdue_rows
+        if row[1].id not in received_ready_wo_ids_set
+    ]
+
+    backorder_rows = [
+        row for row in backorder_rows
+        if row[1].id not in received_ready_wo_ids_set
+    ]
+
+    overdue_rows = sort_alert_rows(overdue_rows)
+    backorder_rows = sort_alert_rows(backorder_rows)
+    eta_passed_rows = sort_alert_rows(eta_passed_rows)
+
+
+    received_not_issued_rows = (
+        db.session.query(WorkOrderPart, WorkOrder, WorkUnit)
+        .join(WorkOrder, WorkOrder.id == WorkOrderPart.work_order_id)
+        .outerjoin(WorkUnit, WorkUnit.id == WorkOrderPart.unit_id)
+        .filter(
+            WorkOrder.id.in_(received_ready_wo_ids),
+            WorkOrderPart.quantity > 0,
+            WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+        )
+        .order_by(
+            WorkOrder.technician_name.asc(),
+            WorkOrder.id.asc(),
+        )
+        .all()
+    )
+
+    received_not_issued_rows = sort_alert_rows(received_not_issued_rows)
 
     pending_confirm_rows = (
         db.session.query(
@@ -4650,6 +4836,7 @@ def wo_alerts():
         backorder_rows=backorder_rows,
         pending_days=pending_days,
         eta_passed_rows=eta_passed_rows,
+        received_not_issued_rows=received_not_issued_rows,
         pending_confirm_rows=pending_confirm_rows,
         overdue_days=overdue_days,
         bo_days=bo_days,
