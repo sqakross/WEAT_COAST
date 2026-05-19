@@ -225,13 +225,13 @@
 
           <td>
             <span class="
-              {% if row.is_invoiced %}
-                name-invoiced
-              {% elif row.is_insurance_supplied %}
-                name-ins
-              {% elif row.is_ordered %}
-                name-ordered
-              {% endif %}
+              {% if row.is_ordered %}
+                  name-ordered
+                {% elif row.is_invoiced %}
+                  name-invoiced
+                {% elif row.is_insurance_supplied %}
+                  name-ins
+                {% endif %}
             ">
               {{ row.part_name or '—' }}
             </span>
@@ -917,29 +917,76 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
     // ---- Technician: confirm all parts in one batch ----
-  document.querySelectorAll(".tech-confirm-all").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const row = btn.closest("tr");
-      const checks = Array.from(row.querySelectorAll("input.tech-confirm:not(:checked):not(:disabled)"));
+  // ---- Technician: confirm all parts in one batch ----
+document.querySelectorAll(".tech-confirm-all").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const row = btn.closest("tr");
 
-      if (!checks.length) {
-        if (window.showToast) showToast("All parts already confirmed", {delay: 1400});
-        return;
+    const checks = Array.from(
+      row.querySelectorAll("input.tech-confirm:not(:checked):not(:disabled)")
+    );
+
+    if (!checks.length) {
+      if (window.showToast) showToast("All parts already confirmed", {delay: 1400});
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Confirming...";
+
+    const recordIds = checks
+      .map(cb => parseInt(cb.dataset.recordId || "0", 10))
+      .filter(id => id > 0);
+
+    const woId = parseInt(checks[0]?.dataset.woid || "0", 10);
+
+    try {
+      const response = await fetch("{{ url_for('inventory.issued_confirm_bulk') }}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body: JSON.stringify({
+          record_ids: recordIds,
+          wo_id: woId,
+          state: true
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error("Bulk confirm failed");
       }
 
-      btn.disabled = true;
-      btn.textContent = "Confirming...";
-
-      for (const cb of checks) {
+      checks.forEach(cb => {
         cb.checked = true;
-        cb.dispatchEvent(new Event("change", { bubbles: true }));
-        await new Promise(r => setTimeout(r, 120));
+        cb.disabled = true;
+
+        const meta = cb.closest(".tech-confirm-wrapper")?.querySelector(".confirm-meta");
+        if (meta) meta.textContent = "✔ confirmed";
+      });
+
+      const badge = row.querySelector(".batch-badge-holder");
+      if (badge) {
+        badge.innerHTML = '<span class="badge bg-success inv-badge">All confirmed</span>';
       }
+
+      const statusCol = row.querySelector(".batch-status-col");
+      if (statusCol) statusCol.textContent = "✅";
 
       btn.textContent = "All confirmed";
+
       if (window.showToast) showToast("All parts confirmed", {delay: 1400});
-    });
+
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "Confirm all";
+      alert("Bulk confirm failed");
+    }
   });
+});
 
   // ---- Admin/Superadmin: check/uncheck all in batch ----
 document.querySelectorAll(".admin-toggle-all").forEach(btn => {
@@ -1028,7 +1075,25 @@ document.querySelectorAll(".admin-toggle-all").forEach(btn => {
       }
     });
 
-    location.reload();
+    btn.disabled = false;
+
+    btn.textContent = shouldCheck
+      ? "Uncheck all"
+      : "Check all";
+
+    const badge = row.querySelector(".batch-badge-holder");
+
+    if (badge) {
+      badge.innerHTML = shouldCheck
+        ? '<span class="badge bg-success inv-badge">All confirmed</span>'
+        : '';
+    }
+
+    const statusCol = row.querySelector(".batch-status-col");
+
+    if (statusCol) {
+      statusCol.textContent = shouldCheck ? "✅" : "☐";
+    }
   });
 });
 

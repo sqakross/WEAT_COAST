@@ -464,10 +464,10 @@
                                (r.line_status is defined and (r.line_status or '')|lower == 'ordered') %}
 
               {% set row_class = '' %}
-              {% if issued_full %}
+              {% if is_ord %}
+              {% set row_class = row_class + ' row-ordered' %}
+              {% elif issued_full %}
                 {% set row_class = row_class + ' issued-row' %}
-              {% elif is_ord %}
-                {% set row_class = row_class + ' row-ordered' %}
               {% endif %}
               {% if r.backorder_flag %}
                 {% set row_class = row_class + ' row-backorder' %}
@@ -803,6 +803,61 @@ function wccrToast(msg) {
   const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
   const API_STOCK_BULK = "{{ url_for('inventory.api_stock_hint_bulk') }}";
   const API_DUP   = "{{ url_for('inventory.api_job_duplicate_check') }}";
+  let jobCheckTimer = null;
+let jobCheckController = null;
+let lastJobCheckValue = '';
+
+async function liveJobDuplicateCheck() {
+  if (IS_EDIT) return;
+
+  const input = document.querySelector('input[name="job_numbers"]');
+  if (!input) return;
+
+  const raw = (input.value || '').trim().toUpperCase();
+
+  if (!raw) {
+    input.classList.remove('is-invalid', 'is-valid');
+    return;
+  }
+
+  if (raw === lastJobCheckValue) return;
+  lastJobCheckValue = raw;
+
+  if (jobCheckController) {
+    jobCheckController.abort();
+  }
+
+  jobCheckController = new AbortController();
+
+  try {
+    const resp = await fetch(
+      API_DUP + '?job_numbers=' + encodeURIComponent(raw),
+      {
+        signal: jobCheckController.signal,
+        headers: {
+          'Accept': 'application/json'
+        }
+      }
+    );
+
+    if (!resp.ok) return;
+
+    const data = await resp.json();
+
+    if (data.duplicate) {
+      input.classList.add('is-invalid');
+      input.classList.remove('is-valid');
+    } else {
+      input.classList.remove('is-invalid');
+      input.classList.add('is-valid');
+    }
+
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      console.warn('job duplicate check failed', err);
+    }
+  }
+}
   const IS_EDIT = !!(document.querySelector('#woForm input[name="wo_id"]')?.value || '').trim();
   const IS_RO   = {{ 'true' if RO else 'false' }};
 
@@ -2587,6 +2642,22 @@ window.addEventListener('pageshow', () => {
   }
 
   window.addEventListener('beforeunload', releaseLock);
+
+  const jobInput = document.querySelector('input[name="job_numbers"]');
+
+if (jobInput) {
+
+  jobInput.addEventListener('input', () => {
+
+    clearTimeout(jobCheckTimer);
+
+    jobCheckTimer = setTimeout(() => {
+      liveJobDuplicateCheck();
+    }, 450);
+
+  });
+
+}
 
   form.addEventListener('submit', async (e)=>{
     if (lastStatus === "locked" || lastStatus === "exists"){

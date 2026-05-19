@@ -3,60 +3,219 @@
 
 <style>
   .inventory-report-page {
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - 60px);
-    max-height: calc(100vh - 60px);
-    font-size: 1.1rem;
+    max-width: 1380px;
+    margin: 0 auto;
+    padding: 14px 18px 40px;
+    font-size: 14px;
   }
+
   .sticky-toolbar {
     position: sticky;
-    top: 0;
+    top: 58px;
     z-index: 100;
-    background: #fff;
-    border: 2px solid #ccc;
-    border-radius: 8px;
-    padding: 18px 20px;
+    background: #ffffff;
+    border: 1px solid #d8dee8;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.06);
+  }
+
+  .toolbar-row1,
+  .toolbar-row2 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+  }
+
+  .toolbar-row1 {
     margin-bottom: 10px;
-    font-size: 1.05rem;
-    line-height: 1.5;
   }
-  .toolbar-row1, .toolbar-row2 {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 16px 20px;
+
+  .left-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
   }
-  .toolbar-row1 .left-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-  .toolbar-summary { font-size: 1rem; line-height: 1.5; }
-  .toolbar-summary div { white-space: nowrap; }
-  .label-inline { font-size: 1rem; font-weight: 600; margin-right: 6px; white-space: nowrap; }
-  .form-control-sm { font-size: 1rem; padding: 8px 10px; height: 40px; line-height: 1.4; min-width: 140px; }
-  .btn-sm { font-size: 1rem; padding: 8px 12px; height: 40px; line-height: 1.4; }
-  .locations-scroll-area { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 6px; font-size: 1.1rem; }
+
+  .toolbar-summary {
+    margin-left: auto;
+    font-size: 13px;
+    line-height: 1.45;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 8px 12px;
+    min-width: 230px;
+  }
+
+  .label-inline {
+    font-size: 13px;
+    font-weight: 700;
+    margin-right: 4px;
+    white-space: nowrap;
+  }
+
+  .form-control-sm {
+    font-size: 13px;
+    height: 34px;
+    padding: 6px 9px;
+  }
+
+  .btn-sm {
+    font-size: 13px;
+    height: 34px;
+    padding: 6px 10px;
+  }
+
+  .locations-scroll-area {
+    overflow: visible;
+    padding-right: 0;
+  }
+
   .location-card {
-    border: 2px solid #ccc; border-radius: 8px; background: #fff; padding: 18px 20px; margin-bottom: 20px;
-    display: flex; flex-direction: column; min-height: 260px; max-height: 480px; font-size: 1rem; line-height: 1.5;
+    border: 1px solid #d8dee8;
+    border-radius: 12px;
+    background: #fff;
+    padding: 0;
+    margin-bottom: 18px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.04);
+    overflow: hidden;
   }
-  .location-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; row-gap: 8px; }
-  .location-header h4 { font-size: 1.2rem; font-weight: 600; margin: 0 0 6px 0; }
-  .location-meta { font-size: 1rem; line-height: 1.5; }
-  .location-header .form-control-sm { min-width: 200px; }
-  .match-count { font-size: 0.9rem; color: #555; min-width: 90px; line-height: 1.4; }
-  .table-wrapper { flex: 1 1 auto; min-height: 0; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; }
-  table.location-table { width: 100%; border-collapse: collapse; font-size: 1rem; line-height: 1.5; }
+
+  .location-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    padding: 12px 14px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .location-header h4 {
+    font-size: 15px;
+    font-weight: 800;
+    margin: 0 0 4px;
+  }
+
+  .location-name {
+    color: #0d6efd;
+  }
+
+  .location-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .match-count {
+    font-size: 12px;
+    color: #64748b;
+    min-width: 80px;
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+    overflow-y: visible;
+    border: 0;
+    border-radius: 0;
+  }
+
+  table.location-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
   table.location-table thead th {
-    position: sticky; top: 0; background: #f8f9fa; z-index: 10; border-bottom: 2px solid #aaa;
-    text-align: left; padding: 10px 12px; white-space: nowrap; font-size: 1rem; font-weight: 600;
+    background: #eef2f7;
+    color: #111827;
+    border-bottom: 1px solid #cbd5e1;
+    text-align: left;
+    padding: 9px 10px;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+  table.location-table tbody td {
+    border-bottom: 1px solid #eef2f7;
+    padding: 8px 10px;
+    vertical-align: middle;
+    font-size: 13px;
   }
-  table.location-table tbody td { border-bottom: 1px solid #eee; padding: 10px 12px; vertical-align: top; font-family: monospace; font-size: 1rem; }
-  tr.location-total-row { background: #e9f3ff; font-weight: 700; font-size: 1rem; }
-  .no-results { padding: .75rem 1rem; margin: .5rem 0; border-radius: .5rem; border: 1px dashed #bbb; color: #555; }
+
+  table.location-table tbody tr:hover {
+    background: #f8fbff;
+  }
+
+  .part-number {
+    font-family: Consolas, monospace;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .part-name {
+    font-family: Arial, sans-serif;
+  }
+
+  .num-cell {
+    text-align: right;
+    white-space: nowrap;
+    font-family: Consolas, monospace;
+  }
+
+  tr.location-total-row {
+    background: #eef6ff;
+    font-weight: 800;
+  }
+
+  .no-results {
+    padding: 12px 14px;
+    margin: 10px 0;
+    border-radius: 10px;
+    border: 1px dashed #94a3b8;
+    color: #475569;
+    background: #f8fafc;
+  }
+
+  @media (max-width: 900px) {
+    .inventory-report-page {
+      padding: 10px;
+    }
+
+    .sticky-toolbar {
+      top: 52px;
+    }
+
+    .toolbar-summary {
+      margin-left: 0;
+      width: 100%;
+    }
+
+    table.location-table {
+      font-size: 12px;
+    }
+
+    table.location-table thead th,
+    table.location-table tbody td {
+      padding: 7px 8px;
+    }
+  }
 </style>
 
 <div class="inventory-report-page">
 
-  <!-- ===== STICKY TOOLBAR ===== -->
   <div class="sticky-toolbar">
 
-    <!-- ROW 1 -->
     <div class="toolbar-row1">
       <div class="left-actions">
         <a href="{{ url_for('inventory.print_location_report') }}" class="btn btn-primary btn-sm">🖨️ Print Location Report</a>
@@ -64,16 +223,13 @@
         <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-secondary btn-sm">← Back to Dashboard</a>
       </div>
 
-      <div class="ms-auto toolbar-summary">
+      <div class="toolbar-summary">
         <div><strong>All Locations Total Qty:</strong> {{ grand_total_quantity }}</div>
         <div><strong>All Locations Total Value:</strong> ${{ '%.2f'|format(grand_total_value) }}</div>
       </div>
     </div>
 
-    <!-- ROW 2 -->
-    <div class="toolbar-row2" style="margin-top:10px;">
-
-      <!-- выбрать/перейти к конкретной локации -->
+    <div class="toolbar-row2">
       <form class="d-flex flex-wrap align-items-center gap-2" method="get" action="{{ url_for('inventory.location_report') }}">
         <label class="label-inline">Location:</label>
 
@@ -87,11 +243,14 @@
           autocomplete="off"
           placeholder="type or pick..."
         >
+
         <datalist id="locationList">
           {% set __has_unknown = false %}
           {% for loc_name in all_locations %}
             {% set _n = loc_name or 'Unknown' %}
-            {% if _n|lower in ['','unknown','—','-','none','null'] %}{% set __has_unknown = true %}{% endif %}
+            {% if _n|lower in ['','unknown','—','-','none','null'] %}
+              {% set __has_unknown = true %}
+            {% endif %}
             <option value="{{ _n }}"></option>
           {% endfor %}
           {% if not __has_unknown %}
@@ -102,7 +261,6 @@
         <button class="btn btn-sm btn-primary" type="submit">Go</button>
       </form>
 
-      <!-- поиск по партам -->
       <div class="d-flex flex-wrap align-items-center gap-2">
         <label class="label-inline">Search Part:</label>
         <input
@@ -115,11 +273,9 @@
         >
         <span id="globalMatchCount" class="match-count"></span>
       </div>
-
     </div>
   </div>
 
-  <!-- ===== SCROLL AREA ===== -->
   <div class="locations-scroll-area">
 
     {% if locations %}
@@ -129,7 +285,7 @@
       <div class="location-card" data-location="{{ loc }}">
         <div class="location-header">
           <div>
-            <h4 class="mb-1" style="font-size:1rem;">
+            <h4>
               Location: <span class="location-name">{{ loc }}</span>
             </h4>
             <div class="location-meta">
@@ -138,7 +294,6 @@
             </div>
           </div>
 
-          <!-- поиск внутри локации -->
           <div class="d-flex flex-wrap align-items-center gap-2">
             <label class="label-inline">Filter in {{ loc }}:</label>
             <input
@@ -156,11 +311,11 @@
           <table class="location-table">
             <thead>
               <tr>
-                <th style="width:160px;">Part Number</th>
+                <th style="width:170px;">Part Number</th>
                 <th>Name</th>
-                <th style="width:60px;">Qty</th>
-                <th style="width:80px;">Unit Cost</th>
-                <th style="width:80px;">Total Cost</th>
+                <th style="width:70px;" class="num-cell">Qty</th>
+                <th style="width:100px;" class="num-cell">Unit Cost</th>
+                <th style="width:110px;" class="num-cell">Total Cost</th>
               </tr>
             </thead>
 
@@ -169,37 +324,38 @@
               <tr>
                 <td class="part-number">{{ part.part_number|default('', true) }}</td>
                 <td class="part-name">{{ part.name|default('', true) }}</td>
-                <td>{{ (part.quantity or 0) }}</td>
-                <td>${{ '%.2f'|format(part.unit_cost or 0.0) }}</td>
-                <td>${{ '%.2f'|format((part.quantity or 0) * (part.unit_cost or 0.0)) }}</td>
+                <td class="num-cell">{{ (part.quantity or 0) }}</td>
+                <td class="num-cell">${{ '%.2f'|format(part.unit_cost or 0.0) }}</td>
+                <td class="num-cell">${{ '%.2f'|format((part.quantity or 0) * (part.unit_cost or 0.0)) }}</td>
               </tr>
               {% endfor %}
 
               <tr class="location-total-row">
                 <td colspan="2">Location Total</td>
-                <td>{{ data.total_quantity }}</td>
+                <td class="num-cell">{{ data.total_quantity }}</td>
                 <td></td>
-                <td>${{ '%.2f'|format(data.total_value) }}</td>
+                <td class="num-cell">${{ '%.2f'|format(data.total_value) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-
       </div>
       {% endfor %}
+
     {% else %}
       <div class="alert alert-info m-3">No parts in inventory.</div>
     {% endif %}
 
-  </div><!-- /locations-scroll-area -->
-
-</div><!-- /inventory-report-page -->
-
+  </div>
+</div>
 
 <script>
-  // --- маленький debounce, чтобы не дёргать фильтр на каждый символ
   function debounce(fn, ms) {
-    let t; return function(...args){ clearTimeout(t); t=setTimeout(()=>fn.apply(this,args), ms); };
+    let t;
+    return function(...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), ms);
+    };
   }
 
   function filterAllLocations() {
@@ -210,6 +366,7 @@
     let visibleCards = 0;
 
     const cards = document.querySelectorAll('.location-card');
+
     cards.forEach(card => {
       const tbody = card.querySelector('.partsTableBody');
       if (!tbody) return;
@@ -223,6 +380,7 @@
 
         const pnCell = tr.querySelector('.part-number');
         const nmCell = tr.querySelector('.part-name');
+
         const pn = (pnCell && pnCell.textContent ? pnCell.textContent : '').toLowerCase();
         const nm = (nmCell && nmCell.textContent ? nmCell.textContent : '').toLowerCase();
 
@@ -236,22 +394,30 @@
       });
 
       const totalRow = tbody.querySelector('.location-total-row');
-      if (totalRow) totalRow.style.display = (localVisible > 0 || q === '') ? '' : 'none';
+      if (totalRow) {
+        totalRow.style.display = (localVisible > 0 || q === '') ? '' : 'none';
+      }
 
       const localCounter = card.querySelector('.localMatchCount');
-      if (localCounter) localCounter.textContent = q ? (localVisible + " match(es)") : '';
+      if (localCounter) {
+        localCounter.textContent = q ? (localVisible + " match(es)") : '';
+      }
 
-      // скрываем карточку, если в ней нет совпадений при непустом запросе
       const cardVisible = (localVisible > 0 || q === '');
       card.style.display = cardVisible ? '' : 'none';
+
       if (cardVisible) visibleCards++;
     });
 
     const globalCounter = document.getElementById('globalMatchCount');
-    if (globalCounter) globalCounter.textContent = q ? (totalVisibleRows + " total match(es)") : '';
+    if (globalCounter) {
+      globalCounter.textContent = q ? (totalVisibleRows + " total match(es)") : '';
+    }
 
     const noRes = document.getElementById('globalNoResults');
-    if (noRes) noRes.style.display = (q && visibleCards === 0) ? '' : 'none';
+    if (noRes) {
+      noRes.style.display = (q && visibleCards === 0) ? '' : 'none';
+    }
   }
 
   const debouncedFilterAll = debounce(filterAllLocations, 120);
@@ -263,8 +429,9 @@
     const tbody = card.querySelector('.partsTableBody');
     if (!tbody) return;
 
-    const rows  = Array.from(tbody.querySelectorAll('tr'));
+    const rows = Array.from(tbody.querySelectorAll('tr'));
     const q = (inputEl.value || '').toLowerCase().trim();
+
     let visibleHere = 0;
 
     rows.forEach(tr => {
@@ -273,19 +440,25 @@
 
       const pnCell = tr.querySelector('.part-number');
       const nmCell = tr.querySelector('.part-name');
+
       const pn = (pnCell && pnCell.textContent ? pnCell.textContent : '').toLowerCase();
       const nm = (nmCell && nmCell.textContent ? nmCell.textContent : '').toLowerCase();
 
       const match = !q || pn.includes(q) || nm.includes(q);
       tr.style.display = match ? '' : 'none';
+
       if (match) visibleHere++;
     });
 
     const totalRow = tbody.querySelector('.location-total-row');
-    if (totalRow) totalRow.style.display = (visibleHere > 0 || q === '') ? '' : 'none';
+    if (totalRow) {
+      totalRow.style.display = (visibleHere > 0 || q === '') ? '' : 'none';
+    }
 
     const localCounter = card.querySelector('.localMatchCount');
-    if (localCounter) localCounter.textContent = q ? (visibleHere + " match(es)") : '';
+    if (localCounter) {
+      localCounter.textContent = q ? (visibleHere + " match(es)") : '';
+    }
   }
 </script>
 
