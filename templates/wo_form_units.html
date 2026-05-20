@@ -803,61 +803,7 @@ function wccrToast(msg) {
   const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
   const API_STOCK_BULK = "{{ url_for('inventory.api_stock_hint_bulk') }}";
   const API_DUP   = "{{ url_for('inventory.api_job_duplicate_check') }}";
-  let jobCheckTimer = null;
-let jobCheckController = null;
-let lastJobCheckValue = '';
 
-async function liveJobDuplicateCheck() {
-  if (IS_EDIT) return;
-
-  const input = document.querySelector('input[name="job_numbers"]');
-  if (!input) return;
-
-  const raw = (input.value || '').trim().toUpperCase();
-
-  if (!raw) {
-    input.classList.remove('is-invalid', 'is-valid');
-    return;
-  }
-
-  if (raw === lastJobCheckValue) return;
-  lastJobCheckValue = raw;
-
-  if (jobCheckController) {
-    jobCheckController.abort();
-  }
-
-  jobCheckController = new AbortController();
-
-  try {
-    const resp = await fetch(
-      API_DUP + '?job_numbers=' + encodeURIComponent(raw),
-      {
-        signal: jobCheckController.signal,
-        headers: {
-          'Accept': 'application/json'
-        }
-      }
-    );
-
-    if (!resp.ok) return;
-
-    const data = await resp.json();
-
-    if (data.duplicate) {
-      input.classList.add('is-invalid');
-      input.classList.remove('is-valid');
-    } else {
-      input.classList.remove('is-invalid');
-      input.classList.add('is-valid');
-    }
-
-  } catch (err) {
-    if (err.name !== 'AbortError') {
-      console.warn('job duplicate check failed', err);
-    }
-  }
-}
   const IS_EDIT = !!(document.querySelector('#woForm input[name="wo_id"]')?.value || '').trim();
   const IS_RO   = {{ 'true' if RO else 'false' }};
 
@@ -889,9 +835,9 @@ async function liveJobDuplicateCheck() {
     const cb = tr.querySelector('.ins-check');
     return !!(cb && cb.checked);
   }
-
   let isDirty = false;
   let isSubmitting = false;
+  let saveInProgress = false;
 
   function handleBeforeUnload(e) {
     if (!isDirty || isSubmitting || IS_RO) return;
@@ -1157,9 +1103,17 @@ async function liveJobDuplicateCheck() {
     }
   }
 
-  if (form) {
+    if (form) {
     form.addEventListener('submit', async (e)=>{
       e.preventDefault();
+
+      if (saveInProgress) return;
+      saveInProgress = true;
+
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+      }
     if (e.submitter && e.submitter.id === 'saveBtn') {
       const afterSaveInput = document.getElementById('afterSaveAction');
       if (afterSaveInput) afterSaveInput.value = '';
@@ -1171,9 +1125,15 @@ async function liveJobDuplicateCheck() {
       window.WCCR_AUTO_ISSUE_RUNNING = false;
     }
 
-
     const okToSubmit = await handleDuplicateCheckBeforeSubmit();
-      if (!okToSubmit) return;
+      if (!okToSubmit) {
+        saveInProgress = false;
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save';
+        }
+        return;
+      }
 
       syncOrderedFlagsBeforeSubmit();
 
@@ -1183,7 +1143,7 @@ async function liveJobDuplicateCheck() {
         window.removeEventListener('beforeunload', handleBeforeUnload);
       }
 
-      form.submit();
+      HTMLFormElement.prototype.submit.call(form);
     });
   }
 
@@ -2643,21 +2603,6 @@ window.addEventListener('pageshow', () => {
 
   window.addEventListener('beforeunload', releaseLock);
 
-  const jobInput = document.querySelector('input[name="job_numbers"]');
-
-if (jobInput) {
-
-  jobInput.addEventListener('input', () => {
-
-    clearTimeout(jobCheckTimer);
-
-    jobCheckTimer = setTimeout(() => {
-      liveJobDuplicateCheck();
-    }, 450);
-
-  });
-
-}
 
   form.addEventListener('submit', async (e)=>{
     if (lastStatus === "locked" || lastStatus === "exists"){

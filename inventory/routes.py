@@ -1814,13 +1814,16 @@ def issued_confirm_toggle():
         should_send_confirm_email = (
                 (is_techlike and new_state)
                 or
-                (role == "superadmin" and new_state and send_confirm_message)
+                (role in ("admin", "superadmin") and new_state and send_confirm_message)
         )
 
         if should_send_confirm_email and getattr(rec, "batch_id", None):
             batch = IssuedBatch.query.filter_by(id=rec.batch_id).first()
 
-            if batch and not getattr(batch, "first_confirm_email_sent_at", None):
+            if batch and (
+                    not getattr(batch, "first_confirm_email_sent_at", None)
+                    or (role in ("admin", "superadmin") and send_confirm_message)
+            ):
                 tech_name = (
                     (getattr(batch, "issued_to", None) or "").strip()
                     or (getattr(wo, "technician_username", None) or "").strip()
@@ -9205,7 +9208,7 @@ def reports_grouped():
     from sqlalchemy.orm import selectinload
     from sqlalchemy import func, or_, case
 
-    from flask import render_template, request
+    from flask import render_template, request, flash, redirect, url_for
     from flask_login import current_user
 
     from extensions import db
@@ -9265,14 +9268,6 @@ def reports_grouped():
     # ТЕХНИК: принудительно фильтруем только по себе
     recipient_effective = me_user if role_low == "technician" else recipient_raw
 
-    if role_low == "technician":
-        q = q.filter(
-            or_(
-                func.trim(IssuedPartRecord.issued_to) == me_user,
-                func.trim(IssuedBatch.issued_to) == me_user,
-            )
-        )
-
     # ---------- Даты: работаем по календарным дням ----------
     start_dt_raw = _parse_date_ymd(start_date_s)
     end_dt_raw   = _parse_date_ymd(end_date_s)
@@ -9290,6 +9285,10 @@ def reports_grouped():
             selectinload(IssuedPartRecord.consumption_logs),
         )
     )
+
+    if role_low in ["technician", "tech"]:
+        flash("Access denied.", "danger")
+        return redirect(url_for("inventory.wo_list"))
 
     # ----- КЛЮЧЕВОЕ: правильная «отчётная дата» строки -----
     is_return = or_(

@@ -502,7 +502,7 @@
 
 <div class="table-responsive">
   <table class="table table-sm table-hover align-middle">
-  {% if role_low == 'superadmin' %}
+  {% if role_low in ['admin','superadmin'] %}
       <div class="form-check form-switch mb-2">
         <input class="form-check-input" type="checkbox" id="superadminSendConfirmMsg">
         <label class="form-check-label" for="superadminSendConfirmMsg">
@@ -918,6 +918,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
     // ---- Technician: confirm all parts in one batch ----
   // ---- Technician: confirm all parts in one batch ----
+
 document.querySelectorAll(".tech-confirm-all").forEach(btn => {
   btn.addEventListener("click", async () => {
     const row = btn.closest("tr");
@@ -934,39 +935,27 @@ document.querySelectorAll(".tech-confirm-all").forEach(btn => {
     btn.disabled = true;
     btn.textContent = "Confirming...";
 
-    const recordIds = checks
-      .map(cb => parseInt(cb.dataset.recordId || "0", 10))
-      .filter(id => id > 0);
-
-    const woId = parseInt(checks[0]?.dataset.woid || "0", 10);
-
     try {
-      const response = await fetch("{{ url_for('inventory.issued_confirm_bulk') }}", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Requested-With": "XMLHttpRequest"
-        },
-        body: JSON.stringify({
-          record_ids: recordIds,
+      for (const cb of checks) {
+        const recordId = parseInt(cb.dataset.recordId || "0", 10) || 0;
+        const woId = parseInt(cb.dataset.woid || "0", 10) || 0;
+
+        const {ok, json} = await postJSON(API_CONFIRM, {
+          record_id: recordId,
           wo_id: woId,
           state: true
-        })
-      });
+        });
 
-      const data = await response.json();
+        if (!ok || !json || !json.ok) {
+          throw new Error("Confirm failed");
+        }
 
-      if (!response.ok || !data.ok) {
-        throw new Error("Bulk confirm failed");
-      }
-
-      checks.forEach(cb => {
         cb.checked = true;
         cb.disabled = true;
 
         const meta = cb.closest(".tech-confirm-wrapper")?.querySelector(".confirm-meta");
         if (meta) meta.textContent = "✔ confirmed";
-      });
+      }
 
       const badge = row.querySelector(".batch-badge-holder");
       if (badge) {
@@ -983,10 +972,11 @@ document.querySelectorAll(".tech-confirm-all").forEach(btn => {
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "Confirm all";
-      alert("Bulk confirm failed");
+      alert("Confirm failed");
     }
   });
 });
+
 
   // ---- Admin/Superadmin: check/uncheck all in batch ----
 document.querySelectorAll(".admin-toggle-all").forEach(btn => {
