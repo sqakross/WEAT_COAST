@@ -673,8 +673,9 @@ def api_job_reserve():
             return None
         return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
 
-    # clean expired
-    JobReservation.query.filter(JobReservation.expires_at < now).delete(synchronize_session=False)
+    # clean expired only sometimes to avoid DB write on every check
+    if request.args.get("cleanup") == "1":
+        JobReservation.query.filter(JobReservation.expires_at < now).delete(synchronize_session=False)
 
     # duplicate check against existing WO
     for t in tokens:

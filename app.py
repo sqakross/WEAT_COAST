@@ -155,6 +155,15 @@ else:
 # 6) DB / Login manager
 # -------------------------------------------------------------------
 os.makedirs(app.instance_path, exist_ok=True)
+
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "connect_args": {
+        "timeout": 30,
+        "check_same_thread": False,
+    },
+    "pool_pre_ping": True,
+}
+
 db.init_app(app)
 login_manager.init_app(app)
 login_manager.login_view = 'auth.login'

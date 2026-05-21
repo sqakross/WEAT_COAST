@@ -1231,7 +1231,7 @@ function wccrToast(msg) {
     cb.title = "";
   }
 
-  const STOCK_HINT_TTL_MS = 15000;
+  const STOCK_HINT_TTL_MS = 25000;
   const stockHintCache = new Map();   // key -> { ts, payload }
     const stockHintTimers = new WeakMap();
     const stockHintInflight = new WeakMap();
@@ -1455,6 +1455,8 @@ function applyHintResult(tr, j){
 }
 }
 async function refreshVisibleHints(force = false){
+  if (window._wccrHintsRefreshing) return;
+  window._wccrHintsRefreshing = true;
   const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
   const targets = rows.filter(tr => {
     const pnMain = (tr.querySelector('.pn')?.value || '').trim();
@@ -1518,10 +1520,12 @@ async function refreshVisibleHints(force = false){
         applyHintResult(tr, payload);
       });
     });
-  } catch (err) {
-    await Promise.allSettled(targets.slice(0, 5).map(tr => fetchHint(tr, true)));
-  }
-}
+    } catch (err) {
+        await Promise.allSettled(targets.slice(0, 5).map(tr => fetchHint(tr, true)));
+      } finally {
+        window._wccrHintsRefreshing = false;
+      }
+    }
 
 function clearHintCacheForRow(tr){
   if (!tr) return;
