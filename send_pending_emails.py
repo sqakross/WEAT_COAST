@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv(override=True)
-
+from models import EmailOutbox
+from extensions import db
 from app import app
 from inventory.routes import process_email_queue
 from models import EmailOutbox
@@ -8,9 +9,46 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
 import traceback
+import re
 
 
 PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
+
+REAL_JOB_RE = re.compile(r"\b[12]\d{6}\b")
+
+
+def has_real_job(text):
+    if not text:
+        return False
+    return bool(REAL_JOB_RE.search(str(text).upper()))
+
+
+def skip_bad_pending_pickup_emails():
+    rows = (
+        EmailOutbox.query
+        .filter_by(status="pending")
+        .all()
+    )
+
+    skipped = 0
+
+    for row in rows:
+        subject = row.subject or ""
+        body = row.body or ""
+
+        is_pickup_email = (
+            "Tech has picked up all the parts" in subject
+            or "Pending Technician Confirmations Report" in subject
+        )
+
+        if is_pickup_email and not has_real_job(subject + " " + body):
+            row.status = "skipped"
+            row.error = "Skipped: no real 7-digit job starting with 1 or 2"
+            skipped += 1
+
+    if skipped:
+        db.session.commit()
+        write_log(f"SKIPPED BAD PENDING EMAILS | count={skipped}")
 
 now = datetime.now(ZoneInfo("America/Los_Angeles"))
 # Mon–Fri, 8am–6pm
@@ -122,6 +160,8 @@ def log_failed_rows(limit: int = 10):
 if __name__ == "__main__":
     try:
         with app.app_context():
+            skip_bad_pending_pickup_emails()
+
             pending = EmailOutbox.query.filter_by(status="pending").count()
 
             if pending == 0:

@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime, date, timedelta, timezone
 from zoneinfo import ZoneInfo
 from sqlalchemy import func, case
-
+import re
 from app import app
 from extensions import db
 from models import WorkOrder, IssuedBatch, IssuedPartRecord, EmailOutbox
@@ -25,6 +25,24 @@ def to_pacific(dt):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(PACIFIC_TZ)
+
+REAL_JOB_RE = re.compile(r"\b[12]\d{6}\b")
+
+
+def extract_real_job(value):
+    """
+    Allows only real 7-digit jobs starting with 1 or 2:
+    1002323, 2002323
+
+    Skips:
+    052120261, 008552, AS008552, 005522AS
+    """
+    if not value:
+        return None
+
+    text = str(value).upper()
+    match = REAL_JOB_RE.search(text)
+    return match.group(0) if match else None
 
 
 def build_report():
@@ -83,7 +101,11 @@ def build_report():
         total = int(items_count or 0)
         confirmed = int(confirmed_count or 0)
 
-        job = wo.job_numbers or batch.reference_job or "—"
+        job_source = wo.job_numbers or batch.reference_job or ""
+        job = extract_real_job(job_source)
+
+        if not job:
+            continue
         tech = batch.issued_to or wo.technician_name or "—"
 
         issued_dt_pt = to_pacific(batch.issue_date)
@@ -94,6 +116,13 @@ def build_report():
         lines.append(
             f"{job} | {tech} | {issued_date} | {invoice} | {confirmed}/{total}"
         )
+
+    if len(lines) <= 6:
+        msg = "No pending confirmations for real jobs found."
+        print(msg)
+        log_queue(msg)
+        return None
+
 
     body = "\n".join(lines)
     subject = f"Pending Technician Confirmations Report - {today_pt.isoformat()}"

@@ -1849,15 +1849,41 @@ def issued_confirm_toggle():
                     f"first_confirm_email"
                 )
 
-                _, created_new = _enqueue_email_once(
-                    unique_key=unique_key,
-                    to_email=current_app.config.get("EMAIL_ORDERS_TO"),
-                    subject=subject,
-                    body=body,
-                    work_order_id=getattr(wo, "id", None),
-                    batch_id=getattr(batch, "id", None),
-                    kind="tech_first_confirm",
-                )
+                created_new = False
+
+                if role in ("admin", "superadmin") and send_confirm_message:
+                    from models import EmailOutbox
+
+                    email = EmailOutbox(
+                        kind="tech_first_confirm",
+                        unique_key=f"manual_confirm_{batch.id}_{datetime.utcnow().timestamp()}",
+                        to_email=current_app.config.get("EMAIL_ORDERS_TO"),
+                        subject=subject,
+                        body=body,
+                        status="pending",
+                        created_at=datetime.utcnow(),
+                    )
+
+                    db.session.add(email)
+                    created_new = True
+
+                else:
+                    unique_key = (
+                        f"batch:{batch.id}:"
+                        f"inv:{getattr(batch, 'invoice_number', 'na')}:"
+                        f"ts:{issue_stamp}:"
+                        f"first_confirm_email"
+                    )
+
+                    _, created_new = _enqueue_email_once(
+                        unique_key=unique_key,
+                        to_email=current_app.config.get("EMAIL_ORDERS_TO"),
+                        subject=subject,
+                        body=body,
+                        work_order_id=getattr(wo, "id", None),
+                        batch_id=getattr(batch, "id", None),
+                        kind="tech_first_confirm",
+                    )
 
                 if created_new:
                     batch.first_confirm_email_sent_at = datetime.utcnow()
@@ -1900,6 +1926,23 @@ def issued_confirm_bulk():
     from flask_login import current_user
     from extensions import db
     from models import IssuedPartRecord, WorkOrder, IssuedBatch
+    import re
+
+    REAL_JOB_RE = re.compile(r"\b[12]\d{6}\b")
+
+    def extract_real_jobs(value):
+        if not value:
+            return ""
+
+        jobs = REAL_JOB_RE.findall(str(value).upper())
+
+        # remove duplicates, keep order
+        unique = []
+        for job in jobs:
+            if job not in unique:
+                unique.append(job)
+
+        return " ".join(unique)
 
     payload = request.get_json(silent=True) or {}
 
@@ -1949,11 +1992,65 @@ def issued_confirm_bulk():
 
             updated.append(rec.id)
 
+        email_created = False
+        email_skipped_reason = None
+
+        if requested_checked and send_confirm_message and records:
+            batch_id = getattr(records[0], "batch_id", None)
+            batch = IssuedBatch.query.filter_by(id=batch_id).first() if batch_id else None
+
+            job_source = (
+                getattr(wo, "job_numbers", None)
+                or (getattr(batch, "reference_job", None) if batch else None)
+                or getattr(wo, "canonical_job", None)
+                or ""
+            )
+
+
+            real_jobs = extract_real_jobs(job_source)
+
+            if not real_jobs:
+                email_skipped_reason = "not_real_job"
+            elif batch:
+                tech_name = (
+                    (getattr(batch, "issued_to", None) or "").strip()
+                    or (getattr(wo, "technician_username", None) or "").strip()
+                    or (getattr(wo, "technician_name", None) or "").strip()
+                    or (username or "TECH")
+                )
+
+                subject = f"Tech has picked up all the parts. — {tech_name} — {real_jobs}"
+                body = f"{tech_name} {real_jobs} has picked up all the parts."
+
+                issue_stamp = batch.issue_date.isoformat() if getattr(batch, "issue_date", None) else "na"
+
+                unique_key = (
+                    f"manual_batch_confirm:"
+                    f"batch:{batch.id}:"
+                    f"inv:{getattr(batch, 'invoice_number', 'na')}:"
+                    f"ts:{issue_stamp}:"
+                    f"{datetime.utcnow().timestamp()}"
+                )
+
+                _enqueue_email_once(
+                    unique_key=unique_key,
+                    to_email=current_app.config.get("EMAIL_ORDERS_TO"),
+                    subject=subject,
+                    body=body,
+                    work_order_id=getattr(wo, "id", None),
+                    batch_id=getattr(batch, "id", None),
+                    kind="tech_first_confirm",
+                )
+
+                email_created = True
+
         db.session.commit()
 
         return jsonify({
             "ok": True,
-            "updated": updated
+            "updated": updated,
+            "email_created": email_created,
+            "email_skipped_reason": email_skipped_reason,
         })
 
     except Exception as e:
@@ -1962,86 +2059,6 @@ def issued_confirm_bulk():
             "ok": False,
             "error": str(e)
         }), 500
-
-# ---------- STOCK HINT API ----------
-from flask import jsonify, request
-
-def _stock_hint_payload(pn: str, qty_needed: int = 0, wh: str = ""):
-    pn = (pn or "").strip().upper()
-    wh = (wh or "").strip()
-
-    try:
-        qty_needed = int(qty_needed or 0)
-    except (ValueError, TypeError):
-        qty_needed = 0
-
-    if not pn:
-        return {
-            "ok": False,
-            "error": "NO_PN",
-            "hint": "WAIT",
-            "qty_available": 0,
-            "location": None,
-            "unit_cost": None,
-            "name": None,
-            "part_number": "",
-        }
-
-    parts = db.session.query(Part).filter(Part.part_number == pn).all()
-
-    if not parts:
-        return {
-            "ok": True,
-            "part_number": pn,
-            "qty_available": 0,
-            "hint": "WAIT",
-            "location": None,
-            "unit_cost": None,
-            "name": None,
-        }
-
-    qty_available = 0
-    locations = []
-
-    for p in parts:
-        try:
-            part_qty = int(p.quantity or 0)
-        except (ValueError, TypeError):
-            part_qty = 0
-
-        qty_available += part_qty
-
-        if part_qty > 0:
-            loc = (p.location or "").strip().upper()
-            if loc and loc not in locations:
-                locations.append(loc)
-
-    location_value = "/".join(locations) if locations else None
-
-    unit_cost = None
-    for p in parts:
-        if p.unit_cost is not None:
-            unit_cost = p.unit_cost
-            break
-
-    name = None
-    for p in parts:
-        if p.name:
-            name = p.name
-            break
-
-    is_stock = qty_available >= qty_needed if qty_needed > 0 else qty_available > 0
-    hint = "STOCK" if is_stock else "WAIT"
-
-    return {
-        "ok": True,
-        "part_number": pn,
-        "qty_available": qty_available,
-        "hint": hint,
-        "location": location_value,
-        "unit_cost": unit_cost,
-        "name": name,
-    }
 
 @inventory_bp.get("/api/stock_hint", endpoint="api_stock_hint")
 @login_required
@@ -4169,6 +4186,7 @@ def wo_detail(wo_id):
     from models import WorkOrder, WorkUnit, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit
     from collections import defaultdict, defaultdict as _dd
     import re
+    import json
 
     # 1) load WO
     wo = (
@@ -4237,15 +4255,23 @@ def wo_detail(wo_id):
 
     audit_log = []
     for a in (audit_rows or []):
+        raw_message = a.message or ""
+        parsed_message = raw_message
+
+        try:
+            parsed_message = json.loads(raw_message)
+        except Exception:
+            pass
+
         audit_log.append({
             "id": a.id,
             "ts": a.created_at,
             "action": (a.action or ""),
-            "message": (a.message or ""),
+            "message": raw_message,
+            "message_json": parsed_message,
             "actor": (a.actor_username or "—"),
-            "meta": (a.meta_json or ""),  # <= ВОТ детальные логи
+            "meta": (a.meta_json or ""),
         })
-
     # ------------------------------------------------------------
     # 4) Issued / Batches — FIXED (work_order_id + safe fallback)
     # ------------------------------------------------------------
@@ -6003,7 +6029,7 @@ def wo_save():
         a = WorkOrderAudit(
             work_order_id=wo_id,
             action=(action or "note")[:40],
-            message=(message or "")[:255],
+            message=json.dumps(message, ensure_ascii=False)[:4000],
             meta_json=json.dumps(meta or {}, ensure_ascii=False),
             actor_user_id=getattr(current_user, "id", None),
             actor_username=((getattr(current_user, "username", None) or "").strip()[:64] or None),
@@ -6582,34 +6608,111 @@ def wo_save():
         removed_keys = sorted(list(before_keys - after_keys))
         common_keys = sorted(list(before_keys & after_keys))
 
+        added = [after_snap[k] for k in added_keys[:50]]
+        removed = [before_snap[k] for k in removed_keys[:50]]
+
         changed = []
+
         for k in common_keys:
             b = before_snap[k]
             a = after_snap[k]
-            fields = ("qty", "inv", "supplier", "ordered_flag", "backorder_flag", "is_insurance_supplied", "name")
+
             delta = {}
-            for f1 in fields:
-                if (b.get(f1) or "") != (a.get(f1) or ""):
-                    delta[f1] = {"from": b.get(f1), "to": a.get(f1)}
+
+            tracked_fields = (
+                "qty",
+                "inv",
+                "supplier",
+                "ordered_flag",
+                "backorder_flag",
+                "is_insurance_supplied",
+                "name",
+            )
+
+            for field_name in tracked_fields:
+                if (b.get(field_name) or "") != (a.get(field_name) or ""):
+                    delta[field_name] = {
+                        "from": b.get(field_name),
+                        "to": a.get(field_name)
+                    }
+
             if delta:
                 changed.append({
                     "pn": a.get("pn") or b.get("pn"),
-                    "unit": a.get("unit") or b.get("unit"),
                     "changes": delta
                 })
 
+        # =========================
+        # HUMAN READABLE SUMMARY
+        # =========================
+
+        summary_lines = []
+
+        if added:
+            added_txt = ", ".join(
+                f"{x.get('pn')} x{x.get('qty')}"
+                for x in added[:3]
+            )
+
+            if len(added) > 3:
+                added_txt += f" +{len(added) - 3} more"
+
+            summary_lines.append({
+                "type": "added",
+                "text": added_txt
+            })
+
+        if removed:
+            removed_txt = ", ".join(
+                f"{x.get('pn')} x{x.get('qty')}"
+                for x in removed[:3]
+            )
+
+            if len(removed) > 3:
+                removed_txt += f" +{len(removed) - 3} more"
+
+            summary_lines.append({
+                "type": "removed",
+                "text": removed_txt
+            })
+
+        if changed:
+            changed_txt = []
+
+            for c in changed[:3]:
+                pn = c.get("pn")
+
+                if "qty" in c["changes"]:
+                    q = c["changes"]["qty"]
+                    changed_txt.append(
+                        f"{pn} qty {q.get('from')}→{q.get('to')}"
+                    )
+                else:
+                    changed_txt.append(pn)
+
+            txt = ", ".join(changed_txt)
+
+            if len(changed) > 3:
+                txt += f" +{len(changed) - 3} more"
+
+            summary_lines.append({
+                "type": "changed",
+                "text": txt
+            })
+
+        summary = summary_lines
+
         meta = {
             "parts": {
-                "added_count": len(added_keys),
-                "removed_count": len(removed_keys),
+                "added_count": len(added),
+                "removed_count": len(removed),
                 "changed_count": len(changed),
-                "added": [after_snap[k] for k in added_keys[:50]],
-                "removed": [before_snap[k] for k in removed_keys[:50]],
-                "changed": changed[:50],
+                "added": added,
+                "removed": removed,
+                "changed": changed,
             }
         }
 
-        summary = f"parts +{len(added_keys)} ~{len(changed)} -{len(removed_keys)}"
         return summary, meta
 
     parts_before_snap = _snap_from_existing_workorder(wo) if not is_new else {}
@@ -6822,14 +6925,16 @@ def wo_save():
 
             msg_bits = []
             if header_changed:
-                msg_bits.append("header (" + ", ".join(header_changed.keys()) + ")")
+                msg_bits.append(
+                    "Updated " + ", ".join(header_changed.keys())
+                )
             if parts_summary:
-                msg_bits.append(parts_summary)
+                msg_bits.extend(parts_summary)
 
             if msg_bits:
-                msg = "Updated: " + ", ".join(msg_bits)
+                msg = msg_bits
             else:
-                msg = "Updated: saved (no changes)"
+                msg = "Saved (no changes)"
 
             meta = {
                 "header": header_changed,

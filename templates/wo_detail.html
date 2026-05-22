@@ -703,110 +703,260 @@
 
 <style>
   .audit-wrap{
-    border: 1px solid #dee2e6;
-    border-radius: .75rem;
-    background: #fff;
-    overflow: hidden;
+    background:#fff;
+    border:1px solid #dfe5ec;
+    border-radius:14px;
+    overflow:hidden;
+    box-shadow:0 1px 3px rgba(15,23,42,.06);
   }
+
   .audit-hd{
-    background:#f8f9fa;
-    border-bottom:1px solid #dee2e6;
-    padding:.6rem .9rem;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:.75rem;
-  }
-  .audit-bd{
-    padding:.75rem .9rem;
-  }
-  .audit-row{
-    display:flex;
-    gap:.75rem;
-    padding:.55rem 0;
-    border-bottom: 1px dashed #e9ecef;
-  }
-  .audit-row:last-child{ border-bottom:0; }
-  .audit-ts{
-    width: 160px;
-    flex: 0 0 160px;
-    font-variant-numeric: tabular-nums;
-    color:#6c757d;
-    white-space: nowrap;
-  }
-  .audit-main{
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .audit-title{
-    display:flex;
-    flex-wrap:wrap;
-    gap:.4rem .6rem;
-    align-items:baseline;
-  }
-  .audit-actor{
+    padding:12px 16px;
+    background:#f8fafc;
+    border-bottom:1px solid #e5e7eb;
+    font-size:12px;
+    color:#64748b;
     font-weight:600;
   }
-  .audit-action{
-    font-size:.85rem;
-    padding:.1rem .45rem;
-    border-radius: .5rem;
-    background:#eef2ff;
-    color:#1e40af;
-    border: 1px solid rgba(30,64,175,.15);
+
+  .audit-bd{
+    padding:0;
   }
-  .audit-msg{
-    margin-top:.15rem;
-    color:#212529;
-    word-break: break-word;
+
+  .audit-event{
+    display:grid;
+    grid-template-columns:130px 1fr;
+    gap:18px;
+    padding:18px 20px;
+    border-bottom:1px solid #eef2f7;
   }
+
+  .audit-event:last-child{
+    border-bottom:0;
+  }
+
+  .audit-time{
+    color:#64748b;
+    font-size:12px;
+    white-space:nowrap;
+  }
+
+  .audit-card{
+    position:relative;
+    padding-left:18px;
+  }
+
+  .audit-card:before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:5px;
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  background:#94a3b8;
+}
+
+/* created */
+.audit-created:before{
+  background:#64748b;
+}
+
+/* updated */
+.audit-updated:before{
+  background:#2563eb;
+}
+
+/* added */
+.audit-added:before{
+  background:#16a34a;
+}
+
+/* removed */
+.audit-removed:before{
+  background:#dc2626;
+}
+
+/* changed */
+.audit-changed:before{
+  background:#2563eb;
+}
+
+  .audit-top{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:5px;
+  }
+
+  .audit-user{
+    font-weight:700;
+    color:#111827;
+    font-size:13px;
+  }
+
+  .audit-badge{
+    font-size:10px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+    color:#1d4ed8;
+    background:#dbeafe;
+    border-radius:999px;
+    padding:3px 8px;
+  }
+
+  .audit-message{
+    color:#111827;
+    font-size:13px;
+    line-height:1.5;
+  }
+
+  .audit-tech-details{
+    margin-top:8px;
+  }
+
+  .audit-tech-details summary{
+    cursor:pointer;
+    color:#64748b;
+    font-size:12px;
+    font-weight:600;
+  }
+
+  .audit-line{
+  margin-top:4px;
+  line-height:1.5;
+}
+
+.audit-added strong{
+  color:#15803d;
+}
+
+.audit-removed strong{
+  color:#dc2626;
+}
+
+.audit-changed strong{
+  color:#2563eb;
+}
+
+  .audit-tech-details summary:hover{
+    color:#2563eb;
+  }
+
+  .audit-meta-box{
+    margin-top:8px;
+    max-height:140px;
+    overflow:auto;
+    background:#f8fafc;
+    border:1px solid #e2e8f0;
+    border-radius:10px;
+    padding:10px;
+  }
+
+  .audit-meta-box pre{
+    margin:0;
+    font-size:11px;
+    color:#475569;
+    white-space:pre-wrap;
+  }
+
   .audit-empty{
-    color:#6c757d;
-    padding:.4rem 0;
+    padding:18px;
+    color:#64748b;
+    font-size:13px;
   }
-  @media (max-width: 768px){
-    .audit-row{ flex-direction: column; }
-    .audit-ts{ width:auto; flex: 0 0 auto; }
+
+  @media (max-width:768px){
+    .audit-event{
+      grid-template-columns:1fr;
+      gap:6px;
+    }
   }
 </style>
 
 <div class="audit-wrap mb-4">
   <div class="audit-hd">
-    <div class="small text-muted">
-      Last {{ (audit_log|length) if audit_log is defined else 0 }} events
-    </div>
+    Last {{ (audit_log|length) if audit_log is defined else 0 }} events
   </div>
 
-  <div class="audit-bd small">
+  <div class="audit-bd">
     {% if audit_log is defined and audit_log and (audit_log|length) > 0 %}
       {% for ev in audit_log %}
-        <div class="audit-row">
-          <div class="audit-ts">
+        <div class="audit-event">
+          <div class="audit-time">
             {{ ev.ts|local_dt if ev.ts else '—' }}
           </div>
 
-          <div class="audit-main">
-            <div class="audit-title">
-              <span class="audit-actor">{{ ev.actor or '—' }}</span>
+          <div class="audit-card
+              {% if ev.message_json is sequence %}
+                {% set first_row = ev.message_json[0] %}
+                audit-{{ first_row.type }}
+              {% else %}
+                audit-{{ (ev.action or 'default')|lower }}
+              {% endif %}
+">
+            <div class="audit-top">
+              <span class="audit-user">{{ ev.actor or 'System' }}</span>
+
               {% if ev.action %}
-                <span class="audit-action">{{ ev.action }}</span>
+                <span class="audit-badge">{{ ev.action }}</span>
               {% endif %}
             </div>
 
             {% if ev.message %}
-              <div class="audit-msg">{{ ev.message }}</div>
-            {% endif %}
-            {% if ev.meta %}
-              <div class="mt-1">
-                <a class="small text-decoration-none" data-bs-toggle="collapse" href="#auditMeta{{ ev.id }}">
-                  Details
-                </a>
-                <div class="collapse mt-1" id="auditMeta{{ ev.id }}">
-                  <pre class="small mb-0" style="white-space:pre-wrap;">{{ ev.meta }}</pre>
-                </div>
-              </div>
+              {% set audit_msg = ev.message_json if ev.message_json is defined else ev.message %}
+
+<div class="audit-message">
+
+  {% if audit_msg is string %}
+    {{ audit_msg }}
+
+  {% elif audit_msg is sequence %}
+
+    {% for row in audit_msg %}
+
+      {% if row.type == 'added' %}
+        <div class="audit-line audit-added">
+         <strong>Added part:</strong>
+          {{ row.text }}
+        </div>
+
+      {% elif row.type == 'removed' %}
+        <div class="audit-line audit-removed">
+          <strong>Removed part:</strong>
+          {{ row.text }}
+        </div>
+
+      {% elif row.type == 'changed' %}
+        <div class="audit-line audit-changed">
+          <strong>Changed:</strong>
+          {{ row.text }}
+        </div>
+
+      {% else %}
+        <div class="audit-line">
+          {{ row }}
+        </div>
+      {% endif %}
+
+    {% endfor %}
+
+  {% else %}
+    {{ audit_msg }}
+  {% endif %}
+
+</div>
             {% endif %}
 
+            {% if ev.meta and role_low == 'superadmin' %}
+              <details class="audit-tech-details">
+                <summary>Technical details</summary>
+                <div class="audit-meta-box">
+                  <pre>{{ ev.meta }}</pre>
+                </div>
+              </details>
+            {% endif %}
           </div>
         </div>
       {% endfor %}
@@ -815,7 +965,6 @@
     {% endif %}
   </div>
 </div>
-
 {# =========================================================
    TECH STICKY FOOTER
    ========================================================= #}
