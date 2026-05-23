@@ -2063,13 +2063,9 @@ def issued_confirm_bulk():
 @inventory_bp.get("/api/stock_hint", endpoint="api_stock_hint")
 @login_required
 def api_stock_hint():
-    """
-    Простой API для подсказки наличия:
-    принимает pn, qty, wh и возвращает JSON с количеством и подсказкой.
-    """
     pn = (request.args.get("pn") or "").strip().upper()
     qty_needed_raw = (request.args.get("qty") or "").strip()
-    wh = (request.args.get("wh") or "").strip()
+    wh = (request.args.get("wh") or "").strip().upper()
 
     try:
         qty_needed = int(qty_needed_raw or 0)
@@ -2081,10 +2077,60 @@ def api_stock_hint():
             "ok": False,
             "error": "NO_PN",
             "hint": "WAIT",
-            "qty_available": 0
+            "qty_available": 0,
+            "location": None,
+            "unit_cost": None,
+            "name": None,
+            "part_name": None,
         }), 400
 
-    return jsonify(_stock_hint_payload(pn=pn, qty_needed=qty_needed, wh=wh))
+    rows = (
+        db.session.query(
+            Part.part_number,
+            Part.name,
+            Part.quantity,
+            Part.location,
+            Part.unit_cost,
+        )
+        .filter(Part.part_number == pn)
+        .all()
+    )
+
+    qty_available = 0
+    locations = []
+    unit_cost = None
+    name = None
+
+    for p in rows:
+        try:
+            part_qty = int(p.quantity or 0)
+        except (ValueError, TypeError):
+            part_qty = 0
+
+        qty_available += part_qty
+
+        loc = (p.location or "").strip().upper()
+        if part_qty > 0 and loc and loc not in locations:
+            locations.append(loc)
+
+        if unit_cost is None and p.unit_cost is not None:
+            unit_cost = float(p.unit_cost)
+
+        if name is None and p.name:
+            name = p.name
+
+    is_stock = qty_available >= qty_needed if qty_needed > 0 else qty_available > 0
+
+    return jsonify({
+        "ok": True,
+        "part_number": pn,
+        "qty_available": qty_available,
+        "hint": "STOCK" if is_stock else "WAIT",
+        "location": "/".join(locations) if locations else None,
+        "unit_cost": unit_cost,
+        "name": name,
+        "part_name": name,
+    })
 
 
 @inventory_bp.post("/api/stock_hint_bulk", endpoint="api_stock_hint_bulk")
@@ -2111,11 +2157,17 @@ def api_stock_hint_bulk():
         if pn:
             pn_set.add(pn)
 
-    # one SQL query instead of many
     parts_by_pn = {}
+
     if pn_set:
         rows = (
-            db.session.query(Part)
+            db.session.query(
+                Part.part_number,
+                Part.name,
+                Part.quantity,
+                Part.location,
+                Part.unit_cost,
+            )
             .filter(Part.part_number.in_(pn_set))
             .all()
         )
@@ -2142,38 +2194,21 @@ def api_stock_hint_bulk():
 
         parts = parts_by_pn.get(pn, [])
 
-        if not parts:
-            result[key] = {
-                "ok": True,
-                "part_number": pn,
-                "qty_available": 0,
-                "hint": "WAIT",
-                "location": None,
-                "unit_cost": None,
-                "name": None,
-            }
-            continue
-
         qty_available = 0
         locations = []
         unit_cost = None
         name = None
 
         for p in parts:
-            try:
-                part_qty = int(p.quantity or 0)
-            except (ValueError, TypeError):
-                part_qty = 0
-
+            part_qty = int(p.quantity or 0)
             qty_available += part_qty
 
-            if part_qty > 0:
-                loc = (p.location or "").strip().upper()
-                if loc and loc not in locations:
-                    locations.append(loc)
+            loc = (p.location or "").strip().upper()
+            if part_qty > 0 and loc and loc not in locations:
+                locations.append(loc)
 
             if unit_cost is None and p.unit_cost is not None:
-                unit_cost = p.unit_cost
+                unit_cost = float(p.unit_cost)
 
             if name is None and p.name:
                 name = p.name
@@ -2190,10 +2225,7 @@ def api_stock_hint_bulk():
             "name": name,
         }
 
-    return jsonify({
-        "ok": True,
-        "items": result
-    })
+    return jsonify({"ok": True, "items": result})
 
 @inventory_bp.get("/debug/db_objects")
 def debug_db_objects():

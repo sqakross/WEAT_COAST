@@ -861,6 +861,18 @@
     white-space:pre-wrap;
   }
 
+  .audit-wide{
+      width:100%;
+    }
+
+  .audit-event{
+      transition:background .15s ease;
+    }
+
+    .audit-event:hover{
+      background:#f8fafc;
+    }
+
   .audit-empty{
     padding:18px;
     color:#64748b;
@@ -875,7 +887,7 @@
   }
 </style>
 
-<div class="audit-wrap mb-4">
+<div class="audit-wrap mb-4 audit-wide">
   <div class="audit-hd">
     Last {{ (audit_log|length) if audit_log is defined else 0 }} events
   </div>

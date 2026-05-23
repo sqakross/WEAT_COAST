@@ -1456,8 +1456,11 @@ function applyHintResult(tr, j){
 }
 async function refreshVisibleHints(force = false){
   if (window._wccrHintsRefreshing) return;
-  window._wccrHintsRefreshing = true;
+
   const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
+
+
+  window._wccrHintsRefreshing = true;
   const targets = rows.filter(tr => {
     const pnMain = (tr.querySelector('.pn')?.value || '').trim();
     const pnAlt  = (tr.querySelector('.alt-pn')?.value || '').trim();
@@ -1691,7 +1694,21 @@ function clearHintCacheForRow(tr){
       e.target.classList.contains('qty')
     )){
       clearHintCacheForRow(tr);
-      scheduleFetchHint(tr, 400);
+
+      const pn = (
+        tr.querySelector('.pn')?.value ||
+        tr.querySelector('.alt-pn')?.value ||
+        ''
+      ).trim();
+
+      if (pn.length < 4) {
+        const hintEl = tr.querySelector('.hint');
+        if (hintEl) hintEl.textContent = '—';
+        setIssueEnabled(tr, false);
+        return;
+      }
+
+      scheduleFetchHint(tr, 1200);
     }
   });
 
@@ -1730,6 +1747,40 @@ function clearHintCacheForRow(tr){
       updateSupplierRequired();
     }
   });
+
+  unitsWrap.addEventListener('blur', (e) => {
+      const target = e.target;
+
+      if (
+        !target.classList.contains('pn') &&
+        !target.classList.contains('alt-pn')
+      ) return;
+
+      const tr = target.closest('tr');
+      if (!tr) return;
+
+      clearHintCacheForRow(tr);
+      fetchHint(tr, true);
+    }, true);
+
+    unitsWrap.addEventListener('keydown', (e) => {
+      const target = e.target;
+
+      if (
+        !target.classList.contains('pn') &&
+        !target.classList.contains('alt-pn')
+      ) return;
+
+      if (e.key !== 'Enter') return;
+
+      e.preventDefault();
+
+      const tr = target.closest('tr');
+      if (!tr) return;
+
+      clearHintCacheForRow(tr);
+      fetchHint(tr, true);
+    });
 
   unitsWrap.addEventListener('click', (e)=>{
     const btn = e.target.closest('button');

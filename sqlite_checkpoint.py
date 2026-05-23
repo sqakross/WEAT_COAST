@@ -32,6 +32,18 @@ try:
     conn.close()
     log("SQLite WAL checkpoint completed successfully.")
 
+    db_size = DB_PATH.stat().st_size / (1024 * 1024)
+
+    wal_path = DB_PATH.with_name(DB_PATH.name + "-wal")
+
+    if wal_path.exists():
+        wal_size = wal_path.stat().st_size / (1024 * 1024)
+    else:
+        wal_size = 0
+
+    log(f"Main DB size: {db_size:.2f} MB")
+    log(f"WAL size: {wal_size:.2f} MB")
+
 except Exception as e:
     log(f"ERROR: {e}")
     raise SystemExit(1)
