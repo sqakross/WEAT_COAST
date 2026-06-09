@@ -15,12 +15,19 @@ import re
 PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
 REAL_JOB_RE = re.compile(r"\b[12]\d{6}\b")
+AS_JOB_RE = re.compile(r"\b(?:AS)?00\d{4,}\b|\b00\d{4,}AS\b", re.I)
 
 
-def has_real_job(text):
+def has_allowed_job(text):
     if not text:
         return False
-    return bool(REAL_JOB_RE.search(str(text).upper()))
+
+    text = str(text).upper()
+
+    return bool(
+        REAL_JOB_RE.search(text)
+        or AS_JOB_RE.search(text)
+    )
 
 
 def skip_bad_pending_pickup_emails():
@@ -41,9 +48,9 @@ def skip_bad_pending_pickup_emails():
             or "Pending Technician Confirmations Report" in subject
         )
 
-        if is_pickup_email and not has_real_job(subject + " " + body):
+        if is_pickup_email and not has_allowed_job(subject + " " + body):
             row.status = "skipped"
-            row.error = "Skipped: no real 7-digit job starting with 1 or 2"
+            row.error = "Skipped: no allowed job number found"
             skipped += 1
 
     if skipped:

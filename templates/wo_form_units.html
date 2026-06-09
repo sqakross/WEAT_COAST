@@ -457,6 +457,7 @@
             <tbody>
               {% for r in (u.rows or []) %}
               {% set ri = loop.index0 %}
+              {% set wop_id = r.get('id') if r.get is defined else r.id %}
               {% set issued_full = ((r.issued_qty or 0) >= (r.quantity or 0)) %}
               {% set rf = (r.ordered_flag if r.ordered_flag is defined else (r.ordered if r.ordered is defined else 0)) %}
               {% set is_ord = (rf in (True, 1, '1')) or
@@ -474,6 +475,9 @@
               {% endif %}
 
               <tr class="{{ row_class|trim }}">
+                  <input type="hidden"
+                       name="units[{{ ui }}][rows][{{ ri }}][id]"
+                       value="{{ wop_id or '' }}">
                 <td>
                   <input class="form-control pn"
                          name="units[{{ ui }}][rows][{{ ri }}][part_number]"
@@ -572,7 +576,7 @@
                 <td class="text-center issue-cell">
                   {% if not RO %}
                     <div class="form-check d-flex justify-content-center m-0">
-                      {% set wop_id = r.get('id') %}
+
                       <input type="checkbox" class="form-check-input issue-check"
                              name="issue_ids"
                              value="{{ wop_id or '' }}"
@@ -654,7 +658,11 @@
     {% endif %}
 
     {% if IS_EDIT %}
-      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">Back</a>
+      <a class="btn btn-outline-secondary"
+           id="backToDetailBtn"
+           href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">
+          Back
+        </a>
     {% else %}
       <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Back</a>
     {% endif %}
@@ -917,7 +925,7 @@ function wccrToast(msg) {
   }
 
   async function checkWorkOrderFreshness(forceReloadIfClean = true){
-      if (isSubmitting || window.WCCR_AUTO_ISSUE_RUNNING || window.WCCR_NAVIGATING_TO_DETAIL) return;
+    if (isSubmitting || window.WCCR_AUTO_ISSUE_RUNNING || window.WCCR_NAVIGATING_TO_DETAIL) return;
     if (!CURRENT_WO_ID || !WO_STAMP_URL || IS_RO) return;
 
     try {
@@ -2010,6 +2018,24 @@ ensureCopyButtonsForAllAppliances();
     });
 
   let stockRefreshTimer = null;
+
+  document.getElementById('backToDetailBtn')?.addEventListener('click', function(e){
+  e.preventDefault();
+
+  isSubmitting = true;
+  isDirty = false;
+  window.WCCR_NAVIGATING_TO_DETAIL = true;
+  window.WCCR_AUTO_ISSUE_RUNNING = false;
+
+  window.removeEventListener('beforeunload', handleBeforeUnload);
+
+  if (stockRefreshTimer) {
+    clearTimeout(stockRefreshTimer);
+    stockRefreshTimer = null;
+  }
+
+  window.location.href = this.href;
+});
 
 function scheduleVisibleRefresh(delay = 150){
   if (window.WCCR_AUTO_ISSUE_RUNNING) return;

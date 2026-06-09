@@ -1713,6 +1713,16 @@ def issued_confirm_toggle():
     from flask_login import current_user
     from extensions import db
     from models import IssuedPartRecord, WorkOrder, IssuedBatch
+    import re
+    import os
+
+    AS_JOB_RE = re.compile(r"\b(?:AS)?00\d{4,}\b|\b00\d{4,}AS\b", re.I)
+
+    def get_orders_email_for_job(value):
+        text = str(value or "").upper()
+        if AS_JOB_RE.search(text):
+            return current_app.config.get("EMAIL_AS_ORDERS_TO") or os.getenv("EMAIL_AS_ORDERS_TO") or "service@appliance-solutions.com"
+        return current_app.config.get("EMAIL_ORDERS_TO") or os.getenv("EMAIL_ORDERS_TO") or "orders@chiefappliance.com"
 
     payload = request.get_json(silent=True) or {}
 
@@ -1794,7 +1804,14 @@ def issued_confirm_toggle():
     else:
         return jsonify({"ok": False, "error": "FORBIDDEN"}), 403
 
-    if new_state == currently_confirmed:
+    force_admin_confirm_email = (
+            is_adminlike
+            and requested_checked
+            and currently_confirmed
+            and send_confirm_message
+    )
+
+    if new_state == currently_confirmed and not force_admin_confirm_email:
         if is_adminlike:
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id_raw))
         return jsonify({"ok": True, "noop": True, "confirmed": currently_confirmed})
@@ -1815,7 +1832,7 @@ def issued_confirm_toggle():
         should_send_confirm_email = (
                 (is_techlike and new_state)
                 or
-                (role in ("admin", "superadmin") and new_state and send_confirm_message)
+                (role in ("admin", "superadmin") and requested_checked and send_confirm_message)
         )
 
         if should_send_confirm_email and getattr(rec, "batch_id", None):
@@ -1838,8 +1855,20 @@ def issued_confirm_toggle():
                 if not jobs_text:
                     jobs_text = (getattr(wo, "canonical_job", None) or "").strip()
 
-                subject = f"Tech has picked up all the parts. — {tech_name} — {jobs_text}".strip(" —")
-                body = f"{tech_name} {jobs_text} has picked up all the parts.".strip()
+                is_as_job = bool(AS_JOB_RE.search(jobs_text))
+                is_admin_received_message = (
+                        role in ("admin", "superadmin")
+                        and send_confirm_message
+                )
+
+                if is_as_job and is_admin_received_message:
+                    subject = f"All parts arrived - {tech_name} - {jobs_text}"
+                    body = f"All parts arrived - {tech_name} - {jobs_text}"
+                else:
+                    subject = f"Tech has picked up all the parts. — {tech_name} — {jobs_text}"
+                    body = f"{tech_name} {jobs_text} has picked up all the parts.".strip()
+
+                target_email = get_orders_email_for_job(jobs_text)
 
                 issue_stamp = batch.issue_date.isoformat() if getattr(batch, "issue_date", None) else "na"
                 unique_key = (
@@ -1857,7 +1886,7 @@ def issued_confirm_toggle():
                     email = EmailOutbox(
                         kind="tech_first_confirm",
                         unique_key=f"manual_confirm_{batch.id}_{datetime.utcnow().timestamp()}",
-                        to_email=current_app.config.get("EMAIL_ORDERS_TO"),
+                        to_email=target_email,
                         subject=subject,
                         body=body,
                         status="pending",
@@ -1877,7 +1906,7 @@ def issued_confirm_toggle():
 
                     _, created_new = _enqueue_email_once(
                         unique_key=unique_key,
-                        to_email=current_app.config.get("EMAIL_ORDERS_TO"),
+                        to_email=target_email,
                         subject=subject,
                         body=body,
                         work_order_id=getattr(wo, "id", None),
@@ -1888,7 +1917,7 @@ def issued_confirm_toggle():
                 if created_new:
                     batch.first_confirm_email_sent_at = datetime.utcnow()
 
-                    target_email = (current_app.config.get("EMAIL_ORDERS_TO") or "").strip()
+                    target_email = (target_email or "").strip()
 
                     _add_wo_audit(
                         wo_id=wo.id,
@@ -1918,6 +1947,98 @@ def issued_confirm_toggle():
 
     return jsonify({"ok": True, "record_id": rec_id, "confirmed": bool(rec.confirmed_by_tech)})
 
+@inventory_bp.post("/api/issued/send_received_message", endpoint="issued_send_received_message")
+@login_required
+def issued_send_received_message():
+    from flask import request, jsonify, current_app
+    from flask_login import current_user
+    from datetime import datetime
+    from extensions import db
+    from models import IssuedPartRecord, WorkOrder, IssuedBatch, EmailOutbox
+    import os
+    import re
+
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role not in ("admin", "superadmin"):
+        return jsonify({"ok": False, "error": "FORBIDDEN"}), 403
+
+    AS_JOB_RE = re.compile(r"\b(?:AS)?00\d{4,}\b|\b00\d{4,}AS\b", re.I)
+
+    def get_orders_email_for_job(value):
+        text = str(value or "").upper()
+        if AS_JOB_RE.search(text):
+            return current_app.config.get("EMAIL_AS_ORDERS_TO") or os.getenv("EMAIL_AS_ORDERS_TO") or "service@appliance-solutions.com"
+        return current_app.config.get("EMAIL_ORDERS_TO") or os.getenv("EMAIL_ORDERS_TO") or "orders@chiefappliance.com"
+
+    payload = request.get_json(silent=True) or {}
+
+    wo_id = payload.get("wo_id")
+    record_ids = payload.get("record_ids") or []
+
+    try:
+        wo_id = int(wo_id)
+    except Exception:
+        return jsonify({"ok": False, "error": "BAD_WO"}), 400
+
+    wo = WorkOrder.query.get(wo_id)
+    if not wo:
+        return jsonify({"ok": False, "error": "WO_NOT_FOUND"}), 404
+
+    records = IssuedPartRecord.query.filter(
+        IssuedPartRecord.id.in_(record_ids)
+    ).all()
+
+    if not records:
+        return jsonify({"ok": False, "error": "NO_RECORDS"}), 400
+
+    batch_id = getattr(records[0], "batch_id", None)
+    batch = IssuedBatch.query.filter_by(id=batch_id).first() if batch_id else None
+
+    if not batch:
+        return jsonify({"ok": False, "error": "BATCH_NOT_FOUND"}), 404
+
+    tech_name = (
+        (getattr(batch, "issued_to", None) or "").strip()
+        or (getattr(wo, "technician_username", None) or "").strip()
+        or (getattr(wo, "technician_name", None) or "").strip()
+        or "TECH"
+    )
+
+    jobs_text = (
+        (getattr(wo, "job_numbers", None) or "").strip()
+        or (getattr(batch, "reference_job", None) or "").strip()
+        or (getattr(wo, "canonical_job", None) or "").strip()
+    )
+
+    target_email = get_orders_email_for_job(jobs_text)
+
+    if AS_JOB_RE.search(jobs_text):
+        subject = f"All parts arrived - {tech_name} - {jobs_text}"
+        body = f"All parts arrived - {tech_name} - {jobs_text}"
+    else:
+        subject = f"Tech has picked up all the parts. — {tech_name} — {jobs_text}"
+        body = f"{tech_name} {jobs_text} has picked up all the parts."
+
+    email = EmailOutbox(
+        kind="manual_received_parts_message",
+        unique_key=f"manual_received_{batch.id}_{datetime.utcnow().timestamp()}",
+        to_email=target_email,
+        subject=subject,
+        body=body,
+        status="pending",
+        created_at=datetime.utcnow(),
+    )
+
+    db.session.add(email)
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "email_id": email.id,
+        "to_email": target_email,
+        "subject": subject,
+    })
+
 @inventory_bp.post("/api/issued/confirm_bulk", endpoint="issued_confirm_bulk")
 @login_required
 def issued_confirm_bulk():
@@ -1927,22 +2048,44 @@ def issued_confirm_bulk():
     from extensions import db
     from models import IssuedPartRecord, WorkOrder, IssuedBatch
     import re
+    import os
 
     REAL_JOB_RE = re.compile(r"\b[12]\d{6}\b")
+    AS_JOB_RE = re.compile(r"\b(?:AS)?00\d{4,}\b|\b00\d{4,}AS\b", re.I)
 
-    def extract_real_jobs(value):
+    def extract_allowed_jobs(value):
         if not value:
             return ""
 
-        jobs = REAL_JOB_RE.findall(str(value).upper())
+        text = str(value).upper()
 
-        # remove duplicates, keep order
+        jobs = []
+        jobs.extend(REAL_JOB_RE.findall(text))
+        jobs.extend(AS_JOB_RE.findall(text))
+
         unique = []
         for job in jobs:
+            job = str(job).upper()
             if job not in unique:
                 unique.append(job)
 
         return " ".join(unique)
+
+    def get_orders_email_for_job(value):
+        text = str(value or "").upper()
+
+        if AS_JOB_RE.search(text):
+            return (
+                current_app.config.get("EMAIL_AS_ORDERS_TO")
+                or os.getenv("EMAIL_AS_ORDERS_TO")
+                or "service@appliance-solutions.com"
+            )
+
+        return (
+            current_app.config.get("EMAIL_ORDERS_TO")
+            or os.getenv("EMAIL_ORDERS_TO")
+            or "orders@chiefappliance.com"
+        )
 
     payload = request.get_json(silent=True) or {}
 
@@ -2006,11 +2149,11 @@ def issued_confirm_bulk():
                 or ""
             )
 
+            allowed_jobs = extract_allowed_jobs(job_source)
+            target_email = get_orders_email_for_job(job_source)
 
-            real_jobs = extract_real_jobs(job_source)
-
-            if not real_jobs:
-                email_skipped_reason = "not_real_job"
+            if not allowed_jobs:
+                email_skipped_reason = "not_allowed_job"
             elif batch:
                 tech_name = (
                     (getattr(batch, "issued_to", None) or "").strip()
@@ -2019,8 +2162,12 @@ def issued_confirm_bulk():
                     or (username or "TECH")
                 )
 
-                subject = f"Tech has picked up all the parts. — {tech_name} — {real_jobs}"
-                body = f"{tech_name} {real_jobs} has picked up all the parts."
+                if AS_JOB_RE.search(job_source):
+                    subject = f"All parts arrived - {tech_name} - {allowed_jobs}"
+                else:
+                    subject = f"Tech has picked up all the parts. — {tech_name} — {allowed_jobs}"
+
+                body = f"{tech_name} {allowed_jobs} has picked up all the parts."
 
                 issue_stamp = batch.issue_date.isoformat() if getattr(batch, "issue_date", None) else "na"
 
@@ -2034,7 +2181,7 @@ def issued_confirm_bulk():
 
                 _enqueue_email_once(
                     unique_key=unique_key,
-                    to_email=current_app.config.get("EMAIL_ORDERS_TO"),
+                    to_email=target_email,
                     subject=subject,
                     body=body,
                     work_order_id=getattr(wo, "id", None),
@@ -2297,34 +2444,58 @@ def get_on_hand(part_number: str) -> int:
 
 def compute_availability(work_order: "WorkOrder"):
     """
-    Возвращает список словарей по каждой строке WO:
-    [{
-      wop_id, part_number, part_name, requested, on_hand, issue_now, status_hint
-    }, ...]
-
-    Логика:
-      - Только при status == "ordered" обращаемся к складу:
-          on_hand = get_on_hand(PN)
-          issue_now = min(requested, on_hand)
-          hint = "STOCK" | "WAIT {need} (stock {on})"
-      - При других статусах (например, "search_ordered"):
-          on_hand = 0, issue_now = 0, hint = "WAIT {requested} (not ordered)"
+    Fast bulk version.
+    Same output as before, but checks stock with ONE database query
+    instead of one query per WO part.
     """
+    from sqlalchemy import func
+    from models import Part
+
     rows = []
-    # считаем «можно ли проверять склад»
     check_stock = (getattr(work_order, "status", "") or "").lower() == "ordered"
 
-    for wop in (work_order.parts or []):
-        # нормализуем PN
+    wops = list(getattr(work_order, "parts", []) or [])
+
+    # collect unique PN only once
+    pns = sorted({
+        (wop.part_number or "").strip().upper()
+        for wop in wops
+        if (wop.part_number or "").strip()
+    })
+
+    stock_by_pn = {}
+
+    if check_stock and pns:
+        stock_rows = (
+            db.session.query(
+                func.upper(Part.part_number).label("pn"),
+                func.coalesce(func.sum(Part.quantity), 0).label("qty")
+            )
+            .filter(func.upper(Part.part_number).in_(pns))
+            .group_by(func.upper(Part.part_number))
+            .all()
+        )
+
+        stock_by_pn = {
+            (pn or "").strip().upper(): int(qty or 0)
+            for pn, qty in stock_rows
+        }
+
+    for wop in wops:
         pn = (wop.part_number or "").strip().upper()
-        # количество, безопасно
-        req = int(wop.quantity or 0)
+
+        try:
+            req = int(wop.quantity or 0)
+        except Exception:
+            req = 0
+
         if req < 0:
             req = 0
 
         if check_stock and pn:
-            on = int(get_on_hand(pn) or 0)
+            on = int(stock_by_pn.get(pn, 0) or 0)
             issue = min(req, on)
+
             if req <= 0:
                 hint = "WAIT 0"
             elif on >= req:
@@ -2333,7 +2504,6 @@ def compute_availability(work_order: "WorkOrder"):
                 need = req - on
                 hint = f"WAIT {need} (stock {on})"
         else:
-            # статус ещё не ordered → по твоей логике не сверяем склад
             on = 0
             issue = 0
             hint = f"WAIT {req} (not ordered)" if req > 0 else "WAIT 0"
@@ -4218,7 +4388,6 @@ def wo_detail(wo_id):
     from models import WorkOrder, WorkUnit, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit
     from collections import defaultdict, defaultdict as _dd
     import re
-    import json
 
     # 1) load WO
     wo = (
@@ -4232,6 +4401,8 @@ def wo_detail(wo_id):
     if not wo:
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
+
+
 
     # 2) access
     role_raw = (getattr(current_user, "role", "") or "").strip().lower()
@@ -4274,36 +4445,59 @@ def wo_detail(wo_id):
         )
     ]
 
+
+
     # ------------------------------------------------------------
     # 3b) Activity log (WorkOrderAudit)
     # ------------------------------------------------------------
     audit_rows = (
-        db.session.query(WorkOrderAudit)
+        db.session.query(
+            WorkOrderAudit.id,
+            WorkOrderAudit.created_at,
+            WorkOrderAudit.action,
+            WorkOrderAudit.message,
+            WorkOrderAudit.actor_username,
+        )
         .filter(WorkOrderAudit.work_order_id == wo.id)
-        .order_by(WorkOrderAudit.created_at.desc(), WorkOrderAudit.id.desc())
-        .limit(200)
+        .order_by(WorkOrderAudit.id.desc())
+        .limit(30)
         .all()
     )
 
     audit_log = []
+
     for a in (audit_rows or []):
-        raw_message = a.message or ""
-        parsed_message = raw_message
+        parsed_json = None
+        pretty_message = a.message or ""
 
         try:
-            parsed_message = json.loads(raw_message)
+            parsed_json = json.loads(pretty_message)
+
+            if isinstance(parsed_json, list):
+                lines = []
+
+                for row in parsed_json:
+                    txt = (row or {}).get("text")
+                    if txt:
+                        lines.append(txt)
+
+                if lines:
+                    pretty_message = "\n".join(lines)
+
         except Exception:
-            pass
+            parsed_json = None
 
         audit_log.append({
             "id": a.id,
             "ts": a.created_at,
             "action": (a.action or ""),
-            "message": raw_message,
-            "message_json": parsed_message,
+            "message": pretty_message,
+            "message_json": parsed_json,
             "actor": (a.actor_username or "—"),
-            "meta": (a.meta_json or ""),
+            "meta": "",
         })
+
+
     # ------------------------------------------------------------
     # 4) Issued / Batches — FIXED (work_order_id + safe fallback)
     # ------------------------------------------------------------
@@ -4399,6 +4593,7 @@ def wo_detail(wo_id):
         IssuedPartRecord.issue_date.asc(),
         IssuedPartRecord.id.asc()
     ).all()
+
 
     # ------------------------------------------------------------
     # 4c) Totals from already loaded issued_items
@@ -4526,6 +4721,8 @@ def wo_detail(wo_id):
             }
         )
 
+
+
     invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
 
     # 5) BLENDED PRICING + INS-строки
@@ -4628,7 +4825,6 @@ def wo_detail(wo_id):
             }
         )
 
-    # 6) отдаём в шаблон
     return render_template(
         "wo_detail.html",
         wo=wo,
@@ -4651,6 +4847,7 @@ def wo_detail(wo_id):
         current_user=current_user,
         audit_log=audit_log,
     )
+
 
 @inventory_bp.app_context_processor
 def inject_alerts_count():
@@ -6254,6 +6451,7 @@ def wo_save():
             "markup_percent": float(getattr(wo, "markup_percent", 0.0) or 0.0),
             "status": (getattr(wo, "status", "") or ""),
             "customer_po": (getattr(wo, "customer_po", None) or ""),
+            "note": (getattr(wo, "note", None) or ""),
             "units_count": len(getattr(wo, "units", []) or []),
             "parts_count": len(getattr(wo, "parts", []) or []),
         }
@@ -6406,7 +6604,7 @@ def wo_save():
     # ---------- собрать units[...] и их rows[...] ----------
     re_unit = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
     re_row = re.compile(
-        r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(part_number|part_name|quantity|"
+        r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(id|part_number|part_name|quantity|"
         r"alt_numbers|alt_part_numbers|warehouse|unit_label|supplier|supplier_name|"
         r"invoice_number|eta_date|"
         r"backorder_flag|status|unit_cost|ordered_flag|is_insurance_supplied)\]$"
@@ -6471,7 +6669,7 @@ def wo_save():
             qty_eff = qty if qty else 1
 
             row_dict = {
-                "id": None,
+                "id": _i(r.get("id"), 0) or None,
                 "part_number": _clip(pn, 80),
                 "part_name": part_name_clip,
                 "quantity": qty_eff,
@@ -6572,7 +6770,10 @@ def wo_save():
     # =========================================================
     # AUDIT: snapshot parts BEFORE rebuild (for diff)
     # =========================================================
-    def _part_key(unit_obj_or_tuple, pn: str, sup: str):
+    def _part_key(unit_obj_or_tuple, pn: str, sup: str, row_id=None):
+        if row_id:
+            return ("id", int(row_id))
+
         if isinstance(unit_obj_or_tuple, tuple):
             uk = unit_obj_or_tuple
         else:
@@ -6581,17 +6782,27 @@ def wo_save():
                 getattr(unit_obj_or_tuple, "model", "") or "",
                 getattr(unit_obj_or_tuple, "serial", "") or "",
             )
-        return (uk, (pn or "").strip().upper(), _norm_supplier(sup))
+
+        return (uk, (pn or "").strip().upper())
 
     def _snap_from_existing_workorder(wo_obj):
         snap = {}
         for u in (getattr(wo_obj, "units", []) or []):
             for p in (getattr(u, "parts", []) or []):
-                k = _part_key(u, getattr(p, "part_number", ""), getattr(p, "supplier", "") or "")
+                k = _part_key(
+                    u,
+                    getattr(p, "part_number", ""),
+                    getattr(p, "supplier", "") or "",
+                    row_id=getattr(p, "id", None),
+                )
                 snap[k] = {
                     "pn": (getattr(p, "part_number", "") or "").strip().upper(),
                     "name": (getattr(p, "part_name", "") or "")[:120],
                     "qty": int(getattr(p, "quantity", 0) or 0),
+                    "warehouse": (getattr(p, "warehouse", "") or getattr(p, "unit_label", "") or "")[:120],
+                    "alt_numbers": (getattr(p, "alt_part_numbers", "") or getattr(p, "alt_numbers", "") or "")[:200],
+                    "unit_cost": float(getattr(p, "unit_cost", 0.0) or 0.0),
+                    "eta_date": str(getattr(p, "eta_date", "") or ""),
                     "supplier": (getattr(p, "supplier", "") or "")[:80],
                     "inv": (getattr(p, "invoice_number", None) or "")[:32],
                     "ordered_flag": bool(getattr(p, "ordered_flag", False)),
@@ -6613,11 +6824,15 @@ def wo_save():
             for r in (up.get("rows") or []):
                 pn = (r.get("part_number") or "").strip().upper()
                 sup = (r.get("supplier") or "")
-                k = _part_key(uk, pn, sup)
+                k = _part_key(uk, pn, sup, row_id=r.get("id"))
                 snap[k] = {
                     "pn": pn,
                     "name": (r.get("part_name") or "")[:120],
                     "qty": int(r.get("quantity") or 0),
+                    "warehouse": (r.get("warehouse") or "")[:120],
+                    "alt_numbers": (r.get("alt_numbers") or "")[:200],
+                    "unit_cost": float(r.get("unit_cost") or 0.0),
+                    "eta_date": str(r.get("eta_date") or ""),
                     "supplier": (sup or "")[:80],
                     "inv": ((r.get("invoice_number") or "")[:32]).strip().upper(),
                     "ordered_flag": bool(r.get("ordered_flag")),
@@ -6653,8 +6868,12 @@ def wo_save():
 
             tracked_fields = (
                 "qty",
+                "unit_cost",
+                "warehouse",
+                "alt_numbers",
                 "inv",
                 "supplier",
+                "eta_date",
                 "ordered_flag",
                 "backorder_flag",
                 "is_insurance_supplied",
@@ -6682,7 +6901,7 @@ def wo_save():
 
         if added:
             added_txt = ", ".join(
-                f"{x.get('pn')} x{x.get('qty')}"
+                f"{x.get('pn')} x{x.get('qty')} — {x.get('name')}"
                 for x in added[:3]
             )
 
@@ -6696,7 +6915,7 @@ def wo_save():
 
         if removed:
             removed_txt = ", ".join(
-                f"{x.get('pn')} x{x.get('qty')}"
+                f"{x.get('pn')} x{x.get('qty')} — {x.get('name')}"
                 for x in removed[:3]
             )
 
@@ -6711,21 +6930,61 @@ def wo_save():
         if changed:
             changed_txt = []
 
-            for c in changed[:3]:
+            field_labels = {
+                "qty": "Qty",
+                "unit_cost": "Unit cost",
+                "warehouse": "WH",
+                "alt_numbers": "Alt PN#",
+                "inv": "INV#",
+                "supplier": "Supplier",
+                "eta_date": "ETA",
+                "ordered_flag": "Ordered",
+                "backorder_flag": "B/O",
+                "is_insurance_supplied": "INS",
+                "name": "Name",
+            }
+
+            def fmt_val(v):
+                if v is None or v == "":
+                    return "—"
+
+                if v is True:
+                    return "YES"
+
+                if v is False:
+                    return "NO"
+
+                if isinstance(v, (date, datetime)):
+                    try:
+                        return v.strftime("%Y-%m-%d")
+                    except Exception:
+                        pass
+
+                s = str(v)
+
+                # prettier ISO datetime
+                if "T" in s:
+                    s = s.split("T")[0]
+
+                return s
+
+            for c in changed[:5]:
                 pn = c.get("pn")
+                changes = c.get("changes") or {}
 
-                if "qty" in c["changes"]:
-                    q = c["changes"]["qty"]
-                    changed_txt.append(
-                        f"{pn} qty {q.get('from')}→{q.get('to')}"
-                    )
-                else:
-                    changed_txt.append(pn)
+                part_changes = []
+                for field_name, diff in changes.items():
+                    label = field_labels.get(field_name, field_name)
+                    old = fmt_val(diff.get("from"))
+                    new = fmt_val(diff.get("to"))
+                    part_changes.append(f"{label}: {old} → {new}")
 
-            txt = ", ".join(changed_txt)
+                changed_txt.append(f"{pn}: " + "; ".join(part_changes))
 
-            if len(changed) > 3:
-                txt += f" +{len(changed) - 3} more"
+            txt = " | ".join(changed_txt)
+
+            if len(changed) > 5:
+                txt += f" | +{len(changed) - 5} more"
 
             summary_lines.append({
                 "type": "changed",
@@ -6751,50 +7010,49 @@ def wo_save():
     parts_after_snap = _snap_from_units_payload(units_payload or [])
     parts_summary, parts_meta = _diff_parts(parts_before_snap, parts_after_snap)
 
-    # ---------- удалить старые юниты/parts и пересоздать ----------
-    for u in list(getattr(wo, "units", []) or []):
-        for p in list(getattr(u, "parts", []) or []):
-            db.session.delete(p)
-        db.session.delete(u)
-
-    try:
-        db.session.flush()
-    except Exception as e:
-        db.session.rollback()
-        flash(f"Failed to refresh units on Work Order: {e}", "danger")
-        return _safe_detail_redirect(wo)
-
-    if units_payload:
-        first_unit = units_payload[0]
-        wo.brand = (first_unit.get("brand") or "").strip() or None
-        wo.model = _clip(first_unit.get("model"), 25) or None
-        wo.serial = _clip(first_unit.get("serial"), 25) or None
+    # ---------- update existing units/parts instead of full delete/recreate ----------
 
     suppliers_seen = []
+    existing_units = list(getattr(wo, "units", []) or [])
 
-    # ---------- создаём заново WorkUnit и WorkOrderPart ----------
-    for up in units_payload:
-        if not (up.get("brand") or up.get("model") or up.get("serial")) and not up.get("rows"):
-            continue
+    # delete extra old units if user removed appliance from form
+    if len(existing_units) > len(units_payload):
+        for old_u in existing_units[len(units_payload):]:
+            db.session.delete(old_u)
 
-        unit = WorkUnit(
-            work_order=wo,
-            brand=(up.get("brand") or "").strip().upper(),
-            model=_clip(up.get("model"), 25).upper(),
-            serial=_clip(up.get("serial"), 25).upper(),
-        )
-        db.session.add(unit)
+    for ui, up in enumerate(units_payload):
+        # reuse existing unit by position, or create new one
+        if ui < len(existing_units):
+            unit = existing_units[ui]
+        else:
+            unit = WorkUnit(work_order=wo)
+            db.session.add(unit)
 
-        try:
-            db.session.flush()
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Failed to add unit: {e}", "danger")
-            return _safe_detail_redirect(wo)
+        unit.brand = (up.get("brand") or "").strip().upper()
+        unit.model = _clip(up.get("model"), 25).upper()
+        unit.serial = _clip(up.get("serial"), 25).upper()
+
+        # index existing parts by ID
+        existing_parts = {
+            int(p.id): p
+            for p in list(getattr(unit, "parts", []) or [])
+            if getattr(p, "id", None)
+        }
+
+        seen_part_ids = set()
 
         uk = _unit_key(unit.brand or "", unit.model or "", unit.serial or "")
 
         for r in (up.get("rows") or []):
+            row_id = _i(r.get("id"), 0)
+
+            if row_id and row_id in existing_parts:
+                wop = existing_parts[row_id]
+                seen_part_ids.add(row_id)
+            else:
+                wop = WorkOrderPart(work_order=wo, unit=unit)
+                db.session.add(wop)
+
             sup = r.get("supplier") or ""
             if sup:
                 norm = " ".join(sup.split())
@@ -6811,10 +7069,7 @@ def wo_save():
             prev_was_ordered, prev_date = (prev_state if prev_state else (False, None))
 
             if ord_in:
-                if prev_was_ordered and prev_date:
-                    ord_date = prev_date
-                else:
-                    ord_date = date.today()
+                ord_date = prev_date if (prev_was_ordered and prev_date) else date.today()
             else:
                 ord_date = None
                 ord_in = False
@@ -6822,23 +7077,26 @@ def wo_save():
             inv = (r.get("invoice_number") or "").strip().upper()
             inv = inv[:32] if inv else None
 
-            wop = WorkOrderPart(
-                work_order=wo,
-                unit=unit,
-                part_number=pn_upper,
-                part_name=(r.get("part_name") or None),
-                quantity=int(r.get("quantity") or 0),
-                alt_part_numbers=(r.get("alt_numbers") or None),
-                supplier=(sup or None),
-                backorder_flag=bool(r.get("backorder_flag")),
-                status=("ordered" if ord_in else "search_ordered"),
-                is_insurance_supplied=ins_flag,
-                invoice_number=inv,
-                eta_date=r.get("eta_date"),
-            )
+            wop.work_order = wo
+            wop.unit = unit
+            wop.part_number = pn_upper
+            wop.part_name = (r.get("part_name") or None)
+            wop.quantity = int(r.get("quantity") or 0)
+            wop.alt_part_numbers = (r.get("alt_numbers") or None)
+            wop.alt_numbers = (r.get("alt_numbers") or None)
+            wop.supplier = (sup or None)
+            wop.backorder_flag = bool(r.get("backorder_flag"))
+            wop.status = "ordered" if ord_in else "search_ordered"
+            wop.line_status = "ordered" if ord_in else "search_ordered"
+            wop.ordered_flag = ord_in
+            wop.ordered_date = ord_date
+            wop.is_insurance_supplied = ins_flag
+            wop.invoice_number = inv
+            wop.eta_date = r.get("eta_date")
 
             if hasattr(wop, "warehouse"):
                 wop.warehouse = (r.get("warehouse") or "")[:120]
+
             wop.unit_label = (r.get("warehouse") or "")[:120] or None
 
             if hasattr(wop, "unit_cost"):
@@ -6849,19 +7107,31 @@ def wo_save():
                     except Exception:
                         wop.unit_cost = None
 
-            if hasattr(wop, "ordered_flag"):
-                wop.ordered_flag = ord_in
-            if hasattr(wop, "ordered_date"):
-                wop.ordered_date = ord_date
-            if hasattr(wop, "line_status"):
-                wop.line_status = "ordered" if ord_in else "search_ordered"
-
-            db.session.add(wop)
-
             _debug_write(
-                f"BEFORE COMMIT: wo={getattr(wo, 'id', None)} pn={pn_upper} inv={inv!r} obj_inv={getattr(wop, 'invoice_number', None)!r}\n"
+                f"UPDATE PART: wo={getattr(wo, 'id', None)} "
+                f"wop_id={getattr(wop, 'id', None)} "
+                f"pn={pn_upper} inv={inv!r}\n"
             )
 
+
+
+        # delete only parts removed from this unit
+        for old_id, old_part in existing_parts.items():
+            if old_id not in seen_part_ids:
+                db.session.delete(old_part)
+
+    try:
+        db.session.flush()
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to save units on Work Order: {e}", "danger")
+        return _safe_detail_redirect(wo)
+
+    if units_payload:
+        first_unit = units_payload[0]
+        wo.brand = (first_unit.get("brand") or "").strip() or None
+        wo.model = _clip(first_unit.get("model"), 25) or None
+        wo.serial = _clip(first_unit.get("serial"), 25) or None
     # =========================
     # AUTO STATUS REEVALUATION
     # =========================
@@ -6948,18 +7218,51 @@ def wo_save():
             _wo_audit(getattr(wo, "id", None) or 0, "created", "Work order created", meta=after)
         else:
             header_changed = {}
+
+            header_labels = {
+                "technician_name": "Technician",
+                "job_numbers": "Job(s)",
+                "job_type": "Job type",
+                "delivery_fee": "Delivery fee",
+                "markup_percent": "Markup %",
+                "status": "Status",
+                "customer_po": "Customer PO #",
+                "note": "Note",
+            }
+
+            def fmt_audit_val(v):
+                if v is None or v == "":
+                    return "—"
+                if v is True:
+                    return "YES"
+                if v is False:
+                    return "NO"
+                return str(v)
+
             for k in (
-                "technician_id", "technician_name", "job_numbers", "job_type",
-                "delivery_fee", "markup_percent", "status", "customer_po"
+                    "technician_name", "job_numbers", "job_type",
+                    "delivery_fee", "markup_percent", "status", "customer_po", "note"
             ):
                 if (before or {}).get(k) != after.get(k):
-                    header_changed[k] = {"from": (before or {}).get(k), "to": after.get(k)}
+                    header_changed[k] = {
+                        "from": (before or {}).get(k),
+                        "to": after.get(k),
+                    }
 
             msg_bits = []
+
             if header_changed:
-                msg_bits.append(
-                    "Updated " + ", ".join(header_changed.keys())
-                )
+                header_text = []
+                for k, diff in header_changed.items():
+                    label = header_labels.get(k, k)
+                    header_text.append(
+                        f"{label}: {fmt_audit_val(diff.get('from'))} → {fmt_audit_val(diff.get('to'))}"
+                    )
+
+                msg_bits.append({
+                    "type": "header_changed",
+                    "text": " | ".join(header_text)
+                })
             if parts_summary:
                 msg_bits.extend(parts_summary)
 
@@ -7084,6 +7387,7 @@ def wo_list():
     """
     from datetime import datetime, timedelta
     from sqlalchemy import and_, or_, func, String
+    from sqlalchemy.orm import joinedload
     from models import IssuedBatch, IssuedPartRecord
     import re
 
@@ -7134,7 +7438,13 @@ def wo_list():
     invoice_matched_wo_ids = set()
 
     # ---- base query ----
-    q = db.session.query(WorkOrder)
+    q = (
+        db.session.query(WorkOrder)
+        .options(
+            joinedload(WorkOrder.created_by_user),
+            joinedload(WorkOrder.updated_by_user),
+        )
+    )
     filters = []
     joined_parts = False
 
@@ -7320,6 +7630,7 @@ def wo_list():
         base_q = base_q.limit(MAX_LIMIT)
 
     items = base_q.all()
+
     count_items = len(items)
 
     # ---- datalist hints ----
@@ -7381,6 +7692,7 @@ def wo_list():
         invoice_matched_wo_ids=invoice_matched_wo_ids,
     )
 
+
 @inventory_bp.post("/work_orders/<int:wo_id>/issue_instock", endpoint="wo_issue_instock")
 @login_required
 def wo_issue_instock(wo_id):
@@ -7397,7 +7709,8 @@ def wo_issue_instock(wo_id):
     from flask import request, session
 
     from extensions import db
-    from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch
+    from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit
+    import json
 
     wo = WorkOrder.query.get_or_404(wo_id)
     is_ins_job = ((wo.job_type or "").upper() == "INSURANCE")
@@ -7453,6 +7766,16 @@ def wo_issue_instock(wo_id):
             or r.get("hint")
             or ("STOCK" if on_hand > 0 else "WAIT")
         )
+
+    def _add_wo_audit(action: str, message: str, meta: dict | None = None):
+        db.session.add(WorkOrderAudit(
+            work_order_id=wo.id,
+            action=action,
+            message=message[:255],
+            meta_json=json.dumps(meta or {}, ensure_ascii=False),
+            actor_user_id=getattr(current_user, "id", None),
+            actor_username=getattr(current_user, "username", "system"),
+        ))
 
     def can_issue(pn: str, qty: int) -> bool:
         pn = (pn or "").strip().upper()
@@ -7800,6 +8123,23 @@ def wo_issue_instock(wo_id):
                     r.batch_id = batch.id
                     r.invoice_number = inv_no
 
+                issued_summary = []
+                for r in new_records:
+                    pn = getattr(getattr(r, "part", None), "part_number", None) or getattr(r, "part_number",
+                                                                                           None) or str(r.part_id)
+                    name = getattr(getattr(r, "part", None), "name", None) or getattr(r, "name_at_issue", None) or ""
+                    issued_summary.append(f"{pn} x{r.quantity}" + (f" — {name}" if name else ""))
+
+                _add_wo_audit(
+                    action="issued",
+                    message=f"Issued invoice #{inv_no}: " + "; ".join(issued_summary),
+                    meta={
+                        "invoice_number": inv_no,
+                        "issued_row_ids": issued_row_ids,
+                        "items": issued_summary,
+                    },
+                )
+
                 _touch_wo()
                 db.session.commit()
 
@@ -7937,6 +8277,22 @@ def wo_issue_instock(wo_id):
     for r in created_records:
         r.batch_id = batch.id
         r.invoice_number = inv_no
+
+    issued_summary = []
+    for r in created_records:
+        pn = getattr(getattr(r, "part", None), "part_number", None) or str(r.part_id)
+        name = getattr(getattr(r, "part", None), "name", None) or ""
+        issued_summary.append(f"{pn} x{r.quantity}" + (f" — {name}" if name else ""))
+
+    _add_wo_audit(
+        action="issued",
+        message=f"Issued invoice #{inv_no}: " + "; ".join(issued_summary),
+        meta={
+            "invoice_number": inv_no,
+            "items": issued_summary,
+        },
+    )
+
     db.session.commit()
 
     if set_status == "done":
@@ -9268,7 +9624,7 @@ def issue_ui():
     from flask_login import current_user
     from models import Part
 
-    parts = Part.query.order_by(Part.part_number).limit(200).all()
+    parts = Part.query.order_by(Part.part_number).limit(50).all()
     technician_name = getattr(current_user, "username", "TECH")
     canonical_ref = "TESTJOB123"  # подставишь свой JOB
 

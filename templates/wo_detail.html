@@ -355,7 +355,16 @@
           <tr class="{% if is_ret %}row-ret{% endif %}">
             <td>{{ r.issue_date|local_dt }}</td>
             <td class="text-nowrap">
-              {{ '%06d'|format(r.invoice_number) if r.invoice_number else '—' }}
+              {% if r.invoice_number %}
+                <a href="{{ url_for('inventory.reports_grouped', q=('%06d'|format(r.invoice_number)), invoice_number=r.invoice_number) }}#invoice-{{ r.invoice_number }}"
+                   target="_blank"
+                   rel="noopener"
+                   class="fw-bold text-decoration-none">
+                  {{ '%06d'|format(r.invoice_number) }}
+                </a>
+              {% else %}
+                —
+              {% endif %}
             </td>
             <td><code>{{ r.part.part_number if r.part else r.part_id }}</code></td>
             <td>{{ r.part.name if r.part else '—' }}</td>
@@ -503,12 +512,7 @@
 <div class="table-responsive">
   <table class="table table-sm table-hover align-middle">
   {% if role_low in ['admin','superadmin'] %}
-      <div class="form-check form-switch mb-2">
-        <input class="form-check-input" type="checkbox" id="superadminSendConfirmMsg">
-        <label class="form-check-label" for="superadminSendConfirmMsg">
-          Send received-parts message when I confirm for technician
-        </label>
-      </div>
+
     {% endif %}
     <thead class="table-light small">
       <tr>
@@ -568,9 +572,14 @@
               </button>
             {% elif is_adminlike %}
               <button type="button"
-                      class="btn btn-sm btn-outline-secondary mb-2 admin-toggle-all">
-                Check / Uncheck all
-              </button>
+                    class="btn btn-sm btn-outline-secondary mb-2 admin-toggle-all">
+              Check / Uncheck all
+            </button>
+
+            <button type="button"
+                    class="btn btn-sm btn-outline-primary mb-2 admin-send-received-msg ms-1">
+              Send received message
+            </button>
             {% endif %}
 
             {% if items and (items|length) > 0 %}
@@ -939,12 +948,25 @@
           <strong>Removed part:</strong>
           {{ row.text }}
         </div>
+      {% elif row.type == 'header_changed' %}
+          <div class="audit-line audit-changed">
+            <strong>Updated Work Order:</strong>
+            <div style="margin-top:4px; padding-left:12px;">
+              {% for item in row.text.split(' | ') %}
+                <div>{{ item }}</div>
+              {% endfor %}
+            </div>
+          </div>
 
       {% elif row.type == 'changed' %}
-        <div class="audit-line audit-changed">
-          <strong>Changed:</strong>
-          {{ row.text }}
-        </div>
+          <div class="audit-line audit-changed">
+            <strong>Changed:</strong>
+            <div style="margin-top:4px; padding-left:12px;">
+              {% for item in row.text.split(' | ') %}
+                <div>{{ item }}</div>
+              {% endfor %}
+            </div>
+          </div>
 
       {% else %}
         <div class="audit-line">
@@ -1244,6 +1266,60 @@ document.querySelectorAll(".admin-toggle-all").forEach(btn => {
 
     if (statusCol) {
       statusCol.textContent = shouldCheck ? "✅" : "☐";
+    }
+  });
+});
+  document.querySelectorAll(".admin-send-received-msg").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const row = btn.closest("tr");
+
+    const forms = Array.from(
+      row.querySelectorAll(".batch-items-cell form")
+    );
+
+    const recordIds = forms
+      .map(form => parseInt(form.querySelector('input[name="record_id"]')?.value || "0", 10))
+      .filter(v => v > 0);
+
+    const woId = parseInt(
+      forms[0]?.querySelector('input[name="wo_id"]')?.value || "0",
+      10
+    );
+
+    if (!recordIds.length || !woId) {
+      alert("No records found for this batch");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Sending...";
+
+    const response = await fetch("{{ url_for('inventory.issued_send_received_message') }}", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      body: JSON.stringify({
+        record_ids: recordIds,
+        wo_id: woId
+      })
+    });
+
+    let data = {};
+    try { data = await response.json(); } catch(e) {}
+
+    if (!response.ok || !data.ok) {
+      alert("Send message failed");
+      btn.disabled = false;
+      btn.textContent = "Send received message";
+      return;
+    }
+
+    btn.textContent = "Message queued";
+
+    if (window.showToast) {
+      showToast("Email queued: " + data.to_email, {delay: 1800});
     }
   });
 });
