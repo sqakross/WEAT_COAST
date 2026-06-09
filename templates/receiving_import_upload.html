@@ -5,51 +5,103 @@
 <form method="post"
       action="{{ url_for('inventory.receiving_import_upload') }}"
       enctype="multipart/form-data"
-      class="row g-3">
+      class="row g-3"
+      id="importPdfForm">
 
   <div class="col-12">
-    <div class="alert alert-info py-2">
-      Upload supplier invoice (PDF). We’ll parse items → preview → create a Receiving batch.
+    <div class="alert alert-info py-2 mb-0">
+      Upload supplier invoice PDF. The system will parse items, show preview, then create a Receiving batch.
     </div>
   </div>
 
   <div class="col-md-5">
-    <label class="form-label">PDF file</label>
-    <input type="file" name="file" accept="application/pdf" class="form-control" required>
-    <div class="form-text">Supported: text-PDF; optionally use OCR for scans.</div>
+    <label class="form-label" for="pdf_file">PDF file</label>
+    <input id="pdf_file"
+           type="file"
+           name="file"
+           accept="application/pdf,.pdf"
+           class="form-control"
+           required>
+    <div class="form-text">Use OCR only for scanned PDFs. Text PDFs are faster without OCR.</div>
   </div>
 
   <div class="col-md-3">
-    <label class="form-label">Supplier (optional)</label>
-    <input name="supplier" class="form-control" placeholder="Reliable Parts | Marcone">
+    <label class="form-label" for="supplier">Supplier optional</label>
+    <input id="supplier"
+           name="supplier"
+           class="form-control js-trim"
+           placeholder="Reliable Parts | Marcone">
   </div>
 
   <div class="col-md-2">
-    <label class="form-label">Invoice #</label>
-    <input name="invoice_number" class="form-control" placeholder="">
+    <label class="form-label" for="invoice_number">Invoice #</label>
+    <input id="invoice_number"
+           name="invoice_number"
+           class="form-control js-trim">
   </div>
 
   <div class="col-md-2">
-    <label class="form-label">Invoice Date</label>
-    <input type="date" name="invoice_date" class="form-control">
+    <label class="form-label" for="invoice_date">Invoice Date</label>
+    <input id="invoice_date"
+           type="date"
+           name="invoice_date"
+           class="form-control">
   </div>
 
   <div class="col-md-2">
     <div class="form-check mt-2 pt-4">
-      <input class="form-check-input" type="checkbox" name="try_ocr" id="try_ocr">
-      <label class="form-check-label" for="try_ocr">Use OCR (for scanned PDFs)</label>
+      <input class="form-check-input"
+             type="checkbox"
+             name="try_ocr"
+             id="try_ocr">
+      <label class="form-check-label" for="try_ocr">Use OCR</label>
     </div>
   </div>
 
   <div class="col-10">
-    <label class="form-label">Notes</label>
-    <input name="notes" class="form-control" placeholder="Optional note (will be saved in batch)">
+    <label class="form-label" for="notes">Notes</label>
+    <input id="notes"
+           name="notes"
+           class="form-control js-trim"
+           placeholder="Optional note will be saved in batch">
   </div>
 
   <div class="col-12 d-flex gap-2">
-    <button class="btn btn-primary">Parse</button>
+    <button type="submit" class="btn btn-primary" id="parseBtn">Parse</button>
     <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_list') }}">Back</a>
   </div>
 </form>
-{% endblock %}
 
+<script>
+(() => {
+  const form = document.getElementById('importPdfForm');
+  const parseBtn = document.getElementById('parseBtn');
+  const fileInput = document.getElementById('pdf_file');
+
+  form.addEventListener('submit', (event) => {
+    const file = fileInput.files && fileInput.files[0];
+
+    if (!file) {
+      event.preventDefault();
+      alert('Please select a PDF file.');
+      return;
+    }
+
+    const fileName = file.name.toLowerCase();
+
+    if (!fileName.endsWith('.pdf')) {
+      event.preventDefault();
+      alert('Only PDF files are allowed.');
+      return;
+    }
+
+    form.querySelectorAll('.js-trim').forEach(input => {
+      input.value = input.value.trim();
+    });
+
+    parseBtn.disabled = true;
+    parseBtn.textContent = 'Parsing...';
+  });
+})();
+</script>
+{% endblock %}

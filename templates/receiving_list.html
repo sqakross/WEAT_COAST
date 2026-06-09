@@ -3,153 +3,209 @@
 
 <h3>Receiving Batches</h3>
 
-<form class="row g-2 mb-3" method="get">
+<form class="row g-2 mb-3" method="get" id="filterForm">
   <div class="col-md-4 col-sm-6">
     <input name="q"
-           class="form-control"
+           class="form-control js-trim"
            placeholder="Supplier / Invoice # / Part # / Part Name"
-           value="{{ filters.q }}">
+           value="{{ filters.q or '' }}">
   </div>
 
   <div class="col-auto">
-    <input name="date_from" type="date" class="form-control"
-           value="{{ filters.date_from }}">
+    <input name="date_from"
+           type="date"
+           class="form-control"
+           value="{{ filters.date_from or '' }}">
   </div>
 
   <div class="col-auto">
-    <input name="date_to" type="date" class="form-control"
-           value="{{ filters.date_to }}">
+    <input name="date_to"
+           type="date"
+           class="form-control"
+           value="{{ filters.date_to or '' }}">
   </div>
 
   <div class="col-auto">
     <select name="status" class="form-select">
       <option value="">Any status</option>
-      <option value="draft"  {{ 'selected' if filters.status=='draft'  }}>Draft</option>
-      <option value="posted" {{ 'selected' if filters.status=='posted' }}>Posted</option>
+      <option value="draft"  {{ 'selected' if filters.status == 'draft' }}>Draft</option>
+      <option value="posted" {{ 'selected' if filters.status == 'posted' }}>Posted</option>
     </select>
   </div>
 
-  <div class="col-auto">
-    <button class="btn btn-primary">Search</button>
-    <a class="btn btn-outline-secondary"
-       href="{{ url_for('inventory.receiving_new') }}">+ New Batch</a>
+  <div class="col-auto d-flex gap-2">
+    <button type="submit" class="btn btn-primary">Search</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_new') }}">+ New Batch</a>
   </div>
 </form>
 
-{# Роль / права #}
-{% set role = current_user.role if current_user.is_authenticated else '' %}
+{% set role = (current_user.role or '')|lower if current_user.is_authenticated else '' %}
 {% set can_super = current_user.is_authenticated and (
   role == 'superadmin'
   or (current_user.is_superadmin|default(false))
   or (current_user.is_super_admin|default(false))
 ) %}
 
-<table class="table table-sm table-hover align-middle">
-  <thead>
-    <tr>
-      <th style="width:60px;">ID</th>
-      <th style="width:110px;">Date</th>
-      <th>Supplier</th>
-      <th style="width:160px;">Invoice #</th>
-      <th style="width:100px;">Status</th>
-      <th style="width:80px;">Stock</th>
-      <th style="width:80px;" class="text-end">Qty</th>
-      <th style="width:140px;" class="text-end">Total Cost</th>
+<div class="table-responsive">
+  <table class="table table-sm table-hover align-middle">
+    <thead>
+      <tr>
+        <th style="width:60px;">ID</th>
+        <th style="width:110px;">Date</th>
+        <th>Supplier</th>
+        <th style="width:160px;">Invoice #</th>
+        <th style="width:100px;">Status</th>
+        <th style="width:80px;">Stock</th>
+        <th style="width:80px;" class="text-end">Qty</th>
+        <th style="width:140px;" class="text-end">Total Cost</th>
         <th style="width:180px;">Audit</th>
         {% if can_super %}
           <th style="width:260px;">Actions</th>
         {% endif %}
-    </tr>
-  </thead>
-  <tbody>
+      </tr>
+    </thead>
 
-  {% for b in batches %}
-    {% set lines = (b.lines if (b.lines is defined) else (b.items if (b.items is defined) else [])) %}
-    {% set ns = namespace(qty=0, total=0.0) %}
-    {% for it in lines %}
-      {% set q = (it.qty|default(it.quantity, true)|default(0, true))|int %}
-      {% set u = (it.unit_cost|default(it.unit_cost_at_issue, true)|default(0.0, true))|float %}
-      {% set ns.qty = ns.qty + q %}
-      {% set ns.total = ns.total + (q * u) %}
-    {% endfor %}
+    <tbody>
+      {% for b in batches %}
+        {% set is_posted = (b.status|default('', true)) == 'posted' %}
+        {% set stock_applied = stock_flags.get(b.id, false) if stock_flags is defined else false %}
 
-    {% set is_posted = (b.status|default('', true)) == 'posted' %}
-    {% set stock_applied = (stock_flags[b.id] if stock_flags is defined and b.id in stock_flags else false) %}
-
-    <tr onclick="location.href='{{ url_for('inventory.receiving_detail', batch_id=b.id) }}'"
-        style="cursor:pointer">
-      <td>{{ b.id }}</td>
-      <td>{{ b.invoice_date|default('—', true) }}</td>
-      <td>{{ b.supplier_name|default('', true) }}</td>
-      <td>{{ b.invoice_number|default('', true) }}</td>
-
-      <td>
-        {% if is_posted %}
-          <span class="badge bg-success">posted</span>
+        {% if qty_map is defined %}
+          {% set row_qty = qty_map.get(b.id, 0) %}
         {% else %}
-          <span class="badge bg-secondary">draft</span>
+          {% set lines = b.lines if b.lines is defined else (b.items if b.items is defined else []) %}
+          {% set ns = namespace(qty=0) %}
+          {% for it in lines %}
+            {% set q = (it.qty|default(it.quantity, true)|default(0, true))|int %}
+            {% set ns.qty = ns.qty + q %}
+          {% endfor %}
+          {% set row_qty = ns.qty %}
         {% endif %}
-      </td>
 
-      <td>
-        {% if stock_applied %}
-          <span class="text-success" style="font-size:.8rem; white-space:nowrap;">● stock</span>
-        {% else %}
-          <span class="text-muted" style="font-size:.8rem; white-space:nowrap;">● clear</span>
-        {% endif %}
-      </td>
+        {% set row_total = totals.get(b.id, 0) if totals is defined else 0 %}
 
-      <td class="text-end">{{ ns.qty }}</td>
-      <td class="text-end">
-  {{ b.currency|default('USD', true) }}
-  {{
-    '%.2f' % (
-      (totals.get(b.id) if (totals is defined and b.id in totals) else ns.total)
-    )
-  }}
-</td>
+        <tr class="js-row-link"
+            data-href="{{ url_for('inventory.receiving_detail', batch_id=b.id) }}"
+            style="cursor:pointer;">
+          <td>{{ b.id }}</td>
+          <td>{{ b.invoice_date|default('—', true) }}</td>
+          <td>{{ b.supplier_name|default('', true) }}</td>
+          <td>{{ b.invoice_number|default('', true) }}</td>
 
-<td class="small text-nowrap">
-  {% if b.updated_at %}
-    <div>upd: {{ b.updated_at_local.strftime('%Y-%m-%d') if b.updated_at_local else '—' }}</div>
-    <div>by {{ user_map.get(b.updated_by, b.updated_by or '—') }}</div>
-  {% elif b.posted_at %}
-    <div>post: {{ b.posted_at_local.strftime('%Y-%m-%d') if b.posted_at_local else '—' }}</div>
-    <div>by {{ user_map.get(b.posted_by, b.posted_by or '—') }}</div>
-  {% else %}
-    <div>crt: {{ b.created_at_local.strftime('%Y-%m-%d') if b.created_at_local else '—' }}</div>
-    <div>by {{ user_map.get(b.created_by, b.created_by or '—') }}</div>
-  {% endif %}
-</td>
+          <td>
+            {% if is_posted %}
+              <span class="badge bg-success">posted</span>
+            {% else %}
+              <span class="badge bg-secondary">draft</span>
+            {% endif %}
+          </td>
 
-{% if can_super %}
-<td onclick="event.stopPropagation();">
-        <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}"
-              method="post" style="display:inline;">
-          <button class="btn btn-sm {{ 'btn-warning' if is_posted else 'btn-primary' }}" type="submit">
-            {{ 'Unpost' if is_posted else 'Post' }}
-          </button>
-        </form>
+          <td>
+            {% if stock_applied %}
+              <span class="text-success small text-nowrap">● stock</span>
+            {% else %}
+              <span class="text-muted small text-nowrap">● clear</span>
+            {% endif %}
+          </td>
 
-        <form action="{{ url_for('inventory.receiving_clear_keys', batch_id=b.id) }}"
-              method="post" style="display:inline;"
-              onsubmit="return confirm('Clear import keys for batch #{{ b.id }}? This allows re-import from the same file.');">
-          <button class="btn btn-sm btn-outline-secondary" type="submit">Clear keys</button>
-        </form>
+          <td class="text-end">{{ row_qty }}</td>
 
-        <form action="{{ url_for('inventory.receiving_delete', batch_id=b.id) }}"
-              method="post" style="display:inline;"
-              onsubmit="return confirm('Delete batch #{{ b.id }}? This will also clear its import keys.');">
-          <button class="btn btn-sm btn-danger" type="submit"
-                  {% if stock_applied %}disabled title="Unpost first to remove from stock before deleting."{% endif %}>
-            Delete
-          </button>
-        </form>
-      </td>
-      {% endif %}
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+          <td class="text-end text-nowrap">
+            {{ b.currency|default('USD', true) }} {{ '%.2f' % row_total }}
+          </td>
+
+          <td class="small text-nowrap">
+            {% if b.updated_at %}
+              <div>upd: {{ b.updated_at_local.strftime('%Y-%m-%d') if b.updated_at_local else '—' }}</div>
+              <div>by {{ user_map.get(b.updated_by, b.updated_by or '—') }}</div>
+            {% elif b.posted_at %}
+              <div>post: {{ b.posted_at_local.strftime('%Y-%m-%d') if b.posted_at_local else '—' }}</div>
+              <div>by {{ user_map.get(b.posted_by, b.posted_by or '—') }}</div>
+            {% else %}
+              <div>crt: {{ b.created_at_local.strftime('%Y-%m-%d') if b.created_at_local else '—' }}</div>
+              <div>by {{ user_map.get(b.created_by, b.created_by or '—') }}</div>
+            {% endif %}
+          </td>
+
+          {% if can_super %}
+            <td class="js-actions-cell">
+              <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}"
+                    method="post"
+                    class="d-inline js-action-form">
+                <button class="btn btn-sm {{ 'btn-warning' if is_posted else 'btn-primary' }}"
+                        type="submit">
+                  {{ 'Unpost' if is_posted else 'Post' }}
+                </button>
+              </form>
+
+              <form action="{{ url_for('inventory.receiving_clear_keys', batch_id=b.id) }}"
+                    method="post"
+                    class="d-inline js-action-form"
+                    data-confirm="Clear import keys for batch #{{ b.id }}? This allows re-import from the same file.">
+                <button class="btn btn-sm btn-outline-secondary" type="submit">Clear keys</button>
+              </form>
+
+              <form action="{{ url_for('inventory.receiving_delete', batch_id=b.id) }}"
+                    method="post"
+                    class="d-inline js-action-form"
+                    data-confirm="Delete batch #{{ b.id }}? This will also clear its import keys.">
+                <button class="btn btn-sm btn-danger"
+                        type="submit"
+                        {% if stock_applied %}disabled title="Unpost first to remove from stock before deleting."{% endif %}>
+                  Delete
+                </button>
+              </form>
+            </td>
+          {% endif %}
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="{{ 10 if can_super else 9 }}" class="text-center text-muted py-4">
+            No receiving batches found.
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+(() => {
+  const filterForm = document.getElementById('filterForm');
+
+  filterForm.addEventListener('submit', () => {
+    filterForm.querySelectorAll('.js-trim').forEach(input => {
+      input.value = input.value.trim();
+    });
+  });
+
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('.js-actions-cell')) return;
+
+    const row = event.target.closest('.js-row-link');
+    if (!row) return;
+
+    window.location.href = row.dataset.href;
+  });
+
+  document.addEventListener('submit', (event) => {
+    const form = event.target.closest('.js-action-form');
+    if (!form) return;
+
+    const message = form.dataset.confirm;
+    if (message && !confirm(message)) {
+      event.preventDefault();
+      return;
+    }
+
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset.originalText = btn.textContent;
+      btn.textContent = 'Working...';
+    }
+  });
+})();
+</script>
 
 {% endblock %}

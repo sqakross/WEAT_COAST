@@ -1,32 +1,34 @@
-
 {% extends "base.html" %}
 {% block content %}
 <h3>Preview & Edit Import</h3>
 
-<form method="post" action="{{ url_for('inventory.receiving_import_apply') }}">
-  <!-- hidden: путь к исходному PDF -->
+<form method="post" action="{{ url_for('inventory.receiving_import_apply') }}" id="importForm">
   <input type="hidden" name="attachment_path" value="{{ meta.attachment_path }}">
 
   <div class="row g-2 mb-3">
     <div class="col-md-3">
       <label class="form-label">Supplier</label>
-      <input class="form-control" name="supplier" value="{{ meta.supplier }}">
+      <input class="form-control" name="supplier" value="{{ meta.supplier or '' }}">
     </div>
+
     <div class="col-md-3">
       <label class="form-label">Invoice #</label>
-      <input class="form-control" name="invoice_number" value="{{ meta.invoice }}">
+      <input class="form-control" name="invoice_number" value="{{ meta.invoice or '' }}">
     </div>
+
     <div class="col-md-2">
       <label class="form-label">Date</label>
-      <input type="date" class="form-control" name="invoice_date" value="{{ meta.date }}">
+      <input type="date" class="form-control" name="invoice_date" value="{{ meta.date or '' }}">
     </div>
+
     <div class="col-md-1">
       <label class="form-label">Currency</label>
-      <input class="form-control" name="currency" value="{{ meta.currency }}">
+      <input class="form-control" name="currency" value="{{ meta.currency or '' }}">
     </div>
+
     <div class="col-md-3">
       <label class="form-label">Notes</label>
-      <input class="form-control" name="notes" value="{{ meta.notes }}">
+      <input class="form-control" name="notes" value="{{ meta.notes or '' }}">
     </div>
   </div>
 
@@ -42,17 +44,50 @@
           <th style="width: 6%"></th>
         </tr>
       </thead>
+
       <tbody id="rowsTbody">
         {% for r in rows %}
         {% set i = loop.index0 %}
         <tr>
-          <td><input name="rows[{{ i }}][part_number]" class="form-control" value="{{ r.part_number }}" required></td>
-          <td><input name="rows[{{ i }}][part_name]"   class="form-control" value="{{ r.part_name }}"></td>
-          <td><input name="rows[{{ i }}][quantity]"    type="number" min="0" class="form-control text-end" value="{{ r.quantity or 1 }}" required></td>
-          <td><input name="rows[{{ i }}][unit_cost]"   type="number" step="0.01" min="0" class="form-control text-end" value="{{ r.unit_cost or 0 }}"></td>
-          <td><input name="rows[{{ i }}][location]"    class="form-control" value="{{ r.location or r.supplier }}"></td>
+          <td>
+            <input name="rows[{{ i }}][part_number]"
+                   class="form-control js-part-number"
+                   value="{{ r.part_number or '' }}"
+                   required>
+          </td>
+
+          <td>
+            <input name="rows[{{ i }}][part_name]"
+                   class="form-control js-trim"
+                   value="{{ r.part_name or '' }}">
+          </td>
+
+          <td>
+            <input name="rows[{{ i }}][quantity]"
+                   type="number"
+                   min="0"
+                   class="form-control text-end"
+                   value="{{ r.quantity or 1 }}"
+                   required>
+          </td>
+
+          <td>
+            <input name="rows[{{ i }}][unit_cost]"
+                   type="number"
+                   step="0.01"
+                   min="0"
+                   class="form-control text-end"
+                   value="{{ r.unit_cost or 0 }}">
+          </td>
+
+          <td>
+            <input name="rows[{{ i }}][location]"
+                   class="form-control js-trim"
+                   value="{{ r.location or r.supplier or '' }}">
+          </td>
+
           <td class="text-end">
-            <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">×</button>
+            <button type="button" class="btn btn-outline-danger btn-sm js-remove-row">×</button>
           </td>
         </tr>
         {% endfor %}
@@ -62,28 +97,128 @@
 
   <div class="d-flex gap-2">
     <button name="action" value="save" class="btn btn-primary">Create Draft</button>
-    <button name="action" value="post" class="btn btn-success" onclick="return confirm('Create & post to stock?')">Create & Post</button>
-    <button type="button" class="btn btn-outline-secondary" onclick="addRow()">+ Add Row</button>
+
+    <button name="action"
+            value="post"
+            class="btn btn-success"
+            onclick="return confirm('Create & post to stock?')">
+      Create & Post
+    </button>
+
+    <button type="button" class="btn btn-outline-secondary" id="addRowBtn">+ Add Row</button>
+
     <a class="btn btn-outline-dark" href="{{ url_for('inventory.receiving_list') }}">Cancel</a>
   </div>
 </form>
 
 <script>
-function addRow() {
+(() => {
+  const form = document.getElementById('importForm');
   const tbody = document.getElementById('rowsTbody');
-  const i = tbody.querySelectorAll('tr').length;
-  const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td><input name="rows[${i}][part_number]" class="form-control" required></td>
-    <td><input name="rows[${i}][part_name]"   class="form-control"></td>
-    <td><input name="rows[${i}][quantity]"    type="number" min="0" class="form-control text-end" value="1" required></td>
-    <td><input name="rows[${i}][unit_cost]"   type="number" step="0.01" min="0" class="form-control text-end" value="0"></td>
-    <td><input name="rows[${i}][location]"    class="form-control"></td>
-    <td class="text-end">
-      <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">×</button>
-    </td>
-  `;
-  tbody.appendChild(tr);
-}
+  const addRowBtn = document.getElementById('addRowBtn');
+
+  function renumberRows() {
+    const rows = tbody.querySelectorAll('tr');
+
+    rows.forEach((tr, index) => {
+      tr.querySelectorAll('input[name^="rows["]').forEach(input => {
+        input.name = input.name.replace(/rows\[\d+]/, `rows[${index}]`);
+      });
+    });
+  }
+
+  function createInput(name, className = 'form-control', attrs = {}) {
+    const input = document.createElement('input');
+    input.name = name;
+    input.className = className;
+
+    Object.entries(attrs).forEach(([key, value]) => {
+      input.setAttribute(key, value);
+    });
+
+    return input;
+  }
+
+  function createCell(child, className = '') {
+    const td = document.createElement('td');
+
+    if (className) {
+      td.className = className;
+    }
+
+    td.appendChild(child);
+    return td;
+  }
+
+  function addRow() {
+    renumberRows();
+
+    const index = tbody.rows.length;
+    const tr = document.createElement('tr');
+
+    tr.appendChild(createCell(
+      createInput(`rows[${index}][part_number]`, 'form-control js-part-number', {
+        required: ''
+      })
+    ));
+
+    tr.appendChild(createCell(
+      createInput(`rows[${index}][part_name]`, 'form-control js-trim')
+    ));
+
+    tr.appendChild(createCell(
+      createInput(`rows[${index}][quantity]`, 'form-control text-end', {
+        type: 'number',
+        min: '0',
+        value: '1',
+        required: ''
+      })
+    ));
+
+    tr.appendChild(createCell(
+      createInput(`rows[${index}][unit_cost]`, 'form-control text-end', {
+        type: 'number',
+        step: '0.01',
+        min: '0',
+        value: '0'
+      })
+    ));
+
+    tr.appendChild(createCell(
+      createInput(`rows[${index}][location]`, 'form-control js-trim')
+    ));
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-outline-danger btn-sm js-remove-row';
+    removeBtn.textContent = '×';
+
+    tr.appendChild(createCell(removeBtn, 'text-end'));
+    tbody.appendChild(tr);
+  }
+
+  addRowBtn.addEventListener('click', addRow);
+
+  tbody.addEventListener('click', (event) => {
+    const btn = event.target.closest('.js-remove-row');
+
+    if (!btn) return;
+
+    btn.closest('tr').remove();
+    renumberRows();
+  });
+
+  form.addEventListener('submit', () => {
+    renumberRows();
+
+    form.querySelectorAll('.js-part-number').forEach(input => {
+      input.value = input.value.trim().toUpperCase();
+    });
+
+    form.querySelectorAll('.js-trim').forEach(input => {
+      input.value = input.value.trim();
+    });
+  });
+})();
 </script>
 {% endblock %}
