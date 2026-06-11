@@ -24,7 +24,7 @@ from io import BytesIO
 from datetime import datetime, timedelta, time, date
 from extensions import db
 from utils.invoice_generator import generate_invoice_pdf
-from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER, ROLE_TECHNICIAN, Part, WorkOrder, WorkUnit, WorkOrderPart, EmailOutbox, WorkOrderAudit
+from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER, ROLE_TECHNICIAN, Part, WorkOrder, WorkUnit, WorkOrderPart, EmailOutbox, WorkOrderAudit, TechnicianLedgerEntry
 from reportlab.lib.pagesizes import letter, landscape
 from compare_cart.run_compare import get_marcone_items, check_cart_items, export_to_docx
 from compare_cart.run_compare_reliable import get_reliable_items
@@ -1538,6 +1538,48 @@ def _create_batch_for_records(
                     r.reference_job = reference_job
                     if location:
                         r.location = location
+
+                db.session.flush()
+
+                # Accounting ledger: create CHARGE entries for technician debt
+                # Safe: only for positive issued qty/cost; old records are not touched.
+                for r in records:
+                    qty = int(r.quantity or 0)
+                    unit_cost = float(r.unit_cost_at_issue or 0.0)
+                    amount = round(qty * unit_cost, 2)
+
+                    if qty <= 0 or amount <= 0:
+                        continue
+
+                    already_exists = TechnicianLedgerEntry.query.filter_by(
+                        issued_part_record_id=r.id,
+                        entry_type="CHARGE",
+                    ).first()
+
+                    if already_exists:
+                        continue
+
+                    ledger = TechnicianLedgerEntry(
+                        technician_name=(r.issued_to or issued_to or "UNKNOWN").strip(),
+                        entry_date=batch.issue_date.date() if batch.issue_date else issue_date.date(),
+                        entry_type="CHARGE",
+                        status="open",
+                        amount=amount,
+                        paid_amount=0.0,
+                        remaining_amount=amount,
+
+                        supplier_name=None,
+                        supplier_invoice=(r.inv_ref or None),
+                        job_number=(r.reference_job or reference_job or None),
+
+                        issued_part_record_id=r.id,
+                        reference_type="issued_part_record",
+                        reference_id=r.id,
+
+                        note=f"Issued invoice #{inv_no}",
+                    )
+
+                    db.session.add(ledger)
 
                 db.session.flush()
 
@@ -7711,6 +7753,7 @@ def wo_issue_instock(wo_id):
     from extensions import db
     from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit
     import json
+    from services.accounting_service import create_ledger_charges_for_records
 
     wo = WorkOrder.query.get_or_404(wo_id)
     is_ins_job = ((wo.job_type or "").upper() == "INSURANCE")
@@ -8122,6 +8165,15 @@ def wo_issue_instock(wo_id):
                 for r in new_records:
                     r.batch_id = batch.id
                     r.invoice_number = inv_no
+
+                create_ledger_charges_for_records(
+                    records=new_records,
+                    invoice_number=inv_no,
+                    work_order_id=wo.id,
+                    default_technician=wo.technician_name,
+                    default_job=wo.canonical_job,
+                    note_prefix="WO unit issue",
+                )
 
                 issued_summary = []
                 for r in new_records:
@@ -8696,6 +8748,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
     from extensions import db
 
     from models import WorkOrder, Part, IssuedPartRecord, IssuedBatch, WorkOrderPart
+    from services.accounting_service import create_ledger_charges_for_records
 
     wo = WorkOrder.query.get_or_404(wo_id)
     unit = next((u for u in (wo.units or []) if u.id == unit_id), None)
@@ -8814,6 +8867,15 @@ def wo_issue_instock_unit(wo_id, unit_id):
         for r in new_records:
             r.batch_id = batch.id
             r.invoice_number = inv_no
+
+        create_ledger_charges_for_records(
+            records=new_records,
+            invoice_number=inv_no,
+            work_order_id=wo.id,
+            default_technician=wo.technician_name,
+            default_job=wo.canonical_job,
+            note_prefix="WO unit issue",
+        )
 
         # ✅ apply issued_qty to WorkOrderPart rows of this unit; clear bo/ord only when fully satisfied
         now = datetime.utcnow()
@@ -9396,7 +9458,7 @@ def issue_part():
     from urllib.parse import urlencode
 
     from extensions import db
-    from models import Part, IssuedPartRecord
+    from models import Part, IssuedPartRecord, TechnicianLedgerEntry
 
     # ✅ lot costing helpers
     from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
@@ -9585,8 +9647,7 @@ def issue_part():
             if batch_location is None:
                 batch_location = "INS"
 
-            # ✅ create batch + invoice number
-            _create_batch_for_records(
+            batch = _create_batch_for_records(
                 records=new_records,
                 issued_to=issued_to,
                 issued_by=issued_by,
@@ -9594,6 +9655,45 @@ def issue_part():
                 issue_date=issue_dt,
                 location=batch_location,
             )
+
+
+            # ✅ Accounting ledger: create CHARGE entries for technician debt
+            for r in new_records:
+                qty = int(r.quantity or 0)
+                unit_cost = float(r.unit_cost_at_issue or 0.0)
+                amount = round(qty * unit_cost, 2)
+
+                if qty <= 0 or amount <= 0:
+                    continue
+
+                already_exists = TechnicianLedgerEntry.query.filter_by(
+                    issued_part_record_id=r.id,
+                    entry_type="CHARGE",
+                ).first()
+
+                if already_exists:
+                    continue
+
+                ledger = TechnicianLedgerEntry(
+                    technician_name=(r.issued_to or issued_to or "UNKNOWN").strip(),
+                    entry_date=batch.issue_date.date() if batch.issue_date else issue_dt.date(),
+                    entry_type="CHARGE",
+                    status="open",
+                    amount=amount,
+                    paid_amount=0.0,
+                    remaining_amount=amount,
+
+                    supplier_name=None,
+                    supplier_invoice=(r.inv_ref or None),
+                    job_number=(r.reference_job or reference_job or None),
+
+                    issued_part_record_id=r.id,
+                    reference_type="issued_part_record",
+                    reference_id=r.id,
+
+                    note=f"Issued invoice #{batch.invoice_number}",
+                )
+                db.session.add(ledger)
 
             # ✅ touch WO
             _touch_work_order_from_ref(reference_job, issue_dt, current_user.id)

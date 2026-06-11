@@ -860,8 +860,6 @@ class GoodsReceiptLine(db.Model):
         except Exception:
             return 0.0
 
-
-
 # --------------------------------
 # Supplier Returns
 # --------------------------------
@@ -944,6 +942,209 @@ class ReturnDestination(db.Model):
 
     def __repr__(self):
         return f"<ReturnDestination id={self.id} name={self.name!r} active={self.is_active}>"
+
+# --------------------------------
+# Accounting: Supplier Statements
+# --------------------------------
+class SupplierStatement(db.Model):
+    __tablename__ = "supplier_statement"
+    __table_args__ = (
+        db.Index("ix_statement_supplier_period", "supplier_name", "statement_period"),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    supplier_name = db.Column(db.String(200), nullable=False, index=True)
+    statement_period = db.Column(db.Date, nullable=False, index=True)
+
+    account_number = db.Column(db.String(64), nullable=True)
+    balance_due = db.Column(db.Float, nullable=False, default=0.0)
+
+    source_file = db.Column(db.String(512), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default="draft", index=True)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+
+    lines = db.relationship(
+        "SupplierStatementLine",
+        back_populates="statement",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+
+class SupplierStatementLine(db.Model):
+    __tablename__ = "supplier_statement_line"
+    __table_args__ = (
+        db.Index("ix_ssl_supplier_doc", "supplier_name", "document_number"),
+        db.Index("ix_ssl_type_date", "line_type", "document_date"),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    statement_id = db.Column(
+        db.Integer,
+        db.ForeignKey("supplier_statement.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    supplier_name = db.Column(db.String(200), nullable=False, index=True)
+
+    line_type = db.Column(db.String(20), nullable=False, index=True)
+    # invoice / credit / payment / return
+
+    document_number = db.Column(db.String(64), nullable=False, index=True)
+    document_date = db.Column(db.Date, nullable=True, index=True)
+    due_date = db.Column(db.Date, nullable=True)
+
+    description = db.Column(db.String(255), nullable=True)
+
+    invoice_amount = db.Column(db.Float, nullable=False, default=0.0)
+    credit_amount = db.Column(db.Float, nullable=False, default=0.0)
+    open_balance = db.Column(db.Float, nullable=False, default=0.0)
+
+    raw_text = db.Column(db.Text, nullable=True)
+
+    statement = db.relationship(
+        "SupplierStatement",
+        back_populates="lines",
+        lazy="joined",
+    )
+
+    @property
+    def signed_amount(self) -> float:
+        if (self.line_type or "").lower() in {"credit", "payment", "return"}:
+            return -abs(float(self.credit_amount or 0.0))
+        return float(self.invoice_amount or 0.0)
+
+# --------------------------------
+# Accounting: Technician Ledger
+# --------------------------------
+class TechnicianLedgerEntry(db.Model):
+    __tablename__ = "technician_ledger_entry"
+    __table_args__ = (
+        db.Index("ix_tle_tech_date", "technician_name", "entry_date"),
+        db.Index("ix_tle_tech_status", "technician_name", "status"),
+        db.Index("ix_tle_supplier_invoice", "supplier_name", "supplier_invoice"),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    technician_name = db.Column(db.String(120), nullable=False, index=True)
+    entry_date = db.Column(db.Date, nullable=False, index=True)
+
+    entry_type = db.Column(db.String(20), nullable=False, index=True)
+    # OPENING / CHARGE / RETURN / ADJUSTMENT
+
+    status = db.Column(db.String(20), nullable=False, default="open", index=True)
+    # open / partial / paid / void
+
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    paid_amount = db.Column(db.Float, nullable=False, default=0.0)
+    remaining_amount = db.Column(db.Float, nullable=False, default=0.0)
+
+    supplier_name = db.Column(db.String(200), nullable=True, index=True)
+    supplier_invoice = db.Column(db.String(64), nullable=True, index=True)
+    job_number = db.Column(db.String(120), nullable=True, index=True)
+
+    issued_part_record_id = db.Column(
+        db.Integer,
+        db.ForeignKey("issued_part_record.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    reference_type = db.Column(db.String(40), nullable=True, index=True)
+    reference_id = db.Column(db.Integer, nullable=True, index=True)
+
+    note = db.Column(db.String(500), nullable=True)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+
+
+class TechnicianPayment(db.Model):
+    __tablename__ = "technician_payment"
+    __table_args__ = (
+        db.Index("ix_tp_tech_date", "technician_name", "payment_date"),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    technician_name = db.Column(db.String(120), nullable=False, index=True)
+    payment_date = db.Column(db.Date, nullable=False, index=True)
+
+    amount = db.Column(db.Float, nullable=False)
+    unapplied_amount = db.Column(db.Float, nullable=False, default=0.0)
+
+    method = db.Column(db.String(40), nullable=True)
+    # cash / zelle / check / payroll / other
+
+    reference = db.Column(db.String(120), nullable=True)
+    note = db.Column(db.String(500), nullable=True)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+
+    allocations = db.relationship(
+        "TechnicianPaymentAllocation",
+        back_populates="payment",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+
+class TechnicianPaymentAllocation(db.Model):
+    __tablename__ = "technician_payment_allocation"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "payment_id",
+            "ledger_entry_id",
+            name="uq_payment_ledger_allocation",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    payment_id = db.Column(
+        db.Integer,
+        db.ForeignKey("technician_payment.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    ledger_entry_id = db.Column(
+        db.Integer,
+        db.ForeignKey("technician_ledger_entry.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    amount = db.Column(db.Float, nullable=False)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    payment = db.relationship(
+        "TechnicianPayment",
+        back_populates="allocations",
+        lazy="joined",
+    )
+
+    ledger_entry = db.relationship(
+        "TechnicianLedgerEntry",
+        lazy="joined",
+    )
 
 
 # --- Backwards-compatible aliases ---
