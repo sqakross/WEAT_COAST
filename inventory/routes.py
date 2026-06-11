@@ -2377,6 +2377,7 @@ def api_stock_hint_bulk():
                 "location": None,
                 "unit_cost": None,
                 "name": None,
+                "part_name": None,
                 "part_number": "",
             }
             continue
@@ -2412,6 +2413,7 @@ def api_stock_hint_bulk():
             "location": "/".join(locations) if locations else None,
             "unit_cost": unit_cost,
             "name": name,
+            "part_name": name,
         }
 
     return jsonify({"ok": True, "items": result})

@@ -1358,9 +1358,14 @@ function applyHintResult(tr, j){
   setIssueEnabled(tr, isStock);
 
   const nameGuess = flat.part_name || flat.name || flat.title || flat.description;
-  if (nameInp && (!nameInp.value || !nameInp.value.trim()) && nameGuess){
-    nameInp.value = String(nameGuess).trim().slice(0,120);
-  }
+
+    if (nameInp) {
+      if (nameGuess) {
+        nameInp.value = String(nameGuess).trim().slice(0,120).toUpperCase();
+      } else {
+        nameInp.value = '';
+      }
+    }
 
   const curCost = parseFloat(costInp?.value || '0') || 0;
   const costGuess =
@@ -1703,6 +1708,22 @@ function clearHintCacheForRow(tr){
     )){
       clearHintCacheForRow(tr);
 
+    if (
+      e.target.classList.contains('pn') ||
+      e.target.classList.contains('alt-pn')
+    ) {
+      const nameInp = tr.querySelector('.part-name');
+      const costInp = tr.querySelector('.unit-cost');
+      const hintEl = tr.querySelector('.hint');
+
+      if (nameInp) nameInp.value = '';
+      if (costInp) costInp.value = '0.00';
+      if (hintEl) hintEl.textContent = '...';
+
+      const card = tr.closest('.card');
+      if (card) recomputeUnitSubtotal(card);
+    }
+
       const pn = (
         tr.querySelector('.pn')?.value ||
         tr.querySelector('.alt-pn')?.value ||
@@ -1716,7 +1737,7 @@ function clearHintCacheForRow(tr){
         return;
       }
 
-      scheduleFetchHint(tr, 1200);
+      scheduleFetchHint(tr, 350);
     }
   });
 
