@@ -405,7 +405,7 @@ def create_ledger_charge_from_issued_record(
     note_prefix: str | None = None,
 ):
     """
-    Create CHARGE ledger entry from IssuedPartRecord.
+    Create or refresh CHARGE ledger entry from IssuedPartRecord.
     Does NOT commit.
     """
 
@@ -422,28 +422,6 @@ def create_ledger_charge_from_issued_record(
 
     if qty <= 0 or amount <= 0:
         return None
-
-    existing = TechnicianLedgerEntry.query.filter_by(
-        issued_part_record_id=record.id,
-        entry_type="CHARGE",
-    ).first()
-
-    if existing:
-        existing_amount = round(float(existing.amount or 0.0), 2)
-        new_amount = round(float(amount or 0.0), 2)
-
-        existing.supplier_invoice = str(supplier_invoice).strip() if supplier_invoice else existing.supplier_invoice
-        existing.job_number = str(job_number).strip() if job_number else existing.job_number
-        existing.note = note[:500]
-
-        # If no payment was applied yet, safely refresh the charge amount
-        if float(existing.paid_amount or 0.0) <= 0:
-            existing.amount = new_amount
-            existing.remaining_amount = new_amount
-            existing.status = "open" if new_amount > 0 else "paid"
-
-        # If payment already exists, do not rewrite accounting history
-        return existing
 
     issue_date = getattr(record, "issue_date", None)
 
@@ -470,6 +448,32 @@ def create_ledger_charge_from_issued_record(
         note = f"{note} invoice #{invoice_number}"
     if work_order_id:
         note = f"{note} / WO #{work_order_id}"
+
+    existing = TechnicianLedgerEntry.query.filter_by(
+        issued_part_record_id=record.id,
+        entry_type="CHARGE",
+    ).first()
+
+    if existing:
+        existing.supplier_invoice = (
+            str(supplier_invoice).strip()
+            if supplier_invoice
+            else existing.supplier_invoice
+        )
+        existing.job_number = (
+            str(job_number).strip()
+            if job_number
+            else existing.job_number
+        )
+        existing.note = note[:500]
+
+        # Safe refresh only if no payment was applied yet
+        if float(existing.paid_amount or 0.0) <= 0:
+            existing.amount = amount
+            existing.remaining_amount = amount
+            existing.status = "open" if amount > 0 else "paid"
+
+        return existing
 
     entry = TechnicianLedgerEntry(
         technician_name=str(technician).strip(),
