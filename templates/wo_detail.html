@@ -926,7 +926,7 @@
             </div>
 
             {% if ev.message %}
-              {% set audit_msg = ev.message_json if ev.message_json is defined else ev.message %}
+              {% set audit_msg = ev.message_json if (ev.message_json is defined and ev.message_json) else ev.message %}
 
 <div class="audit-message">
 

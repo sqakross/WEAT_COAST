@@ -1359,12 +1359,8 @@ function applyHintResult(tr, j){
 
   const nameGuess = flat.part_name || flat.name || flat.title || flat.description;
 
-    if (nameInp) {
-      if (nameGuess) {
-        nameInp.value = String(nameGuess).trim().slice(0,120).toUpperCase();
-      } else {
-        nameInp.value = '';
-      }
+    if (nameInp && nameGuess) {
+      nameInp.value = String(nameGuess).trim().slice(0,120).toUpperCase();
     }
 
   const curCost = parseFloat(costInp?.value || '0') || 0;
@@ -2117,10 +2113,9 @@ window.addEventListener('pageshow', () => {
     return result;
   }
 
-  function waitForAutoIssueRowsReady(saved, timeoutMs = 5000){
+  function waitForAutoIssueRowsReady(saved, timeoutMs = 2000){
     return new Promise(resolve => {
       const started = Date.now();
-
       function check(){
         const rows = getSelectedAutoIssueRows(saved);
 
@@ -2199,37 +2194,37 @@ window.addEventListener('pageshow', () => {
   }
 
     async function runAutoIssueAfterSave(){
-    if (!CURRENT_WO_ID || !issueBtn) return;
+      if (!CURRENT_WO_ID || !issueBtn) return;
 
-    const key = 'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID;
-    const saved = sessionStorage.getItem(key);
-    if (!saved) return;
+      const key = 'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID;
+      const saved = sessionStorage.getItem(key);
+      if (!saved) return;
 
-    const rows = await refreshAutoIssueRowsHints(saved);
-    const isReady = await waitForAutoIssueRowsReady(saved, 5000);
+      const rows = await refreshAutoIssueRowsHints(saved);
+      const isReady = await waitForAutoIssueRowsReady(saved, 2000);
 
-    let checkedCount = 0;
+      let checkedCount = 0;
 
-    rows.forEach(tr => {
-      const cb = tr.querySelector('.issue-check');
-      if (cb && !cb.disabled) {
-        cb.checked = true;
-        checkedCount++;
+      rows.forEach(tr => {
+        const cb = tr.querySelector('.issue-check');
+        if (cb && !cb.disabled) {
+          cb.checked = true;
+          checkedCount++;
+        }
+      });
+
+      if (!isReady || !checkedCount) {
+        sessionStorage.removeItem(key);
+        alert('Saved changes, but selected parts are not available for issue. Please check Stock Hint and click Issue selected again.');
+        return;
       }
-    });
 
-    if (!isReady || !checkedCount) {
       sessionStorage.removeItem(key);
-      alert('Saved changes, but selected parts are not available for issue. Please check Stock Hint and click Issue selected again.');
-      return;
+
+      window.WCCR_AUTO_ISSUE_RUNNING = true;
+      isDirty = false;
+      issueBtn.click();
     }
-
-    sessionStorage.removeItem(key);
-
-    window.WCCR_AUTO_ISSUE_RUNNING = true;
-    isDirty = false;
-    issueBtn.click();
-  }
 
   document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
   const autoIssueKey = 'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID;

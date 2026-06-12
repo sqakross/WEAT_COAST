@@ -230,7 +230,7 @@ def pick_receipt_line_for_issue(
         qg = (
             db.session.query(GoodsReceiptLine)
             .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
-            .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+            .filter(GoodsReceiptLine.part_number == pn)
             .filter(_is_posted(GoodsReceipt.status))
             .filter(func.ltrim(func.coalesce(GoodsReceipt.invoice_number, ""), "0") == inv)
         )
@@ -295,7 +295,7 @@ def pick_receipt_line_for_issue(
     q = (
         db.session.query(GoodsReceiptLine)
         .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
-        .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+        .filter(GoodsReceiptLine.part_number == pn)
         .filter(_is_posted(GoodsReceipt.status))
     )
 

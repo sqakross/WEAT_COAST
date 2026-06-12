@@ -2664,6 +2664,18 @@ def _issue_records_bulk(
 
     issue_date = datetime.utcnow()
     created_records: list[IssuedPartRecord] = []
+    receipt_pick_cache = {}
+
+    part_ids = sorted({
+        int(it["part_id"])
+        for it in items
+        if it.get("part_id")
+    })
+
+    parts_by_id = {}
+    if part_ids:
+        parts = Part.query.filter(Part.id.in_(part_ids)).all()
+        parts_by_id = {int(p.id): p for p in parts}
 
     for it in items:
         part_id = int(it["part_id"])
@@ -2671,7 +2683,7 @@ def _issue_records_bulk(
         if qty <= 0:
             continue
 
-        part = Part.query.get(part_id)
+        part = parts_by_id.get(part_id)
         if not part:
             continue
 
@@ -2698,11 +2710,17 @@ def _issue_records_bulk(
 
         if pn:
             # ✅ STOCK => prefer_latest=True (LATEST lot)
-            lot_line, lot_src = pick_receipt_line_for_issue(
-                part_number=pn,
-                inv_ref=inv_ref,
-                prefer_latest=is_stock,
-            )
+            cache_key = (pn, inv_ref or "", bool(is_stock))
+
+            if cache_key in receipt_pick_cache:
+                lot_line, lot_src = receipt_pick_cache[cache_key]
+            else:
+                lot_line, lot_src = pick_receipt_line_for_issue(
+                    part_number=pn,
+                    inv_ref=inv_ref,
+                    prefer_latest=is_stock,
+                )
+                receipt_pick_cache[cache_key] = (lot_line, lot_src)
 
             if inv_ref:
                 # STRICT: invoice provided -> MUST match posted receipt invoice
@@ -2714,11 +2732,17 @@ def _issue_records_bulk(
             else:
                 # STOCK => if picker returned nothing, one more try without flags (safe)
                 if lot_line is None:
-                    lot_line, lot_src = pick_receipt_line_for_issue(
-                        part_number=pn,
-                        inv_ref=None,
-                        prefer_latest=True,
-                    )
+                    cache_key = (pn, "", True)
+
+                    if cache_key in receipt_pick_cache:
+                        lot_line, lot_src = receipt_pick_cache[cache_key]
+                    else:
+                        lot_line, lot_src = pick_receipt_line_for_issue(
+                            part_number=pn,
+                            inv_ref=None,
+                            prefer_latest=True,
+                        )
+                        receipt_pick_cache[cache_key] = (lot_line, lot_src)
 
             if lot_line is not None:
                 chosen_receipt_line_id = int(getattr(lot_line, "id", 0) or 0) or None
@@ -8137,16 +8161,11 @@ def wo_issue_instock(wo_id):
 
         if issued_row_ids or new_records or items_to_issue:
             _touch_wo()
-            db.session.commit()
 
         # autostatus
         if set_status == "done":
-            try:
-                wo.status = "done"
-                _touch_wo()
-                db.session.commit()
-            except Exception:
-                db.session.rollback()
+            wo.status = "done"
+            _touch_wo()
 
         # create invoice/batch if there are new records
         if new_records:
@@ -8186,11 +8205,12 @@ def wo_issue_instock(wo_id):
 
                 _add_wo_audit(
                     action="issued",
-                    message=f"Issued invoice #{inv_no}: " + "; ".join(issued_summary),
+                    message=f"Created issue invoice #{inv_no}: " + "; ".join(issued_summary),
                     meta={
                         "invoice_number": inv_no,
                         "issued_row_ids": issued_row_ids,
                         "items": issued_summary,
+                        "audit_reason": "issue_invoice",
                     },
                 )
 
@@ -8212,7 +8232,16 @@ def wo_issue_instock(wo_id):
                 db.session.rollback()
                 # fallback below
 
+        try:
+            if issued_row_ids or new_records or items_to_issue:
+                db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Error saving issue result: {e}", "danger")
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
         # grouped fallback
+
         d = (issue_date or datetime.utcnow()).date().isoformat()
         params = urlencode({
             "start_date": d,
@@ -8340,10 +8369,11 @@ def wo_issue_instock(wo_id):
 
     _add_wo_audit(
         action="issued",
-        message=f"Issued invoice #{inv_no}: " + "; ".join(issued_summary),
+        message=f"Created issue invoice #{inv_no}: " + "; ".join(issued_summary),
         meta={
             "invoice_number": inv_no,
             "items": issued_summary,
+            "audit_reason": "issue_invoice",
         },
     )
 
@@ -8748,8 +8778,9 @@ def wo_issue_instock_unit(wo_id, unit_id):
     from urllib.parse import urlencode
     from flask import request, session
     from extensions import db
+    from models import WorkOrder, Part, IssuedPartRecord, IssuedBatch, WorkOrderPart, WorkOrderAudit
+    import json
 
-    from models import WorkOrder, Part, IssuedPartRecord, IssuedBatch, WorkOrderPart
     from services.accounting_service import create_ledger_charges_for_records
 
     wo = WorkOrder.query.get_or_404(wo_id)
@@ -8878,6 +8909,25 @@ def wo_issue_instock_unit(wo_id, unit_id):
             default_job=wo.canonical_job,
             note_prefix="WO unit issue",
         )
+
+        issued_summary = []
+        for r in new_records:
+            pn = getattr(getattr(r, "part", None), "part_number", None) or str(r.part_id)
+            name = getattr(getattr(r, "part", None), "name", None) or ""
+            issued_summary.append(f"{pn} x{r.quantity}" + (f" — {name}" if name else ""))
+
+        db.session.add(WorkOrderAudit(
+            work_order_id=wo.id,
+            action="issued",
+            message=(f"Created issue invoice #{inv_no}: " + "; ".join(issued_summary))[:255],
+            meta_json=json.dumps({
+                "invoice_number": inv_no,
+                "items": issued_summary,
+                "audit_reason": "issue_invoice",
+            }, ensure_ascii=False),
+            actor_user_id=getattr(current_user, "id", None),
+            actor_username=getattr(current_user, "username", "system"),
+        ))
 
         # ✅ apply issued_qty to WorkOrderPart rows of this unit; clear bo/ord only when fully satisfied
         now = datetime.utcnow()
@@ -14803,18 +14853,18 @@ def _norm_cols(df):
         })
     return out
 
-@inventory_bp.get("/receiving/import")
-@login_required
-def receiving_import_form():
-    """Форма загрузки PDF (или CSV, если захочешь)."""
-    return render_template("receiving_import_upload.html")
+# @inventory_bp.get("/receiving/import")
+# @login_required
+# def receiving_import_form():
+#     """Форма загрузки PDF (или CSV, если захочешь)."""
+#     return render_template("receiving_import_upload.html")
 
 @inventory_bp.route("/receiving/import", methods=["GET", "POST"])
 @login_required
 def receiving_import_upload():
-    # legacy path disabled, use /import-parts instead
+    # legacy path disabled, use /import instead
     flash("Use Import Parts page instead.", "warning")
-    return redirect(url_for("inventory.import_parts_upload"))
+    return redirect(url_for("inventory.import_parts"))
 
 @inventory_bp.get("/receiving/<int:batch_id>/attachment")
 @login_required

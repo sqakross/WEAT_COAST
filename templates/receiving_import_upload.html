@@ -71,15 +71,21 @@
     <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_list') }}">Back</a>
   </div>
 </form>
-
 <script>
 (() => {
   const form = document.getElementById('importPdfForm');
   const parseBtn = document.getElementById('parseBtn');
   const fileInput = document.getElementById('pdf_file');
 
+  let isSubmitting = false;
+
   form.addEventListener('submit', (event) => {
-    const file = fileInput.files && fileInput.files[0];
+    if (isSubmitting) {
+      event.preventDefault();
+      return;
+    }
+
+    const file = fileInput.files?.[0];
 
     if (!file) {
       event.preventDefault();
@@ -87,21 +93,26 @@
       return;
     }
 
-    const fileName = file.name.toLowerCase();
+    const isPdf =
+      file.type === 'application/pdf' ||
+      file.name.toLowerCase().endsWith('.pdf');
 
-    if (!fileName.endsWith('.pdf')) {
+    if (!isPdf) {
       event.preventDefault();
       alert('Only PDF files are allowed.');
       return;
     }
 
-    form.querySelectorAll('.js-trim').forEach(input => {
+    for (const input of form.querySelectorAll('.js-trim')) {
       input.value = input.value.trim();
-    });
+    }
 
+    isSubmitting = true;
     parseBtn.disabled = true;
     parseBtn.textContent = 'Parsing...';
   });
 })();
+</script>
+
 </script>
 {% endblock %}

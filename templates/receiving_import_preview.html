@@ -117,107 +117,84 @@
   const tbody = document.getElementById('rowsTbody');
   const addRowBtn = document.getElementById('addRowBtn');
 
+  let isSubmitting = false;
+
   function renumberRows() {
-    const rows = tbody.querySelectorAll('tr');
+    const rows = tbody.rows;
 
-    rows.forEach((tr, index) => {
-      tr.querySelectorAll('input[name^="rows["]').forEach(input => {
-        input.name = input.name.replace(/rows\[\d+]/, `rows[${index}]`);
-      });
-    });
-  }
+    for (let i = 0; i < rows.length; i++) {
+      const inputs = rows[i].querySelectorAll('input[name^="rows["]');
 
-  function createInput(name, className = 'form-control', attrs = {}) {
-    const input = document.createElement('input');
-    input.name = name;
-    input.className = className;
-
-    Object.entries(attrs).forEach(([key, value]) => {
-      input.setAttribute(key, value);
-    });
-
-    return input;
-  }
-
-  function createCell(child, className = '') {
-    const td = document.createElement('td');
-
-    if (className) {
-      td.className = className;
+      for (const input of inputs) {
+        input.name = input.name.replace(/rows\[\d+]/, `rows[${i}]`);
+      }
     }
+  }
 
-    td.appendChild(child);
-    return td;
+  function inputHtml(name, className, attrs = '') {
+    return `<input name="${name}" class="${className}" ${attrs}>`;
   }
 
   function addRow() {
-    renumberRows();
-
     const index = tbody.rows.length;
+
     const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${inputHtml(`rows[${index}][part_number]`, 'form-control js-part-number', 'required')}</td>
+      <td>${inputHtml(`rows[${index}][part_name]`, 'form-control js-trim')}</td>
+      <td>${inputHtml(`rows[${index}][quantity]`, 'form-control text-end', 'type="number" min="0" value="1" required')}</td>
+      <td>${inputHtml(`rows[${index}][unit_cost]`, 'form-control text-end', 'type="number" step="0.01" min="0" value="0"')}</td>
+      <td>${inputHtml(`rows[${index}][location]`, 'form-control js-trim')}</td>
+      <td class="text-end">
+        <button type="button" class="btn btn-outline-danger btn-sm js-remove-row">×</button>
+      </td>
+    `;
 
-    tr.appendChild(createCell(
-      createInput(`rows[${index}][part_number]`, 'form-control js-part-number', {
-        required: ''
-      })
-    ));
-
-    tr.appendChild(createCell(
-      createInput(`rows[${index}][part_name]`, 'form-control js-trim')
-    ));
-
-    tr.appendChild(createCell(
-      createInput(`rows[${index}][quantity]`, 'form-control text-end', {
-        type: 'number',
-        min: '0',
-        value: '1',
-        required: ''
-      })
-    ));
-
-    tr.appendChild(createCell(
-      createInput(`rows[${index}][unit_cost]`, 'form-control text-end', {
-        type: 'number',
-        step: '0.01',
-        min: '0',
-        value: '0'
-      })
-    ));
-
-    tr.appendChild(createCell(
-      createInput(`rows[${index}][location]`, 'form-control js-trim')
-    ));
-
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'btn btn-outline-danger btn-sm js-remove-row';
-    removeBtn.textContent = '×';
-
-    tr.appendChild(createCell(removeBtn, 'text-end'));
     tbody.appendChild(tr);
+    tr.querySelector('.js-part-number').focus();
   }
 
   addRowBtn.addEventListener('click', addRow);
 
   tbody.addEventListener('click', (event) => {
     const btn = event.target.closest('.js-remove-row');
-
     if (!btn) return;
 
     btn.closest('tr').remove();
     renumberRows();
   });
 
-  form.addEventListener('submit', () => {
+  form.addEventListener('submit', (event) => {
+    if (isSubmitting) {
+      event.preventDefault();
+      return;
+    }
+
+    if (!tbody.rows.length) {
+      event.preventDefault();
+      alert('Please add at least one row.');
+      return;
+    }
+
     renumberRows();
 
-    form.querySelectorAll('.js-part-number').forEach(input => {
+    for (const input of form.querySelectorAll('.js-part-number')) {
       input.value = input.value.trim().toUpperCase();
-    });
+    }
 
-    form.querySelectorAll('.js-trim').forEach(input => {
+    for (const input of form.querySelectorAll('.js-trim')) {
       input.value = input.value.trim();
-    });
+    }
+
+    isSubmitting = true;
+
+    const submitter = event.submitter;
+    if (submitter) {
+      submitter.disabled = true;
+      submitter.textContent = submitter.value === 'post'
+        ? 'Posting...'
+        : 'Saving...';
+    }
   });
 })();
 </script>

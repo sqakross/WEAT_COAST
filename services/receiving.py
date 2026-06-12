@@ -159,7 +159,23 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
         getattr(batch, "status", None),
     )
 
-    for it in (batch.items or []):
+    items = list(batch.items or [])
+
+    part_numbers = sorted({
+        (getattr(it, "part_number", "") or "").strip().upper()
+        for it in items
+        if (getattr(it, "part_number", "") or "").strip()
+    })
+
+    existing_parts = {}
+
+    if part_numbers:
+        existing_parts = {
+            (p.part_number or "").strip().upper(): p
+            for p in Part.query.filter(func.upper(Part.part_number).in_(part_numbers)).all()
+        }
+
+    for it in items:
         pn_raw = (getattr(it, "part_number", "") or "").strip()
         qty_incoming = int(getattr(it, "quantity", 0) or 0)
 
@@ -171,7 +187,7 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
         # ✅ ensure cost fields on line
         base_cost, extra_per_unit, actual_cost = _ensure_line_cost_fields(it)
 
-        part = Part.query.filter(func.upper(Part.part_number) == pn_upper).first()
+        part = existing_parts.get(pn_upper)
 
         if not part:
             raw_kwargs = {
@@ -189,6 +205,7 @@ def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
             part = Part(**kwargs)
             db.session.add(part)
             db.session.flush()
+            existing_parts[pn_upper] = part
 
             before_qty = 0
             current_app.logger.info(
