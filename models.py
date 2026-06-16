@@ -1056,6 +1056,13 @@ class TechnicianLedgerEntry(db.Model):
     supplier_invoice = db.Column(db.String(64), nullable=True, index=True)
     job_number = db.Column(db.String(120), nullable=True, index=True)
 
+    adjustment_reason = db.Column(db.String(255), nullable=True)
+
+    voided = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    voided_at = db.Column(db.DateTime, nullable=True)
+    voided_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    void_reason = db.Column(db.String(255), nullable=True)
+
     issued_part_record_id = db.Column(
         db.Integer,
         db.ForeignKey("issued_part_record.id", ondelete="SET NULL"),

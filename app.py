@@ -225,9 +225,11 @@ def inject_role_flags():
 # -------------------------------------------------------------------
 from auth.routes import auth_bp
 from inventory.routes import inventory_bp
+from accounting.routes import accounting_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(inventory_bp)
+app.register_blueprint(accounting_bp)
 
 # Supplier Returns — используем один blueprint из routes, префикс задаём здесь
 from supplier_returns.routes import supplier_returns_bp

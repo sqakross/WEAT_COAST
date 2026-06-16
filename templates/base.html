@@ -175,14 +175,30 @@
                href="{{ url_for('inventory.import_parts_upload') }}">IMPORT PARTS</a>
           </li>
 
+          {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
           <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle text-uppercase" href="#" id="compareDropdown" role="button"
-               data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false">COMPARE PARTS</a>
-            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="compareDropdown">
-              <li><a class="dropdown-item" href="{{ url_for('inventory.download_marcone_report') }}">📥 Marcone Report</a></li>
-              <li><a class="dropdown-item" href="{{ url_for('inventory.download_reliable_report') }}">📥 Reliable Report</a></li>
+            <a class="nav-link dropdown-toggle text-uppercase{% if request.endpoint and request.endpoint.startswith('accounting.') %} active{% endif %}"
+               href="#"
+               id="accountingDropdown"
+               role="button"
+               data-bs-toggle="dropdown"
+               data-bs-display="static"
+               aria-expanded="false">
+              ACCOUNTING
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="accountingDropdown">
+              <li>
+                <a class="dropdown-item" href="{{ url_for('accounting.technician_balances') }}">
+                  💰 Technician Balances
+                </a>
+              </li>
+              <li><hr class="dropdown-divider"></li>
+              <li><span class="dropdown-item text-muted">Technician Ledger</span></li>
+              <li><span class="dropdown-item text-muted">Payments</span></li>
+              <li><span class="dropdown-item text-muted">Supplier Statements</span></li>
             </ul>
           </li>
+          {% endif %}
 
           {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
           <li class="nav-item">

@@ -1,10 +1,9 @@
 from __future__ import annotations
-
-from dataclasses import dataclass
 from datetime import date
 from sqlalchemy import func
 from extensions import db
 from models import IssuedPartRecord, IssuedBatch, Part
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -527,3 +526,166 @@ def create_ledger_charges_for_records(
             entries.append(entry)
 
     return entries
+
+@dataclass(frozen=True)
+class TechnicianBalanceRow:
+    technician: str
+    total_amount: float
+    paid_amount: float
+    remaining_amount: float
+    open_count: int
+
+
+def get_technician_balances() -> list[TechnicianBalanceRow]:
+    from models import TechnicianLedgerEntry
+
+    rows = (
+        db.session.query(
+            TechnicianLedgerEntry.technician_name.label("technician"),
+            func.coalesce(func.sum(TechnicianLedgerEntry.amount), 0.0).label("total_amount"),
+            func.coalesce(func.sum(TechnicianLedgerEntry.paid_amount), 0.0).label("paid_amount"),
+            func.coalesce(func.sum(TechnicianLedgerEntry.remaining_amount), 0.0).label("remaining_amount"),
+            func.count(
+                func.distinct(TechnicianLedgerEntry.supplier_invoice)
+            ).label("open_count"),
+        )
+        .filter(TechnicianLedgerEntry.status.in_(["open", "partial"]))
+        .group_by(TechnicianLedgerEntry.technician_name)
+        .order_by(func.sum(TechnicianLedgerEntry.remaining_amount).desc())
+        .all()
+    )
+
+    return [
+        TechnicianBalanceRow(
+            technician=r.technician or "UNKNOWN",
+            total_amount=round(float(r.total_amount or 0.0), 2),
+            paid_amount=round(float(r.paid_amount or 0.0), 2),
+            remaining_amount=round(float(r.remaining_amount or 0.0), 2),
+            open_count=int(r.open_count or 0),
+        )
+        for r in rows
+    ]
+
+def create_technician_adjustment(
+    technician_name: str,
+    amount: float,
+    adjustment_type: str,
+    reason: str | None = None,
+    created_by: int | None = None,
+):
+    """
+    Create manual technician accounting adjustment.
+    Does NOT touch old ledger entries.
+    """
+
+    from datetime import date
+    from extensions import db
+    from models import TechnicianLedgerEntry
+
+    tech = (technician_name or "").strip()
+    adj_type = (adjustment_type or "").strip().upper()
+    amt = round(float(amount or 0.0), 2)
+
+    allowed = {
+        "OPENING_BALANCE",
+        "ADJUSTMENT_PLUS",
+        "ADJUSTMENT_MINUS",
+    }
+
+    if not tech:
+        raise ValueError("Technician name is required")
+
+    if adj_type not in allowed:
+        raise ValueError("Invalid adjustment type")
+
+    if amt <= 0:
+        raise ValueError("Amount must be greater than zero")
+
+    if adj_type == "ADJUSTMENT_MINUS":
+        amt = -abs(amt)
+    else:
+        amt = abs(amt)
+
+    entry = TechnicianLedgerEntry(
+        technician_name=tech,
+        entry_date=date.today(),
+        entry_type=adj_type,
+        status="open",
+        amount=amt,
+        paid_amount=0.0,
+        remaining_amount=amt,
+        supplier_name=None,
+        supplier_invoice=None,
+        job_number=None,
+        issued_part_record_id=None,
+        reference_type="manual_adjustment",
+        reference_id=None,
+        note=(reason or adj_type)[:500],
+        adjustment_reason=(reason or "")[:255],
+        created_by=created_by,
+    )
+
+    db.session.add(entry)
+    db.session.commit()
+
+    return entry
+
+@dataclass(frozen=True)
+class TechnicianLedgerRow:
+    id: int
+    entry_date: str
+    entry_type: str
+    supplier_name: str | None
+    supplier_invoice: str | None
+    job_number: str | None
+    amount: float
+    paid_amount: float
+    remaining_amount: float
+    status: str
+    note: str | None
+
+
+def get_technician_ledger(
+    technician_name: str,
+) -> list[TechnicianLedgerRow]:
+    from models import TechnicianLedgerEntry
+
+    tech = (technician_name or "").strip()
+
+    if not tech:
+        return []
+
+    rows = (
+        TechnicianLedgerEntry.query
+        .filter(
+            TechnicianLedgerEntry.technician_name == tech,
+            TechnicianLedgerEntry.voided == False,
+        )
+        .order_by(
+            TechnicianLedgerEntry.entry_date.desc(),
+            TechnicianLedgerEntry.created_at.desc(),
+            TechnicianLedgerEntry.id.desc(),
+        )
+        .all()
+    )
+
+    return [
+        TechnicianLedgerRow(
+            id=r.id,
+            entry_date=(
+                r.entry_date.strftime("%m/%d/%Y")
+                if r.entry_date
+                else ""
+            ),
+            entry_type=r.entry_type or "",
+            supplier_name=r.supplier_name,
+            supplier_invoice=r.supplier_invoice,
+            job_number=r.job_number,
+            amount=round(float(r.amount or 0.0), 2),
+            paid_amount=round(float(r.paid_amount or 0.0), 2),
+            remaining_amount=round(float(r.remaining_amount or 0.0), 2),
+            status=r.status or "",
+            note=r.note,
+        )
+        for r in rows
+    ]
