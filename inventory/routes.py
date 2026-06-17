@@ -8024,10 +8024,11 @@ def wo_issue_instock(wo_id):
             part = _pick_part_for_line(pn, getattr(line, "warehouse", None))
 
             issued_so_far = int(line.issued_qty or 0)
-            if issued_so_far >= qty_req:
-                continue
 
             if item_type == "tool":
+                # если tool уже реально привязан к tool_asset — повторно не выдаём эту же строку
+                if issued_so_far >= qty_req and getattr(line, "tool_asset_id", None):
+                    continue
                 now_tool = datetime.utcnow()
 
                 if not (wo.technician_name or "").strip():
@@ -8141,10 +8142,13 @@ def wo_issue_instock(wo_id):
                 _touch_wo()
                 continue
 
-            # ✅ INV# snapshot from UI (even without Save)
+            if issued_so_far >= qty_req:
+                continue
+
+            # INV# snapshot from UI (even without Save)
             inv_now = (inv_now_by_line_id.get(int(line.id)) or "").strip().upper()[:32]
 
-            # ✅ if user typed INV# but didn't Save — save it now
+            # if user typed INV# but didn't Save — save it now
             if inv_now:
                 try:
                     line.invoice_number = inv_now
@@ -8434,6 +8438,35 @@ def wo_issue_instock(wo_id):
         if not pn:
             continue
 
+        pn = (r.get("part_number") or "").strip().upper()
+        if not pn:
+            continue
+
+        wop_check = (
+            WorkOrderPart.query
+            .filter(
+                WorkOrderPart.work_order_id == wo.id,
+                func.upper(WorkOrderPart.part_number) == pn
+            )
+            .order_by(WorkOrderPart.id.asc())
+            .first()
+        )
+
+        if (
+                wop_check and
+                (getattr(wop_check, "item_type", "part") or "part").strip().lower() == "tool"
+        ):
+            continue
+
+        pn_issue_map[pn] = pn_issue_map.get(pn, 0) + issue_now
+
+        part = Part.query.filter(
+            func.upper(Part.part_number) == pn
+        ).first()
+
+        if not part:
+            continue
+
         pn_issue_map[pn] = pn_issue_map.get(pn, 0) + issue_now
 
         part = Part.query.filter(func.upper(Part.part_number) == pn).first()
@@ -8580,12 +8613,93 @@ def wo_issue_instock(wo_id):
 
     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
+@inventory_bp.post("/tools/<int:tool_id>/return", endpoint="tool_return")
+@login_required
+def tool_return(tool_id):
+    from datetime import datetime
+    from flask import flash, redirect, url_for
+    from sqlalchemy import func
+    from extensions import db
+    from models import ToolAsset, ToolMovement
+
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.tools_list"))
+
+    tool = ToolAsset.query.get_or_404(tool_id)
+
+    assigned_qty = (
+        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+        .filter(ToolMovement.tool_id == tool.id, ToolMovement.action == "assigned")
+        .scalar() or 0
+    )
+
+    returned_qty = (
+        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+        .filter(ToolMovement.tool_id == tool.id, ToolMovement.action == "returned")
+        .scalar() or 0
+    )
+
+    open_qty = max(int(assigned_qty or 0) - int(returned_qty or 0), 0)
+
+    if open_qty <= 0:
+        flash(f"Tool {tool.tool_number} has nothing to return.", "warning")
+        return redirect(url_for("inventory.tools_list"))
+
+    last_assignment = (
+        ToolMovement.query
+        .filter(
+            ToolMovement.tool_id == tool.id,
+            ToolMovement.action == "assigned",
+        )
+        .order_by(ToolMovement.id.desc())
+        .first()
+    )
+
+    now = datetime.utcnow()
+
+    db.session.add(ToolMovement(
+        tool_id=tool.id,
+        work_order_id=getattr(last_assignment, "work_order_id", None),
+        technician_id=getattr(last_assignment, "technician_id", None),
+        technician_name=getattr(last_assignment, "technician_name", None),
+        action="returned",
+        quantity=1,
+        from_status="assigned",
+        to_status="available",
+        note="Returned to TOOLS",
+        actor_user_id=getattr(current_user, "id", None),
+        actor_username=getattr(current_user, "username", "system"),
+        created_at=now,
+    ))
+
+    new_open_qty = open_qty - 1
+
+    if new_open_qty <= 0:
+        tool.status = "available"
+        tool.location = "TOOLS"
+        tool.current_technician_id = None
+        tool.current_technician_name = None
+        tool.current_work_order_id = None
+
+    tool.updated_at = now
+    db.session.add(tool)
+
+    try:
+        db.session.commit()
+        flash(f"Returned 1 x {tool.tool_number} to TOOLS.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Return failed: {e}", "danger")
+
+    return redirect(url_for("inventory.tools_list"))
+
 @inventory_bp.get("/tools", endpoint="tools_list")
 @login_required
 def tools_list():
     from flask import request, render_template
     from sqlalchemy import func, or_, case
-    from models import ToolAsset, ToolMovement
+    from models import ToolAsset, ToolMovement, ToolMovement
 
     status = (request.args.get("status") or "").strip().lower()
     q = (request.args.get("q") or "").strip()
@@ -8662,12 +8776,55 @@ def tools_list():
             "location": tool.location or "TOOLS",
         })
 
+        assigned_by_tool = {}
+
+        for t in tools:
+            tool_id = int(t["id"])
+
+            rows = (
+                db.session.query(
+                    ToolMovement.technician_name,
+                    func.coalesce(func.sum(ToolMovement.quantity), 0)
+                )
+                .filter(
+                    ToolMovement.tool_id == tool_id,
+                    ToolMovement.action == "assigned"
+                )
+                .group_by(ToolMovement.technician_name)
+                .all()
+            )
+
+            returned = (
+                db.session.query(
+                    ToolMovement.technician_name,
+                    func.coalesce(func.sum(ToolMovement.quantity), 0)
+                )
+                .filter(
+                    ToolMovement.tool_id == tool_id,
+                    ToolMovement.action == "returned"
+                )
+                .group_by(ToolMovement.technician_name)
+                .all()
+            )
+
+            ret_map = {name: int(qty or 0) for name, qty in returned}
+            assigned_by_tool[tool_id] = []
+
+            for tech, qty in rows:
+                qty = int(qty or 0) - ret_map.get(tech, 0)
+                if qty > 0:
+                    assigned_by_tool[tool_id].append({
+                        "tech": tech or "—",
+                        "qty": qty,
+                    })
+
     return render_template(
         "tools.html",
         tools=tools,
         stats=stats,
         status=status,
         q=q,
+        assigned_by_tool=assigned_by_tool,
     )
 
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")

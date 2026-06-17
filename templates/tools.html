@@ -21,6 +21,7 @@
       <th class="text-end">Assigned</th>
       <th class="text-end">Free</th>
       <th>Status</th>
+      <th>Technician</th>
       <th>Location</th>
       <th></th>
     </tr>
@@ -35,10 +36,28 @@
       <td class="text-end">{{ t.assigned_qty }}</td>
       <td class="text-end">{{ t.free_qty }}</td>
       <td>{{ t.status }}</td>
-      <td>{{ t.location or '—' }}</td>
+
+        <td>
+          {% set items = assigned_by_tool.get(t.id, []) %}
+          {% if items %}
+            {% for x in items %}
+              <div>{{ x.tech }} ({{ x.qty }})</div>
+            {% endfor %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+
+<td>{{ t.location or '—' }}</td>
       <td>
         {% if t.assigned_qty > 0 %}
-          <button class="btn btn-sm btn-outline-warning" disabled>Return</button>
+          <form method="post"
+              action="{{ url_for('inventory.tool_return', tool_id=t.id) }}"
+              onsubmit="return confirm('Return 1 x {{ t.tool_number }} to TOOLS?');">
+          <button class="btn btn-sm btn-outline-warning">
+            Return
+          </button>
+        </form>
         {% endif %}
       </td>
     </tr>
