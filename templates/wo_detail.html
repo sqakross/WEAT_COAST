@@ -12,6 +12,29 @@
     white-space: nowrap;
     vertical-align: middle;
   }
+
+  .item-type-badge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:22px;
+  height:20px;
+  border-radius:4px;
+  font-size:11px;
+  font-weight:800;
+}
+
+.item-type-badge.type-part{
+  color:#0d6efd;
+  border:1px solid #0d6efd;
+  background:#eef5ff;
+}
+
+.item-type-badge.type-tool{
+  color:#dc3545;
+  border:1px solid #dc3545;
+  background:#fff1f1;
+}
 </style>
 
 {# ---------- header row with actions ---------- #}
@@ -202,6 +225,7 @@
   <table class="table table-sm table-bordered align-middle">
     <thead class="table-light">
       <tr>
+        <th title="P = Part, T = Tool">TYPE</th>
         <th>Part #</th>
         <th>Alt PN#</th>
         <th>Name</th>
@@ -220,6 +244,14 @@
     <tbody>
       {% for row in display_parts %}
         <tr>
+          {% set itype = row.item_type if row.item_type is defined else 'part' %}
+          <td class="text-center">
+            <span class="item-type-badge {{ 'type-tool' if itype == 'tool' else 'type-part' }}"
+                  title="{{ 'Tool' if itype == 'tool' else 'Part' }}">
+              {{ 'T' if itype == 'tool' else 'P' }}
+            </span>
+          </td>
+
           <td><code>{{ row.part_number or '' }}</code></td>
           <td>{{ row.alt_part_numbers or '—' }}</td>
 
@@ -312,7 +344,7 @@
 
     <tfoot>
       <tr class="table-light">
-        <th colspan="5" class="text-end">Grand total (plan):</th>
+        <th colspan="6" class="text-end">Grand total (plan):</th>
         <th class="num">{{ '%.2f'|format(grand_total_display or 0) }}</th>
         <th colspan="6"></th>
       </tr>

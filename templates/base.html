@@ -125,6 +125,12 @@
                href="{{ url_for('inventory.dashboard') }}">DASHBOARD</a>
           </li>
           <li class="nav-item">
+              <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.tools') %} active{% endif %}"
+                 href="{{ url_for('inventory.tools_list') }}">
+                TOOLS
+              </a>
+            </li>
+          <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.add_part' %} active{% endif %}"
                href="{{ url_for('inventory.add_part') }}">ADD PART</a>
           </li>

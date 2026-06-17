@@ -4868,6 +4868,7 @@ def wo_detail(wo_id):
 
         display_parts.append(
             {
+                "item_type": (getattr(r, "item_type", "part") or "part").strip().lower(),
                 "part_number": getattr(r, "part_number", "") or "",
                 "alt_part_numbers": (
                     getattr(r, "alt_part_numbers", "") or
@@ -6672,7 +6673,7 @@ def wo_save():
     # ---------- собрать units[...] и их rows[...] ----------
     re_unit = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
     re_row = re.compile(
-        r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(id|part_number|part_name|quantity|"
+        r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(id|item_type|part_number|part_name|quantity|"
         r"alt_numbers|alt_part_numbers|warehouse|unit_label|supplier|supplier_name|"
         r"invoice_number|eta_date|"
         r"backorder_flag|status|unit_cost|ordered_flag|is_insurance_supplied)\]$"
@@ -6738,6 +6739,11 @@ def wo_save():
 
             row_dict = {
                 "id": _i(r.get("id"), 0) or None,
+                "item_type": (
+                    (r.get("item_type") or "part")
+                    .strip()
+                    .lower()
+                ),
                 "part_number": _clip(pn, 80),
                 "part_name": part_name_clip,
                 "quantity": qty_eff,
@@ -7147,6 +7153,16 @@ def wo_save():
 
             wop.work_order = wo
             wop.unit = unit
+            item_type = (
+                (r.get("item_type") or "part")
+                .strip()
+                .lower()
+            )
+
+            if item_type not in ("part", "tool"):
+                item_type = "part"
+
+            wop.item_type = item_type
             wop.part_number = pn_upper
             wop.part_name = (r.get("part_name") or None)
             wop.quantity = int(r.get("quantity") or 0)
@@ -7775,9 +7791,9 @@ def wo_issue_instock(wo_id):
     # from sqlalchemy import func
     from datetime import datetime
     from flask import request, session
-
     from extensions import db
-    from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit
+    from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit, ToolAsset, \
+        ToolMovement
     import json
     from services.accounting_service import create_ledger_charges_for_records
 
@@ -8004,6 +8020,127 @@ def wo_issue_instock(wo_id):
             if not pn or qty_req <= 0:
                 continue
 
+            item_type = (getattr(line, "item_type", "part") or "part").strip().lower()
+            part = _pick_part_for_line(pn, getattr(line, "warehouse", None))
+
+            issued_so_far = int(line.issued_qty or 0)
+            if issued_so_far >= qty_req:
+                continue
+
+            if item_type == "tool":
+                now_tool = datetime.utcnow()
+
+                if not (wo.technician_name or "").strip():
+                    flash("Select technician before assigning tools.", "danger")
+                    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+                if qty_req != 1:
+                    flash("Tool rows must have quantity 1. Each tool must be a separate asset.", "danger")
+                    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+                tool = ToolAsset.query.filter(
+                    func.upper(ToolAsset.tool_number) == pn
+                ).first()
+
+                try:
+                    tool_total_qty = int(getattr(part, "quantity", 0) or 0) if part else 0
+                except Exception:
+                    tool_total_qty = 0
+
+                if not tool:
+                    tool = ToolAsset(
+                        tool_number=pn,
+                        name=(line.part_name or pn),
+                        quantity=tool_total_qty,
+                        serial_number=None,
+                        status="available",
+                        condition="good",
+                        location="TOOLS",
+                    )
+                    db.session.add(tool)
+                    db.session.flush()
+                else:
+                    if tool_total_qty > int(tool.quantity or 0):
+                        tool.quantity = tool_total_qty
+                    tool.name = tool.name or (line.part_name or pn)
+                    db.session.add(tool)
+
+                old_status = tool.status or "available"
+
+                assigned_qty = (
+                        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+                        .filter(
+                            ToolMovement.tool_id == tool.id,
+                            ToolMovement.action == "assigned",
+                        )
+                        .scalar()
+                        or 0
+                )
+
+                returned_qty = (
+                        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+                        .filter(
+                            ToolMovement.tool_id == tool.id,
+                            ToolMovement.action == "returned",
+                        )
+                        .scalar()
+                        or 0
+                )
+
+                assigned_qty = max(int(assigned_qty or 0) - int(returned_qty or 0), 0)
+                free_qty = max(int(tool.quantity or 0) - assigned_qty, 0)
+
+                if free_qty <= 0:
+                    flash(f"Tool {pn} has no free quantity available.", "danger")
+                    db.session.rollback()
+                    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+                tool.status = "assigned"
+                tool.location = "TECHNICIAN"
+                tool.current_technician_id = getattr(wo, "technician_id", None)
+                tool.current_technician_name = wo.technician_name
+                tool.current_work_order_id = wo.id
+                tool.updated_at = now_tool
+
+                db.session.add(ToolMovement(
+                    tool_id=tool.id,
+                    work_order_id=wo.id,
+                    technician_id=getattr(wo, "technician_id", None),
+                    technician_name=wo.technician_name,
+                    action="assigned",
+                    quantity=1,  # <-- ВОТ ЭТУ СТРОКУ ДОБАВИТЬ
+                    from_status=old_status,
+                    to_status="assigned",
+                    note=f"Assigned from WO #{wo.id}",
+                    actor_user_id=getattr(current_user, "id", None),
+                    actor_username=getattr(current_user, "username", "system"),
+                    created_at=now_tool,
+                ))
+
+                line.tool_asset_id = tool.id
+                line.item_type = "tool"
+                line.issued_qty = 1
+                line.last_issued_at = now_tool
+                line.status = "done"
+                line.line_status = "done"
+                _clear_bo_and_ord(line)
+                db.session.add(line)
+
+                _add_wo_audit(
+                    action="tool_assigned",
+                    message=f"Assigned tool: {pn} — {(line.part_name or pn)}",
+                    meta={
+                        "tool_id": tool.id,
+                        "tool_number": pn,
+                        "technician": wo.technician_name,
+                        "audit_reason": "tool_assigned",
+                    },
+                )
+
+                issued_row_ids.append(line.id)
+                _touch_wo()
+                continue
+
             # ✅ INV# snapshot from UI (even without Save)
             inv_now = (inv_now_by_line_id.get(int(line.id)) or "").strip().upper()[:32]
 
@@ -8020,7 +8157,7 @@ def wo_issue_instock(wo_id):
                 or bool(getattr(line, "is_insurance_supplied", False))
             )
 
-            part = _pick_part_for_line(pn, getattr(line, "warehouse", None))
+
 
             hint_norm = (hint_map.get(pn) or "STOCK").upper()
             try:
@@ -8078,6 +8215,8 @@ def wo_issue_instock(wo_id):
                 })
                 continue
 
+            has_inv = bool(inv_now)
+
             ok = can_issue(pn, qty_req)
 
             if not ok and part:
@@ -8097,7 +8236,7 @@ def wo_issue_instock(wo_id):
             except Exception:
                 pass
 
-            if not ok:
+            if not ok and not has_inv:
                 skipped_rows.append({
                     "id": line.id,
                     "pn": pn,
@@ -8120,6 +8259,23 @@ def wo_issue_instock(wo_id):
             })
             issued_row_ids.append(line.id)
             issued_delta_by_line_id[int(line.id)] = issued_delta_by_line_id.get(int(line.id), 0) + qty_req
+
+        if not issued_row_ids and not items_to_issue and not new_records:
+            if skipped_rows:
+                flash("Selected item(s) are not available in stock. Nothing was issued.", "warning")
+            else:
+                flash("Nothing was issued.", "warning")
+            return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+
+        if issued_row_ids and not items_to_issue and not new_records:
+            try:
+                db.session.commit()
+                flash("Tool(s) assigned to technician.", "success")
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Error assigning tool(s): {e}", "danger")
+
+            return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
         # --- issue stock items in bulk ---
         if items_to_issue:
@@ -8424,6 +8580,96 @@ def wo_issue_instock(wo_id):
 
     return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
 
+@inventory_bp.get("/tools", endpoint="tools_list")
+@login_required
+def tools_list():
+    from flask import request, render_template
+    from sqlalchemy import func, or_, case
+    from models import ToolAsset, ToolMovement
+
+    status = (request.args.get("status") or "").strip().lower()
+    q = (request.args.get("q") or "").strip()
+
+    assigned_qty_expr = func.coalesce(
+        func.sum(
+            case(
+                (ToolMovement.action == "assigned", ToolMovement.quantity),
+                (ToolMovement.action == "returned", -ToolMovement.quantity),
+                else_=0,
+            )
+        ),
+        0,
+    )
+
+    tools_q = (
+        db.session.query(
+            ToolAsset,
+            assigned_qty_expr.label("assigned_qty"),
+        )
+        .outerjoin(ToolMovement, ToolMovement.tool_id == ToolAsset.id)
+        .group_by(ToolAsset.id)
+    )
+
+    if q:
+        like = f"%{q}%"
+        tools_q = tools_q.filter(
+            or_(
+                ToolAsset.tool_number.ilike(like),
+                ToolAsset.name.ilike(like),
+            )
+        )
+
+    rows = tools_q.order_by(ToolAsset.tool_number.asc()).all()
+
+    tools = []
+    stats = {
+        "total": 0,
+        "assigned": 0,
+        "free": 0,
+        "maintenance": 0,
+        "lost": 0,
+        "retired": 0,
+    }
+
+    for tool, assigned_qty in rows:
+        total_qty = int(getattr(tool, "quantity", 0) or 0)
+        assigned_qty = max(int(assigned_qty or 0), 0)
+        free_qty = max(total_qty - assigned_qty, 0)
+
+        computed_status = "available" if free_qty > 0 else "assigned"
+
+        if (tool.status or "") in ("maintenance", "lost", "retired"):
+            computed_status = tool.status
+
+        if status and computed_status != status:
+            continue
+
+        stats["total"] += total_qty
+        stats["assigned"] += assigned_qty
+        stats["free"] += free_qty
+
+        if computed_status in stats:
+            stats[computed_status] += 1
+
+        tools.append({
+            "id": tool.id,
+            "tool_number": tool.tool_number,
+            "name": tool.name,
+            "quantity": total_qty,
+            "assigned_qty": assigned_qty,
+            "free_qty": free_qty,
+            "status": computed_status,
+            "location": tool.location or "TOOLS",
+        })
+
+    return render_template(
+        "tools.html",
+        tools=tools,
+        stats=stats,
+        status=status,
+        q=q,
+    )
+
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
 @login_required
 def wo_edit(wo_id: int):
@@ -8529,6 +8775,7 @@ def wo_edit(wo_id: int):
 
             rows.append({
                 "id": getattr(p, "id", None),
+                "item_type": getattr(p, "item_type", "part"),
                 "part_number": getattr(p, "part_number", "") or "",
                 "part_name": getattr(p, "part_name", "") or "",
                 "quantity": qty_plan,
@@ -8558,6 +8805,7 @@ def wo_edit(wo_id: int):
         if not rows:
             rows = [{
                 "id": None,
+                "item_type": "part",
                 "part_number": "", "part_name": "", "quantity": 1,
                 "alt_numbers": "",
                 "warehouse": "", "supplier": "",
@@ -8778,7 +9026,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
     from urllib.parse import urlencode
     from flask import request, session
     from extensions import db
-    from models import WorkOrder, Part, IssuedPartRecord, IssuedBatch, WorkOrderPart, WorkOrderAudit
+    from models import WorkOrder, Part, IssuedPartRecord, IssuedBatch, WorkOrderPart, WorkOrderAudit, ToolAsset, ToolMovement
     import json
 
     from services.accounting_service import create_ledger_charges_for_records
@@ -8804,50 +9052,173 @@ def wo_issue_instock_unit(wo_id, unit_id):
 
     rows = compute_availability_unit(unit, wo.status)
 
-    items = []
+    selected_ids = []
+    for x in request.form.getlist("issue_ids"):
+        try:
+            selected_ids.append(int(x))
+        except Exception:
+            pass
 
+    if not selected_ids:
+        flash("Select at least one item to issue.", "warning")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    selected_lines = (
+        WorkOrderPart.query
+        .filter(
+            WorkOrderPart.work_order_id == wo.id,
+            WorkOrderPart.unit_id == unit_id,
+            WorkOrderPart.id.in_(selected_ids),
+        )
+        .order_by(WorkOrderPart.id.asc())
+        .all()
+    )
+
+    if not selected_lines:
+        flash("No matching selected lines found.", "warning")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    availability_by_pn = {}
     for r in rows:
-        issue_now = int(r.get("issue_now", 0) or 0)
-        if issue_now <= 0:
+        pn_key = (r.get("part_number") or "").strip().upper()
+        if pn_key:
+            availability_by_pn[pn_key] = r
+
+    items = []
+    tool_assignments = []
+
+    for wop in selected_lines:
+        if int(wop.issued_qty or 0) >= int(wop.quantity or 0):
             continue
 
-        pn = (r.get("part_number") or "").strip().upper()
+        pn = (wop.part_number or "").strip().upper()
         if not pn:
             continue
 
-        part = Part.query.filter(func.upper(Part.part_number) == pn).first()
-        if not part:
+        item_type = (getattr(wop, "item_type", "part") or "part").strip().lower()
+        qty_left = max(int(wop.quantity or 0) - int(wop.issued_qty or 0), 0)
+
+        avail_row = availability_by_pn.get(pn) or {}
+        issue_now = int(avail_row.get("issue_now", 0) or 0)
+
+        if item_type == "tool":
+            if qty_left != 1:
+                flash("Tool rows must have quantity 1. Each tool must be a separate asset.", "danger")
+                return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+            tool_assignments.append({
+                "wop": wop,
+                "tool_number": pn,
+                "tool_name": (wop.part_name or pn).strip(),
+                "qty": 1,
+            })
             continue
 
-        # ✅ фиксируем себестоимость склада в момент выдачи
-        try:
-            real_cost = float(part.unit_cost or 0.0)
-        except Exception:
-            real_cost = 0.0
+        if issue_now <= 0:
+            flash(f"{pn} is not available in stock. Cannot issue.", "danger")
+            return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-        # INV# берём из WorkOrderPart.invoice_number по unit_id + part_number
-        wop_inv = ""
-        try:
-            wop = next(
-                (p for p in (wo.parts or [])
-                 if p.unit_id == unit_id and (p.part_number or "").strip().upper() == pn),
-                None
-            )
-            wop_inv = (getattr(wop, "invoice_number", "") or "").strip()
-        except Exception:
-            wop_inv = ""
+    now = datetime.utcnow()
+    tool_summary = []
 
-        items.append({
-            "part_id": part.id,
-            "qty": issue_now,
-            "unit_price": real_cost,
-            "inv_ref": (wop_inv or "")[:32],
-        })
-
-    if not items:
-        flash("Nothing available to issue for this unit.", "warning")
+    if tool_assignments and not (wo.technician_name or "").strip():
+        flash("Select technician before assigning tools.", "danger")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
+    try:
+        for t in tool_assignments:
+            line = t["wop"]
+            tool_number = t["tool_number"]
+            tool_name = t["tool_name"]
+
+            tool = ToolAsset.query.filter(
+                func.upper(ToolAsset.tool_number) == pn
+            ).first()
+
+            if not tool:
+                try:
+                    tool_total_qty = int(getattr(part, "quantity", 0) or 0) if part else 0
+                except Exception:
+                    tool_total_qty = 0
+
+                tool = ToolAsset(
+                    tool_number=pn,
+                    name=(line.part_name or pn),
+                    quantity=tool_total_qty,
+                    serial_number=None,
+                    status="available",
+                    condition="good",
+                    location="TOOLS",
+                )
+                db.session.add(tool)
+                db.session.flush()
+
+            old_status = tool.status or "available"
+
+            if old_status == "assigned" and tool.current_technician_name:
+                flash(
+                    f"Tool {tool_number} is already assigned to {tool.current_technician_name}. Return or transfer it first.",
+                    "danger"
+                )
+                db.session.rollback()
+                return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+            tool.status = "assigned"
+            tool.location = "TECHNICIAN"
+            tool.current_technician_id = getattr(wo, "technician_id", None)
+            tool.current_technician_name = wo.technician_name
+            tool.current_work_order_id = wo.id
+            tool.updated_at = now
+
+            db.session.add(ToolMovement(
+                tool_id=tool.id,
+                work_order_id=wo.id,
+                technician_id=getattr(wo, "technician_id", None),
+                technician_name=wo.technician_name,
+                action="assigned",
+                from_status=old_status,
+                to_status="assigned",
+                note=f"Assigned from WO #{wo.id}",
+                actor_user_id=getattr(current_user, "id", None),
+                actor_username=getattr(current_user, "username", "system"),
+                created_at=now,
+            ))
+
+            if line:
+                line.item_type = "tool"
+                line.tool_asset_id = tool.id
+                line.issued_qty = int(line.issued_qty or 0) + 1
+                line.last_issued_at = now
+                line.status = "done"
+                line.line_status = "done"
+                _clear_bo_and_ord(line)
+                db.session.add(line)
+
+            tool_summary.append(f"{tool_number} — {tool_name}")
+
+        if tool_summary:
+            db.session.add(WorkOrderAudit(
+                work_order_id=wo.id,
+                action="tool_assigned",
+                message=("Assigned tool(s): " + "; ".join(tool_summary))[:255],
+                meta_json=json.dumps({
+                    "tools": tool_summary,
+                    "audit_reason": "tool_assigned",
+                }, ensure_ascii=False),
+                actor_user_id=getattr(current_user, "id", None),
+                actor_username=getattr(current_user, "username", "system"),
+            ))
+
+        db.session.commit()
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Tool assignment error: {e}", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+
+    if not items:
+        flash("Tool(s) assigned to technician.", "success")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
     # --- создаём строки выдачи ---
     issue_date, maybe_records = _issue_records_bulk(
         issued_to=wo.technician_name,
@@ -8935,10 +9306,31 @@ def wo_issue_instock_unit(wo_id, unit_id):
         pn_need_to_apply: dict[str, int] = {}
         for rr in rows:
             delta = int(rr.get("issue_now", 0) or 0)
-            if delta > 0:
-                ppn = (rr.get("part_number") or "").strip().upper()
-                if ppn:
-                    pn_need_to_apply[ppn] = pn_need_to_apply.get(ppn, 0) + delta
+            if delta <= 0:
+                continue
+
+            ppn = (rr.get("part_number") or "").strip().upper()
+            if not ppn:
+                continue
+
+            wop_check = next(
+                (
+                    p for p in (wo.parts or [])
+                    if p.unit_id == unit_id
+                    and (p.part_number or "").strip().upper() == ppn
+                    and int(p.issued_qty or 0) < int(p.quantity or 0)
+                ),
+                None
+            )
+
+            item_type_check = (
+                getattr(wop_check, "item_type", "part") or "part"
+            ).strip().lower()
+
+            if item_type_check == "tool":
+                continue
+
+            pn_need_to_apply[ppn] = pn_need_to_apply.get(ppn, 0) + delta
 
         for pn, need_to_apply in pn_need_to_apply.items():
             if need_to_apply <= 0:
@@ -9510,7 +9902,7 @@ def issue_part():
     from urllib.parse import urlencode
 
     from extensions import db
-    from models import Part, IssuedPartRecord, TechnicianLedgerEntry
+    from models import Part, IssuedPartRecord, TechnicianLedgerEntry, ToolAsset
 
     # ✅ lot costing helpers
     from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost

@@ -289,6 +289,27 @@ class WorkOrderPart(db.Model):
     is_insurance_supplied = db.Column(db.Boolean, nullable=False, default=False, index=True)
     invoice_number = db.Column(db.String(32), nullable=True, index=True)
 
+    item_type = db.Column(
+        db.String(20),
+        nullable=False,
+        default="part",
+        index=True,
+    )
+
+    tool_asset_id = db.Column(
+        db.Integer,
+        db.ForeignKey("tool_assets.id"),
+        nullable=True,
+        index=True,
+    )
+
+    tool_asset = db.relationship(
+        "ToolAsset",
+        foreign_keys=[tool_asset_id],
+        lazy="joined",
+    )
+
+
     @property
     def warehouse_or_label(self) -> str:
         return self.warehouse or self.unit_label or ""
@@ -314,6 +335,54 @@ class WorkOrderPart(db.Model):
     def __repr__(self):
         return f"<WOP id={self.id} pn={self.part_number} ordered={self.ordered_flag} on={self.ordered_date}>"
 
+class ToolAsset(db.Model):
+    __tablename__ = "tool_assets"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    tool_number = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(120), nullable=False)
+
+    quantity = db.Column(db.Integer, nullable=False, default=0)
+
+    serial_number = db.Column(db.String(120), nullable=True, index=True)
+
+    status = db.Column(db.String(30), nullable=False, default="available", index=True)
+    condition = db.Column(db.String(40), nullable=False, default="good")
+    location = db.Column(db.String(80), nullable=False, default="TOOLS")
+
+    current_technician_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    current_technician_name = db.Column(db.String(80), nullable=True, index=True)
+    current_work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=True, index=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ToolMovement(db.Model):
+    __tablename__ = "tool_movements"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    tool_id = db.Column(db.Integer, db.ForeignKey("tool_assets.id"), nullable=False, index=True)
+    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=True, index=True)
+
+    technician_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    technician_name = db.Column(db.String(80), nullable=True, index=True)
+
+    action = db.Column(db.String(30), nullable=False, index=True)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+
+    from_status = db.Column(db.String(30), nullable=True)
+    to_status = db.Column(db.String(30), nullable=True)
+    note = db.Column(db.Text, nullable=True)
+
+    actor_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+    actor_username = db.Column(db.String(80), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    tool = db.relationship("ToolAsset", foreign_keys=[tool_id], lazy="joined")
 
 # --------------------------------
 # Tech receive log
@@ -1152,6 +1221,7 @@ class TechnicianPaymentAllocation(db.Model):
         "TechnicianLedgerEntry",
         lazy="joined",
     )
+
 
 
 # --- Backwards-compatible aliases ---

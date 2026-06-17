@@ -51,36 +51,6 @@
     min-width: 0;
   }
 
-  .wo-form .unit-table th:nth-child(1),
-  .wo-form .unit-table td:nth-child(1){
-    width: 140px;
-  }
-  .wo-form .unit-table td:nth-child(1) .pn{
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    font-size: .88rem;
-  }
-
-  .wo-form .unit-table th:nth-child(2),
-  .wo-form .unit-table td:nth-child(2){
-    width: 110px;
-  }
-
-  .wo-form .unit-table th:nth-child(3),
-  .wo-form .unit-table td:nth-child(3){
-    width: 320px;
-  }
-
-  .wo-form .unit-table td .form-control{
-    padding: .20rem .35rem;
-    font-size: .90rem;
-  }
-
-  .wo-form .unit-table td:nth-child(3) .part-name{
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .unit-table .form-check-input{ transform: scale(.9); }
 
   tr.issued-row{ background:#e6f4ea; }
@@ -146,59 +116,88 @@
 
   .wo-form .unit-table .form-check-input{ transform: scale(.85); }
 
-  .wo-form .unit-table th:nth-child(1),
-.wo-form .unit-table td:nth-child(1){ width: 95px; }
+.wo-form .unit-table th:nth-child(1),
+.wo-form .unit-table td:nth-child(1){ width: 44px; } /* Type */
 
 .wo-form .unit-table th:nth-child(2),
-.wo-form .unit-table td:nth-child(2){ width: 70px; }
+.wo-form .unit-table td:nth-child(2){ width: 92px; } /* Part # */
 
 .wo-form .unit-table th:nth-child(3),
-.wo-form .unit-table td:nth-child(3){ width: 145px; }
+.wo-form .unit-table td:nth-child(3){ width: 62px; } /* Alt */
 
 .wo-form .unit-table th:nth-child(4),
-.wo-form .unit-table td:nth-child(4){ width: 42px; }
+.wo-form .unit-table td:nth-child(4){ width: 140px; } /* Name */
 
 .wo-form .unit-table th:nth-child(5),
-.wo-form .unit-table td:nth-child(5){ width: 60px; }
+.wo-form .unit-table td:nth-child(5){ width: 40px; } /* Qty */
 
 .wo-form .unit-table th:nth-child(6),
-.wo-form .unit-table td:nth-child(6){ width: 60px; }
+.wo-form .unit-table td:nth-child(6){ width: 58px; } /* Unit */
 
 .wo-form .unit-table th:nth-child(7),
-.wo-form .unit-table td:nth-child(7){ width: 42px; }
+.wo-form .unit-table td:nth-child(7){ width: 58px; } /* Total */
 
 .wo-form .unit-table th:nth-child(8),
-.wo-form .unit-table td:nth-child(8){ width: 62px; }
+.wo-form .unit-table td:nth-child(8){ width: 40px; } /* WH */
 
 .wo-form .unit-table th:nth-child(9),
-.wo-form .unit-table td:nth-child(9){ width: 96px; } /* ETA */
+.wo-form .unit-table td:nth-child(9){ width: 58px; } /* INV */
 
 .wo-form .unit-table th:nth-child(10),
-.wo-form .unit-table td:nth-child(10){ width: 34px; } /* B/O */
+.wo-form .unit-table td:nth-child(10){ width: 90px; } /* ETA */
 
 .wo-form .unit-table th:nth-child(11),
-.wo-form .unit-table td:nth-child(11){ width: 34px; } /* INS */
+.wo-form .unit-table td:nth-child(11){ width: 32px; } /* B/O */
 
 .wo-form .unit-table th:nth-child(12),
-.wo-form .unit-table td:nth-child(12){ width: 52px; } /* Sup */
+.wo-form .unit-table td:nth-child(12){ width: 32px; } /* INS */
 
 .wo-form .unit-table th:nth-child(13),
-.wo-form .unit-table td:nth-child(13){ width: 34px; } /* Ord */
+.wo-form .unit-table td:nth-child(13){ width: 48px; } /* Sup */
 
 .wo-form .unit-table th:nth-child(14),
-.wo-form .unit-table td:nth-child(14){ width: 70px; } /* Stock hint */
+.wo-form .unit-table td:nth-child(14){ width: 32px; } /* Ord */
 
 .wo-form .unit-table th:nth-child(15),
-.wo-form .unit-table td:nth-child(15){ width: 48px; } /* Issue */
+.wo-form .unit-table td:nth-child(15){ width: 66px; } /* Hint */
 
 .wo-form .unit-table th:nth-child(16),
-.wo-form .unit-table td:nth-child(16){ width: 36px; } /* Delete */
+.wo-form .unit-table td:nth-child(16){ width: 44px; } /* Issue */
 
-  .wo-form .unit-table td:nth-child(3) .part-name{
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+.wo-form .unit-table th:nth-child(17),
+.wo-form .unit-table td:nth-child(17){ width: 32px; } /* Delete */
+
+.item-type-hidden{
+  display:none;
+}
+
+.item-type-toggle{
+  width: 26px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  font-size: .72rem !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  border-radius: 4px !important;
+}
+
+.item-type-toggle.type-part{
+  color:#0d6efd !important;
+  border-color:#0d6efd !important;
+  background:#eef5ff !important;
+}
+
+.item-type-toggle.type-tool{
+  color:#dc3545 !important;
+  border-color:#dc3545 !important;
+  background:#fff1f1 !important;
+}
+
+  .wo-form .unit-table td:nth-child(4) .part-name{
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
   .wo-list-table .wo-actions .btn,
   .wo-list-table .wo-actions button.btn{
@@ -436,6 +435,7 @@
           <table class="table table-sm table-bordered align-middle unit-table">
             <thead>
               <tr>
+                <th title="P = Part, T = Tool">TYPE</th>
                 <th>Part #</th>
                 <th>Alt PN#</th>
                 <th>Part name</th>
@@ -478,6 +478,21 @@
                   <input type="hidden"
                        name="units[{{ ui }}][rows][{{ ri }}][id]"
                        value="{{ wop_id or '' }}">
+                <td class="text-center">
+                  {% set itype = (r.item_type or 'part') %}
+                  <input type="hidden"
+                         class="item-type-hidden"
+                         name="units[{{ ui }}][rows][{{ ri }}][item_type]"
+                         value="{{ itype }}">
+
+                  <button type="button"
+                          class="btn btn-sm item-type-toggle {{ 'type-tool' if itype == 'tool' else 'type-part' }}"
+                          title="Click to switch: P = Part, T = Tool"
+                          {{ dis }}>
+                    {{ 'T' if itype == 'tool' else 'P' }}
+                  </button>
+                </td>
+
                 <td>
                   <input class="form-control pn"
                          name="units[{{ ui }}][rows][{{ ri }}][part_number]"
@@ -1549,8 +1564,19 @@ function clearHintCacheForRow(tr){
   function rowTemplate(ui, ri){
     const ro = IS_RO ? 'disabled readonly' : '';
     const thebo = IS_RO ? 'disabled' : '';
-    return `
-<tr>
+        return `
+    <td class="text-center">
+      <input type="hidden"
+             class="item-type-hidden"
+             name="units[${ui}][rows][${ri}][item_type]"
+             value="part">
+      <button type="button"
+              class="btn btn-sm item-type-toggle type-part"
+              title="Click to switch: P = Part, T = Tool"
+              ${thebo}>
+        P
+      </button>
+    </td>
   <td><input class="form-control pn" name="units[${ui}][rows][${ri}][part_number]" maxlength="80" ${ro}></td>
   <td><input class="form-control alt-pn" name="units[${ui}][rows][${ri}][alt_numbers]" ${ro}></td>
   <td><input class="form-control part-name" name="units[${ui}][rows][${ri}][part_name]" maxlength="120" ${ro}></td>
@@ -1628,6 +1654,7 @@ function clearHintCacheForRow(tr){
       <table class="table table-sm table-bordered align-middle unit-table">
         <thead>
           <tr>
+            <th title="P = Part, T = Tool">TYPE</th>
             <th>Part #</th>
             <th>Alt PN#</th>
             <th>Part name</th>
@@ -1810,6 +1837,22 @@ function clearHintCacheForRow(tr){
   unitsWrap.addEventListener('click', (e)=>{
     const btn = e.target.closest('button');
     if(!btn) return;
+
+    if (btn.classList.contains('item-type-toggle')) {
+      const td = btn.closest('td');
+      const hidden = td ? td.querySelector('.item-type-hidden') : null;
+      if (!hidden) return;
+
+      const next = hidden.value === 'tool' ? 'part' : 'tool';
+      hidden.value = next;
+
+      btn.textContent = next === 'tool' ? 'T' : 'P';
+      btn.classList.toggle('type-tool', next === 'tool');
+      btn.classList.toggle('type-part', next !== 'tool');
+
+      markDirty();
+      return;
+    }
 
     if (btn.classList.contains('del-unit')) {
       const targetCard = btn.closest('.card');

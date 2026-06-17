@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3 class="mb-3">Tools</h3>
+
+<div class="row mb-3">
+  <div class="col-auto"><span class="badge bg-dark">Total: {{ stats.total }}</span></div>
+  <div class="col-auto"><span class="badge bg-success">Free: {{ stats.free }}</span></div>
+  <div class="col-auto"><span class="badge bg-primary">Assigned: {{ stats.assigned }}</span></div>
+  <div class="col-auto"><span class="badge bg-warning text-dark">Maintenance: {{ stats.maintenance }}</span></div>
+  <div class="col-auto"><span class="badge bg-danger">Lost: {{ stats.lost }}</span></div>
+  <div class="col-auto"><span class="badge bg-secondary">Retired: {{ stats.retired }}</span></div>
+</div>
+
+<table class="table table-sm table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Tool #</th>
+      <th>Name</th>
+      <th class="text-end">Total</th>
+      <th class="text-end">Assigned</th>
+      <th class="text-end">Free</th>
+      <th>Status</th>
+      <th>Location</th>
+      <th></th>
+    </tr>
+  </thead>
+
+  <tbody>
+  {% for t in tools %}
+    <tr>
+      <td><code>{{ t.tool_number }}</code></td>
+      <td>{{ t.name }}</td>
+      <td class="text-end">{{ t.quantity }}</td>
+      <td class="text-end">{{ t.assigned_qty }}</td>
+      <td class="text-end">{{ t.free_qty }}</td>
+      <td>{{ t.status }}</td>
+      <td>{{ t.location or '—' }}</td>
+      <td>
+        {% if t.assigned_qty > 0 %}
+          <button class="btn btn-sm btn-outline-warning" disabled>Return</button>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}
