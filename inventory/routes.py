@@ -11060,6 +11060,45 @@ def issue_part():
     from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
 
     # ---------- helper: touch Work Order updated_by/updated_at ----------
+    def _invoice_available_qty_for_part(pn: str, inv_ref: str) -> tuple[int, int, int]:
+        """
+        Returns: received_qty, already_issued_qty, available_qty
+        Strict limit for issuing by supplier invoice.
+        """
+        pn = (pn or "").strip().upper()
+        inv = (inv_ref or "").strip().upper()
+
+        if not pn or not inv:
+            return 0, 0, 0
+
+        from sqlalchemy import func
+        from models import GoodsReceipt, GoodsReceiptLine, IssuedPartRecord, Part
+
+        received_qty = (
+                db.session.query(func.coalesce(func.sum(GoodsReceiptLine.quantity), 0))
+                .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
+                .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+                .filter(func.upper(GoodsReceipt.status) == "POSTED")
+                .filter(func.ltrim(func.coalesce(GoodsReceipt.invoice_number, ""), "0") == inv)
+                .scalar()
+                or 0
+        )
+
+        already_issued_qty = (
+                db.session.query(func.coalesce(func.sum(IssuedPartRecord.quantity), 0))
+                .join(Part, Part.id == IssuedPartRecord.part_id)
+                .filter(func.upper(Part.part_number) == pn)
+                .filter(func.upper(func.coalesce(IssuedPartRecord.inv_ref, "")) == inv)
+                .scalar()
+                or 0
+        )
+
+        received_qty = int(received_qty or 0)
+        already_issued_qty = int(already_issued_qty or 0)
+        available_qty = max(received_qty - already_issued_qty, 0)
+
+        return received_qty, already_issued_qty, available_qty
+
     def _touch_work_order_from_ref(ref_job: str, ts: datetime, user_id: int) -> None:
         ref = (ref_job or "").strip()
         if not ref:
@@ -11199,6 +11238,20 @@ def issue_part():
                         f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
                         f"Nothing was issued."
                     )
+
+                if inv_ref:
+                    received_qty, already_issued_qty, available_qty = _invoice_available_qty_for_part(
+                        pn=pn,
+                        inv_ref=inv_ref,
+                    )
+
+                    if qty > available_qty:
+                        raise ValueError(
+                            f"Cannot issue {qty} pcs of '{pn}' from supplier invoice '{inv_ref}'. "
+                            f"Received on this invoice: {received_qty}. "
+                            f"Already issued from this invoice: {already_issued_qty}. "
+                            f"Available: {available_qty}."
+                        )
 
                 if line is not None:
                     unit_cost = float(receipt_line_cost(line))
@@ -12351,7 +12404,7 @@ def update_invoice():
                             IssuedPartRecord.issue_date.between(start, end))
                     .order_by(IssuedPartRecord.id.asc()).all())
 
-    if not recs:
+    if not recs and delete_invoice_no is None:
         flash("Invoice lines not found.", "warning")
         return redirect(url_for('inventory.reports_grouped'))
 
@@ -12360,15 +12413,82 @@ def update_invoice():
         if current_user.role != 'superadmin':
             flash("Only superadmin may delete invoice.", "danger")
             return redirect(url_for('inventory.reports_grouped'))
+
         touched = set()
+
         try:
+            recs = IssuedPartRecord.query.filter_by(invoice_number=delete_invoice_no).all()
+
+            if not recs:
+                flash(f"Invoice #{delete_invoice_no:06d} already deleted or not found.", "warning")
+                return redirect(url_for('inventory.reports_grouped'))
+
             for r in list(recs):
+                qty = int(r.quantity or 0)
+
                 if r.part:
-                    # Revert stock impact (return issued qty to stock; for negative rows this subtracts)
-                    r.part.quantity = int(r.part.quantity or 0) + int(r.quantity or 0)
+                    # Revert stock impact.
+                    # Positive issued qty returns to stock.
+                    # Negative return row subtracts from stock.
+                    r.part.quantity = int(r.part.quantity or 0) + qty
+
+                # Roll back WO part issued state
+                if qty > 0 and r.part:
+                    from models import WorkOrderPart, WorkOrder
+
+                    pn = (r.part.part_number or "").strip()
+                    ref = (r.reference_job or "").strip()
+
+                    wo_id = getattr(r, "work_order_id", None)
+
+                    # fallback: find WO by job_numbers
+                    if not wo_id and ref:
+                        wo = (
+                            WorkOrder.query
+                            .filter(
+                                WorkOrder.job_numbers.ilike(f"%{ref}%")
+                            )
+                            .order_by(WorkOrder.id.desc())
+                            .first()
+                        )
+                        if wo:
+                            wo_id = wo.id
+
+                    if wo_id and pn:
+                        line = (
+                            WorkOrderPart.query
+                            .filter(
+                                WorkOrderPart.work_order_id == wo_id,
+                                WorkOrderPart.part_number == pn,
+                            )
+                            .first()
+                        )
+
+                        if line:
+                            old_issued = int(getattr(line, "issued_qty", 0) or 0)
+
+                            qty_to_rollback = min(max(int(qty or 0), 0), old_issued)
+                            new_issued = max(old_issued - qty_to_rollback, 0)
+
+                            line.issued_qty = new_issued
+
+                            if new_issued <= 0:
+                                line.last_issued_at = None
+                                line.stock_hint = None
+
+                                if hasattr(line, "status"):
+                                    line.status = "search_ordered"
+
+                                if hasattr(line, "line_status"):
+                                    line.line_status = "search_ordered"
+
+                            db.session.add(line)
+
                 if r.batch_id:
                     touched.add(r.batch_id)
+
                 db.session.delete(r)
+
             # Remove empty batches
             for bid in touched:
                 still = db.session.query(IssuedPartRecord.id).filter_by(batch_id=bid).first()
@@ -12376,13 +12496,15 @@ def update_invoice():
                     b = db.session.get(IssuedBatch, bid)
                     if b:
                         db.session.delete(b)
+
             db.session.commit()
             flash(f"Invoice #{delete_invoice_no:06d} deleted.", "success")
+
         except Exception as e:
             db.session.rollback()
             flash(f"Failed to delete invoice: {e}", "danger")
-        return redirect(url_for('inventory.reports_grouped'))
 
+        return redirect(url_for('inventory.reports_grouped'))
     # ---------- DELETE RETURN ----------
     if do_delete_ret:
         if current_user.role != 'superadmin':
