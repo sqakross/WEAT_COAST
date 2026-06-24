@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3 class="mb-3">Tools History</h3>
+
+<div class="row mb-3">
+  <div class="col-auto"><span class="badge bg-dark">Total: {{ total_tools }}</span></div>
+  <div class="col-auto"><span class="badge bg-primary">Assigned: {{ total_assigned }}</span></div>
+  <div class="col-auto"><span class="badge bg-success">Free: {{ total_free }}</span></div>
+</div>
+
+<h5>Assigned by Technician</h5>
+<table class="table table-sm table-bordered mb-4">
+  <thead>
+    <tr>
+      <th>Technician</th>
+      <th class="text-end">Qty</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for x in by_tech %}
+      <tr>
+        <td>
+          <a href="{{ url_for('inventory.tools_history', tech=x.tech) }}"
+             class="fw-semibold text-decoration-none">
+            👤 {{ x.tech }}
+          </a>
+        </td>
+        <td class="text-end">{{ x.qty }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="2" class="text-muted">No assigned tools.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if tech_filter %}
+  <div class="alert alert-info py-2">
+    Showing history for technician:
+    <b>{{ tech_filter }}</b>
+
+    <a class="btn btn-sm btn-outline-secondary ms-2"
+       href="{{ url_for('inventory.tools_history') }}">
+      Show All
+    </a>
+  </div>
+{% endif %}
+
+<h5>Movement History</h5>
+<table class="table table-sm table-striped table-bordered align-middle">
+  <thead>
+    <tr>
+      <th>Tool</th>
+      <th>Name</th>
+      <th>Action</th>
+      <th class="text-end">Qty</th>
+      <th>Technician</th>
+      <th>WO</th>
+      <th>Note</th>
+      <th>Actor</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in movements %}
+      <tr>
+        <td><code>{{ m.tool.tool_number if m.tool else '—' }}</code></td>
+        <td>{{ m.tool.name if m.tool else '—' }}</td>
+        <td>
+          {% if m.action == 'assigned' and m.note and m.note.startswith('Transfer in') %}
+              <span class="badge bg-info text-dark">Transferred</span>
+            {% elif m.action == 'assigned' %}
+              <span class="badge bg-primary">Assigned</span>
+            {% elif m.action == 'returned' %}
+            <span class="badge bg-warning text-dark">Returned</span>
+          {% elif m.action == 'transferred' %}
+            <span class="badge bg-info text-dark">Transferred</span>
+          {% else %}
+            <span class="badge bg-secondary">{{ m.action }}</span>
+          {% endif %}
+        </td>
+        <td class="text-end">{{ m.quantity }}</td>
+        <td class="text-nowrap">
+          <td class="text-nowrap">
+          {% if m.action == 'assigned' and m.note and m.note.startswith('Transfer in') %}
+            <div>
+              <b>{{ m.technician_name }}</b>
+            </div>
+            <div class="small text-muted">
+              received tool
+            </div>
+
+          {% elif m.action == 'transferred' %}
+            <div>
+              <b>Transfer</b>
+            </div>
+            <div class="small text-muted">
+              {{ m.note or '—' }}
+            </div>
+
+          {% else %}
+            {{ m.technician_name or '—' }}
+          {% endif %}
+        </td>
+        <td>{% if m.work_order_id %}#{{ m.work_order_id }}{% else %}—{% endif %}</td>
+        <td>
+          {% if m.action == 'assigned' and m.note and m.note.startswith('Transfer in') %}
+            Tool received from
+            <b>{{ (m.note or '').replace('Transfer in from', '').strip() }}</b>
+            by
+            <b>{{ m.technician_name }}</b>
+
+          {% elif m.action == 'transferred' %}
+            Tool moved from
+            <b>{{ (m.note or '').split('->')[0].strip() }}</b>
+            to
+            <b>{{ (m.note or '').split('->')[1].strip() }}</b>
+
+          {% else %}
+            {{ m.note or '—' }}
+          {% endif %}
+        </td>
+        <td class="text-nowrap">
+          <div>{{ m.actor_username or '—' }}</div>
+          <div class="small text-muted">
+            {{ m.created_at.strftime("%m/%d/%Y %I:%M %p") if m.created_at else '—' }}
+          </div>
+        </td>
+      </tr>
+    {% else %}
+      <tr>
+        <td colspan="8" class="text-muted">No history yet.</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<a class="btn btn-secondary" href="{{ url_for('inventory.tools_list') }}">
+  Back to Tools
+</a>
+
+{% endblock %}

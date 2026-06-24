@@ -360,6 +360,43 @@
   })();
   </script>
 
+  <script>
+(function () {
+  // Links
+  document.addEventListener("click", function (e) {
+    const a = e.target.closest("a");
+    if (!a) return;
+
+    const href = a.getAttribute("href") || "";
+    if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
+
+    if (a.target === "_blank") {
+      e.preventDefault();
+      a.removeAttribute("target");
+      window.location.assign(a.href);
+    }
+  }, true);
+
+  // Forms
+  document.addEventListener("submit", function (e) {
+    const form = e.target;
+    if (!form || form.tagName !== "FORM") return;
+
+    if (form.target === "_blank") {
+      form.removeAttribute("target");
+    }
+  }, true);
+
+  // JS popups
+  window.open = function (url) {
+    if (url) {
+      window.location.assign(url);
+    }
+    return null;
+  };
+})();
+</script>
+
   {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3 class="mb-3">Tool: {{ tool.tool_number }}</h3>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div><strong>Tool #:</strong> {{ tool.tool_number }}</div>
+    <div><strong>Name:</strong> {{ tool.name }}</div>
+    <div><strong>Total Qty:</strong> {{ total_qty }}</div>
+    <div><strong>Assigned:</strong> {{ assigned_qty }}</div>
+    <div><strong>Free:</strong> {{ free_qty }}</div>
+    <div><strong>Location:</strong> {{ tool.location or '—' }}</div>
+  </div>
+</div>
+
+<h5>Current Holders</h5>
+<table class="table table-sm table-bordered mb-4">
+  <thead>
+    <tr>
+      <th>Technician</th>
+      <th class="text-end">Qty</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for h in holders %}
+      <tr>
+        <td>{{ h.tech }}</td>
+        <td class="text-end">{{ h.qty }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="2" class="text-muted">No assigned tools.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h5>Assignment Summary</h5>
+<table class="table table-sm table-bordered mb-4">
+  <thead>
+    <tr>
+      <th>Technician</th>
+      <th class="text-end">Assigned</th>
+      <th class="text-end">Returned</th>
+      <th class="text-end">Currently Holding</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in assignment_summary %}
+      <tr>
+        <td>{{ s.tech }}</td>
+        <td class="text-end">{{ s.assigned }}</td>
+        <td class="text-end">{{ s.returned }}</td>
+        <td class="text-end">{{ s.holding }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="text-muted">No assignment summary.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h5>Movement Timeline</h5>
+
+<div class="mb-4">
+  {% for m in movements %}
+    <div class="card mb-2">
+      <div class="card-body py-2">
+        <div class="small text-muted">
+          {{ m.created_at }}
+        </div>
+
+        <div>
+          {% if m.action == 'assigned' %}
+            <span class="badge bg-primary">Assigned</span>
+            <strong>{{ tool.tool_number }} x{{ m.quantity }}</strong>
+            Assigned to <strong>{{ m.technician_name }}</strong>
+
+          {% elif m.action == 'returned' %}
+            <span class="badge bg-warning text-dark">Returned</span>
+            <strong>{{ tool.tool_number }} x{{ m.quantity }}</strong>
+            Returned from <strong>{{ m.technician_name }}</strong>
+
+          {% elif m.action == 'transferred' %}
+            <span class="badge bg-info text-dark">Transferred</span>
+            <strong>{{ tool.tool_number }} x{{ m.quantity }}</strong>
+            <strong>{{ m.note }}</strong>
+
+          {% else %}
+            <span class="badge bg-secondary">{{ m.action }}</span>
+            <strong>{{ tool.tool_number }} x{{ m.quantity }}</strong>
+          {% endif %}
+        </div>
+
+        <div class="small mt-1">
+          {% if m.work_order_id %}
+            WO:
+            <a href="{{ url_for('inventory.wo_detail', wo_id=m.work_order_id) }}">
+              #{{ m.work_order_id }}
+            </a>
+          {% else %}
+            WO: —
+          {% endif %}
+          &nbsp; | &nbsp;
+          By: {{ m.actor_username or '—' }}
+        </div>
+      </div>
+    </div>
+  {% else %}
+    <div class="text-muted">No movement history yet.</div>
+  {% endfor %}
+</div>
+
+<h5>Related Work Orders</h5>
+<table class="table table-sm table-bordered mb-4">
+  <thead>
+    <tr>
+      <th>WO</th>
+      <th>Technician</th>
+      <th>Created</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for wo in related_wos %}
+      <tr>
+        <td>#{{ wo.id }}</td>
+        <td>{{ wo.technician_name or '—' }}</td>
+        <td>{{ wo.created_at or '—' }}</td>
+        <td>
+          <a class="btn btn-sm btn-outline-primary"
+             href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">
+            Open WO
+          </a>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="text-muted">No related work orders.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<a class="btn btn-secondary" href="{{ url_for('inventory.tools_list') }}">
+  Back to Tools
+</a>
+
+{% endblock %}

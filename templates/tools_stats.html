@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3 class="mb-3">Tools Statistics</h3>
+
+<div class="row mb-4">
+  <div class="col-auto">
+    <span class="badge bg-dark">
+      Total: {{ total_tools }}
+    </span>
+  </div>
+
+  <div class="col-auto">
+    <span class="badge bg-primary">
+      Assigned: {{ total_assigned }}
+    </span>
+  </div>
+
+  <div class="col-auto">
+    <span class="badge bg-success">
+      Free: {{ total_free }}
+    </span>
+  </div>
+</div>
+
+<h5>By Technician</h5>
+
+<table class="table table-sm table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Technician</th>
+      <th class="text-end">Assigned</th>
+      <th class="text-end">Returned</th>
+      <th class="text-end">Holding</th>
+      <th>Tools</th>
+      <th>Last Movement</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for t in technicians %}
+      <tr>
+        <td>
+          <a href="{{ url_for('inventory.tools_by_technician', technician=t.tech) }}">
+            {{ t.tech }}
+          </a>
+        </td>
+        <td class="text-end">{{ t.assigned }}</td>
+        <td class="text-end">{{ t.returned }}</td>
+        <td class="text-end">{{ t.holding }}</td>
+        <td>{{ t.tools or '—' }}</td>
+        <td>
+          {{ t.last_move.strftime("%m/%d/%Y %I:%M %p") if t.last_move else '—' }}
+        </td>
+      </tr>
+    {% else %}
+      <tr>
+        <td colspan="6" class="text-muted">No statistics yet.</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<a
+  class="btn btn-secondary"
+  href="{{ url_for('inventory.tools_list') }}">
+  Back to Tools
+</a>
+
+{% endblock %}

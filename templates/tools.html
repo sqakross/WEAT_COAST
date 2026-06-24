@@ -3,13 +3,83 @@
 
 <h3 class="mb-3">Tools</h3>
 
-<div class="row mb-3">
-  <div class="col-auto"><span class="badge bg-dark">Total: {{ stats.total }}</span></div>
-  <div class="col-auto"><span class="badge bg-success">Free: {{ stats.free }}</span></div>
-  <div class="col-auto"><span class="badge bg-primary">Assigned: {{ stats.assigned }}</span></div>
-  <div class="col-auto"><span class="badge bg-warning text-dark">Maintenance: {{ stats.maintenance }}</span></div>
-  <div class="col-auto"><span class="badge bg-danger">Lost: {{ stats.lost }}</span></div>
-  <div class="col-auto"><span class="badge bg-secondary">Retired: {{ stats.retired }}</span></div>
+<form method="get" class="row g-2 mb-3">
+  <div class="col-md-5">
+    <input
+      type="text"
+      name="q"
+      class="form-control form-control-sm"
+      placeholder="Search by Tool #, Name, or Technician"
+      value="{{ q or '' }}">
+  </div>
+
+  <div class="col-auto">
+    <button class="btn btn-sm btn-primary">
+      Search
+    </button>
+  </div>
+
+  <div class="col-auto">
+    <a class="btn btn-sm btn-outline-secondary"
+       href="{{ url_for('inventory.tools_list') }}">
+      Reset
+    </a>
+  </div>
+</form>
+
+<div class="mb-3">
+  <a
+    class="btn btn-sm btn-outline-secondary"
+    href="{{ url_for('inventory.tools_history') }}">
+    History
+  </a>
+
+  <a
+    class="btn btn-sm btn-outline-primary"
+    href="{{ url_for('inventory.tools_stats') }}">
+    Statistics
+  </a>
+  <a
+      class="btn btn-sm btn-success"
+      target="_blank"
+      href="{{ url_for('inventory.tools_tech_report_pdf') }}">
+      Print Technician Report
+    </a>
+
+</div>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+
+  <a href="{{ url_for('inventory.tools_list', q=q) }}"
+     class="badge text-decoration-none bg-dark">
+    Total: {{ stats.total }}
+  </a>
+
+  <a href="{{ url_for('inventory.tools_list', status='available', q=q) }}"
+     class="badge text-decoration-none bg-success">
+    Free: {{ stats.free }}
+  </a>
+
+  <a href="{{ url_for('inventory.tools_list', status='assigned', q=q) }}"
+     class="badge text-decoration-none bg-primary">
+    Assigned: {{ stats.assigned }}
+  </a>
+
+  <a href="{{ url_for('inventory.tools_list', status='maintenance', q=q) }}"
+     class="badge text-decoration-none bg-warning text-dark">
+    Maintenance: {{ stats.maintenance }}
+  </a>
+
+  <a href="{{ url_for('inventory.tools_list', status='lost', q=q) }}"
+     class="badge text-decoration-none bg-danger">
+    Lost: {{ stats.lost }}
+  </a>
+
+  <a href="{{ url_for('inventory.tools_list', status='retired', q=q) }}"
+     class="badge text-decoration-none bg-secondary">
+    Retired: {{ stats.retired }}
+  </a>
+
 </div>
 
 <table class="table table-sm table-striped align-middle">
@@ -30,18 +100,29 @@
   <tbody>
   {% for t in tools %}
     <tr>
-      <td><code>{{ t.tool_number }}</code></td>
+      <td>
+          <a href="{{ url_for('inventory.tool_detail', tool_id=t.id) }}">
+            <code>{{ t.tool_number }}</code>
+          </a>
+        </td>
       <td>{{ t.name }}</td>
       <td class="text-end">{{ t.quantity }}</td>
       <td class="text-end">{{ t.assigned_qty }}</td>
       <td class="text-end">{{ t.free_qty }}</td>
       <td>{{ t.status }}</td>
 
-        <td>
+        <td class="text-nowrap">
           {% set items = assigned_by_tool.get(t.id, []) %}
           {% if items %}
             {% for x in items %}
-              <div>{{ x.tech }} ({{ x.qty }})</div>
+              <div>
+                <a class="fw-semibold text-decoration-none"
+                   href="{{ url_for('inventory.tools_by_technician',
+                                    technician=x.tech) }}"
+                   title="Open technician card">
+                  👤 {{ x.tech }} ({{ x.qty }})
+                </a>
+              </div>
             {% endfor %}
           {% else %}
             —
@@ -50,16 +131,23 @@
 
 <td>{{ t.location or '—' }}</td>
       <td>
-        {% if t.assigned_qty > 0 %}
-          <form method="post"
-              action="{{ url_for('inventory.tool_return', tool_id=t.id) }}"
-              onsubmit="return confirm('Return 1 x {{ t.tool_number }} to TOOLS?');">
-          <button class="btn btn-sm btn-outline-warning">
-            Return
-          </button>
-        </form>
-        {% endif %}
-      </td>
+  {% if t.assigned_qty > 0 %}
+    <div class="d-flex gap-1">
+      <form method="post"
+            action="{{ url_for('inventory.tool_return', tool_id=t.id) }}"
+            onsubmit="return confirm('Return 1 x {{ t.tool_number }} to TOOLS?');">
+        <button class="btn btn-sm btn-outline-warning">
+          Return
+        </button>
+      </form>
+
+      <a class="btn btn-sm btn-outline-primary"
+         href="{{ url_for('inventory.tool_transfer_form', tool_id=t.id) }}">
+        Transfer
+      </a>
+    </div>
+  {% endif %}
+</td>
     </tr>
   {% endfor %}
   </tbody>

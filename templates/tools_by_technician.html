@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card mb-3 shadow-sm">
+  <div class="card-body">
+
+    <h3 class="mb-4">
+      Technician: {{ technician }}
+    </h3>
+
+    <div class="mb-3">
+      <a class="btn btn-sm btn-success"
+         target="_blank"
+         href="{{ url_for('inventory.tools_tech_report_pdf',
+                          technician=technician) }}">
+        Print PDF
+      </a>
+    </div>
+
+    <div class="row text-center">
+
+      <div class="col-md">
+        <div class="fs-3 fw-bold text-primary">{{ assigned_total }}</div>
+        <div class="text-muted">Assigned</div>
+      </div>
+
+      <div class="col-md">
+        <div class="fs-3 fw-bold text-warning">{{ returned_total }}</div>
+        <div class="text-muted">Returned</div>
+      </div>
+
+      <div class="col-md">
+        <div class="fs-3 fw-bold text-success">{{ holding }}</div>
+        <div class="text-muted">Holding Now</div>
+      </div>
+
+      <div class="col-md">
+        <div class="fs-3 fw-bold">{{ current_tools|length }}</div>
+        <div class="text-muted">Tool Types</div>
+      </div>
+
+      <div class="col-md">
+        <div class="fs-3 fw-bold text-info">{{ return_rate }}%</div>
+        <div class="text-muted">Return Rate</div>
+      </div>
+
+    </div>
+    </div>
+
+  </div>
+</div>
+
+<h5>Current Tools</h5>
+
+<table class="table table-sm table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Tool #</th>
+        <th>Name</th>
+        <th class="text-end">Qty</th>
+        <th class="text-nowrap">Since</th>
+        <th class="text-end">Actions</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for r in current_tools %}
+      <tr>
+          <td>
+            <a href="{{ url_for('inventory.tool_detail', tool_id=r.tool.id) }}">
+              {{ r.tool.tool_number }}
+            </a>
+          </td>
+
+          <td>{{ r.tool.name }}</td>
+
+          <td class="text-end">{{ r.qty }}</td>
+
+          <td class="text-nowrap">
+              {% if r.since %}
+                {{ r.since.strftime("%m/%d/%Y") }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+
+          <td class="text-nowrap text-end">
+            <a class="btn btn-sm btn-outline-primary"
+               href="{{ url_for('inventory.tool_transfer_form', tool_id=r.tool.id) }}">
+              Transfer
+            </a>
+
+            <form method="post"
+                  action="{{ url_for('inventory.tool_return', tool_id=r.tool.id) }}"
+                  class="d-inline"
+                  onsubmit="return confirm('Return 1 x {{ r.tool.tool_number }} to TOOLS?');">
+              <button class="btn btn-sm btn-outline-warning">
+                Return
+              </button>
+            </form>
+          </td>
+        </tr>
+    {% else %}
+      <tr>
+        <td colspan="5" class="text-muted">
+          No tools currently assigned.
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h5 class="mt-4">Long-Held Tools</h5>
+
+<table class="table table-sm table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Tool</th>
+      <th class="text-end">Qty</th>
+      <th class="text-end">Days Held</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for r in long_held %}
+      <tr>
+        <td>{{ r.tool.tool_number }}</td>
+        <td class="text-end">{{ r.qty }}</td>
+        <td class="text-end">{{ r.days }}</td>
+        <td>
+          {% if r.days >= 30 %}
+            <span class="badge bg-danger">Long-held</span>
+          {% elif r.days >= 14 %}
+            <span class="badge bg-warning text-dark">Review</span>
+          {% else %}
+            <span class="badge bg-success">OK</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr>
+        <td colspan="4" class="text-muted">
+          No tools currently assigned.
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+
+<h5 class="mt-4">Tool History Summary</h5>
+
+<table class="table table-sm table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Tool</th>
+      <th class="text-end">Assigned</th>
+      <th class="text-end">Returned</th>
+      <th class="text-end">Holding</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for r in tool_summary %}
+      <tr>
+        <td>
+          <a href="{{ url_for('inventory.tool_detail', tool_id=r.tool.id) }}">
+            {{ r.tool.tool_number }}
+          </a>
+        </td>
+        <td class="text-end">{{ r.assigned }}</td>
+        <td class="text-end">{{ r.returned }}</td>
+        <td class="text-end">{{ r.holding }}</td>
+      </tr>
+    {% else %}
+      <tr>
+        <td colspan="4" class="text-muted">No history.</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if at_risk_tools %}
+
+<h5 class="mt-4 text-danger">At Risk Tools (30+ Days)</h5>
+
+<table class="table table-sm table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Tool</th>
+      <th class="text-end">Qty</th>
+      <th class="text-end">Days Held</th>
+      <th>WO</th>
+      <th></th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {% for r in at_risk_tools %}
+      <tr class="table-danger">
+        <td>
+          <a href="{{ url_for('inventory.tool_detail', tool_id=r.tool.id) }}">
+            {{ r.tool.tool_number }}
+          </a>
+        </td>
+
+        <td class="text-end">{{ r.qty }}</td>
+
+        <td class="text-end">
+          {{ r.days }} day{% if r.days != 1 %}s{% endif %}
+        </td>
+
+        <td>
+          {% if r.wo_id %}
+            #{{ r.wo_id }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+
+        <td class="text-end">
+          {% if r.wo_id %}
+            <a class="btn btn-sm btn-outline-danger"
+               href="{{ url_for('inventory.wo_detail', wo_id=r.wo_id) }}">
+              Open WO
+            </a>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endif %}
+
+
+
+<h5 class="mt-4">Movement Timeline</h5>
+
+{% for m in movements %}
+  <div class="card mb-2 shadow-sm">
+    <div class="card-body py-2">
+
+      <div class="small text-muted mb-1">
+        {{ m.created_at.strftime("%m/%d/%Y %I:%M %p") if m.created_at else '—' }}
+      </div>
+
+      <div class="fw-bold mb-1">
+        {% if m.action == 'assigned' %}
+          <span class="badge bg-primary">Assigned</span>
+        {% elif m.action == 'returned' %}
+          <span class="badge bg-warning text-dark">Returned</span>
+        {% elif m.action == 'transferred' %}
+          <span class="badge bg-info text-dark">Transferred</span>
+        {% else %}
+          <span class="badge bg-secondary">{{ m.action }}</span>
+        {% endif %}
+
+        {{ m.tool.tool_number if m.tool else 'Tool' }}
+        x{{ m.quantity }}
+      </div>
+
+      <div>
+        {{ m.note or '—' }}
+      </div>
+
+      <div class="small text-muted">
+        By: {{ m.actor_username or 'system' }}
+      </div>
+
+    </div>
+  </div>
+{% else %}
+  <div class="text-muted">No movement history.</div>
+{% endfor %}
+
+<h5 class="mt-4">Related Work Orders</h5>
+
+{% for wo_id in wo_ids %}
+  <div class="card mb-2">
+    <div class="card-body py-2">
+      <div class="fw-bold">
+        Work Order #{{ wo_id }}
+      </div>
+
+      <a class="btn btn-sm btn-outline-primary mt-2"
+         href="{{ url_for('inventory.wo_detail', wo_id=wo_id) }}">
+        Open Work Order
+      </a>
+    </div>
+  </div>
+{% else %}
+  <div class="text-muted">No related work orders.</div>
+{% endfor %}
+
+<a class="btn btn-secondary mt-3"
+   href="{{ url_for('inventory.tools_stats') }}">
+  Back
+</a>
+
+{% endblock %}

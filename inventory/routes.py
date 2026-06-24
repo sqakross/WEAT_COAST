@@ -9,7 +9,7 @@ from services.receiving import post_receiving_batch
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, send_file, jsonify, after_this_request,
-    current_app,abort, session,current_app,                   # NEW
+    current_app,abort, session,current_app, send_from_directory,                  # NEW
 )
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -1745,6 +1745,7 @@ def issued_batch_update(batch_id):
     db.session.commit()
 
     return jsonify({"ok": True})
+
 
 @inventory_bp.post("/api/issued/confirm_toggle", endpoint="issued_confirm_toggle")
 @login_required
@@ -7935,7 +7936,6 @@ def wo_issue_instock(wo_id):
 
     # === 2) Selected mode ===
     raw_ids = (request.form.get("part_ids") or "").strip()
-
     items_to_issue = []
     issued_row_ids: list[int] = []
     skipped_rows = []
@@ -8017,6 +8017,7 @@ def wo_issue_instock(wo_id):
         for line in wops:
             pn = (line.part_number or "").strip().upper()
             qty_req = int(line.quantity or 0)
+
             if not pn or qty_req <= 0:
                 continue
 
@@ -8304,6 +8305,7 @@ def wo_issue_instock(wo_id):
             for line in WorkOrderPart.query.filter(WorkOrderPart.id.in_(issued_row_ids)).all():
                 qty_needed = int(line.quantity or 0)
                 issued_so_far = int(line.issued_qty or 0)
+                issued_so_far = min(issued_so_far, qty_needed)
                 delta = int(issued_delta_by_line_id.get(int(line.id), 0) or 0)
                 if delta <= 0:
                     continue
@@ -8438,10 +8440,6 @@ def wo_issue_instock(wo_id):
         if not pn:
             continue
 
-        pn = (r.get("part_number") or "").strip().upper()
-        if not pn:
-            continue
-
         wop_check = (
             WorkOrderPart.query
             .filter(
@@ -8458,20 +8456,11 @@ def wo_issue_instock(wo_id):
         ):
             continue
 
-        pn_issue_map[pn] = pn_issue_map.get(pn, 0) + issue_now
-
-        part = Part.query.filter(
-            func.upper(Part.part_number) == pn
-        ).first()
-
-        if not part:
-            continue
-
-        pn_issue_map[pn] = pn_issue_map.get(pn, 0) + issue_now
-
         part = Part.query.filter(func.upper(Part.part_number) == pn).first()
         if not part:
             continue
+
+        pn_issue_map[pn] = pn_issue_map.get(pn, 0) + issue_now
 
         try:
             real_cost = float(part.unit_cost or 0.0)
@@ -8515,6 +8504,7 @@ def wo_issue_instock(wo_id):
 
             qty_needed = int(line.quantity or 0)
             issued_so_far = int(line.issued_qty or 0)
+            issued_so_far = min(issued_so_far, qty_needed)
             remaining = max(qty_needed - issued_so_far, 0)
             if remaining <= 0:
                 continue
@@ -8699,7 +8689,7 @@ def tool_return(tool_id):
 def tools_list():
     from flask import request, render_template
     from sqlalchemy import func, or_, case
-    from models import ToolAsset, ToolMovement, ToolMovement
+    from models import ToolAsset, ToolMovement
 
     status = (request.args.get("status") or "").strip().lower()
     q = (request.args.get("q") or "").strip()
@@ -8730,6 +8720,7 @@ def tools_list():
             or_(
                 ToolAsset.tool_number.ilike(like),
                 ToolAsset.name.ilike(like),
+                ToolMovement.technician_name.ilike(like),
             )
         )
 
@@ -8750,20 +8741,39 @@ def tools_list():
         assigned_qty = max(int(assigned_qty or 0), 0)
         free_qty = max(total_qty - assigned_qty, 0)
 
-        computed_status = "available" if free_qty > 0 else "assigned"
+        raw_status = (tool.status or "").strip().lower()
 
-        if (tool.status or "") in ("maintenance", "lost", "retired"):
-            computed_status = tool.status
-
-        if status and computed_status != status:
-            continue
+        if raw_status in ("maintenance", "lost", "retired"):
+            computed_status = raw_status
+        elif assigned_qty > 0:
+            computed_status = "assigned"
+        else:
+            computed_status = "available"
 
         stats["total"] += total_qty
         stats["assigned"] += assigned_qty
         stats["free"] += free_qty
 
-        if computed_status in stats:
-            stats[computed_status] += 1
+        if raw_status == "maintenance":
+            stats["maintenance"] += 1
+        elif raw_status == "lost":
+            stats["lost"] += 1
+        elif raw_status == "retired":
+            stats["retired"] += 1
+
+        show_row = True
+
+        if status == "available":
+            show_row = free_qty > 0 and raw_status not in ("maintenance", "lost", "retired")
+
+        elif status == "assigned":
+            show_row = assigned_qty > 0 and raw_status not in ("maintenance", "lost", "retired")
+
+        elif status in ("maintenance", "lost", "retired"):
+            show_row = raw_status == status
+
+        if not show_row:
+            continue
 
         tools.append({
             "id": tool.id,
@@ -8776,47 +8786,52 @@ def tools_list():
             "location": tool.location or "TOOLS",
         })
 
-        assigned_by_tool = {}
+    assigned_by_tool = {}
 
-        for t in tools:
-            tool_id = int(t["id"])
+    for t in tools:
+        tool_id = int(t["id"])
 
-            rows = (
-                db.session.query(
-                    ToolMovement.technician_name,
-                    func.coalesce(func.sum(ToolMovement.quantity), 0)
-                )
-                .filter(
-                    ToolMovement.tool_id == tool_id,
-                    ToolMovement.action == "assigned"
-                )
-                .group_by(ToolMovement.technician_name)
-                .all()
+        assigned_rows = (
+            db.session.query(
+                ToolMovement.technician_name,
+                func.coalesce(func.sum(ToolMovement.quantity), 0)
             )
-
-            returned = (
-                db.session.query(
-                    ToolMovement.technician_name,
-                    func.coalesce(func.sum(ToolMovement.quantity), 0)
-                )
-                .filter(
-                    ToolMovement.tool_id == tool_id,
-                    ToolMovement.action == "returned"
-                )
-                .group_by(ToolMovement.technician_name)
-                .all()
+            .filter(
+                ToolMovement.tool_id == tool_id,
+                ToolMovement.action == "assigned"
             )
+            .group_by(ToolMovement.technician_name)
+            .all()
+        )
 
-            ret_map = {name: int(qty or 0) for name, qty in returned}
-            assigned_by_tool[tool_id] = []
+        returned_rows = (
+            db.session.query(
+                ToolMovement.technician_name,
+                func.coalesce(func.sum(ToolMovement.quantity), 0)
+            )
+            .filter(
+                ToolMovement.tool_id == tool_id,
+                ToolMovement.action == "returned"
+            )
+            .group_by(ToolMovement.technician_name)
+            .all()
+        )
 
-            for tech, qty in rows:
-                qty = int(qty or 0) - ret_map.get(tech, 0)
-                if qty > 0:
-                    assigned_by_tool[tool_id].append({
-                        "tech": tech or "—",
-                        "qty": qty,
-                    })
+        ret_map = {
+            name: int(qty or 0)
+            for name, qty in returned_rows
+        }
+
+        assigned_by_tool[tool_id] = []
+
+        for tech, qty in assigned_rows:
+            qty = int(qty or 0) - ret_map.get(tech, 0)
+
+            if qty > 0:
+                assigned_by_tool[tool_id].append({
+                    "tech": tech or "—",
+                    "qty": qty,
+                })
 
     return render_template(
         "tools.html",
@@ -8825,6 +8840,985 @@ def tools_list():
         status=status,
         q=q,
         assigned_by_tool=assigned_by_tool,
+    )
+
+@inventory_bp.get("/tools/<int:tool_id>/transfer", endpoint="tool_transfer_form")
+@login_required
+def tool_transfer_form(tool_id):
+    from models import ToolAsset, ToolMovement, User
+    from sqlalchemy import func
+
+    tool = ToolAsset.query.get_or_404(tool_id)
+
+    assigned_rows = (
+        db.session.query(
+            ToolMovement.technician_name,
+            func.coalesce(func.sum(ToolMovement.quantity), 0)
+        )
+        .filter(
+            ToolMovement.tool_id == tool.id,
+            ToolMovement.action == "assigned"
+        )
+        .group_by(ToolMovement.technician_name)
+        .all()
+    )
+
+    returned_rows = (
+        db.session.query(
+            ToolMovement.technician_name,
+            func.coalesce(func.sum(ToolMovement.quantity), 0)
+        )
+        .filter(
+            ToolMovement.tool_id == tool.id,
+            ToolMovement.action == "returned"
+        )
+        .group_by(ToolMovement.technician_name)
+        .all()
+    )
+
+    ret_map = {
+        name: int(qty or 0)
+        for name, qty in returned_rows
+    }
+
+    holders = []
+
+    for tech, qty in assigned_rows:
+        qty = int(qty or 0) - ret_map.get(tech, 0)
+
+        if qty > 0:
+            holders.append({
+                "name": tech,
+                "qty": qty,
+            })
+
+    technicians = (
+        User.query
+        .filter(User.role == "technician")
+        .order_by(User.username.asc())
+        .all()
+    )
+
+    return render_template(
+        "tool_transfer.html",
+        tool=tool,
+        holders=holders,
+        technicians=technicians,
+    )
+
+@inventory_bp.post("/tools/<int:tool_id>/transfer", endpoint="tool_transfer")
+@login_required
+def tool_transfer(tool_id):
+    from datetime import datetime
+    from flask import request, flash, redirect, url_for
+    from sqlalchemy import func
+    from extensions import db
+    from models import ToolAsset, ToolMovement, User
+
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.tools_list"))
+
+    tool = ToolAsset.query.get_or_404(tool_id)
+
+    from_tech = (request.form.get("from_tech") or "").strip()
+    to_tech = (request.form.get("to_tech") or "").strip()
+
+    try:
+        qty = int(request.form.get("qty") or 1)
+    except Exception:
+        qty = 1
+
+    if not from_tech or not to_tech:
+        flash("From and To technician are required.", "danger")
+        return redirect(url_for("inventory.tool_transfer_form", tool_id=tool.id))
+
+    if from_tech == to_tech:
+        flash("From and To technician cannot be the same.", "warning")
+        return redirect(url_for("inventory.tool_transfer_form", tool_id=tool.id))
+
+    if qty <= 0:
+        flash("Qty must be greater than 0.", "danger")
+        return redirect(url_for("inventory.tool_transfer_form", tool_id=tool.id))
+
+    assigned_qty = (
+        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+        .filter(
+            ToolMovement.tool_id == tool.id,
+            ToolMovement.action == "assigned",
+            ToolMovement.technician_name == from_tech,
+        )
+        .scalar()
+        or 0
+    )
+
+    returned_qty = (
+        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+        .filter(
+            ToolMovement.tool_id == tool.id,
+            ToolMovement.action == "returned",
+            ToolMovement.technician_name == from_tech,
+        )
+        .scalar()
+        or 0
+    )
+
+    open_qty = max(int(assigned_qty or 0) - int(returned_qty or 0), 0)
+
+    if qty > open_qty:
+        flash(
+            f"{from_tech} has only {open_qty} x {tool.tool_number} assigned.",
+            "danger"
+        )
+        return redirect(url_for("inventory.tool_transfer_form", tool_id=tool.id))
+
+    to_user = (
+        User.query
+        .filter(func.lower(User.username) == to_tech.lower())
+        .first()
+    )
+
+    now = datetime.utcnow()
+    actor_id = getattr(current_user, "id", None)
+    actor_name = getattr(current_user, "username", "system")
+
+    # 1) снимаем qty с первого техника
+    db.session.add(ToolMovement(
+        tool_id=tool.id,
+        work_order_id=None,
+        technician_id=None,
+        technician_name=from_tech,
+        action="returned",
+        quantity=qty,
+        from_status="assigned",
+        to_status="available",
+        note=f"Transfer out to {to_tech}",
+        actor_user_id=actor_id,
+        actor_username=actor_name,
+        created_at=now,
+    ))
+
+    # 2) назначаем qty новому технику
+    db.session.add(ToolMovement(
+        tool_id=tool.id,
+        work_order_id=None,
+        technician_id=getattr(to_user, "id", None),
+        technician_name=to_tech,
+        action="assigned",
+        quantity=qty,
+        from_status="available",
+        to_status="assigned",
+        note=f"Transfer in from {from_tech}",
+        actor_user_id=actor_id,
+        actor_username=actor_name,
+        created_at=now,
+    ))
+
+    db.session.add(ToolMovement(
+        tool_id=tool.id,
+        work_order_id=None,
+        technician_id=getattr(to_user, "id", None),
+        technician_name=f"{from_tech} → {to_tech}",
+        action="transferred",
+        quantity=qty,
+        from_status="assigned",
+        to_status="assigned",
+        note=f"{from_tech} -> {to_tech}",
+        actor_user_id=actor_id,
+        actor_username=actor_name,
+        created_at=now,
+    ))
+
+    tool.status = "assigned"
+    tool.location = "TECHNICIAN"
+    tool.current_technician_id = getattr(to_user, "id", None)
+    tool.current_technician_name = to_tech
+    tool.current_work_order_id = None
+    tool.updated_at = now
+    db.session.add(tool)
+
+    try:
+        db.session.commit()
+        flash(
+            f"Transferred {qty} x {tool.tool_number} from {from_tech} to {to_tech}.",
+            "success"
+        )
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Transfer failed: {e}", "danger")
+        return redirect(url_for("inventory.tool_transfer_form", tool_id=tool.id))
+
+    return redirect(url_for("inventory.tools_list"))
+
+@inventory_bp.get("/tools/history", endpoint="tools_history")
+@login_required
+def tools_history():
+    from flask import render_template, request
+    from sqlalchemy import func, case, or_
+    from models import ToolAsset, ToolMovement
+
+    tech_filter = (request.args.get("tech") or "").strip()
+
+    total_tools = db.session.query(func.coalesce(func.sum(ToolAsset.quantity), 0)).scalar() or 0
+
+    assigned_expr = func.coalesce(
+        func.sum(
+            case(
+                (ToolMovement.action == "assigned", ToolMovement.quantity),
+                (ToolMovement.action == "returned", -ToolMovement.quantity),
+                else_=0,
+            )
+        ),
+        0,
+    )
+
+    total_assigned = (
+        db.session.query(assigned_expr)
+        .select_from(ToolMovement)
+        .scalar()
+        or 0
+    )
+
+    total_free = max(int(total_tools) - int(total_assigned), 0)
+
+    tech_rows = (
+        db.session.query(
+            ToolMovement.technician_name,
+            assigned_expr.label("qty"),
+        )
+        .group_by(ToolMovement.technician_name)
+        .all()
+    )
+
+    by_tech = [
+        {"tech": tech or "—", "qty": int(qty or 0)}
+        for tech, qty in tech_rows
+        if int(qty or 0) > 0
+    ]
+
+    movements_q = (
+        ToolMovement.query
+        .filter(~ToolMovement.note.ilike("Transfer in%"))
+        .filter(~ToolMovement.note.ilike("Transfer out%"))
+    )
+
+    if tech_filter:
+        like = f"%{tech_filter}%"
+
+        movements_q = movements_q.filter(
+            or_(
+                ToolMovement.technician_name.ilike(like),
+                ToolMovement.note.ilike(like),
+            )
+        )
+
+    movements = (
+        movements_q
+        .order_by(ToolMovement.created_at.desc(), ToolMovement.id.desc())
+        .limit(300)
+        .all()
+    )
+
+    return render_template(
+        "tools_history.html",
+        total_tools=int(total_tools),
+        total_assigned=int(total_assigned),
+        total_free=int(total_free),
+        by_tech=by_tech,
+        movements=movements,
+        tech_filter=tech_filter,
+    )
+
+@inventory_bp.get("/tools/<int:tool_id>", endpoint="tool_detail")
+@login_required
+def tool_detail(tool_id):
+    from flask import render_template
+    from sqlalchemy import func, case
+    from models import ToolAsset, ToolMovement, WorkOrder
+
+    tool = ToolAsset.query.get_or_404(tool_id)
+
+    assigned_expr = func.coalesce(
+        func.sum(
+            case(
+                (ToolMovement.action == "assigned", ToolMovement.quantity),
+                (ToolMovement.action == "returned", -ToolMovement.quantity),
+                else_=0,
+            )
+        ),
+        0,
+    )
+
+    total_qty = int(tool.quantity or 0)
+
+    assigned_qty = (
+        db.session.query(assigned_expr)
+        .filter(ToolMovement.tool_id == tool.id)
+        .scalar()
+        or 0
+    )
+
+    assigned_qty = max(int(assigned_qty or 0), 0)
+    free_qty = max(total_qty - assigned_qty, 0)
+
+    # Current holders
+    holders_rows = (
+        db.session.query(
+            ToolMovement.technician_name,
+            assigned_expr.label("qty"),
+        )
+        .filter(ToolMovement.tool_id == tool.id)
+        .group_by(ToolMovement.technician_name)
+        .all()
+    )
+
+    holders = [
+        {"tech": tech or "—", "qty": int(qty or 0)}
+        for tech, qty in holders_rows
+        if int(qty or 0) > 0
+    ]
+
+    # Assignment Summary
+    assigned_rows = (
+        db.session.query(
+            ToolMovement.technician_name,
+            func.coalesce(func.sum(ToolMovement.quantity), 0)
+        )
+        .filter(
+            ToolMovement.tool_id == tool.id,
+            ToolMovement.action == "assigned",
+        )
+        .group_by(ToolMovement.technician_name)
+        .all()
+    )
+
+    returned_rows = (
+        db.session.query(
+            ToolMovement.technician_name,
+            func.coalesce(func.sum(ToolMovement.quantity), 0)
+        )
+        .filter(
+            ToolMovement.tool_id == tool.id,
+            ToolMovement.action == "returned",
+        )
+        .group_by(ToolMovement.technician_name)
+        .all()
+    )
+
+    summary_map = {}
+
+    for tech, qty in assigned_rows:
+        tech = tech or "—"
+        summary_map.setdefault(tech, {"tech": tech, "assigned": 0, "returned": 0, "holding": 0})
+        summary_map[tech]["assigned"] = int(qty or 0)
+
+    for tech, qty in returned_rows:
+        tech = tech or "—"
+        summary_map.setdefault(tech, {"tech": tech, "assigned": 0, "returned": 0, "holding": 0})
+        summary_map[tech]["returned"] = int(qty or 0)
+
+    for x in summary_map.values():
+        x["holding"] = max(int(x["assigned"]) - int(x["returned"]), 0)
+
+    assignment_summary = sorted(
+        summary_map.values(),
+        key=lambda x: (x["holding"] <= 0, x["tech"])
+    )
+
+    movements = (
+        ToolMovement.query
+        .filter(ToolMovement.tool_id == tool.id)
+        .filter(~ToolMovement.note.ilike("Transfer in%"))
+        .filter(~ToolMovement.note.ilike("Transfer out%"))
+        .order_by(ToolMovement.created_at.desc(), ToolMovement.id.desc())
+        .limit(300)
+        .all()
+    )
+
+    wo_ids = sorted({
+        int(m.work_order_id)
+        for m in movements
+        if m.work_order_id
+    })
+
+    related_wos = []
+    if wo_ids:
+        related_wos = (
+            WorkOrder.query
+            .filter(WorkOrder.id.in_(wo_ids))
+            .order_by(WorkOrder.id.desc())
+            .all()
+        )
+
+    return render_template(
+        "tool_detail.html",
+        tool=tool,
+        total_qty=total_qty,
+        assigned_qty=assigned_qty,
+        free_qty=free_qty,
+        holders=holders,
+        assignment_summary=assignment_summary,
+        movements=movements,
+        related_wos=related_wos,
+    )
+
+@inventory_bp.get("/tools/stats", endpoint="tools_stats")
+@login_required
+def tools_stats():
+    from flask import render_template
+    from sqlalchemy import func, case
+    from models import ToolAsset, ToolMovement
+
+    total_tools = (
+        db.session.query(func.coalesce(func.sum(ToolAsset.quantity), 0))
+        .scalar()
+        or 0
+    )
+
+    assigned_expr = func.coalesce(
+        func.sum(
+            case(
+                (ToolMovement.action == "assigned", ToolMovement.quantity),
+                (ToolMovement.action == "returned", -ToolMovement.quantity),
+                else_=0,
+            )
+        ),
+        0,
+    )
+
+    total_assigned = (
+        db.session.query(assigned_expr)
+        .select_from(ToolMovement)
+        .scalar()
+        or 0
+    )
+
+    total_assigned = max(int(total_assigned), 0)
+    total_tools = int(total_tools)
+    total_free = max(total_tools - total_assigned, 0)
+
+    tech_rows = (
+        db.session.query(
+            ToolMovement.technician_name,
+            assigned_expr.label("holding"),
+            func.max(ToolMovement.created_at).label("last_move"),
+        )
+        .filter(
+            ToolMovement.action.in_(("assigned", "returned"))
+        )
+        .group_by(ToolMovement.technician_name)
+        .all()
+    )
+
+    technicians = []
+
+    for tech, holding, last_move in tech_rows:
+        holding = max(int(holding or 0), 0)
+
+        tools = (
+            db.session.query(
+                ToolAsset.tool_number,
+                assigned_expr.label("qty"),
+            )
+            .join(
+                ToolMovement,
+                ToolMovement.tool_id == ToolAsset.id,
+            )
+            .filter(
+                ToolMovement.technician_name == tech,
+                ToolMovement.action.in_(("assigned", "returned"))
+            )
+            .group_by(ToolAsset.id)
+            .having(assigned_expr > 0)
+            .all()
+        )
+
+        tool_list = [
+            f"{pn} x{qty}"
+            for pn, qty in tools
+        ]
+
+        assigned_total = (
+                db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+                .filter(
+                    ToolMovement.technician_name == tech,
+                    ToolMovement.action == "assigned",
+                )
+                .scalar()
+                or 0
+        )
+
+        returned_total = (
+                db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+                .filter(
+                    ToolMovement.technician_name == tech,
+                    ToolMovement.action == "returned",
+                )
+                .scalar()
+                or 0
+        )
+
+        technicians.append({
+            "tech": tech or "—",
+            "assigned": int(assigned_total or 0),
+            "returned": int(returned_total or 0),
+            "holding": holding,
+            "tools": ", ".join(tool_list),
+            "last_move": last_move,
+        })
+
+    technicians.sort(
+        key=lambda x: (-x["holding"], x["tech"])
+    )
+
+    return render_template(
+        "tools_stats.html",
+        total_tools=total_tools,
+        total_assigned=total_assigned,
+        total_free=total_free,
+        technicians=technicians,
+    )
+
+@inventory_bp.get("/tools/tech/<technician>", endpoint="tools_by_technician")
+@login_required
+def tools_by_technician(technician):
+    from datetime import datetime
+    from flask import render_template
+    from sqlalchemy import func
+    from models import ToolAsset, ToolMovement
+
+    tech = (technician or "").strip()
+
+    assigned_total = (
+        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+        .filter(
+            ToolMovement.technician_name == tech,
+            ToolMovement.action == "assigned",
+        )
+        .scalar()
+        or 0
+    )
+
+    returned_total = (
+        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+        .filter(
+            ToolMovement.technician_name == tech,
+            ToolMovement.action == "returned",
+        )
+        .scalar()
+        or 0
+    )
+
+    holding = max(int(assigned_total or 0) - int(returned_total or 0), 0)
+
+    return_rate = (
+        round((int(returned_total or 0) * 100) / int(assigned_total or 0))
+        if int(assigned_total or 0) > 0
+        else 0
+    )
+
+    current_tools = []
+    long_held = []
+    at_risk_tools = []
+    tool_summary = []
+
+    tool_ids = (
+        db.session.query(ToolMovement.tool_id)
+        .filter(
+            ToolMovement.technician_name == tech,
+            ToolMovement.action.in_(("assigned", "returned")),
+        )
+        .distinct()
+        .all()
+    )
+
+    for (tool_id,) in tool_ids:
+        tool = ToolAsset.query.get(tool_id)
+        if not tool:
+            continue
+
+        assigned = (
+            db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+            .filter(
+                ToolMovement.tool_id == tool_id,
+                ToolMovement.technician_name == tech,
+                ToolMovement.action == "assigned",
+            )
+            .scalar()
+            or 0
+        )
+
+        returned = (
+            db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+            .filter(
+                ToolMovement.tool_id == tool_id,
+                ToolMovement.technician_name == tech,
+                ToolMovement.action == "returned",
+            )
+            .scalar()
+            or 0
+        )
+
+        assigned = int(assigned or 0)
+        returned = int(returned or 0)
+        qty = max(assigned - returned, 0)
+
+        first_assigned = (
+            db.session.query(func.min(ToolMovement.created_at))
+            .filter(
+                ToolMovement.tool_id == tool.id,
+                ToolMovement.technician_name == tech,
+                ToolMovement.action == "assigned",
+            )
+            .scalar()
+        )
+
+        tool_summary.append({
+            "tool": tool,
+            "assigned": assigned,
+            "returned": returned,
+            "holding": qty,
+        })
+
+        if qty <= 0:
+            continue
+
+        days_held = 0
+        if first_assigned:
+            days_held = (datetime.utcnow() - first_assigned).days
+
+        current_tools.append({
+            "tool": tool,
+            "qty": qty,
+            "since": first_assigned,
+        })
+
+        long_held.append({
+            "tool": tool,
+            "qty": qty,
+            "days": days_held,
+        })
+
+        if days_held >= 30:
+            last_wo = (
+                db.session.query(ToolMovement.work_order_id)
+                .filter(
+                    ToolMovement.tool_id == tool.id,
+                    ToolMovement.technician_name == tech,
+                    ToolMovement.work_order_id.isnot(None),
+                )
+                .order_by(ToolMovement.created_at.desc())
+                .first()
+            )
+
+            at_risk_tools.append({
+                "tool": tool,
+                "qty": qty,
+                "days": days_held,
+                "wo_id": last_wo[0] if last_wo else None,
+            })
+
+    movements = (
+        ToolMovement.query
+        .filter(ToolMovement.technician_name == tech)
+        .filter(~ToolMovement.note.ilike("Transfer in%"))
+        .filter(~ToolMovement.note.ilike("Transfer out%"))
+        .order_by(
+            ToolMovement.created_at.desc(),
+            ToolMovement.id.desc(),
+        )
+        .limit(300)
+        .all()
+    )
+
+    related_wos = (
+        db.session.query(ToolMovement.work_order_id)
+        .filter(
+            ToolMovement.technician_name == tech,
+            ToolMovement.work_order_id.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+
+    wo_ids = [r[0] for r in related_wos]
+
+    return render_template(
+        "tools_by_technician.html",
+        technician=tech,
+        assigned_total=int(assigned_total or 0),
+        returned_total=int(returned_total or 0),
+        holding=holding,
+        current_tools=current_tools,
+        long_held=long_held,
+        at_risk_tools=at_risk_tools,
+        return_rate=return_rate,
+        tool_summary=tool_summary,
+        movements=movements,
+        wo_ids=wo_ids,
+    )
+
+@inventory_bp.get("/tools/technician_report.pdf", endpoint="tools_tech_report_pdf")
+@login_required
+def tools_tech_report_pdf():
+    from datetime import datetime
+    from io import BytesIO
+
+    from flask import request, send_file
+    from sqlalchemy import func
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    from models import ToolAsset, ToolMovement
+
+    technician_filter = (request.args.get("technician") or "").strip()
+
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36,
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph("<b>WEST COAST CHIEF REPAIR</b>", styles["Title"]))
+    story.append(Paragraph("Technician Tool Custody Report", styles["Heading2"]))
+    story.append(Paragraph(
+        f"Generated: {datetime.now().strftime('%m/%d/%Y %I:%M %p')}",
+        styles["Normal"],
+    ))
+
+    if technician_filter:
+        story.append(Paragraph(
+            f"Technician: <b>{technician_filter}</b>",
+            styles["Normal"],
+        ))
+
+    story.append(Spacer(1, 0.2 * inch))
+
+    tech_rows = (
+        db.session.query(ToolMovement.technician_name)
+        .filter(ToolMovement.technician_name.isnot(None))
+        .distinct()
+        .order_by(ToolMovement.technician_name.asc())
+        .all()
+    )
+
+    technicians = [
+        r[0]
+        for r in tech_rows
+        if r[0] and "→" not in r[0] and "->" not in r[0]
+    ]
+
+    if technician_filter:
+        technicians = [
+            t for t in technicians
+            if t.lower() == technician_filter.lower()
+        ]
+
+    grand_tool_types = 0
+    grand_qty = 0
+    technician_count = 0
+
+    for tech in technicians:
+        current_tools = []
+
+        tool_ids = (
+            db.session.query(ToolMovement.tool_id)
+            .filter(ToolMovement.technician_name == tech)
+            .distinct()
+            .all()
+        )
+
+        for (tool_id,) in tool_ids:
+            tool = ToolAsset.query.get(tool_id)
+            if not tool:
+                continue
+
+            assigned = (
+                db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+                .filter(
+                    ToolMovement.tool_id == tool_id,
+                    ToolMovement.technician_name == tech,
+                    ToolMovement.action == "assigned",
+                )
+                .scalar()
+                or 0
+            )
+
+            returned = (
+                db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
+                .filter(
+                    ToolMovement.tool_id == tool_id,
+                    ToolMovement.technician_name == tech,
+                    ToolMovement.action == "returned",
+                )
+                .scalar()
+                or 0
+            )
+
+            qty = max(int(assigned or 0) - int(returned or 0), 0)
+
+            if qty <= 0:
+                continue
+
+            first_assigned = (
+                db.session.query(func.min(ToolMovement.created_at))
+                .filter(
+                    ToolMovement.tool_id == tool_id,
+                    ToolMovement.technician_name == tech,
+                    ToolMovement.action == "assigned",
+                )
+                .scalar()
+            )
+
+            last_wo = (
+                db.session.query(ToolMovement.work_order_id)
+                .filter(
+                    ToolMovement.tool_id == tool_id,
+                    ToolMovement.technician_name == tech,
+                    ToolMovement.work_order_id.isnot(None),
+                )
+                .order_by(ToolMovement.created_at.desc())
+                .first()
+            )
+
+            days_held = 0
+            if first_assigned:
+                days_held = (datetime.utcnow() - first_assigned).days
+
+            current_tools.append({
+                "tool": tool,
+                "qty": qty,
+                "since": first_assigned,
+                "days": days_held,
+                "wo_id": last_wo[0] if last_wo else None,
+            })
+
+        if not current_tools:
+            continue
+
+        technician_count += 1
+        grand_tool_types += len(current_tools)
+        grand_qty += sum(x["qty"] for x in current_tools)
+
+        story.append(Paragraph(f"<b>Technician: {tech}</b>", styles["Heading3"]))
+
+        data = [[
+            "Tool #",
+            "Tool Name",
+            "Qty",
+            "Assigned Since",
+            "Days Held",
+            "WO",
+        ]]
+
+        for x in current_tools:
+            since_text = (
+                x["since"].strftime("%m/%d/%Y")
+                if x["since"]
+                else "—"
+            )
+
+            wo_text = f"#{x['wo_id']}" if x["wo_id"] else "—"
+
+            data.append([
+                x["tool"].tool_number or "—",
+                x["tool"].name or "—",
+                str(x["qty"]),
+                since_text,
+                str(x["days"]),
+                wo_text,
+            ])
+
+        table = Table(
+            data,
+            colWidths=[
+                1.25 * inch,
+                2.3 * inch,
+                0.45 * inch,
+                1.1 * inch,
+                0.8 * inch,
+                0.8 * inch,
+            ],
+        )
+
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9ecef")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+            ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+
+        story.append(table)
+        story.append(Spacer(1, 0.12 * inch))
+
+        story.append(Paragraph(
+            f"Summary: Tool Types: <b>{len(current_tools)}</b> | "
+            f"Total Tools Assigned: <b>{sum(x['qty'] for x in current_tools)}</b>",
+            styles["Normal"],
+        ))
+
+        story.append(Spacer(1, 0.3 * inch))
+
+    story.append(Spacer(1, 0.2 * inch))
+    story.append(Paragraph("<b>Final Totals</b>", styles["Heading3"]))
+    story.append(Paragraph(
+        f"Total Technicians: <b>{technician_count}</b><br/>"
+        f"Total Tool Types Assigned: <b>{grand_tool_types}</b><br/>"
+        f"Total Physical Tools Assigned: <b>{grand_qty}</b>",
+        styles["Normal"],
+    ))
+
+    story.append(Spacer(1, 0.5 * inch))
+    story.append(Paragraph(
+        "Technician Signature: ________________________________",
+        styles["Normal"],
+    ))
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph(
+        "Printed Name: _______________________________________",
+        styles["Normal"],
+    ))
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph(
+        "Date: ______________________________________________",
+        styles["Normal"],
+    ))
+
+    doc.build(story)
+
+    buffer.seek(0)
+
+    filename = "technician_tool_custody_report.pdf"
+    if technician_filter:
+        filename = f"{technician_filter}_tool_custody_report.pdf"
+
+    return send_file(
+        buffer,
+        as_attachment=False,
+        download_name=filename,
+        mimetype="application/pdf",
     )
 
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
@@ -9329,15 +10323,16 @@ def wo_issue_instock_unit(wo_id, unit_id):
 
             db.session.add(ToolMovement(
                 tool_id=tool.id,
-                work_order_id=wo.id,
-                technician_id=getattr(wo, "technician_id", None),
-                technician_name=wo.technician_name,
-                action="assigned",
-                from_status=old_status,
+                work_order_id=None,
+                technician_id=None,
+                technician_name=f"{from_tech} → {to_tech}",
+                action="transferred",
+                quantity=qty,
+                from_status="assigned",
                 to_status="assigned",
-                note=f"Assigned from WO #{wo.id}",
-                actor_user_id=getattr(current_user, "id", None),
-                actor_username=getattr(current_user, "username", "system"),
+                note=f"{from_tech} -> {to_tech}",
+                actor_user_id=actor_id,
+                actor_username=actor_name,
                 created_at=now,
             ))
 
@@ -9515,7 +10510,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
                     continue
 
                 delta = min(remaining, need_to_apply)
-                line.issued_qty = issued_so_far + delta
+                line.issued_qty = min(qty_needed, issued_so_far + delta)
                 line.last_issued_at = now
 
                 if line.issued_qty >= qty_needed:

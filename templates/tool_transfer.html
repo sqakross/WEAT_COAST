@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3 class="mb-3">
+  Transfer Tool: {{ tool.tool_number }}
+</h3>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div><strong>Tool:</strong> {{ tool.tool_number }}</div>
+    <div><strong>Name:</strong> {{ tool.name }}</div>
+    <div><strong>Total Qty:</strong> {{ tool.quantity }}</div>
+  </div>
+</div>
+
+<h5>Currently Assigned</h5>
+
+<table class="table table-sm table-bordered mb-4">
+  <thead>
+    <tr>
+      <th>Technician</th>
+      <th class="text-end">Qty</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for h in holders %}
+      <tr>
+        <td>{{ h.name }}</td>
+        <td class="text-end">{{ h.qty }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<form method="post"
+      action="{{ url_for('inventory.tool_transfer', tool_id=tool.id) }}">
+
+  <div class="mb-3">
+    <label class="form-label">From Technician</label>
+    <select class="form-select" name="from_tech" required>
+      {% for h in holders %}
+        <option value="{{ h.name }}">
+          {{ h.name }} ({{ h.qty }})
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">To Technician</label>
+    <select class="form-select" name="to_tech" required>
+      {% for u in technicians %}
+        <option value="{{ u.username }}">
+          {{ u.username }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Qty</label>
+    <input class="form-control"
+           type="number"
+           name="qty"
+           min="1"
+           value="1"
+           required>
+  </div>
+
+  <button class="btn btn-primary">
+    Transfer
+  </button>
+
+  <a class="btn btn-secondary"
+     href="{{ url_for('inventory.tools_list') }}">
+    Back
+  </a>
+
+</form>
+
+{% endblock %}
