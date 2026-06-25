@@ -2751,16 +2751,20 @@ def _issue_records_bulk(
         chosen_cost_source = None
 
         if inv_ref:
+            # Real supplier invoice selected:
+            # price comes from that exact receiving invoice line.
             price_to_fix = float(receipt_line_cost(lot_line))
             chosen_cost_source = "receipt_inv_match"
         else:
-            # STOCK / LATEST
-            if lot_line is not None:
+            # STOCK selected:
+            # price comes from current Inventory Dashboard price.
+            price_to_fix = float(part.unit_cost or 0.0)
+
+            if price_to_fix <= 0 and lot_line is not None:
                 price_to_fix = float(receipt_line_cost(lot_line))
                 chosen_cost_source = (lot_src or "latest")[:32]
             else:
-                price_to_fix = float(part.unit_cost or 0.0)
-                chosen_cost_source = "fallback_part_unit_cost"
+                chosen_cost_source = "part_unit_cost_stock"
 
         part.quantity = on_hand - issue_now
         db.session.add(part)
@@ -11254,13 +11258,25 @@ def issue_part():
                         )
 
                 if line is not None:
-                    unit_cost = float(receipt_line_cost(line))
                     chosen_receipt_line_id = int(line.id)
+                else:
+                    chosen_receipt_line_id = None
+
+                if inv_ref and line is not None:
+                    # Real supplier invoice selected:
+                    # price comes from that exact receiving invoice line.
+                    unit_cost = float(receipt_line_cost(line))
                     chosen_cost_source = src
                 else:
+                    # STOCK or no invoice selected:
+                    # price comes from current Inventory Dashboard price.
                     unit_cost = float(getattr(part, "unit_cost", 0) or 0.0)
-                    chosen_receipt_line_id = None
-                    chosen_cost_source = "fallback_part_unit_cost"
+
+                    if unit_cost <= 0 and line is not None:
+                        unit_cost = float(receipt_line_cost(line))
+                        chosen_cost_source = src
+                    else:
+                        chosen_cost_source = "part_unit_cost_stock"
 
                 # decrement stock (still not committed)
                 part.quantity = int(part.quantity or 0) - qty
