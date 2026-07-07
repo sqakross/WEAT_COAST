@@ -58,22 +58,92 @@ def technician_ledger(technician_name):
 
     from services.accounting_service import (
         get_technician_ledger,
-        get_technician_balances,
+        get_technician_summary,
     )
 
     rows = get_technician_ledger(technician_name)
 
-    balance = next(
-        (
-            x for x in get_technician_balances()
-            if x.technician == technician_name
-        ),
-        None,
-    )
+    summary = get_technician_summary(technician_name)
 
     return render_template(
         "accounting/technician_ledger.html",
         technician_name=technician_name,
         rows=rows,
-        balance=balance,
+        summary=summary,
     )
+
+@accounting_bp.route(
+    "/technicians/<technician_name>/payment/new",
+    methods=["GET", "POST"],
+)
+@login_required
+def payment_new(technician_name):
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from datetime import date
+    from services.accounting_service import preview_technician_payment_fifo
+
+    amount_raw = (request.form.get("amount") or request.args.get("amount") or "").strip()
+
+    preview = None
+    error = None
+
+    if amount_raw:
+        try:
+            preview = preview_technician_payment_fifo(
+                technician_name=technician_name,
+                amount=float(amount_raw),
+            )
+        except Exception as e:
+            error = str(e)
+
+    return render_template(
+        "accounting/payment_new.html",
+        technician_name=technician_name,
+        today=date.today().isoformat(),
+        amount_raw=amount_raw,
+        preview=preview,
+        error=error,
+    )
+
+@accounting_bp.post("/technicians/<technician_name>/payment")
+@login_required
+def payment_create(technician_name):
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from datetime import datetime
+    from services.accounting_service import create_technician_payment_fifo
+    from extensions import db
+
+    try:
+        amount = float(request.form.get("amount") or 0)
+        payment_date_raw = request.form.get("payment_date") or ""
+        payment_date = datetime.strptime(payment_date_raw, "%Y-%m-%d").date()
+
+        payment = create_technician_payment_fifo(
+            technician_name=technician_name,
+            amount=amount,
+            payment_date=payment_date,
+            method=request.form.get("method"),
+            reference=request.form.get("reference"),
+            note=request.form.get("note"),
+            created_by=getattr(current_user, "id", None),
+        )
+
+        flash(f"Payment #{payment.id} posted successfully.", "success")
+        return redirect(url_for(
+            "accounting.technician_ledger",
+            technician_name=technician_name,
+        ))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(str(e), "danger")
+        return redirect(url_for(
+            "accounting.payment_new",
+            technician_name=technician_name,
+        ))

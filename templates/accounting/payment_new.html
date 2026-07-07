@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">New Payment — {{ technician_name }}</h3>
+
+  <a class="btn btn-outline-secondary"
+     href="{{ url_for('accounting.technician_ledger', technician_name=technician_name) }}">
+    ← Back
+  </a>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">
+  {{ error }}
+</div>
+{% endif %}
+
+<form method="post" class="card border-0 shadow-sm mb-4">
+  <div class="card-body">
+
+    <div class="row g-3">
+
+      <div class="col-md-3">
+        <label class="form-label">Payment Date</label>
+        <input type="date"
+               name="payment_date"
+               class="form-control"
+               value="{{ today }}">
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label">Amount</label>
+        <input type="number"
+               step="0.01"
+               min="0"
+               name="amount"
+               class="form-control"
+               value="{{ amount_raw }}"
+               required>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label">Method</label>
+        <select name="method" class="form-select">
+          <option value="payroll" selected>Payroll Deduction</option>
+            <option value="cash">Cash</option>
+            <option value="check">Check</option>
+            <option value="zelle">Zelle</option>
+            <option value="bank_transfer">Bank Transfer</option>
+            <option value="card">Card</option>
+            <option value="other">Other</option>
+        </select>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label">Reference # / Payroll Period</label>
+        <input name="reference"
+               class="form-control"
+               placeholder="Payroll date / payroll # / check # / Zelle ref">
+      </div>
+
+      <div class="col-12">
+        <label class="form-label">Note</label>
+        <input name="note"
+               class="form-control"
+               placeholder="Optional note">
+      </div>
+
+    </div>
+
+    <div class="mt-3">
+      <button class="btn btn-primary">
+        Preview FIFO
+      </button>
+    </div>
+
+  </div>
+</form>
+
+{% if preview %}
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+
+    <h5>FIFO Preview</h5>
+
+    <div class="mb-3">
+      Payment:
+      <strong>${{ '%.2f'|format(preview.payment_amount) }}</strong>
+
+      Applied:
+      <strong class="text-success">${{ '%.2f'|format(preview.total_applied) }}</strong>
+
+      Unapplied:
+      <strong class="text-danger">${{ '%.2f'|format(preview.unapplied_amount) }}</strong>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Invoice</th>
+            <th>Job</th>
+            <th class="text-end">Remaining Before</th>
+            <th class="text-end">Will Apply</th>
+            <th class="text-end">Remaining After</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {% for line in preview.lines %}
+          <tr>
+            <td>{{ line.entry_date }}</td>
+            <td>{{ line.supplier_invoice }}</td>
+            <td>{{ line.job_number }}</td>
+            <td class="text-end">${{ '%.2f'|format(line.remaining_before) }}</td>
+            <td class="text-end fw-bold text-success">${{ '%.2f'|format(line.apply_amount) }}</td>
+            <td class="text-end">${{ '%.2f'|format(line.remaining_after) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <form method="post"
+      action="{{ url_for('accounting.payment_create', technician_name=technician_name) }}">
+
+  <input type="hidden" name="payment_date" value="{{ request.form.get('payment_date') or today }}">
+  <input type="hidden" name="amount" value="{{ amount_raw }}">
+  <input type="hidden" name="method" value="{{ request.form.get('method') or 'payroll' }}">
+  <input type="hidden" name="reference" value="{{ request.form.get('reference') or '' }}">
+  <input type="hidden" name="note" value="{{ request.form.get('note') or '' }}">
+
+  <button class="btn btn-success">
+    Save Payment
+  </button>
+</form>
+
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

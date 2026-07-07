@@ -2745,8 +2745,10 @@ def _issue_records_bulk(
                         )
                         receipt_pick_cache[cache_key] = (lot_line, lot_src)
 
-            if lot_line is not None:
+            if lot_line is not None and inv_ref:
                 chosen_receipt_line_id = int(getattr(lot_line, "id", 0) or 0) or None
+            else:
+                chosen_receipt_line_id = None
 
         chosen_cost_source = None
 

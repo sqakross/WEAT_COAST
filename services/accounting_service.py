@@ -330,6 +330,8 @@ def create_technician_payment_fifo(
         raise ValueError("Payment amount must be greater than zero")
 
     try:
+        from datetime import datetime
+
         payment = TechnicianPayment(
             technician_name=tech,
             payment_date=payment_date,
@@ -339,6 +341,10 @@ def create_technician_payment_fifo(
             reference=(reference or "").strip() or None,
             note=(note or "").strip() or None,
             created_by=created_by,
+            status="posted",
+            posted_at=datetime.utcnow(),
+            posted_by=created_by,
+            voided=False,
         )
 
         db.session.add(payment)
@@ -644,6 +650,22 @@ class TechnicianLedgerRow:
     status: str
     note: str | None
 
+@dataclass(frozen=True)
+class TechnicianSummary:
+    technician: str
+
+    charges: float
+
+    payments: float
+
+    adjustments: float
+
+    opening_balance: float
+
+    remaining: float
+
+    open_invoices: int
+
 
 def get_technician_ledger(
     technician_name: str,
@@ -689,3 +711,160 @@ def get_technician_ledger(
         )
         for r in rows
     ]
+
+def get_technician_summary(
+    technician_name: str,
+) -> TechnicianSummary:
+    from models import TechnicianLedgerEntry
+
+    tech = (technician_name or "").strip()
+
+    if not tech:
+        raise ValueError("Technician name required")
+
+    rows = (
+        TechnicianLedgerEntry.query
+        .filter(
+            TechnicianLedgerEntry.technician_name == tech,
+            TechnicianLedgerEntry.voided == False,
+        )
+        .all()
+    )
+
+    charges = 0.0
+    payments = 0.0
+    adjustments = 0.0
+    opening = 0.0
+
+    invoices = set()
+
+    remaining = 0.0
+
+    for r in rows:
+
+        remaining += float(r.remaining_amount or 0)
+
+        if r.supplier_invoice:
+            invoices.add(r.supplier_invoice)
+
+        t = (r.entry_type or "").upper()
+
+        if t == "CHARGE":
+            charges += float(r.amount or 0)
+
+        elif t == "OPENING_BALANCE":
+            opening += float(r.amount or 0)
+
+        elif t in (
+            "ADJUSTMENT_PLUS",
+            "ADJUSTMENT_MINUS",
+        ):
+            adjustments += float(r.amount or 0)
+
+        elif t == "PAYMENT":
+            payments += abs(float(r.amount or 0))
+
+    return TechnicianSummary(
+        technician=tech,
+
+        charges=round(charges, 2),
+
+        payments=round(payments, 2),
+
+        adjustments=round(adjustments, 2),
+
+        opening_balance=round(opening, 2),
+
+        remaining=round(remaining, 2),
+
+        open_invoices=len(invoices),
+    )
+
+@dataclass(frozen=True)
+class PaymentPreviewLine:
+    ledger_entry_id: int
+    entry_date: str
+    supplier_invoice: str
+    job_number: str
+    remaining_before: float
+    apply_amount: float
+    remaining_after: float
+
+
+@dataclass(frozen=True)
+class PaymentPreview:
+    technician: str
+    payment_amount: float
+    total_applied: float
+    unapplied_amount: float
+    lines: list[PaymentPreviewLine]
+
+
+def preview_technician_payment_fifo(
+    technician_name: str,
+    amount: float,
+) -> PaymentPreview:
+    from models import TechnicianLedgerEntry
+
+    tech = (technician_name or "").strip()
+    payment_amount = round(float(amount or 0.0), 2)
+
+    if not tech:
+        raise ValueError("Technician name is required")
+
+    if payment_amount <= 0:
+        raise ValueError("Payment amount must be greater than zero")
+
+    remaining_payment = payment_amount
+    preview_lines = []
+
+    open_entries = (
+        TechnicianLedgerEntry.query
+        .filter(
+            TechnicianLedgerEntry.technician_name == tech,
+            TechnicianLedgerEntry.status.in_(["open", "partial"]),
+            TechnicianLedgerEntry.remaining_amount > 0,
+            TechnicianLedgerEntry.voided == False,
+        )
+        .order_by(
+            TechnicianLedgerEntry.entry_date.asc(),
+            TechnicianLedgerEntry.created_at.asc(),
+            TechnicianLedgerEntry.id.asc(),
+        )
+        .all()
+    )
+
+    for entry in open_entries:
+        if remaining_payment <= 0:
+            break
+
+        entry_remaining = round(float(entry.remaining_amount or 0.0), 2)
+        if entry_remaining <= 0:
+            continue
+
+        apply_amount = round(min(remaining_payment, entry_remaining), 2)
+        remaining_after = round(entry_remaining - apply_amount, 2)
+
+        preview_lines.append(
+            PaymentPreviewLine(
+                ledger_entry_id=entry.id,
+                entry_date=entry.entry_date.strftime("%m/%d/%Y") if entry.entry_date else "",
+                supplier_invoice=entry.supplier_invoice or "",
+                job_number=entry.job_number or "",
+                remaining_before=entry_remaining,
+                apply_amount=apply_amount,
+                remaining_after=remaining_after,
+            )
+        )
+
+        remaining_payment = round(remaining_payment - apply_amount, 2)
+
+    total_applied = round(payment_amount - remaining_payment, 2)
+
+    return PaymentPreview(
+        technician=tech,
+        payment_amount=payment_amount,
+        total_applied=total_applied,
+        unapplied_amount=round(remaining_payment, 2),
+        lines=preview_lines,
+    )

@@ -1169,6 +1169,17 @@ class TechnicianPayment(db.Model):
     reference = db.Column(db.String(120), nullable=True)
     note = db.Column(db.String(500), nullable=True)
 
+    status = db.Column(db.String(20), nullable=False, default="posted", index=True)
+    # draft / posted / void
+
+    posted_at = db.Column(db.DateTime, nullable=True, index=True)
+    posted_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+
+    voided = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    voided_at = db.Column(db.DateTime, nullable=True)
+    voided_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
+    void_reason = db.Column(db.String(255), nullable=True)
+
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     created_by = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
 
