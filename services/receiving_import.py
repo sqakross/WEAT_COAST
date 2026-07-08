@@ -24,43 +24,6 @@ def _num_int(x, default=0) -> int:
     except Exception:
         return int(default)
 
-
-# def _coalesce_same_parts(rows: list[dict]) -> list[dict]:
-    """
-    Склеиваем одинаковые PN + unit_cost (как у тебя было),
-    но нормализуем:
-    #   - PN -> UPPER
-    #   - unit_cost -> float
-    #   - qty -> int
-    # """
-    # acc: dict[tuple[str, float], dict] = {}
-    #
-    # for r in (rows or []):
-    #     pn = (r.get("part_number") or r.get("pn") or "").strip().upper()
-    #     if not pn:
-    #         continue
-    #
-    #     qty = _num_int(r.get("quantity") or r.get("qty") or 0, 0)
-    #     if qty <= 0:
-    #         continue
-    #
-    #     unit_cost = _num_float(r.get("unit_cost") or r.get("price") or 0, 0.0)
-    #
-    #     key = (pn, unit_cost)
-    #     if key not in acc:
-    #         acc[key] = {
-    #             "part_number": pn,
-    #             "part_name": (r.get("part_name") or r.get("description") or r.get("descr") or "").strip(),
-    #             "quantity": qty,
-    #             "unit_cost": unit_cost,
-    #             "location": (r.get("location") or r.get("supplier") or "").strip(),
-    #         }
-    #     else:
-    #         acc[key]["quantity"] += qty
-    #
-    # return [v for v in acc.values() if int(v.get("quantity") or 0) > 0]
-
-
 def create_receiving_from_rows(
     *,
     supplier_name: str,

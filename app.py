@@ -1,10 +1,10 @@
 from dotenv import load_dotenv
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 from flask import Flask, request, redirect, url_for, send_file, abort
 from config import Config
 import os, sys, io, logging, time, ipaddress
-from logging.handlers import RotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler
 from extensions import db, login_manager
 from flask_login import current_user
 
@@ -47,43 +47,97 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # -------------------------------------------------------------------
 # DEBUG-флаг из окружения (используем и для логирования, и для run)
 # -------------------------------------------------------------------
-DEBUG_ENV = os.getenv("DEBUG", "true").lower() == "true"
+DEBUG_ENV = os.getenv("DEBUG", "false").strip().lower() in ("1", "true", "yes", "on")
 
 # -------------------------------------------------------------------
-# 3) Логирование (DEV: только консоль, PROD: файл + ротация)
+# 3) Логирование: console + app.log + error.log, ротация по дням
 # -------------------------------------------------------------------
-formatter = logging.Formatter('[%(asctime)s] %(levelname)s %(name)s: %(message)s')
+class MaxLevelFilter(logging.Filter):
+    def __init__(self, max_level):
+        super().__init__()
+        self.max_level = max_level
+
+    def filter(self, record):
+        return record.levelno <= self.max_level
+
+
+formatter = logging.Formatter(
+    fmt="%(asctime)s | %(levelname)-8s | %(module)s:%(lineno)d | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 root = logging.getLogger()
 
-# если код вдруг импортировали повторно (reloader) — очищаем обработчики
-if root.handlers:
-    for h in list(root.handlers):
-        root.removeHandler(h)
+# Защита от дублей при повторном импорте / reloader
+for h in list(root.handlers):
+    root.removeHandler(h)
+    try:
+        h.close()
+    except Exception:
+        pass
 
 root.setLevel(logging.INFO)
+
 logging.getLogger("app").setLevel(logging.INFO)
 logging.getLogger("inventory").setLevel(logging.INFO)
+logging.getLogger("accounting").setLevel(logging.INFO)
+logging.getLogger("supplier_returns").setLevel(logging.INFO)
+
+# Не засоряем лог каждым GET /static и обычными запросами
 logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
-# Всегда логируем в консоль
-sh = logging.StreamHandler(sys.stdout)
-sh.setFormatter(formatter)
-root.addHandler(sh)
+# Console
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)
+root.addHandler(console_handler)
 
-if not DEBUG_ENV:
-    # В production — ещё и файл с ротацией
-    fh = RotatingFileHandler(
-        os.path.join(LOG_DIR, 'app.log'),
-        maxBytes=2_000_000,
-        backupCount=3,
-        encoding='utf-8',
-        delay=True,  # файл откроется только при первой записи
+# app.log — INFO + WARNING
+app_handler = TimedRotatingFileHandler(
+    os.path.join(LOG_DIR, "app.log"),
+    when="midnight",
+    interval=1,
+    backupCount=7,
+    encoding="utf-8",
+    delay=True,
+    utc=False,
+)
+app_handler.setLevel(logging.INFO)
+app_handler.addFilter(MaxLevelFilter(logging.WARNING))
+app_handler.setFormatter(formatter)
+root.addHandler(app_handler)
+
+# error.log — только ERROR + CRITICAL
+error_handler = TimedRotatingFileHandler(
+    os.path.join(LOG_DIR, "error.log"),
+    when="midnight",
+    interval=1,
+    backupCount=14,
+    encoding="utf-8",
+    delay=True,
+    utc=False,
+)
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(formatter)
+root.addHandler(error_handler)
+
+logging.info("Logging subsystem initialized.")
+
+
+# -------------------------------------------------------------------
+# Global exception logger
+# -------------------------------------------------------------------
+def log_uncaught_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logging.critical(
+        "UNHANDLED EXCEPTION",
+        exc_info=(exc_type, exc_value, exc_traceback),
     )
-    fh.setFormatter(formatter)
-    root.addHandler(fh)
-else:
-    logging.info("DEBUG mode detected: file logging disabled (console only).")
+
+
+sys.excepthook = log_uncaught_exception
 
 # -------------------------------------------------------------------
 # 4) Flask app init
@@ -132,7 +186,9 @@ if extra_loaders:
     except Exception:
         pass
 else:
-    logging.warning("No extra template dirs found among: %s", extra_templates)
+    logging.debug(
+        "No additional template directories found."
+    )
 
 # -------------------------------------------------------------------
 # 5) Sentry (если задан SENTRY_DSN)
@@ -471,17 +527,56 @@ if __name__ == "__main__":
     debug = DEBUG_ENV
     use_ssl = os.getenv("USE_SSL", "1").lower() in ("1", "true", "yes")
 
+    import platform
+
+    logging.info("=" * 70)
+    logging.info("WEST COAST CHIEF REPAIR ERP")
+    logging.info("Version : 1.1.1.45")
+    logging.info("Python  : %s", platform.python_version())
+    logging.info("PID     : %s", os.getpid())
+    logging.info("Debug   : %s", debug)
+    logging.info("SSL     : %s", use_ssl)
+    logging.info("Port    : %s", port)
+    logging.info("=" * 70)
+
     if use_ssl:
-        # ВАЖНО: используем серверный сертификат, подписанный нашим CA
         cert_path = os.path.join("ssl", "server.crt")
-        key_path  = os.path.join("ssl", "server.key")
+        key_path = os.path.join("ssl", "server.key")
 
         if os.path.exists(cert_path) and os.path.exists(key_path):
             logging.info(f"Starting secure server on https://0.0.0.0:{port}, debug={debug}")
-            app.run(host="0.0.0.0", port=port, debug=debug, ssl_context=(cert_path, key_path))
+
+            try:
+                app.run(
+                    host="0.0.0.0",
+                    port=port,
+                    debug=debug,
+                    use_reloader=False,
+                    ssl_context=(cert_path, key_path),
+                )
+            finally:
+                logging.info("Server stopped.")
         else:
             logging.warning("SSL server cert not found (ssl/server.crt|server.key). Falling back to HTTP.")
-            app.run(host="0.0.0.0", port=port, debug=debug)
+
+            try:
+                app.run(
+                    host="0.0.0.0",
+                    port=port,
+                    debug=debug,
+                    use_reloader=False,
+                )
+            finally:
+                logging.info("Server stopped.")
     else:
         logging.info(f"Starting HTTP server on http://0.0.0.0:{port}, debug={debug}")
-        app.run(host="0.0.0.0", port=port, debug=debug)
+
+        try:
+            app.run(
+                host="0.0.0.0",
+                port=port,
+                debug=debug,
+                use_reloader=False,
+            )
+        finally:
+            logging.info("Server stopped.")
