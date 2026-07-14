@@ -1,7 +1,14 @@
 from dotenv import load_dotenv
 load_dotenv(override=False)
-
-from flask import Flask, request, redirect, url_for, send_file, abort
+from flask import (
+    Flask,
+    request,
+    redirect,
+    url_for,
+    send_file,
+    abort,
+    g,
+)
 from config import Config
 import os, sys, io, logging, time, ipaddress
 from logging.handlers import TimedRotatingFileHandler
@@ -154,6 +161,43 @@ app = Flask(
 app.config.from_object(Config)
 app.config.from_pyfile('config.py', silent=True)  # instance/config.py (если есть)
 
+# -------------------------------------------------------------------
+# REQUEST PERFORMANCE PROFILER
+# -------------------------------------------------------------------
+@app.before_request
+def start_request_timer():
+    g.request_started_at = time.perf_counter()
+
+@app.after_request
+def log_request_duration(response):
+    started_at = getattr(g, "request_started_at", None)
+
+    if started_at is None:
+        return response
+
+    elapsed = time.perf_counter() - started_at
+
+    is_static = (
+        request.endpoint == "static"
+        or request.path.startswith("/static/")
+    )
+
+    # Static ne logiruem.
+    # Obychnye stranicy logiruem tolko esli medlennee 1 sekundy.
+    if not is_static and elapsed >= 1.0:
+        logging.warning(
+            "SLOW_REQUEST %.3fs | %s %s | endpoint=%s | "
+            "status=%s | bytes=%s",
+            elapsed,
+            request.method,
+            request.path,
+            request.endpoint,
+            response.status_code,
+            response.calculate_content_length(),
+        )
+
+    return response
+
 # флаги импорта
 app.config['WCCR_IMPORT_ENABLED'] = 1
 app.config['WCCR_IMPORT_DRY_RUN'] = 0
@@ -220,10 +264,10 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
 }
 
-db.init_app(app)
+db.init_app(app)          # <<< ЭТА СТРОКА ПРОПАЛА
 
 login_manager.init_app(app)
-login_manager.login_view = 'auth.login'
+login_manager.login_view = "auth.login"
 
 logging.info(
     "WCCR flags: enabled=%s, dry=%s",
@@ -234,16 +278,24 @@ logging.info(
 # -------------------------------------------------------------------
 # 7) Jinja-фильтры локального времени
 # -------------------------------------------------------------------
+UTC_TZ = ZoneInfo("UTC")
+DISPLAY_TZ = ZoneInfo(
+    app.config.get("DISPLAY_TZ", "America/Los_Angeles")
+)
+
+
 def _to_local(dt: datetime, fmt: str):
-  if not dt:
-      return "—"
-  tzname = app.config.get("DISPLAY_TZ", "America/Los_Angeles")
-  try:
-      dt_utc = dt.replace(tzinfo=ZoneInfo("UTC"))
-      dt_local = dt_utc.astimezone(ZoneInfo(tzname))
-      return dt_local.strftime(fmt)
-  except Exception:
-      return dt.strftime(fmt)
+    if not dt:
+        return "—"
+
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC_TZ)
+
+        return dt.astimezone(DISPLAY_TZ).strftime(fmt)
+
+    except Exception:
+        return dt.strftime(fmt)
 
 @app.template_filter("local_dt")
 def jinja_local_dt(dt: datetime, fmt: str = "%Y-%m-%d %H:%M"):
@@ -291,6 +343,11 @@ app.register_blueprint(accounting_bp)
 # Supplier Returns — используем один blueprint из routes, префикс задаём здесь
 from supplier_returns.routes import supplier_returns_bp
 app.register_blueprint(supplier_returns_bp, url_prefix="/supplier_returns")
+
+# -------------------------------------------------------------------
+# TEMP: измерение каждого template context processor
+# -------------------------------------------------------------------
+
 
 logging.info("Flask app configured and blueprints registered.")
 # from flask import redirect, url_for
@@ -367,34 +424,60 @@ ALLOWED_VIEWER_ENDPOINTS = {
 @app.before_request
 def restrict_role_routes():
     """
-    Ограничиваем доступ по ролям 'technician' и 'viewer' *только* разрешёнными endpoint'ами.
-    Для остальных ролей (admin/superadmin/user) — без ограничений.
+    Ограничиваем доступ по ролям technician/viewer.
+
+    Static-файлы пропускаем сразу, не загружая current_user из БД.
     """
     try:
-        if not getattr(current_user, "is_authenticated", False):
-            return  # гость — пусть дойдёт до /login
-
         ep = (request.endpoint or "").strip()
-        role = (getattr(current_user, "role", "") or "").strip().lower()
+
+        # КРИТИЧНО ДЛЯ СКОРОСТИ:
+        # не загружаем current_user и не обращаемся к БД
+        # для CSS, JS, manifest, icons и других static-файлов.
+        if ep == "static" or request.path.startswith("/static/"):
+            return
+
+        if not getattr(current_user, "is_authenticated", False):
+            return
+
+        role = (
+            getattr(current_user, "role", "") or ""
+        ).strip().lower()
 
         if role == "technician":
-            if ep in ALLOWED_TECH_ENDPOINTS or ep.endswith(".health") or ep.endswith(".ping"):
+            if (
+                ep in ALLOWED_TECH_ENDPOINTS
+                or ep.endswith(".health")
+                or ep.endswith(".ping")
+            ):
                 return
+
             return redirect(url_for("inventory.wo_list"))
 
         if role == "viewer":
-            if ep in ALLOWED_VIEWER_ENDPOINTS or ep.endswith(".health") or ep.endswith(".ping"):
+            if (
+                ep in ALLOWED_VIEWER_ENDPOINTS
+                or ep.endswith(".health")
+                or ep.endswith(".ping")
+            ):
                 return
+
             return redirect(url_for("inventory.wo_list"))
 
-        # admin/superadmin/user — не ограничиваем
+        # admin / superadmin / user
         return
+
     except Exception:
+        logging.exception(
+            "ROLE_RESTRICTION_ERROR endpoint=%r path=%r",
+            request.endpoint,
+            request.path,
+        )
+
         try:
             return redirect(url_for("inventory.wo_list"))
         except Exception:
             return
-
 # -------------------------------------------------------------------
 # 10) Вспомогательные миграции (безопасные автополевые апдейты)
 # -------------------------------------------------------------------

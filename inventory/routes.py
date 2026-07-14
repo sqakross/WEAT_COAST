@@ -5375,26 +5375,59 @@ def wo_detail(wo_id):
         current_user=current_user,
         audit_log=audit_log,
     )
+import time
+
+_ALERTS_COUNT_CACHE = {
+    "value": 0,
+    "expires_at": 0.0,
+}
 
 
 @inventory_bp.app_context_processor
 def inject_alerts_count():
+    """
+    Alert badge для верхнего меню.
+
+    Значение кэшируется на 30 секунд, чтобы один и тот же COUNT
+    не выполнялся при каждом открытии CSS-heavy страницы и каждого раздела.
+    """
     from datetime import date, timedelta
+    from sqlalchemy import func
     from models import WorkOrderPart, WorkOrder
+
+    now = time.monotonic()
+
+    if now < _ALERTS_COUNT_CACHE["expires_at"]:
+        return {
+            "alerts_count": _ALERTS_COUNT_CACHE["value"]
+        }
 
     today = date.today()
     overdue_cutoff = today - timedelta(days=3)
 
-    count = db.session.query(WorkOrderPart).join(WorkOrder).filter(
-        WorkOrder.status != "done",
-        WorkOrder.status != "cancel_job",
-        WorkOrderPart.ordered_date.isnot(None),
-        WorkOrderPart.issued_qty < WorkOrderPart.quantity,
-        WorkOrderPart.backorder_flag.is_(False),
-        WorkOrderPart.ordered_date <= overdue_cutoff
-    ).count()
+    count = (
+        db.session.query(func.count(WorkOrderPart.id))
+        .join(
+            WorkOrder,
+            WorkOrder.id == WorkOrderPart.work_order_id,
+        )
+        .filter(
+            WorkOrder.status.notin_(["done", "cancel_job"]),
+            WorkOrderPart.ordered_date.isnot(None),
+            WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+            WorkOrderPart.backorder_flag.is_(False),
+            WorkOrderPart.ordered_date <= overdue_cutoff,
+        )
+        .scalar()
+        or 0
+    )
 
-    return {"alerts_count": count}
+    _ALERTS_COUNT_CACHE["value"] = int(count)
+    _ALERTS_COUNT_CACHE["expires_at"] = now + 30.0
+
+    return {
+        "alerts_count": int(count)
+    }
 
 @inventory_bp.get("/work_orders/alerts", endpoint="wo_alerts")
 @login_required
@@ -5470,8 +5503,7 @@ def wo_alerts():
         .join(WorkOrder, WorkOrder.id == WorkOrderPart.work_order_id)
         .outerjoin(WorkUnit, WorkUnit.id == WorkOrderPart.unit_id)
         .filter(
-            WorkOrder.status != "done",
-            WorkOrder.status != "cancel_job",
+            WorkOrder.status.notin_(["done", "cancel_job"]),
             WorkOrderPart.ordered_date.isnot(None),
             WorkOrderPart.quantity > 0,
             WorkOrderPart.issued_qty < WorkOrderPart.quantity,

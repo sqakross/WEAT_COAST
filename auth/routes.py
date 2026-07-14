@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func
+from sqlalchemy.orm import lazyload
 from extensions import db, login_manager
 from models import (
     User,
@@ -12,8 +13,18 @@ auth_bp = Blueprint('auth', __name__)
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    try:
+        uid = int(user_id)
 
+        return (
+            db.session.query(User)
+            .options(lazyload("*"))
+            .filter(User.id == uid)
+            .first()
+        )
+
+    except (TypeError, ValueError):
+        return None
 # Login
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
