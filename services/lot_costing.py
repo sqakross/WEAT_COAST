@@ -143,6 +143,32 @@ def receipt_line_cost(line) -> float:
     except Exception:
         return 0.0
 
+def _first_existing_model_field(model, field_names):
+    for field_name in field_names:
+        if hasattr(model, field_name):
+            return field_name
+    return None
+
+
+GOODS_RECEIPT_REMAINING_FIELD = _first_existing_model_field(
+    GoodsReceiptLine,
+    (
+        "qty_remaining",
+        "remaining_qty",
+        "remaining",
+        "qty_left",
+    ),
+)
+
+RECEIVING_ITEM_REMAINING_FIELD = _first_existing_model_field(
+    ReceivingItem,
+    (
+        "qty_remaining",
+        "remaining_qty",
+        "remaining",
+        "qty_left",
+    ),
+)
 
 def pick_receipt_line_for_issue(
     part_id: int | None = None,
@@ -169,7 +195,7 @@ def pick_receipt_line_for_issue(
     if not part_number and part_id is not None:
         try:
             from models import Part
-            p = Part.query.get(int(part_id))
+            p = db.session.get(Part, int(part_id))
             if not p:
                 return (None, "part_not_found") if want_tuple else None
             part_number = p.part_number
@@ -181,11 +207,7 @@ def pick_receipt_line_for_issue(
         return (None, "missing_part_number") if want_tuple else None
 
     # optional "remaining" field on GoodsReceiptLine
-    rem_field = None
-    for cand in ("qty_remaining", "remaining_qty", "remaining", "qty_left"):
-        if hasattr(GoodsReceiptLine, cand):
-            rem_field = cand
-            break
+    rem_field = GOODS_RECEIPT_REMAINING_FIELD
 
     inv = _norm_inv(inv_ref or "") if inv_ref else ""
 
@@ -204,8 +226,12 @@ def pick_receipt_line_for_issue(
         issued_sum = None
 
     def _apply_remaining_filter_goodsreceipt(q):
+        needed = max(int(qty_needed or 1), 1)
+
         if rem_field:
-            return q.filter(getattr(GoodsReceiptLine, rem_field) > 0)
+            return q.filter(
+                getattr(GoodsReceiptLine, rem_field) > 0
+            )
 
         if (
             IssuedPartRecord is not None
@@ -218,7 +244,12 @@ def pick_receipt_line_for_issue(
                 IssuedPartRecord.source_receipt_line_id == GoodsReceiptLine.id,
             )
             q = q.group_by(GoodsReceiptLine.id, GoodsReceipt.id)
-            q = q.having((func.coalesce(GoodsReceiptLine.quantity, 0) - issued_sum) > 0)
+            q = q.having(
+                (
+                        func.coalesce(GoodsReceiptLine.quantity, 0)
+                        - issued_sum
+                ) > 0
+            )
             return q
 
         return q
@@ -264,13 +295,11 @@ def pick_receipt_line_for_issue(
                 .filter(func.ltrim(func.coalesce(ReceivingBatch.invoice_number, ""), "0") == inv)
             )
 
-            rem2 = None
-            for cand in ("qty_remaining", "remaining_qty", "remaining", "qty_left"):
-                if hasattr(ReceivingItem, cand):
-                    rem2 = cand
-                    break
+            rem2 = RECEIVING_ITEM_REMAINING_FIELD
             if rem2:
-                qr = qr.filter(getattr(ReceivingItem, rem2) > 0)
+                qr = qr.filter(
+                    getattr(ReceivingItem, rem2) > 0
+                )
 
             if hasattr(ReceivingBatch, "posted_at"):
                 qr = qr.order_by(

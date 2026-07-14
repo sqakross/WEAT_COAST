@@ -1,0 +1,203 @@
+2026-07-11 01:13:38 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 01:13:38 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 01:13:38 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 01:13:38 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 01:13:48 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 01:13:49 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 01:13:52 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 01:13:52 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 01:13:52 | INFO     | app:532 | ======================================================================
+2026-07-11 01:13:52 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 01:13:52 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 01:13:52 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 01:13:52 | INFO     | app:536 | PID     : 4892
+2026-07-11 01:13:52 | INFO     | app:537 | Debug   : False
+2026-07-11 01:13:52 | INFO     | app:538 | SSL     : True
+2026-07-11 01:13:52 | INFO     | app:539 | Port    : 5000
+2026-07-11 01:13:52 | INFO     | app:540 | ======================================================================
+2026-07-11 01:13:52 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-11 09:13:57 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 09:13:57 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 09:13:57 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 09:13:57 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 09:14:06 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 09:14:06 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 09:14:10 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 09:14:11 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 09:14:11 | INFO     | app:532 | ======================================================================
+2026-07-11 09:14:11 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 09:14:11 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 09:14:11 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 09:14:11 | INFO     | app:536 | PID     : 11108
+2026-07-11 09:14:11 | INFO     | app:537 | Debug   : False
+2026-07-11 09:14:11 | INFO     | app:538 | SSL     : True
+2026-07-11 09:14:11 | INFO     | app:539 | Port    : 5000
+2026-07-11 09:14:11 | INFO     | app:540 | ======================================================================
+2026-07-11 09:14:11 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-11 09:14:15 | INFO     | app:558 | Server stopped.
+2026-07-11 09:27:21 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 09:27:21 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 09:27:21 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 09:27:22 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 09:27:26 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 09:27:26 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 09:27:31 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 09:27:31 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 09:27:31 | INFO     | app:532 | ======================================================================
+2026-07-11 09:27:31 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 09:27:31 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 09:27:31 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 09:27:31 | INFO     | app:536 | PID     : 7564
+2026-07-11 09:27:31 | INFO     | app:537 | Debug   : False
+2026-07-11 09:27:31 | INFO     | app:538 | SSL     : True
+2026-07-11 09:27:31 | INFO     | app:539 | Port    : 5000
+2026-07-11 09:27:31 | INFO     | app:540 | ======================================================================
+2026-07-11 09:27:31 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-11 09:27:44 | INFO     | app:558 | Server stopped.
+2026-07-11 09:28:57 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 09:28:57 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 09:28:58 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 09:28:58 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 09:29:01 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 09:29:01 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 09:29:05 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 09:29:05 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 09:29:05 | INFO     | app:532 | ======================================================================
+2026-07-11 09:29:05 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 09:29:05 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 09:29:05 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 09:29:05 | INFO     | app:536 | PID     : 7204
+2026-07-11 09:29:05 | INFO     | app:537 | Debug   : False
+2026-07-11 09:29:05 | INFO     | app:538 | SSL     : True
+2026-07-11 09:29:05 | INFO     | app:539 | Port    : 5000
+2026-07-11 09:29:05 | INFO     | app:540 | ======================================================================
+2026-07-11 09:29:05 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-11 09:54:59 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 09:54:59 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 09:54:59 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 09:54:59 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 09:55:06 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 09:55:06 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 09:55:10 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 09:55:10 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 09:55:10 | INFO     | app:532 | ======================================================================
+2026-07-11 09:55:10 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 09:55:10 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 09:55:10 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 09:55:10 | INFO     | app:536 | PID     : 7612
+2026-07-11 09:55:10 | INFO     | app:537 | Debug   : False
+2026-07-11 09:55:10 | INFO     | app:538 | SSL     : True
+2026-07-11 09:55:10 | INFO     | app:539 | Port    : 5000
+2026-07-11 09:55:10 | INFO     | app:540 | ======================================================================
+2026-07-11 09:55:10 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-11 09:55:49 | INFO     | app:558 | Server stopped.
+2026-07-11 10:29:07 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2383. Status before='draft', item count=11.
+2026-07-11 10:29:07 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part '241872501' (id=30, before=0, incoming=2).
+2026-07-11 10:29:07 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'WP2319265T' (id=3606, incoming=1).
+2026-07-11 10:29:07 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'WP12550101Q' (id=3607, incoming=1).
+2026-07-11 10:29:07 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'WP2319266T' (id=3608, incoming=1).
+2026-07-11 10:29:07 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'WP61003999' (id=3609, incoming=1).
+2026-07-11 10:29:07 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'W10443319' (id=3610, incoming=1).
+2026-07-11 10:29:07 | INFO     | receiving:289 | [RECEIVING_POST] Created Part '240358925' (id=3611, incoming=1).
+2026-07-11 10:29:07 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'WB57K10100' (id=3612, incoming=1).
+2026-07-11 10:29:07 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'WPW10330077' (id=3613, incoming=1).
+2026-07-11 10:29:07 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part '241872512' (id=53, before=0, incoming=2).
+2026-07-11 10:29:07 | INFO     | receiving:289 | [RECEIVING_POST] Created Part '2159082' (id=3614, incoming=1).
+2026-07-11 10:29:07 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2383 posted successfully. Applied items=11, final status='posted'.
+2026-07-11 10:29:09 | WARNING  | routes:16140 | [RECV_DETAIL consume-check] batch 2383: raw_pns=['WB57K10100', 'W10443319', '240358925', 'WPW10330077', 'WP61003999', '241872512', '2159082', 'WP2319265T', '241872501', 'WP2319266T', 'WP12550101Q'], direct_part_ids(pre)=[]
+2026-07-11 10:29:09 | WARNING  | routes:16153 | [RECV_DETAIL consume-check] batch 2383: part_ids_from_pn=[3614, 3611, 30, 53, 3610, 3612, 3607, 3606, 3608, 3609, 3613], parts_matched=['2159082', '240358925', '241872501', '241872512', 'W10443319', 'WB57K10100', 'WP12550101Q', 'WP2319265T', 'WP2319266T', 'WP61003999', 'WPW10330077']
+2026-07-11 10:29:09 | WARNING  | routes:16160 | [RECV_DETAIL consume-check] batch 2383: all_part_ids(final)=[3607, 53, 3606, 30, 3608, 3609, 3610, 3611, 3612, 3613, 3614]
+2026-07-11 10:29:09 | WARNING  | routes:16181 | [RECV_DETAIL consume-check] batch 2383: issued_rows=[(142, 53, 1, datetime.datetime(2025, 10, 8, 16, 26, 39, 131643)), (2313, 53, 1, datetime.datetime(2026, 1, 27, 17, 46, 56, 742093)), (2515, 53, 1, datetime.datetime(2026, 2, 2, 20, 44, 40, 257183)), (4042, 53, 1, datetime.datetime(2026, 3, 24, 17, 28, 39, 577681)), (5225, 53, 1, datetime.datetime(2026, 5, 7, 16, 40, 8, 565787))]
+2026-07-11 10:29:09 | WARNING  | routes:16206 | [RECV_DETAIL FLAGS] batch 2383 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-11 10:35:12 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 10:35:12 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 10:35:12 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 10:35:12 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 10:35:15 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 10:35:15 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 10:35:18 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 10:35:18 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 10:35:18 | INFO     | app:532 | ======================================================================
+2026-07-11 10:35:18 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 10:35:18 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 10:35:18 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 10:35:18 | INFO     | app:536 | PID     : 8224
+2026-07-11 10:35:18 | INFO     | app:537 | Debug   : False
+2026-07-11 10:35:18 | INFO     | app:538 | SSL     : True
+2026-07-11 10:35:18 | INFO     | app:539 | Port    : 5000
+2026-07-11 10:35:18 | INFO     | app:540 | ======================================================================
+2026-07-11 10:35:18 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-11 10:35:21 | INFO     | app:558 | Server stopped.
+2026-07-11 10:37:54 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 10:37:54 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 10:37:54 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 10:37:54 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 10:37:57 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 10:37:57 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 10:38:01 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 10:38:01 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 10:38:01 | INFO     | app:532 | ======================================================================
+2026-07-11 10:38:01 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 10:38:01 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 10:38:01 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 10:38:01 | INFO     | app:536 | PID     : 2728
+2026-07-11 10:38:01 | INFO     | app:537 | Debug   : False
+2026-07-11 10:38:01 | INFO     | app:538 | SSL     : True
+2026-07-11 10:38:01 | INFO     | app:539 | Port    : 5000
+2026-07-11 10:38:01 | INFO     | app:540 | ======================================================================
+2026-07-11 10:38:01 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-11 10:39:45 | INFO     | app:558 | Server stopped.
+2026-07-11 10:40:20 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 10:40:20 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 10:40:20 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 10:40:20 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 10:40:22 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 10:40:22 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 10:40:25 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 10:40:25 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 10:40:25 | INFO     | app:532 | ======================================================================
+2026-07-11 10:40:25 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 10:40:25 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 10:40:25 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 10:40:25 | INFO     | app:536 | PID     : 8044
+2026-07-11 10:40:25 | INFO     | app:537 | Debug   : False
+2026-07-11 10:40:25 | INFO     | app:538 | SSL     : True
+2026-07-11 10:40:25 | INFO     | app:539 | Port    : 5000
+2026-07-11 10:40:25 | INFO     | app:540 | ======================================================================
+2026-07-11 10:40:25 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-11 10:59:48 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 10:59:48 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 10:59:48 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 10:59:48 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 10:59:52 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 10:59:52 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 10:59:56 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 10:59:56 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 10:59:56 | INFO     | app:532 | ======================================================================
+2026-07-11 10:59:56 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 10:59:56 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 10:59:56 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 10:59:56 | INFO     | app:536 | PID     : 10960
+2026-07-11 10:59:56 | INFO     | app:537 | Debug   : False
+2026-07-11 10:59:56 | INFO     | app:538 | SSL     : True
+2026-07-11 10:59:56 | INFO     | app:539 | Port    : 5000
+2026-07-11 10:59:56 | INFO     | app:540 | ======================================================================
+2026-07-11 10:59:56 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-11 11:09:06 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-11 11:09:06 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-11 11:09:06 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-11 11:09:06 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-11 11:09:08 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-11 11:09:08 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-11 11:09:10 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-11 11:09:10 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-11 11:09:10 | INFO     | app:532 | ======================================================================
+2026-07-11 11:09:10 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-11 11:09:10 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-11 11:09:10 | INFO     | app:535 | Python  : 3.13.5
+2026-07-11 11:09:10 | INFO     | app:536 | PID     : 8308
+2026-07-11 11:09:10 | INFO     | app:537 | Debug   : False
+2026-07-11 11:09:10 | INFO     | app:538 | SSL     : True
+2026-07-11 11:09:10 | INFO     | app:539 | Port    : 5000
+2026-07-11 11:09:10 | INFO     | app:540 | ======================================================================
+2026-07-11 11:09:10 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False

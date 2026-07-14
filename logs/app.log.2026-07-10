@@ -1,0 +1,191 @@
+2026-07-10 08:53:30 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-10 08:53:31 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-10 08:53:31 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-10 08:53:31 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-10 08:53:33 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-10 08:53:33 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-10 08:53:36 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-10 08:53:36 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-10 08:53:36 | INFO     | app:532 | ======================================================================
+2026-07-10 08:53:36 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-10 08:53:36 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-10 08:53:36 | INFO     | app:535 | Python  : 3.13.5
+2026-07-10 08:53:36 | INFO     | app:536 | PID     : 1812
+2026-07-10 08:53:36 | INFO     | app:537 | Debug   : False
+2026-07-10 08:53:36 | INFO     | app:538 | SSL     : True
+2026-07-10 08:53:36 | INFO     | app:539 | Port    : 5000
+2026-07-10 08:53:36 | INFO     | app:540 | ======================================================================
+2026-07-10 08:53:36 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-10 08:53:47 | INFO     | app:558 | Server stopped.
+2026-07-10 08:54:15 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-10 08:54:15 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-10 08:54:15 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-10 08:54:15 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-10 08:54:17 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-10 08:54:18 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-10 08:54:20 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-10 08:54:20 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-10 08:54:20 | INFO     | app:532 | ======================================================================
+2026-07-10 08:54:20 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-10 08:54:20 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-10 08:54:20 | INFO     | app:535 | Python  : 3.13.5
+2026-07-10 08:54:20 | INFO     | app:536 | PID     : 10028
+2026-07-10 08:54:20 | INFO     | app:537 | Debug   : False
+2026-07-10 08:54:20 | INFO     | app:538 | SSL     : True
+2026-07-10 08:54:20 | INFO     | app:539 | Port    : 5000
+2026-07-10 08:54:20 | INFO     | app:540 | ======================================================================
+2026-07-10 08:54:20 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-10 09:32:33 | WARNING  | routes:16199 | [RECV_DETAIL consume-check] batch 2372: raw_pns=['WE12X27300', '316075103', 'WB24T10025', 'WB30T10136', 'W10780045', 'W11316362', '5304533520', 'W11167099', '202894'], direct_part_ids(pre)=[]
+2026-07-10 09:32:33 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2372: part_ids_from_pn=[1760, 811, 2441, 481, 3600, 1446, 1310, 679, 858], parts_matched=['202894', '316075103', '5304533520', 'W10780045', 'W11167099', 'W11316362', 'WB24T10025', 'WB30T10136', 'WE12X27300']
+2026-07-10 09:32:33 | WARNING  | routes:16219 | [RECV_DETAIL consume-check] batch 2372: all_part_ids(final)=[1760, 481, 1446, 679, 2441, 811, 3600, 858, 1310]
+2026-07-10 09:32:33 | WARNING  | routes:16240 | [RECV_DETAIL consume-check] batch 2372: issued_rows=[(390, 679, 1, datetime.datetime(2025, 11, 10, 19, 53, 17, 105853)), (417, 811, 1, datetime.datetime(2025, 11, 11, 18, 46, 51, 168442)), (483, 858, 1, datetime.datetime(2025, 11, 13, 18, 2, 13, 782571)), (737, 858, 1, datetime.datetime(2025, 11, 26, 0, 53, 33, 403595)), (924, 1310, 1, datetime.datetime(2025, 12, 5, 0, 11, 7, 313294))]
+2026-07-10 09:32:33 | WARNING  | routes:16265 | [RECV_DETAIL FLAGS] batch 2372 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-10 10:24:23 | WARNING  | routes:16199 | [RECV_DETAIL consume-check] batch 2373: raw_pns=['5304515845'], direct_part_ids(pre)=[]
+2026-07-10 10:24:23 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2373: part_ids_from_pn=[408], parts_matched=['5304515845']
+2026-07-10 10:24:23 | WARNING  | routes:16219 | [RECV_DETAIL consume-check] batch 2373: all_part_ids(final)=[408]
+2026-07-10 10:24:23 | WARNING  | routes:16240 | [RECV_DETAIL consume-check] batch 2373: issued_rows=[(220, 408, 1, datetime.datetime(2025, 10, 29, 22, 0, 44, 348513)), (592, 408, 1, datetime.datetime(2025, 11, 19, 17, 30, 32, 388196)), (595, 408, 1, datetime.datetime(2025, 11, 19, 17, 39, 39, 300458)), (2687, 408, 1, datetime.datetime(2026, 2, 6, 17, 13, 23, 982583)), (4047, 408, 1, datetime.datetime(2026, 3, 24, 18, 5, 43, 704737))]
+2026-07-10 10:24:23 | WARNING  | routes:16265 | [RECV_DETAIL FLAGS] batch 2373 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-10 10:28:50 | WARNING  | routes:16199 | [RECV_DETAIL consume-check] batch 2374: raw_pns=[], direct_part_ids(pre)=[]
+2026-07-10 10:28:50 | WARNING  | routes:16219 | [RECV_DETAIL consume-check] batch 2374: all_part_ids(final)=[]
+2026-07-10 10:28:50 | WARNING  | routes:16223 | [RECV_DETAIL consume-check] batch 2374: no part ids -> consumed=False
+2026-07-10 10:28:50 | WARNING  | routes:16265 | [RECV_DETAIL FLAGS] batch 2374 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-10 10:32:14 | INFO     | routes:921 | [DELETE RECEIVING] start: batch_id=2374, status=posted, supplier=Reliable Parts, invoice=5179588, pns=[]
+2026-07-10 10:32:14 | INFO     | receiving:294 | [RECEIVING_UNPOST] Reverting batch 2374 from posted -> draft ...
+2026-07-10 10:32:14 | INFO     | receiving:351 | [RECEIVING_UNPOST] Batch 2374 reverted to draft, stock rolled back safely.
+2026-07-10 10:32:14 | INFO     | routes:932 | [DELETE RECEIVING] unposted batch_id=2374
+2026-07-10 10:32:14 | INFO     | routes:953 | [DELETE RECEIVING] batch deleted batch_id=2374
+2026-07-10 10:32:14 | INFO     | routes:970 | [DELETE RECEIVING] dedup removed=0 for batch_id=2374
+2026-07-10 10:32:14 | INFO     | routes:1000 | [DELETE RECEIVING] done batch_id=2374, keys_removed=0
+2026-07-10 10:34:13 | WARNING  | routes:16199 | [RECV_DETAIL consume-check] batch 2374: raw_pns=['WR14X27236'], direct_part_ids(pre)=[]
+2026-07-10 10:34:13 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2374: part_ids_from_pn=[15], parts_matched=['WR14X27236']
+2026-07-10 10:34:13 | WARNING  | routes:16219 | [RECV_DETAIL consume-check] batch 2374: all_part_ids(final)=[15]
+2026-07-10 10:34:13 | WARNING  | routes:16240 | [RECV_DETAIL consume-check] batch 2374: issued_rows=[(13, 15, 1, datetime.datetime(2025, 7, 25, 0, 0)), (222, 15, 1, datetime.datetime(2025, 10, 30, 22, 1, 19)), (1957, 15, 1, datetime.datetime(2026, 1, 14, 18, 27, 49, 418687)), (2557, 15, 1, datetime.datetime(2026, 2, 3, 19, 15, 7, 512597)), (3120, 15, -1, datetime.datetime(2026, 2, 20, 22, 7, 43, 998860))]
+2026-07-10 10:34:13 | WARNING  | routes:16265 | [RECV_DETAIL FLAGS] batch 2374 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-10 11:12:15 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-10 11:12:15 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-10 11:12:15 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-10 11:12:15 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-10 11:12:19 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-10 11:12:19 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-10 11:12:22 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-10 11:12:22 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-10 11:12:22 | INFO     | app:532 | ======================================================================
+2026-07-10 11:12:22 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-10 11:12:22 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-10 11:12:22 | INFO     | app:535 | Python  : 3.13.5
+2026-07-10 11:12:22 | INFO     | app:536 | PID     : 7828
+2026-07-10 11:12:22 | INFO     | app:537 | Debug   : False
+2026-07-10 11:12:22 | INFO     | app:538 | SSL     : True
+2026-07-10 11:12:22 | INFO     | app:539 | Port    : 5000
+2026-07-10 11:12:22 | INFO     | app:540 | ======================================================================
+2026-07-10 11:12:22 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-10 12:31:55 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2375: raw_pns=['AEC73317502'], direct_part_ids(pre)=[]
+2026-07-10 12:31:55 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2375: part_ids_from_pn=[3601], parts_matched=['AEC73317502']
+2026-07-10 12:31:55 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2375: all_part_ids(final)=[3601]
+2026-07-10 12:31:55 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2375: issued_rows=[]
+2026-07-10 12:31:55 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2375 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-10 13:09:50 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2376. Status before='draft', item count=1.
+2026-07-10 13:09:51 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part 'THONAPA FLAT PLUG' (id=3598, before=2, incoming=8).
+2026-07-10 13:09:51 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2376 posted successfully. Applied items=1, final status='posted'.
+2026-07-10 13:10:02 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2376: raw_pns=['THONAPA FLAT PLUG'], direct_part_ids(pre)=[]
+2026-07-10 13:10:02 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2376: part_ids_from_pn=[3598], parts_matched=['THONAPA FLAT PLUG']
+2026-07-10 13:10:02 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2376: all_part_ids(final)=[3598]
+2026-07-10 13:10:02 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2376: issued_rows=[]
+2026-07-10 13:10:02 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2376 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-10 13:11:16 | INFO     | receiving:419 | [RECEIVING_UNPOST] Reverting batch 2376 from posted -> draft ...
+2026-07-10 13:11:16 | INFO     | receiving:454 | [RECEIVING_UNPOST] part THONAPA FLAT PLUG: before=10, rollback=8, after=2 (qty_applied=8)
+2026-07-10 13:11:16 | INFO     | receiving:476 | [RECEIVING_UNPOST] Batch 2376 reverted to draft, stock rolled back safely.
+2026-07-10 13:11:17 | WARNING  | routes:16158 | [RECV_DETAIL consume-check] batch 2376: not posted -> consumed=False
+2026-07-10 13:11:17 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2376 status=draft posted?=False consumed?=False is_super=True => can_edit=True can_unpost=False
+2026-07-10 13:11:27 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2376. Status before='draft', item count=1.
+2026-07-10 13:11:27 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part 'THONAPA FLAT PLUG' (id=3598, before=2, incoming=8).
+2026-07-10 13:11:28 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2376 posted successfully. Applied items=1, final status='posted'.
+2026-07-10 13:11:29 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2376: raw_pns=['THONAPA FLAT PLUG'], direct_part_ids(pre)=[]
+2026-07-10 13:11:29 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2376: part_ids_from_pn=[3598], parts_matched=['THONAPA FLAT PLUG']
+2026-07-10 13:11:29 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2376: all_part_ids(final)=[3598]
+2026-07-10 13:11:29 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2376: issued_rows=[]
+2026-07-10 13:11:29 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2376 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-10 13:11:44 | INFO     | receiving:419 | [RECEIVING_UNPOST] Reverting batch 2376 from posted -> draft ...
+2026-07-10 13:11:44 | INFO     | receiving:454 | [RECEIVING_UNPOST] part THONAPA FLAT PLUG: before=10, rollback=8, after=2 (qty_applied=8)
+2026-07-10 13:11:44 | INFO     | receiving:476 | [RECEIVING_UNPOST] Batch 2376 reverted to draft, stock rolled back safely.
+2026-07-10 13:11:46 | WARNING  | routes:16158 | [RECV_DETAIL consume-check] batch 2376: not posted -> consumed=False
+2026-07-10 13:11:46 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2376 status=draft posted?=False consumed?=False is_super=True => can_edit=True can_unpost=False
+2026-07-10 13:12:02 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2376. Status before='draft', item count=1.
+2026-07-10 13:12:02 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part 'THONAPA FLAT PLUG' (id=3598, before=2, incoming=8).
+2026-07-10 13:12:02 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2376 posted successfully. Applied items=1, final status='posted'.
+2026-07-10 13:12:03 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2376: raw_pns=['THONAPA FLAT PLUG'], direct_part_ids(pre)=[]
+2026-07-10 13:12:03 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2376: part_ids_from_pn=[3598], parts_matched=['THONAPA FLAT PLUG']
+2026-07-10 13:12:03 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2376: all_part_ids(final)=[3598]
+2026-07-10 13:12:03 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2376: issued_rows=[]
+2026-07-10 13:12:03 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2376 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-10 13:14:56 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2377. Status before='draft', item count=1.
+2026-07-10 13:14:56 | INFO     | receiving:289 | [RECEIVING_POST] Created Part '69028' (id=3602, incoming=1).
+2026-07-10 13:14:56 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2377 posted successfully. Applied items=1, final status='posted'.
+2026-07-10 13:14:59 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2377: raw_pns=['69028'], direct_part_ids(pre)=[]
+2026-07-10 13:14:59 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2377: part_ids_from_pn=[3602], parts_matched=['69028']
+2026-07-10 13:14:59 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2377: all_part_ids(final)=[3602]
+2026-07-10 13:14:59 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2377: issued_rows=[]
+2026-07-10 13:14:59 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2377 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-10 13:18:23 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2378. Status before='draft', item count=1.
+2026-07-10 13:18:23 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'WP2320150' (id=3603, incoming=1).
+2026-07-10 13:18:23 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2378 posted successfully. Applied items=1, final status='posted'.
+2026-07-10 13:18:26 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2378: raw_pns=['WP2320150'], direct_part_ids(pre)=[]
+2026-07-10 13:18:26 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2378: part_ids_from_pn=[3603], parts_matched=['WP2320150']
+2026-07-10 13:18:26 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2378: all_part_ids(final)=[3603]
+2026-07-10 13:18:26 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2378: issued_rows=[]
+2026-07-10 13:18:26 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2378 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-10 13:21:44 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2379. Status before='draft', item count=1.
+2026-07-10 13:21:44 | INFO     | receiving:289 | [RECEIVING_POST] Created Part '6931EL3004B' (id=3604, incoming=1).
+2026-07-10 13:21:44 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2379 posted successfully. Applied items=1, final status='posted'.
+2026-07-10 13:21:46 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2379: raw_pns=['6931EL3004B'], direct_part_ids(pre)=[]
+2026-07-10 13:21:46 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2379: part_ids_from_pn=[3604], parts_matched=['6931EL3004B']
+2026-07-10 13:21:46 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2379: all_part_ids(final)=[3604]
+2026-07-10 13:21:46 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2379: issued_rows=[]
+2026-07-10 13:21:46 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2379 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-10 13:26:37 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2380. Status before='draft', item count=1.
+2026-07-10 13:26:37 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part 'WH44X10288' (id=824, before=0, incoming=1).
+2026-07-10 13:26:37 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2380 posted successfully. Applied items=1, final status='posted'.
+2026-07-10 13:26:39 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2380: raw_pns=['WH44X10288'], direct_part_ids(pre)=[]
+2026-07-10 13:26:39 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2380: part_ids_from_pn=[824], parts_matched=['WH44X10288']
+2026-07-10 13:26:39 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2380: all_part_ids(final)=[824]
+2026-07-10 13:26:39 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2380: issued_rows=[(430, 824, 1, datetime.datetime(2025, 11, 12, 18, 19, 15, 121859)), (543, 824, 1, datetime.datetime(2025, 11, 17, 21, 9, 31, 817062)), (544, 824, 1, datetime.datetime(2025, 11, 17, 21, 10, 17, 497172)), (748, 824, 1, datetime.datetime(2025, 11, 26, 17, 2, 36, 577727)), (1280, 824, 1, datetime.datetime(2025, 12, 17, 18, 24, 11, 23704))]
+2026-07-10 13:26:39 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2380 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-10 13:40:05 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2381. Status before='draft', item count=1.
+2026-07-10 13:40:05 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'NEMO 6-15P' (id=3605, incoming=1).
+2026-07-10 13:40:06 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2381 posted successfully. Applied items=1, final status='posted'.
+2026-07-10 13:40:09 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2381: raw_pns=['NEMO 6-15P'], direct_part_ids(pre)=[]
+2026-07-10 13:40:09 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2381: part_ids_from_pn=[3605], parts_matched=['NEMO 6-15P']
+2026-07-10 13:40:09 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2381: all_part_ids(final)=[3605]
+2026-07-10 13:40:09 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2381: issued_rows=[]
+2026-07-10 13:40:09 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2381 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-10 13:47:20 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2381: raw_pns=['NEMO 6-15P'], direct_part_ids(pre)=[]
+2026-07-10 13:47:20 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2381: part_ids_from_pn=[3605], parts_matched=['NEMO 6-15P']
+2026-07-10 13:47:20 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2381: all_part_ids(final)=[3605]
+2026-07-10 13:47:20 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2381: issued_rows=[(6779, 3605, 1, datetime.datetime(2026, 7, 10, 20, 46, 39, 710089))]
+2026-07-10 13:47:20 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2381 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-10 16:02:52 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2382. Status before='draft', item count=1.
+2026-07-10 16:02:52 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part 'D510266P' (id=1125, before=0, incoming=1).
+2026-07-10 16:02:52 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2382 posted successfully. Applied items=1, final status='posted'.
+2026-07-10 16:02:53 | WARNING  | routes:16192 | [RECV_DETAIL consume-check] batch 2382: raw_pns=['D510266P'], direct_part_ids(pre)=[]
+2026-07-10 16:02:53 | WARNING  | routes:16205 | [RECV_DETAIL consume-check] batch 2382: part_ids_from_pn=[1125], parts_matched=['D510266P']
+2026-07-10 16:02:53 | WARNING  | routes:16212 | [RECV_DETAIL consume-check] batch 2382: all_part_ids(final)=[1125]
+2026-07-10 16:02:53 | WARNING  | routes:16233 | [RECV_DETAIL consume-check] batch 2382: issued_rows=[(750, 1125, 1, datetime.datetime(2025, 11, 26, 18, 9, 12, 955378)), (1586, 1125, 1, datetime.datetime(2025, 12, 29, 23, 55, 18, 579272)), (1627, 1125, 1, datetime.datetime(2025, 12, 30, 20, 8, 49, 372701)), (1648, 1125, -1, datetime.datetime(2025, 12, 30, 20, 8, 49)), (1745, 1125, 1, datetime.datetime(2026, 1, 6, 22, 8, 17, 633652))]
+2026-07-10 16:02:53 | WARNING  | routes:16258 | [RECV_DETAIL FLAGS] batch 2382 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-10 16:36:14 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-10 16:36:14 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-10 16:36:14 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-10 16:36:14 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-10 16:36:23 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-10 16:36:23 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-10 16:36:27 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-10 16:36:27 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-10 16:36:27 | INFO     | app:532 | ======================================================================
+2026-07-10 16:36:27 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-10 16:36:27 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-10 16:36:27 | INFO     | app:535 | Python  : 3.13.5
+2026-07-10 16:36:27 | INFO     | app:536 | PID     : 4852
+2026-07-10 16:36:27 | INFO     | app:537 | Debug   : False
+2026-07-10 16:36:27 | INFO     | app:538 | SSL     : True
+2026-07-10 16:36:27 | INFO     | app:539 | Port    : 5000
+2026-07-10 16:36:27 | INFO     | app:540 | ======================================================================
+2026-07-10 16:36:27 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False

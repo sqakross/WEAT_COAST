@@ -1,0 +1,115 @@
+2026-07-09 01:13:37 | INFO     | app:123 | Logging subsystem initialized.
+2026-07-09 01:13:37 | INFO     | app:167 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-09 01:13:37 | INFO     | app:208 | Sentry DSN not set; skipping Sentry init.
+2026-07-09 01:13:37 | INFO     | app:227 | WCCR flags: enabled=1, dry=0
+2026-07-09 01:13:46 | INFO     | app:294 | Flask app configured and blueprints registered.
+2026-07-09 01:13:47 | INFO     | app:512 | DB tables ensured (create_all).
+2026-07-09 01:13:50 | INFO     | app:451 | Backfill: created 0 units; updated 0 parts
+2026-07-09 01:13:50 | INFO     | app:524 | Old .docx cleanup complete.
+2026-07-09 01:13:50 | INFO     | app:532 | ======================================================================
+2026-07-09 01:13:50 | INFO     | app:533 | WEST COAST CHIEF REPAIR ERP
+2026-07-09 01:13:50 | INFO     | app:534 | Version : 1.1.1.45
+2026-07-09 01:13:50 | INFO     | app:535 | Python  : 3.13.5
+2026-07-09 01:13:50 | INFO     | app:536 | PID     : 5024
+2026-07-09 01:13:50 | INFO     | app:537 | Debug   : False
+2026-07-09 01:13:50 | INFO     | app:538 | SSL     : True
+2026-07-09 01:13:50 | INFO     | app:539 | Port    : 5000
+2026-07-09 01:13:50 | INFO     | app:540 | ======================================================================
+2026-07-09 01:13:50 | INFO     | app:547 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-09 10:02:50 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2362: raw_pns=['SPARKMODULEPA020047', 'WPW10330137', '5304525218', '5304512686', 'WR50X10108', '316031501', '241505301', '241505501', 'WR55X46805'], direct_part_ids(pre)=[]
+2026-07-09 10:02:50 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2362: part_ids_from_pn=[1764, 1773, 3586, 3587, 829, 3589, 3588, 2170, 2164], parts_matched=['241505301', '241505501', '316031501', '5304512686', '5304525218', 'SPARKMODULEPA020047', 'WPW10330137', 'WR50X10108', 'WR55X46805']
+2026-07-09 10:02:50 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2362: all_part_ids(final)=[3586, 3587, 1764, 3589, 3588, 1773, 2164, 2170, 829]
+2026-07-09 10:02:50 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2362: issued_rows=[(435, 829, 1, datetime.datetime(2025, 11, 12, 18, 23, 51, 599906)), (678, 829, 1, datetime.datetime(2025, 11, 21, 23, 50, 26, 949867)), (1457, 829, 1, datetime.datetime(2025, 12, 22, 19, 41, 10, 98015)), (1759, 1773, 1, datetime.datetime(2026, 1, 7, 18, 48, 26, 206740)), (1760, 1764, 1, datetime.datetime(2026, 1, 7, 18, 48, 26, 206740))]
+2026-07-09 10:02:50 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2362 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-09 10:19:37 | INFO     | routes:858 | [DELETE RECEIVING] start: batch_id=2362, status=posted, supplier=Reliable Parts, invoice=5180021, pns=['241505301', '241505501', '316031501', '5304512686', '5304525218', 'SPARKMODULEPA020047', 'WPW10330137', 'WR50X10108', 'WR55X46805']
+2026-07-09 10:19:37 | INFO     | receiving:294 | [RECEIVING_UNPOST] Reverting batch 2362 from posted -> draft ...
+2026-07-09 10:19:37 | INFO     | receiving:329 | [RECEIVING_UNPOST] part 5304525218: before=1, rollback=1, after=0 (qty_applied=1)
+2026-07-09 10:19:37 | INFO     | receiving:329 | [RECEIVING_UNPOST] part 316031501: before=1, rollback=1, after=0 (qty_applied=1)
+2026-07-09 10:19:37 | INFO     | receiving:329 | [RECEIVING_UNPOST] part WR50X10108: before=1, rollback=1, after=0 (qty_applied=1)
+2026-07-09 10:19:37 | INFO     | receiving:329 | [RECEIVING_UNPOST] part 5304512686: before=0, rollback=0, after=0 (qty_applied=1)
+2026-07-09 10:19:37 | INFO     | receiving:329 | [RECEIVING_UNPOST] part WR55X46805: before=1, rollback=1, after=0 (qty_applied=1)
+2026-07-09 10:19:37 | INFO     | receiving:329 | [RECEIVING_UNPOST] part 241505301: before=2, rollback=2, after=0 (qty_applied=2)
+2026-07-09 10:19:37 | INFO     | receiving:329 | [RECEIVING_UNPOST] part 241505501: before=1, rollback=1, after=0 (qty_applied=1)
+2026-07-09 10:19:37 | INFO     | receiving:329 | [RECEIVING_UNPOST] part WPW10330137: before=0, rollback=0, after=0 (qty_applied=1)
+2026-07-09 10:19:37 | INFO     | receiving:329 | [RECEIVING_UNPOST] part SPARKMODULEPA020047: before=0, rollback=0, after=0 (qty_applied=1)
+2026-07-09 10:19:38 | INFO     | receiving:351 | [RECEIVING_UNPOST] Batch 2362 reverted to draft, stock rolled back safely.
+2026-07-09 10:19:38 | INFO     | routes:869 | [DELETE RECEIVING] unposted batch_id=2362
+2026-07-09 10:19:38 | INFO     | routes:890 | [DELETE RECEIVING] batch deleted batch_id=2362
+2026-07-09 10:19:40 | INFO     | routes:907 | [DELETE RECEIVING] dedup removed=9 for batch_id=2362
+2026-07-09 10:19:40 | INFO     | routes:937 | [DELETE RECEIVING] done batch_id=2362, keys_removed=9
+2026-07-09 10:21:42 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2362: raw_pns=['DWMAGIC', 'WPW10330137', '5304525218', '5304512686', 'WR50X10108', '316031501', 'PA020047', '241505301', '241505501', 'WR55X46805'], direct_part_ids(pre)=[]
+2026-07-09 10:21:42 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2362: part_ids_from_pn=[1764, 1773, 3586, 3587, 829, 293, 3590, 3588, 2170, 2164], parts_matched=['241505301', '241505501', '316031501', '5304512686', '5304525218', 'DWMAGIC', 'PA020047', 'WPW10330137', 'WR50X10108', 'WR55X46805']
+2026-07-09 10:21:42 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2362: all_part_ids(final)=[3586, 3587, 1764, 293, 3590, 3588, 1773, 2164, 2170, 829]
+2026-07-09 10:21:42 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2362: issued_rows=[(67, 293, 1, datetime.datetime(2025, 9, 15, 14, 33, 54, 395254)), (101, 293, 2, datetime.datetime(2025, 9, 25, 14, 22, 31, 165938)), (106, 293, 2, datetime.datetime(2025, 9, 26, 14, 48, 44, 978607)), (168, 293, 1, datetime.datetime(2025, 10, 15, 15, 24, 28, 545755)), (177, 293, 2, datetime.datetime(2025, 10, 21, 16, 36, 7, 45835))]
+2026-07-09 10:21:42 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2362 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-09 10:47:57 | INFO     | receiving:156 | [RECEIVING_POST] Posting batch 2363 (status before='draft') and applying to stock...
+2026-07-09 10:47:57 | INFO     | receiving:211 | [RECEIVING_POST] Created new Part '7009399' (id=3591). Qty before=0, incoming=1
+2026-07-09 10:47:58 | INFO     | receiving:263 | [RECEIVING_POST] Batch 2363 commit complete. Final status=posted
+2026-07-09 10:47:59 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2363: raw_pns=['7009399'], direct_part_ids(pre)=[]
+2026-07-09 10:47:59 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2363: part_ids_from_pn=[3591], parts_matched=['7009399']
+2026-07-09 10:47:59 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2363: all_part_ids(final)=[3591]
+2026-07-09 10:47:59 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2363: issued_rows=[]
+2026-07-09 10:47:59 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2363 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-09 11:34:38 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2364: raw_pns=['5304517203', '241510207', 'EBR72955426', '5304494425', '10032857', '316009046', '316102303', '5304508761', 'W10876537', 'D510207P', 'WH23X26206'], direct_part_ids(pre)=[]
+2026-07-09 11:34:38 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2364: part_ids_from_pn=[3593, 614, 3594, 592, 3592, 3595, 493, 985, 3596, 125, 2442], parts_matched=['10032857', '241510207', '316009046', '316102303', '5304494425', '5304508761', '5304517203', 'D510207P', 'EBR72955426', 'W10876537', 'WH23X26206']
+2026-07-09 11:34:38 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2364: all_part_ids(final)=[614, 3592, 3593, 3594, 3595, 3596, 493, 2442, 592, 985, 125]
+2026-07-09 11:34:38 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2364: issued_rows=[(95, 125, 1, datetime.datetime(2025, 9, 24, 14, 47, 6, 726582)), (215, 592, 1, datetime.datetime(2025, 10, 29, 18, 25, 44, 448290)), (238, 614, 1, datetime.datetime(2025, 10, 31, 16, 41, 36, 627694)), (360, 493, 1, datetime.datetime(2025, 11, 7, 19, 1, 44, 394655)), (627, 985, 1, datetime.datetime(2025, 11, 20, 17, 38, 13, 941899))]
+2026-07-09 11:34:38 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2364 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-09 12:10:20 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2365: raw_pns=['242193212'], direct_part_ids(pre)=[]
+2026-07-09 12:10:20 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2365: part_ids_from_pn=[618], parts_matched=['242193212']
+2026-07-09 12:10:20 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2365: all_part_ids(final)=[618]
+2026-07-09 12:10:20 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2365: issued_rows=[(3432, 618, 1, datetime.datetime(2026, 3, 4, 19, 5, 16, 944123)), (4193, 618, 1, datetime.datetime(2026, 3, 30, 17, 32, 54, 574108)), (4519, 618, 1, datetime.datetime(2026, 4, 10, 18, 29, 7, 559343)), (4677, 618, 1, datetime.datetime(2026, 4, 20, 14, 26, 54, 842855)), (4709, 618, -1, datetime.datetime(2026, 4, 21, 15, 44, 22, 562956))]
+2026-07-09 12:10:20 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2365 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-09 12:35:33 | INFO     | receiving:156 | [RECEIVING_POST] Posting batch 2366 (status before='draft') and applying to stock...
+2026-07-09 12:35:33 | INFO     | receiving:224 | [RECEIVING_POST] Updating existing Part '4204490' (id=1739). Qty before=0, incoming=1
+2026-07-09 12:35:33 | INFO     | receiving:263 | [RECEIVING_POST] Batch 2366 commit complete. Final status=posted
+2026-07-09 12:35:34 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2366: raw_pns=['4204490'], direct_part_ids(pre)=[]
+2026-07-09 12:35:35 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2366: part_ids_from_pn=[1739], parts_matched=['4204490']
+2026-07-09 12:35:35 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2366: all_part_ids(final)=[1739]
+2026-07-09 12:35:35 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2366: issued_rows=[(1707, 1739, 1, datetime.datetime(2026, 1, 5, 21, 43, 46, 611803)), (5891, 1739, 1, datetime.datetime(2026, 6, 2, 22, 19, 0, 232372)), (5936, 1739, 1, datetime.datetime(2026, 6, 4, 16, 59, 37, 588367))]
+2026-07-09 12:35:35 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2366 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-09 13:43:02 | INFO     | receiving:156 | [RECEIVING_POST] Posting batch 2367 (status before='draft') and applying to stock...
+2026-07-09 13:43:02 | INFO     | receiving:211 | [RECEIVING_POST] Created new Part 'KVM SWITCH' (id=3597). Qty before=0, incoming=1
+2026-07-09 13:43:02 | INFO     | receiving:263 | [RECEIVING_POST] Batch 2367 commit complete. Final status=posted
+2026-07-09 13:43:04 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2367: raw_pns=['KVM SWITCH'], direct_part_ids(pre)=[]
+2026-07-09 13:43:04 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2367: part_ids_from_pn=[3597], parts_matched=['KVM SWITCH']
+2026-07-09 13:43:04 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2367: all_part_ids(final)=[3597]
+2026-07-09 13:43:04 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2367: issued_rows=[]
+2026-07-09 13:43:04 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2367 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-09 13:51:40 | INFO     | receiving:156 | [RECEIVING_POST] Posting batch 2368 (status before='draft') and applying to stock...
+2026-07-09 13:51:40 | INFO     | receiving:224 | [RECEIVING_POST] Updating existing Part '316489403' (id=1985). Qty before=0, incoming=1
+2026-07-09 13:51:41 | INFO     | receiving:263 | [RECEIVING_POST] Batch 2368 commit complete. Final status=posted
+2026-07-09 13:51:42 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2368: raw_pns=['316489403'], direct_part_ids(pre)=[]
+2026-07-09 13:51:42 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2368: part_ids_from_pn=[1985], parts_matched=['316489403']
+2026-07-09 13:51:42 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2368: all_part_ids(final)=[1985]
+2026-07-09 13:51:42 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2368: issued_rows=[(2237, 1985, 1, datetime.datetime(2026, 1, 22, 20, 34, 45, 629512))]
+2026-07-09 13:51:42 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2368 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-09 13:57:24 | INFO     | receiving:156 | [RECEIVING_POST] Posting batch 2369 (status before='draft') and applying to stock...
+2026-07-09 13:57:24 | INFO     | receiving:211 | [RECEIVING_POST] Created new Part 'THONAPA FLAT PLUG' (id=3598). Qty before=0, incoming=2
+2026-07-09 13:57:24 | INFO     | receiving:263 | [RECEIVING_POST] Batch 2369 commit complete. Final status=posted
+2026-07-09 13:57:26 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2369: raw_pns=['THONAPA FLAT PLUG'], direct_part_ids(pre)=[]
+2026-07-09 13:57:26 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2369: part_ids_from_pn=[3598], parts_matched=['THONAPA FLAT PLUG']
+2026-07-09 13:57:26 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2369: all_part_ids(final)=[3598]
+2026-07-09 13:57:26 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2369: issued_rows=[]
+2026-07-09 13:57:26 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2369 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-09 15:20:05 | INFO     | receiving:156 | [RECEIVING_POST] Posting batch 2370 (status before='draft') and applying to stock...
+2026-07-09 15:20:05 | INFO     | receiving:224 | [RECEIVING_POST] Updating existing Part 'CSTC302TW' (id=1378). Qty before=0, incoming=1
+2026-07-09 15:20:06 | INFO     | receiving:263 | [RECEIVING_POST] Batch 2370 commit complete. Final status=posted
+2026-07-09 15:20:07 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2370: raw_pns=['CSTC302TW'], direct_part_ids(pre)=[]
+2026-07-09 15:20:07 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2370: part_ids_from_pn=[1378], parts_matched=['CSTC302TW']
+2026-07-09 15:20:07 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2370: all_part_ids(final)=[1378]
+2026-07-09 15:20:07 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2370: issued_rows=[(1001, 1378, 1, datetime.datetime(2025, 12, 8, 18, 53, 37, 292823)), (1815, 1378, 1, datetime.datetime(2026, 1, 8, 19, 19, 41, 245524)), (2067, 1378, 1, datetime.datetime(2026, 1, 19, 18, 18, 57, 937980))]
+2026-07-09 15:20:07 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2370 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-09 15:26:15 | INFO     | receiving:156 | [RECEIVING_POST] Posting batch 2371 (status before='draft') and applying to stock...
+2026-07-09 15:26:15 | INFO     | receiving:211 | [RECEIVING_POST] Created new Part 'CSC151TW' (id=3599). Qty before=0, incoming=1
+2026-07-09 15:26:15 | INFO     | receiving:263 | [RECEIVING_POST] Batch 2371 commit complete. Final status=posted
+2026-07-09 15:26:17 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2371: raw_pns=['CSC151TW'], direct_part_ids(pre)=[]
+2026-07-09 15:26:17 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2371: part_ids_from_pn=[3599], parts_matched=['CSC151TW']
+2026-07-09 15:26:17 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2371: all_part_ids(final)=[3599]
+2026-07-09 15:26:17 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2371: issued_rows=[]
+2026-07-09 15:26:17 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2371 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-09 16:36:35 | WARNING  | routes:16136 | [RECV_DETAIL consume-check] batch 2272: raw_pns=['80-54493-00'], direct_part_ids(pre)=[]
+2026-07-09 16:36:35 | WARNING  | routes:16149 | [RECV_DETAIL consume-check] batch 2272: part_ids_from_pn=[3495], parts_matched=['80-54493-00']
+2026-07-09 16:36:35 | WARNING  | routes:16156 | [RECV_DETAIL consume-check] batch 2272: all_part_ids(final)=[3495]
+2026-07-09 16:36:35 | WARNING  | routes:16177 | [RECV_DETAIL consume-check] batch 2272: issued_rows=[(6460, 3495, 1, datetime.datetime(2026, 6, 29, 17, 10, 32, 892685)), (6622, 3495, -1, datetime.datetime(2026, 7, 6, 17, 1, 9, 280028))]
+2026-07-09 16:36:35 | WARNING  | routes:16202 | [RECV_DETAIL FLAGS] batch 2272 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False

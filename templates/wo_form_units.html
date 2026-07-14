@@ -269,12 +269,19 @@
 
 <form method="post"
       action="{{ url_for('inventory.wo_save') }}"
+      data-save-url="{{ url_for('inventory.wo_save') }}"
+      data-save-issue-url="{% if IS_EDIT %}{{ url_for('inventory.wo_issue_instock', wo_id=wo.id) }}{% endif %}"
       id="woForm"
       class="wo-form {% if IS_EDIT and wo.status == 'cancel_job' %}wo-cancelled{% endif %}">
   {% if IS_EDIT %}
-    <input type="hidden" name="wo_id" value="{{ wo.id }}">
-    <input type="hidden" name="_after_save" id="afterSaveAction" value="">
-  {% endif %}
+  <input type="hidden" name="wo_id" value="{{ wo.id }}">
+  <input type="hidden" name="_after_save" id="afterSaveAction" value="">
+
+  <input type="hidden" name="_operation" id="woOperation" value="save">
+  <input type="hidden" name="part_ids" id="issue_part_ids" value="">
+  <input type="hidden" name="set_status" id="issue_set_status" value="">
+  <input type="hidden" name="ins_ids" id="issue_ins_ids" value="">
+{% endif %}
 
   {% if IS_EDIT %}
       <input type="hidden" id="woUpdatedAt" value="{{ wo.updated_at.isoformat() if wo.updated_at else '' }}">
@@ -684,13 +691,6 @@
   </div>
 </form>
 
-{% set issue_action = IS_EDIT and url_for('inventory.wo_issue_instock', wo_id=wo.id) or '#' %}
-<form id="issueForm" method="post" action="{{ issue_action }}">
-  <input type="hidden" name="wo_id" value="{{ IS_EDIT and wo.id or '' }}">
-  <input type="hidden" name="part_ids" id="issue_part_ids">
-  <input type="hidden" name="set_status" id="issue_set_status" value="">
-  <input type="hidden" name="ins_ids" id="issue_ins_ids">
-</form>
 
 {% endblock %}
 
@@ -882,16 +882,25 @@ function wccrToast(msg) {
     form.addEventListener('change', markDirty, { passive: true });
   }
 
-  saveBtn?.addEventListener('click', () => {
-  const afterSaveInput = document.getElementById('afterSaveAction');
-  if (afterSaveInput) afterSaveInput.value = '';
+    saveBtn?.addEventListener('click', () => {
+    const afterSaveInput =
+      document.getElementById('afterSaveAction');
 
-  if (CURRENT_WO_ID) {
-    sessionStorage.removeItem('WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID);
-  }
+    if (afterSaveInput) {
+      afterSaveInput.value = '';
+    }
 
-  window.WCCR_AUTO_ISSUE_RUNNING = false;
-});
+    const operationInput =
+      document.getElementById('woOperation');
+
+    if (operationInput) {
+      operationInput.value = 'save';
+    }
+
+    form.action =
+      form.dataset.saveUrl
+      || "{{ url_for('inventory.wo_save') }}";
+  });
 
   const currentWOInput = form.querySelector('input[name="wo_id"]');
   const CURRENT_WO_ID  = currentWOInput ? String(currentWOInput.value || '').trim() : '';
@@ -940,7 +949,12 @@ function wccrToast(msg) {
   }
 
   async function checkWorkOrderFreshness(forceReloadIfClean = true){
-    if (isSubmitting || window.WCCR_AUTO_ISSUE_RUNNING || window.WCCR_NAVIGATING_TO_DETAIL) return;
+    if (
+  isSubmitting
+  || window.WCCR_NAVIGATING_TO_DETAIL
+) {
+  return;
+}
     if (!CURRENT_WO_ID || !WO_STAMP_URL || IS_RO) return;
 
     try {
@@ -1127,48 +1141,167 @@ function wccrToast(msg) {
   }
 
     if (form) {
-    form.addEventListener('submit', async (e)=>{
-      e.preventDefault();
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
 
-      if (saveInProgress) return;
-      saveInProgress = true;
+    if (saveInProgress) return;
 
-      if (saveBtn) {
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving...';
-      }
-    if (e.submitter && e.submitter.id === 'saveBtn') {
-      const afterSaveInput = document.getElementById('afterSaveAction');
-      if (afterSaveInput) afterSaveInput.value = '';
+    /*
+     * Для нового WO оставляем обычный submit.
+     * После первого сохранения сервер должен открыть созданный WO,
+     * потому что новые строки ещё не имеют database ID.
+     */
+    if (!IS_EDIT) {
+      const okToSubmit =
+        await handleDuplicateCheckBeforeSubmit();
 
-      if (CURRENT_WO_ID) {
-        sessionStorage.removeItem('WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID);
-      }
-
-      window.WCCR_AUTO_ISSUE_RUNNING = false;
-    }
-
-    const okToSubmit = await handleDuplicateCheckBeforeSubmit();
       if (!okToSubmit) {
-        saveInProgress = false;
-        if (saveBtn) {
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'Save';
-        }
         return;
       }
 
       syncOrderedFlagsBeforeSubmit();
 
-      if (!IS_RO) {
-        isSubmitting = true;
-        isDirty = false;
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-      }
+      isSubmitting = true;
+      isDirty = false;
+
+      window.removeEventListener(
+        'beforeunload',
+        handleBeforeUnload
+      );
 
       HTMLFormElement.prototype.submit.call(form);
-    });
-  }
+      return;
+    }
+
+    saveInProgress = true;
+
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+    }
+
+    const afterSaveInput =
+      document.getElementById('afterSaveAction');
+
+    if (afterSaveInput) {
+      afterSaveInput.value = '';
+    }
+
+    const operationInput =
+      document.getElementById('woOperation');
+
+    if (operationInput) {
+      operationInput.value = 'save';
+    }
+
+    syncOrderedFlagsBeforeSubmit();
+
+    const saveUrl =
+      form.dataset.saveUrl
+      || "{{ url_for('inventory.wo_save') }}";
+
+    try {
+      const saveData = new FormData(form);
+
+      saveData.set('_ajax_save', '1');
+      saveData.delete('_save_clicked');
+      saveData.delete('_after_save');
+
+      const response = await fetch(saveUrl, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json'
+        },
+        body: saveData,
+        redirect: 'follow'
+      });
+
+      const contentType =
+        response.headers.get('content-type') || '';
+
+      if (
+        !response.ok
+        || !contentType.includes('application/json')
+      ) {
+        /*
+         * При validation error wo_save может вернуть HTML
+         * или redirect на detail. Показываем реальный ответ.
+         */
+        if (response.url) {
+          isSubmitting = true;
+          isDirty = false;
+
+          window.removeEventListener(
+            'beforeunload',
+            handleBeforeUnload
+          );
+
+          window.location.href = response.url;
+          return;
+        }
+
+        throw new Error('Work Order save failed.');
+      }
+
+      const result = await response.json();
+
+      if (!result?.ok) {
+        throw new Error(
+          result?.error
+          || 'Work Order save failed.'
+        );
+      }
+
+      isDirty = false;
+        isSubmitting = true;
+        saveInProgress = false;
+        window.WCCR_NAVIGATING_TO_DETAIL = true;
+
+        window.removeEventListener(
+          'beforeunload',
+          handleBeforeUnload
+        );
+
+        if (saveBtn) {
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'Saved';
+        }
+
+        window.location.href =
+          "{{ url_for('inventory.wo_detail', wo_id=0) }}"
+            .replace("0", String(result.wo_id));
+
+        return;
+
+    } catch (error) {
+      console.error(
+        'AJAX Work Order save failed:',
+        error
+      );
+
+      isSubmitting = false;
+      isDirty = true;
+      saveInProgress = false;
+      window.WCCR_NAVIGATING_TO_DETAIL = false;
+
+      window.addEventListener(
+        'beforeunload',
+        handleBeforeUnload
+      );
+
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+      }
+
+      alert(
+        error?.message
+        || 'Unable to save Work Order.'
+      );
+    }
+  });
+}
 
   const toMoney = (n)=> (Math.round((Number(n||0)+Number.EPSILON)*100)/100).toFixed(2);
 
@@ -1956,48 +2089,15 @@ ensureCopyButtonsForAllAppliances();
 
   issueBtn?.addEventListener('click', async ()=>{
 
-    if (isDirty && IS_EDIT && !window.WCCR_AUTO_ISSUE_RUNNING) {
-    const selectedPositions = [];
-
-    document.querySelectorAll('#unitsWrap .card').forEach((card, ui) => {
-      card.querySelectorAll('tbody tr').forEach((tr, ri) => {
-        const cb = tr.querySelector('.issue-check');
-        if (cb && cb.checked) {
-          selectedPositions.push(`${ui}:${ri}`);
-        }
-      });
-    });
-
-    if (!selectedPositions.length) {
-      alert('Select at least one saved in-stock part before issuing.');
-      return;
-    }
-
-    sessionStorage.setItem(
-      'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID,
-      selectedPositions.join(',')
-    );
-
-    const afterSaveInput = document.getElementById('afterSaveAction');
-    if (afterSaveInput) afterSaveInput.value = 'edit_auto_issue';
-
-    syncOrderedFlagsBeforeSubmit();
-
-    issueBtn.disabled = true;
-    issueBtn.textContent = 'Saving...';
-    isSubmitting = true;
-    isDirty = false;
-    window.removeEventListener('beforeunload', handleBeforeUnload);
-
-    form.requestSubmit();
+  if (isSubmitting) {
     return;
-  }
+}
 
   const isINSJob = isInsuranceJob();
   const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
-  const issueFormEl = document.getElementById('issueForm');
+  const issueFormEl = form;
 
-  if (!issueFormEl) return;
+
 
   const selected = [];
   const insSelected = [];
@@ -2062,225 +2162,225 @@ ensureCopyButtonsForAllAppliances();
 
   if (statusSel) statusSel.value = 'done';
 
-  document.getElementById('issue_set_status').value = 'done';
-  document.getElementById('issue_part_ids').value = selected.join(',');
-  document.getElementById('issue_ins_ids').value = insSelected.join(',');
-
-      issueBtn.disabled = true;
-      issueBtn.textContent = 'Issuing...';
-
-      window.WCCR_NAVIGATING_TO_DETAIL = true;
-      isSubmitting = true;
 
 
-      issueFormEl.submit();
-      return;
+/*
+ * Эти поля должны находиться внутри woForm,
+ * потому что теперь отправляется вся редактируемая форма.
+ */
+document.getElementById('issue_part_ids').value = selected.join(',');
+document.getElementById('issue_ins_ids').value = insSelected.join(',');
+document.getElementById('issue_set_status').value = 'done';
 
-    });
+syncOrderedFlagsBeforeSubmit();
 
-  let stockRefreshTimer = null;
+const saveUrl =
+  form.dataset.saveUrl
+  || "{{ url_for('inventory.wo_save') }}";
 
-  document.getElementById('backToDetailBtn')?.addEventListener('click', function(e){
-  e.preventDefault();
+const issueUrl = form.dataset.saveIssueUrl;
 
-  isSubmitting = true;
-  isDirty = false;
-  window.WCCR_NAVIGATING_TO_DETAIL = true;
-  window.WCCR_AUTO_ISSUE_RUNNING = false;
-
-  window.removeEventListener('beforeunload', handleBeforeUnload);
-
-  if (stockRefreshTimer) {
-    clearTimeout(stockRefreshTimer);
-    stockRefreshTimer = null;
-  }
-
-  window.location.href = this.href;
-});
-
-function scheduleVisibleRefresh(delay = 150){
-  if (window.WCCR_AUTO_ISSUE_RUNNING) return;
-
-  const autoIssueKey = 'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID;
-  if (CURRENT_WO_ID && sessionStorage.getItem(autoIssueKey)) return;
-
-  if (stockRefreshTimer) clearTimeout(stockRefreshTimer);
-  stockRefreshTimer = setTimeout(() => {
-    refreshVisibleHints(true);
-  }, delay);
+if (!issueUrl) {
+  alert('Issue endpoint is not configured.');
+  return;
 }
 
-// --- SMART WORK ORDER SYNC (без polling) ---
-window.addEventListener('focus', () => {
-  checkWorkOrderFreshness(false);
-});
+const operationInput =
+  document.getElementById('woOperation');
 
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    checkWorkOrderFreshness(false);
-  }
-});
+if (operationInput) {
+  operationInput.value = 'save_and_issue';
+}
 
-window.addEventListener('pageshow', () => {
-  checkWorkOrderFreshness(false);
-});
+issueBtn.disabled = true;
+issueBtn.textContent = 'Saving...';
 
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    scheduleVisibleRefresh(100);
-  }
-});
+isSubmitting = true;
+isDirty = false;
+window.WCCR_NAVIGATING_TO_DETAIL = true;
 
-window.addEventListener('focus', () => {
-  scheduleVisibleRefresh(100);
-});
+window.removeEventListener(
+  'beforeunload',
+  handleBeforeUnload
+);
 
-window.addEventListener('pageshow', () => {
-  scheduleVisibleRefresh(100);
-});
+try {
+  /*
+   * Save current WO without page reload.
+   *
+   * FormData includes:
+   * - current WO header;
+   * - units and rows;
+   * - invoice values;
+   * - selected row IDs.
+   */
+  const saveData = new FormData(form);
 
+  saveData.set('_ajax_save', '1');
+  saveData.delete('_save_clicked');
+  saveData.delete('_after_save');
 
-      function getSelectedAutoIssueRows(saved){
-    const positions = (saved || '').split(',').map(x => x.trim()).filter(Boolean);
-    const result = [];
+  const response = await fetch(saveUrl, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Accept': 'application/json'
+    },
+    body: saveData,
+    redirect: 'follow'
+  });
 
-    positions.forEach(pos => {
-      const [uiRaw, riRaw] = pos.split(':');
-      const ui = parseInt(uiRaw, 10);
-      const ri = parseInt(riRaw, 10);
+  const contentType =
+    response.headers.get('content-type') || '';
 
-      const card = document.querySelectorAll('#unitsWrap .card')[ui];
-      const tr = card?.querySelectorAll('tbody tr')[ri];
-      if (tr) result.push(tr);
-    });
-
-    return result;
-  }
-
-  function waitForAutoIssueRowsReady(saved, timeoutMs = 2000){
-    return new Promise(resolve => {
-      const started = Date.now();
-      function check(){
-        const rows = getSelectedAutoIssueRows(saved);
-
-        const ready = rows.some(tr => {
-          const cb = tr.querySelector('.issue-check');
-          return cb && !cb.disabled;
-        });
-
-        if (ready) return resolve(true);
-
-        if (Date.now() - started >= timeoutMs) {
-          return resolve(false);
-        }
-
-        requestAnimationFrame(check);
-      }
-
-      check();
-    });
-  }
-      async function refreshAutoIssueRowsHints(saved){
-    const rows = getSelectedAutoIssueRows(saved);
-    if (!rows.length) return rows;
-
-    const items = [];
-    const rowMap = new Map();
-
-    rows.forEach((tr) => {
-      const pnMain = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
-      const pnAlt  = (tr.querySelector('.alt-pn')?.value || '').trim().toUpperCase();
-      const pn     = pnMain || pnAlt;
-      const qty    = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
-      const wh     = (tr.querySelector('.wh-input')?.value || '').trim().toUpperCase();
-
-      if (!pn || qty <= 0) {
-        setIssueEnabled(tr, false);
-        return;
-      }
-
-      const key = `${pn}|${qty}|${wh}`;
-      if (!rowMap.has(key)) {
-        rowMap.set(key, []);
-        items.push({ pn, qty, wh });
-      }
-      rowMap.get(key).push(tr);
-    });
-
-    if (!items.length) return rows;
-
-    try {
-      const resp = await fetch(API_STOCK_BULK, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ items })
-      });
-
-      if (!resp.ok) throw new Error('bulk failed');
-
-      const data = await resp.json();
-      const payloads = data.items || {};
-
-      Object.entries(payloads).forEach(([key, payload]) => {
-        stockHintCache.set(key, { ts: Date.now(), payload });
-        (rowMap.get(key) || []).forEach(tr => applyHintResult(tr, payload));
-      });
-
-    } catch (err) {
-      await Promise.allSettled(rows.map(tr => fetchHint(tr, true)));
+  if (
+    !response.ok
+    || !contentType.includes('application/json')
+  ) {
+    /*
+     * wo_save returned an existing redirect or HTML error.
+     * Open its final destination so the user sees the error.
+     */
+    if (response.url) {
+      window.location.href = response.url;
+      return;
     }
 
-    return rows;
+    throw new Error('Work Order save failed.');
   }
 
-    async function runAutoIssueAfterSave(){
-      if (!CURRENT_WO_ID || !issueBtn) return;
+  const result = await response.json();
 
-      const key = 'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID;
-      const saved = sessionStorage.getItem(key);
-      if (!saved) return;
+  if (!result.issue_url && !issueUrl) {
+    throw new Error('Issue URL was not returned.');
+}
 
-      const rows = await refreshAutoIssueRowsHints(saved);
-      const isReady = await waitForAutoIssueRowsReady(saved, 2000);
+  if (!result?.ok) {
+    throw new Error(
+      result?.error
+      || 'Work Order save failed.'
+    );
+  }
 
-      let checkedCount = 0;
+  issueBtn.textContent = 'Issuing...';
 
-      rows.forEach(tr => {
-        const cb = tr.querySelector('.issue-check');
-        if (cb && !cb.disabled) {
-          cb.checked = true;
-          checkedCount++;
-        }
-      });
+  /*
+   * Save succeeded.
+   * Submit the same form directly to the existing Issue route.
+   *
+   * No intermediate wo_edit page load.
+   */
+  form.action =
+    result.issue_url
+    || issueUrl;
 
-      if (!isReady || !checkedCount) {
-        sessionStorage.removeItem(key);
-        alert('Saved changes, but selected parts are not available for issue. Please check Stock Hint and click Issue selected again.');
-        return;
-      }
+  form.method = 'post';
 
-      sessionStorage.removeItem(key);
+  HTMLFormElement.prototype.submit.call(form);
 
-      window.WCCR_AUTO_ISSUE_RUNNING = true;
+} catch (error) {
+  console.error(
+    'Save before issue failed:',
+    error
+  );
+
+  isSubmitting = false;
+  isDirty = true;
+  window.WCCR_NAVIGATING_TO_DETAIL = false;
+
+  window.addEventListener(
+    'beforeunload',
+    handleBeforeUnload
+  );
+
+  issueBtn.disabled = false;
+  issueBtn.textContent = 'Issue selected';
+
+  alert(
+    error?.message
+    || 'Unable to save Work Order before issuing.'
+  );
+}
+
+return;
+
+    });
+
+    let stockRefreshTimer = null;
+
+  document
+    .getElementById('backToDetailBtn')
+    ?.addEventListener('click', function(e){
+      e.preventDefault();
+
+      isSubmitting = true;
       isDirty = false;
-      issueBtn.click();
+      window.WCCR_NAVIGATING_TO_DETAIL = true;
+
+      window.removeEventListener(
+        'beforeunload',
+        handleBeforeUnload
+      );
+
+      if (stockRefreshTimer) {
+        clearTimeout(stockRefreshTimer);
+        stockRefreshTimer = null;
+      }
+
+      window.location.href = this.href;
+    });
+
+  function scheduleVisibleRefresh(delay = 150){
+    if (
+      isSubmitting
+      || window.WCCR_NAVIGATING_TO_DETAIL
+    ) {
+      return;
     }
 
-  document.querySelectorAll('#unitsWrap .card').forEach(recomputeUnitSubtotal);
-  const autoIssueKey = 'WCCR_AUTO_ISSUE_POS_' + CURRENT_WO_ID;
-
-    if (CURRENT_WO_ID && sessionStorage.getItem(autoIssueKey)) {
-      runAutoIssueAfterSave();
-    } else {
-      warmupHintsBulk();
+    if (stockRefreshTimer) {
+      clearTimeout(stockRefreshTimer);
     }
+
+    stockRefreshTimer = setTimeout(() => {
+      refreshVisibleHints(true);
+    }, delay);
+  }
+
+  // Проверка, не был ли WO изменён в другом окне.
+  window.addEventListener('focus', () => {
+    checkWorkOrderFreshness(false);
+    scheduleVisibleRefresh(100);
+  });
+
+  document.addEventListener(
+    'visibilitychange',
+    () => {
+      if (
+        document.visibilityState === 'visible'
+      ) {
+        checkWorkOrderFreshness(false);
+        scheduleVisibleRefresh(100);
+      }
+    }
+  );
+
+  window.addEventListener('pageshow', () => {
+    checkWorkOrderFreshness(false);
+    scheduleVisibleRefresh(100);
+  });
+
+  document
+    .querySelectorAll('#unitsWrap .card')
+    .forEach(recomputeUnitSubtotal);
+
+  warmupHintsBulk();
   updateSupplierRequired();
   toggleOrderedCols();
   updateInsColumns();
+  updatePOField();
+  syncAllSupplierStates();
+
 })();
 </script>
 

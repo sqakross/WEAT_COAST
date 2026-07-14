@@ -128,144 +128,269 @@ def _ensure_line_cost_fields(it) -> tuple[float, float, float]:
 
 # ---------- core: POST (apply batch to stock & mark posted) ----------
 
-def post_receiving_batch(batch_id: int, current_user_id: int | None = None):
+def post_receiving_batch(
+    batch_id: int,
+    current_user_id: int | None = None,
+):
     """
-    POST (проводка прихода):
-    - если batch уже posted -> выходим (не трогаем склад второй раз)
-    - иначе:
-        для каждой строки:
-          - гарантируем cost-поля (base/extra/actual)
-          - увеличиваем склад на quantity
-          - обновляем Part.unit_cost по ACTUAL (это важно для твоей логики)
-          - applied_qty = quantity
+    Безопасная проводка прихода.
+
+    Гарантии:
+    - повторно posted batch не проводится;
+    - пустой batch не проводится;
+    - batch с некорректной строкой не проводится;
+    - строки не пропускаются молча;
+    - при любой ошибке выполняется rollback;
+    - статус posted устанавливается только после успешной обработки всех строк;
+    - applied_qty фиксирует реально применённое количество.
     """
     from flask import current_app
 
-    batch = ReceivingBatch.query.get(batch_id)
-    if not batch:
-        raise ValueError("Receiving batch not found")
+    try:
+        batch = db.session.get(ReceivingBatch, batch_id)
 
-    status_now = (getattr(batch, "status", "") or "").strip().lower()
-    if status_now == "posted":
+        if batch is None:
+            raise ValueError(
+                f"Receiving batch #{batch_id} was not found."
+            )
+
+        status_now = (
+            getattr(batch, "status", "") or ""
+        ).strip().lower()
+
+        # Идемпотентность: повторная проводка ничего не меняет.
+        if status_now == "posted":
+            current_app.logger.info(
+                "[RECEIVING_POST] Batch %s is already posted. "
+                "Stock update skipped.",
+                batch.id,
+            )
+            return batch
+
+        items = list(batch.items or [])
+
+        # Пустой документ проводить запрещено.
+        if not items:
+            raise ValueError(
+                f"Receiving batch #{batch.id} cannot be posted: "
+                f"the batch contains no items."
+            )
+
+        validated_items = []
+        validation_errors = []
+
+        for row_number, item in enumerate(items, start=1):
+            part_number = (
+                getattr(item, "part_number", "") or ""
+            ).strip().upper()
+
+            raw_quantity = getattr(item, "quantity", None)
+
+            try:
+                quantity = int(raw_quantity or 0)
+            except (TypeError, ValueError):
+                quantity = 0
+
+            if not part_number:
+                validation_errors.append(
+                    f"row {row_number}: Part # is empty"
+                )
+                continue
+
+            if quantity <= 0:
+                validation_errors.append(
+                    f"row {row_number} ({part_number}): "
+                    f"quantity must be greater than zero"
+                )
+                continue
+
+            validated_items.append(
+                (item, part_number, quantity)
+            )
+
+        # Не пропускаем неправильные строки молча.
+        # Либо проводится весь документ, либо не проводится ничего.
+        if validation_errors:
+            raise ValueError(
+                f"Receiving batch #{batch.id} cannot be posted. "
+                + "; ".join(validation_errors)
+            )
+
+        if not validated_items:
+            raise ValueError(
+                f"Receiving batch #{batch.id} cannot be posted: "
+                f"there are no valid items."
+            )
+
         current_app.logger.info(
-            "[RECEIVING_POST] Batch %s is already posted, skipping stock update.",
+            "[RECEIVING_POST] Posting batch %s. "
+            "Status before='%s', item count=%s.",
             batch.id,
+            getattr(batch, "status", None),
+            len(validated_items),
         )
-        return batch
 
-    current_app.logger.info(
-        "[RECEIVING_POST] Posting batch %s (status before='%s') and applying to stock...",
-        batch.id,
-        getattr(batch, "status", None),
-    )
+        part_numbers = sorted({
+            part_number
+            for _, part_number, _ in validated_items
+        })
 
-    items = list(batch.items or [])
-
-    part_numbers = sorted({
-        (getattr(it, "part_number", "") or "").strip().upper()
-        for it in items
-        if (getattr(it, "part_number", "") or "").strip()
-    })
-
-    existing_parts = {}
-
-    if part_numbers:
         existing_parts = {
-            (p.part_number or "").strip().upper(): p
-            for p in Part.query.filter(func.upper(Part.part_number).in_(part_numbers)).all()
+            (part.part_number or "").strip().upper(): part
+            for part in Part.query.filter(
+                func.upper(Part.part_number).in_(part_numbers)
+            ).all()
         }
 
-    for it in items:
-        pn_raw = (getattr(it, "part_number", "") or "").strip()
-        qty_incoming = int(getattr(it, "quantity", 0) or 0)
+        for item, part_number, quantity in validated_items:
+            _, _, actual_cost = _ensure_line_cost_fields(item)
 
-        if not pn_raw or qty_incoming <= 0:
-            continue
+            # Защита от отрицательной или некорректной себестоимости.
+            actual_cost = _safe_float(actual_cost, 0.0)
 
-        pn_upper = pn_raw.upper()
+            if actual_cost < 0:
+                raise ValueError(
+                    f"Receiving batch #{batch.id}, "
+                    f"Part #{part_number}: cost cannot be negative."
+                )
 
-        # ✅ ensure cost fields on line
-        base_cost, extra_per_unit, actual_cost = _ensure_line_cost_fields(it)
+            part = existing_parts.get(part_number)
 
-        part = existing_parts.get(pn_upper)
+            if part is None:
+                raw_kwargs = {
+                    "part_number": part_number,
+                    "part_name": (
+                        getattr(item, "part_name", "") or ""
+                    ).strip(),
+                }
 
-        if not part:
-            raw_kwargs = {
-                "part_number": pn_upper,
-                "part_name": getattr(it, "part_name", "") or "",
-            }
-            if hasattr(Part, "supplier"):
-                raw_kwargs["supplier"] = (getattr(batch, "supplier_name", "") or "")[:120]
-            if hasattr(Part, "location"):
-                raw_kwargs["location"] = (getattr(it, "location", "") or "").strip()[:64]
-            if hasattr(Part, "unit_cost"):
-                raw_kwargs["unit_cost"] = float(actual_cost or 0.0)
+                if hasattr(Part, "supplier"):
+                    raw_kwargs["supplier"] = (
+                        getattr(batch, "supplier_name", "") or ""
+                    ).strip()[:120]
 
-            kwargs = _sanitize_part_kwargs(raw_kwargs)
-            part = Part(**kwargs)
+                if hasattr(Part, "location"):
+                    raw_kwargs["location"] = (
+                        getattr(item, "location", "") or ""
+                    ).strip().upper()[:64]
+
+                if hasattr(Part, "unit_cost"):
+                    raw_kwargs["unit_cost"] = float(actual_cost)
+
+                kwargs = _sanitize_part_kwargs(raw_kwargs)
+
+                part = Part(**kwargs)
+                db.session.add(part)
+                db.session.flush()
+
+                existing_parts[part_number] = part
+                before_quantity = 0
+
+                current_app.logger.info(
+                    "[RECEIVING_POST] Created Part '%s' "
+                    "(id=%s, incoming=%s).",
+                    part_number,
+                    part.id,
+                    quantity,
+                )
+            else:
+                before_quantity = _get_part_on_hand(part)
+
+                new_name = (
+                    getattr(item, "part_name", "") or ""
+                ).strip()
+
+                if new_name:
+                    if hasattr(part, "name"):
+                        old_name = (
+                            getattr(part, "name", "") or ""
+                        ).strip()
+
+                        if old_name != new_name:
+                            part.name = new_name
+
+                    elif hasattr(part, "part_name"):
+                        old_name = (
+                            getattr(part, "part_name", "") or ""
+                        ).strip()
+
+                        if old_name != new_name:
+                            part.part_name = new_name
+
+                current_app.logger.info(
+                    "[RECEIVING_POST] Updating Part '%s' "
+                    "(id=%s, before=%s, incoming=%s).",
+                    part_number,
+                    part.id,
+                    before_quantity,
+                    quantity,
+                )
+
+            after_quantity = before_quantity + quantity
+            _set_part_on_hand(part, after_quantity)
+
+            # Складская стоимость — фактическая стоимость с extra expenses.
+            if hasattr(part, "last_cost"):
+                part.last_cost = float(actual_cost)
+            elif hasattr(part, "unit_cost"):
+                part.unit_cost = float(actual_cost)
+
+            if hasattr(part, "location"):
+                incoming_location = (
+                    getattr(item, "location", "") or ""
+                ).strip().upper()
+
+                if incoming_location:
+                    if before_quantity > 0:
+                        part.location = _merge_locations(
+                            getattr(part, "location", None),
+                            incoming_location,
+                        )[:64]
+                    else:
+                        part.location = incoming_location[:64]
+
+            if hasattr(item, "applied_qty"):
+                item.applied_qty = quantity
+
             db.session.add(part)
-            db.session.flush()
-            existing_parts[pn_upper] = part
+            db.session.add(item)
 
-            before_qty = 0
-            current_app.logger.info(
-                "[RECEIVING_POST] Created new Part '%s' (id=%s). Qty before=%s, incoming=%s",
-                pn_upper, part.id, before_qty, qty_incoming
-            )
-        else:
-            before_qty = _get_part_on_hand(part)
+        # Статус меняется только после успешной обработки всех строк.
+        batch.status = "posted"
+        batch.posted_at = datetime.utcnow()
 
-            new_name = (getattr(it, "part_name", "") or "").strip()
-            if new_name and hasattr(part, "name"):
-                old_name = (getattr(part, "name", "") or "").strip()
-                if old_name != new_name:
-                    part.name = new_name
+        if (
+            current_user_id is not None
+            and hasattr(batch, "posted_by")
+        ):
+            batch.posted_by = int(current_user_id)
 
-            current_app.logger.info(
-                "[RECEIVING_POST] Updating existing Part '%s' (id=%s). Qty before=%s, incoming=%s",
-                pn_upper, part.id, before_qty, qty_incoming
-            )
+        db.session.add(batch)
 
-        # 1) stock qty
-        after_qty = before_qty + qty_incoming
-        _set_part_on_hand(part, after_qty)
+        # Выявляем ошибки БД до окончательного commit.
+        db.session.flush()
+        db.session.commit()
 
-        # 2) cost: stock valuation uses ACTUAL
-        if hasattr(part, "last_cost"):
-            part.last_cost = float(actual_cost or 0.0)
-        elif hasattr(part, "unit_cost"):
-            part.unit_cost = float(actual_cost or 0.0)
+        current_app.logger.info(
+            "[RECEIVING_POST] Batch %s posted successfully. "
+            "Applied items=%s, final status='%s'.",
+            batch.id,
+            len(validated_items),
+            batch.status,
+        )
 
-        # 3) location merge
-        if hasattr(part, "location"):
-            incoming_loc = (getattr(it, "location", "") or "").strip().upper()
-            if incoming_loc:
-                if before_qty > 0:
-                    part.location = _merge_locations(getattr(part, "location", None), incoming_loc)[:64]
-                else:
-                    part.location = incoming_loc[:64]
+        return batch
 
-        # 4) applied_qty
-        if hasattr(it, "applied_qty"):
-            it.applied_qty = qty_incoming
+    except Exception:
+        db.session.rollback()
 
-        db.session.add(part)
-        db.session.add(it)
+        current_app.logger.exception(
+            "[RECEIVING_POST] Batch %s posting failed. "
+            "Transaction rolled back.",
+            batch_id,
+        )
 
-    batch.status = "posted"
-    batch.posted_at = datetime.utcnow()
-    if current_user_id is not None and hasattr(batch, "posted_by"):
-        batch.posted_by = int(current_user_id)
-
-    db.session.add(batch)
-    db.session.commit()
-
-    current_app.logger.info(
-        "[RECEIVING_POST] Batch %s commit complete. Final status=%s",
-        batch.id, batch.status
-    )
-
-    return batch
+        raise
 
 
 # ---------- core: UNPOST (rollback stock using applied_qty) ----------

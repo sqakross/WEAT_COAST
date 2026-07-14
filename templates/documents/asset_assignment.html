@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="container py-4">
+
+  <h2>Asset Assignment Receipt</h2>
+
+  <p>
+    <strong>Receipt:</strong>
+    {{ receipt.receipt_number }}
+  </p>
+
+  <p>
+    <strong>Assigned To:</strong>
+    {{ receipt.assigned_to_name }}
+  </p>
+
+  <p>
+    <strong>Work Order:</strong>
+    {{ receipt.work_order_id or "—" }}
+  </p>
+
+  <p>
+    <strong>Status:</strong>
+    {{ receipt.status }}
+  </p>
+
+  <h4 class="mt-4">Assets</h4>
+
+  <ul>
+    {% for assignment in receipt.assignments %}
+      <li>
+        {{ assignment.asset.tool_number }}
+        —
+        {{ assignment.asset.name }}
+      </li>
+    {% endfor %}
+  </ul>
+
+</div>
+
+{% endblock %}

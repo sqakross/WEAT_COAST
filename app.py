@@ -221,6 +221,7 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 }
 
 db.init_app(app)
+
 login_manager.init_app(app)
 login_manager.login_view = 'auth.login'
 

@@ -433,6 +433,125 @@
   </span>
 </div>
 
+<!-- =========================================================
+     ASSIGNED ASSETS (NEW)
+     ========================================================= -->
+
+<h5 class="mt-4">
+    Assigned Assets (this WO)
+    <span class="badge bg-secondary ms-1">
+        {{ asset_assignments|length }}
+    </span>
+</h5>
+
+<div class="table-responsive mb-4">
+
+<table class="table table-sm table-bordered align-middle">
+
+<thead class="table-light">
+
+<tr>
+
+    <th>Receipt #</th>
+
+    <th>Asset #</th>
+
+    <th>Description</th>
+
+    <th>Assigned To</th>
+
+    <th>Assigned At</th>
+
+    <th>Status</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+{% if asset_assignments %}
+
+    {% for a in asset_assignments %}
+
+    <tr>
+
+        <td>
+
+            {{ a.receipt.receipt_number }}
+
+        </td>
+
+        <td>
+
+            <code>{{ a.asset.tool_number }}</code>
+
+        </td>
+
+        <td>
+
+            {{ a.asset.name }}
+
+        </td>
+
+        <td>
+
+            {{ a.assigned_to_name }}
+
+        </td>
+
+        <td>
+
+            {{ a.assigned_at|local_dt if a.assigned_at else "—" }}
+
+        </td>
+
+        <td>
+
+            {% if a.status == "assigned" %}
+
+                <span class="badge bg-success">
+
+                    Assigned
+
+                </span>
+
+            {% else %}
+
+                <span class="badge bg-secondary">
+
+                    {{ a.status }}
+
+                </span>
+
+            {% endif %}
+
+        </td>
+
+    </tr>
+
+    {% endfor %}
+
+{% else %}
+
+<tr>
+
+    <td colspan="6" class="text-center text-muted">
+
+        No assigned assets.
+
+    </td>
+
+</tr>
+
+{% endif %}
+
+</tbody>
+
+</table>
+
+</div>
+
 <h5 class="mt-4">Issued Batches (Technician View)</h5>
 
 <style>

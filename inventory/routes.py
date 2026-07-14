@@ -632,10 +632,11 @@ def model_research():
 @inventory_bp.get("/api/job_reserve", endpoint="api_job_reserve")
 @login_required
 def api_job_reserve():
+    from sqlalchemy.orm.exc import StaleDataError
     from flask import request, jsonify, current_app, make_response
     from models import JobReservation, WorkOrder
     from extensions import db
-    from datetime import timezone
+    from datetime import datetime, timedelta, timezone
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
     if role not in ("admin", "superadmin"):
@@ -713,7 +714,6 @@ def api_job_reserve():
             if row.holder_user_id == uid:
                 row.expires_at = exp
                 row.holder_username = uname
-                db.session.add(row)
                 reserved.append(t)
                 current_app.logger.debug(
                     "API_JOB_RESERVE refresh token=%r user_id=%r exp=%r",
@@ -730,13 +730,19 @@ def api_job_reserve():
                     t, row.holder_user_id, row.holder_username, row.expires_at
                 )
         else:
-            if not row:
-                row = JobReservation(job_token=t)
+            if row:
+                row.holder_user_id = uid
+                row.holder_username = uname
+                row.expires_at = exp
+            else:
+                row = JobReservation(
+                    job_token=t,
+                    holder_user_id=uid,
+                    holder_username=uname,
+                    expires_at=exp,
+                )
+                db.session.add(row)
 
-            row.holder_user_id = uid
-            row.holder_username = uname
-            row.expires_at = exp
-            db.session.add(row)
             reserved.append(t)
 
             current_app.logger.debug(
@@ -744,7 +750,47 @@ def api_job_reserve():
                 t, uid, exp
             )
 
-    db.session.commit()
+    try:
+        db.session.commit()
+
+    except StaleDataError:
+        db.session.rollback()
+
+        current_app.logger.warning(
+            "API_JOB_RESERVE stale reservation user_id=%r tokens=%r",
+            uid,
+            tokens,
+        )
+
+        resp = make_response(jsonify({
+            "ok": False,
+            "status": "retry",
+            "error": "Reservation changed by another request. Please try again."
+        }), 409)
+
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
+
+    except Exception:
+        db.session.rollback()
+
+        current_app.logger.exception(
+            "API_JOB_RESERVE failed user_id=%r tokens=%r",
+            uid,
+            tokens,
+        )
+
+        resp = make_response(jsonify({
+            "ok": False,
+            "error": "Failed to reserve job number."
+        }), 500)
+
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
     payload = {
         "ok": True,
@@ -796,7 +842,22 @@ def api_job_release():
             holder_user_id=uid
         ).delete(synchronize_session=False)
 
-    db.session.commit()
+    try:
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+
+        current_app.logger.exception(
+            "API_JOB_RELEASE failed user_id=%r tokens=%r",
+            uid,
+            tokens,
+        )
+
+        return jsonify({
+            "ok": False,
+            "error": "Failed to release job reservation."
+        }), 500
 
     current_app.logger.debug(
         "API_JOB_RELEASE done user_id=%r tokens=%r",
@@ -920,13 +981,6 @@ def receiving_delete(batch_id: int):
             exc_info=True
         )
 
-    # 5. ВАЖНО: мы НЕ удаляем Part, и мы НЕ делаем никаких "вручную минусни qty".
-    #    Всё, что должно списаться, уже списал unpost_receiving_batch().
-    #    Значит:
-    #      было 2 → постнули +1 → стало 3
-    #      unpost → 3-1 = 2
-    #      delete → просто убрали сам batch, остаток остался 2
-    #    Именно то, что ты хочешь.
 
     msg = f"Batch #{batch_id} deleted."
     if keys_removed:
@@ -2640,164 +2694,395 @@ def _issue_records_bulk(
 ):
     """
     INV# is REQUIRED per item:
-      - "STOCK" => LATEST (no invoice filter, newest posted lot)
-      - real invoice number => STRICT match to POSTED receipt, and price comes from that receipt line
 
-    items: list of dicts:
-      {
-        "part_id": int,
-        "qty": int,
-        "unit_price": float | None,   # kept for backward-compat, ignored in invoice mode
-        "inv_ref": str | None,        # REQUIRED: "STOCK" or real invoice number
-      }
+    - STOCK:
+        uses current Part.unit_cost;
+        if Part.unit_cost is empty, uses latest posted receipt cost.
+
+    - Real supplier invoice:
+        strict match to a POSTED receipt;
+        cost comes from that exact receipt line;
+        quantity cannot exceed the remaining quantity on that invoice.
+
+    This function does NOT commit.
+    Caller must commit or rollback the whole transaction.
 
     Returns:
-      (issue_date: datetime, created_records: list[IssuedPartRecord])
+        tuple[datetime, list[IssuedPartRecord]]
     """
     if not items:
-        raise ValueError("No items to issue")
+        raise ValueError("No items to issue.")
 
     from datetime import datetime
+
     from flask_login import current_user
+    from sqlalchemy import func
+
     from extensions import db
-    from models import IssuedPartRecord, Part
-    from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
+    from models import (
+        GoodsReceipt,
+        GoodsReceiptLine,
+        IssuedPartRecord,
+        Part,
+    )
+    from services.lot_costing import (
+        pick_receipt_line_for_issue,
+        receipt_line_cost,
+    )
 
     issue_date = datetime.utcnow()
     created_records: list[IssuedPartRecord] = []
-    receipt_pick_cache = {}
 
-    part_ids = sorted({
-        int(it["part_id"])
-        for it in items
-        if it.get("part_id")
-    })
+    receipt_pick_cache: dict[
+        tuple[str, str, bool],
+        tuple[object | None, str | None],
+    ] = {}
 
-    parts_by_id = {}
-    if part_ids:
-        parts = Part.query.filter(Part.id.in_(part_ids)).all()
-        parts_by_id = {int(p.id): p for p in parts}
+    invoice_reserved_qty: dict[
+        tuple[str, str],
+        int,
+    ] = {}
 
-    for it in items:
-        part_id = int(it["part_id"])
-        qty = max(0, int(it.get("qty") or 0))
+    part_ids = sorted(
+        {
+            int(item["part_id"])
+            for item in items
+            if item.get("part_id")
+        }
+    )
+
+    if not part_ids:
+        raise ValueError("No valid inventory parts were provided.")
+
+    parts = (
+        Part.query
+        .filter(Part.id.in_(part_ids))
+        .all()
+    )
+
+    parts_by_id = {
+        int(part.id): part
+        for part in parts
+    }
+
+    for index, item in enumerate(items, start=1):
+        raw_part_id = item.get("part_id")
+
+        if not raw_part_id:
+            raise ValueError(
+                f"Part ID is missing for item #{index}."
+            )
+
+        part_id = int(raw_part_id)
+
+        try:
+            qty = int(item.get("qty") or 0)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Invalid quantity for item #{index}."
+            )
+
         if qty <= 0:
-            continue
+            raise ValueError(
+                f"Quantity must be greater than zero "
+                f"for item #{index}."
+            )
 
         part = parts_by_id.get(part_id)
-        if not part:
-            continue
 
-        on_hand = int(part.quantity or 0)
-        issue_now = min(qty, on_hand)
-        if issue_now <= 0:
-            continue
+        if part is None:
+            raise ValueError(
+                f"Inventory part #{part_id} was not found."
+            )
 
-        inv_raw = (str(it.get("inv_ref") or "").strip()[:32] or "")
-        inv_up = inv_raw.upper()
+        pn = (
+            getattr(part, "part_number", "")
+            or ""
+        ).strip().upper()
+
+        if not pn:
+            raise ValueError(
+                f"Inventory part #{part.id} has no part number."
+            )
+
+        inv_raw = (
+            str(item.get("inv_ref") or "")
+            .strip()
+            .upper()[:32]
+        )
 
         if not inv_raw:
-            raise ValueError("INV# is required (use STOCK or a real invoice number).")
+            raise ValueError(
+                f"INV# is required for part '{pn}'. "
+                f"Use STOCK or a real invoice number."
+            )
 
-        is_stock = (inv_up == "STOCK")
+        is_stock = inv_raw == "STOCK"
         inv_ref = None if is_stock else inv_raw
 
-        base_loc = (getattr(part, "location", "") or "").strip() or None
+        on_hand = int(part.quantity or 0)
 
-        pn = (getattr(part, "part_number", "") or "").strip()
+        if on_hand < qty:
+            raise ValueError(
+                f"Not enough stock for '{pn}': "
+                f"requested {qty}, available {on_hand}."
+            )
+
+        issue_now = qty
+
+        base_loc = (
+            getattr(part, "location", "")
+            or ""
+        ).strip() or None
+
         lot_line = None
         lot_src = None
         chosen_receipt_line_id = None
+        chosen_cost_source = None
 
-        if pn:
-            # ✅ STOCK => prefer_latest=True (LATEST lot)
-            cache_key = (pn, inv_ref or "", bool(is_stock))
+        cache_key = (
+            pn,
+            inv_ref or "",
+            is_stock,
+        )
 
-            if cache_key in receipt_pick_cache:
-                lot_line, lot_src = receipt_pick_cache[cache_key]
-            else:
-                lot_line, lot_src = pick_receipt_line_for_issue(
+        if cache_key in receipt_pick_cache:
+            lot_line, lot_src = receipt_pick_cache[
+                cache_key
+            ]
+        else:
+            lot_line, lot_src = (
+                pick_receipt_line_for_issue(
                     part_number=pn,
                     inv_ref=inv_ref,
                     prefer_latest=is_stock,
                 )
-                receipt_pick_cache[cache_key] = (lot_line, lot_src)
+            )
 
-            if inv_ref:
-                # STRICT: invoice provided -> MUST match posted receipt invoice
-                if lot_line is None or lot_src != "receipt_inv_match":
-                    raise ValueError(
-                        f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
-                        f"Nothing was issued."
-                    )
-            else:
-                # STOCK => if picker returned nothing, one more try without flags (safe)
-                if lot_line is None:
-                    cache_key = (pn, "", True)
-
-                    if cache_key in receipt_pick_cache:
-                        lot_line, lot_src = receipt_pick_cache[cache_key]
-                    else:
-                        lot_line, lot_src = pick_receipt_line_for_issue(
-                            part_number=pn,
-                            inv_ref=None,
-                            prefer_latest=True,
-                        )
-                        receipt_pick_cache[cache_key] = (lot_line, lot_src)
-
-            if lot_line is not None and inv_ref:
-                chosen_receipt_line_id = int(getattr(lot_line, "id", 0) or 0) or None
-            else:
-                chosen_receipt_line_id = None
-
-        chosen_cost_source = None
+            receipt_pick_cache[cache_key] = (
+                lot_line,
+                lot_src,
+            )
 
         if inv_ref:
-            # Real supplier invoice selected:
-            # price comes from that exact receiving invoice line.
-            price_to_fix = float(receipt_line_cost(lot_line))
-            chosen_cost_source = "receipt_inv_match"
-        else:
-            # STOCK selected:
-            # price comes from current Inventory Dashboard price.
-            price_to_fix = float(part.unit_cost or 0.0)
+            # Strict supplier invoice mode.
+            if (
+                lot_line is None
+                or lot_src != "receipt_inv_match"
+            ):
+                raise ValueError(
+                    f"INV# '{inv_ref}' was not found in "
+                    f"POSTED receipts for part '{pn}'. "
+                    f"Nothing was issued."
+                )
 
-            if price_to_fix <= 0 and lot_line is not None:
-                price_to_fix = float(receipt_line_cost(lot_line))
-                chosen_cost_source = (lot_src or "latest")[:32]
+            normalized_inv = inv_ref.lstrip("0") or "0"
+            invoice_key = (pn, normalized_inv)
+
+            received_qty = (
+                db.session.query(
+                    func.coalesce(
+                        func.sum(
+                            GoodsReceiptLine.quantity
+                        ),
+                        0,
+                    )
+                )
+                .join(
+                    GoodsReceipt,
+                    GoodsReceiptLine.goods_receipt_id
+                    == GoodsReceipt.id,
+                )
+                .filter(
+                    func.upper(
+                        GoodsReceiptLine.part_number
+                    )
+                    == pn
+                )
+                .filter(
+                    func.upper(
+                        GoodsReceipt.status
+                    )
+                    == "POSTED"
+                )
+                .filter(
+                    func.ltrim(
+                        func.upper(
+                            func.coalesce(
+                                GoodsReceipt.invoice_number,
+                                "",
+                            )
+                        ),
+                        "0",
+                    )
+                    == normalized_inv
+                )
+                .scalar()
+                or 0
+            )
+
+            already_issued_qty = (
+                db.session.query(
+                    func.coalesce(
+                        func.sum(
+                            IssuedPartRecord.quantity
+                        ),
+                        0,
+                    )
+                )
+                .join(
+                    Part,
+                    Part.id
+                    == IssuedPartRecord.part_id,
+                )
+                .filter(
+                    func.upper(
+                        Part.part_number
+                    )
+                    == pn
+                )
+                .filter(
+                    func.ltrim(
+                        func.upper(
+                            func.coalesce(
+                                IssuedPartRecord.inv_ref,
+                                "",
+                            )
+                        ),
+                        "0",
+                    )
+                    == normalized_inv
+                )
+                .scalar()
+                or 0
+            )
+
+            reserved_now = (
+                invoice_reserved_qty.get(
+                    invoice_key,
+                    0,
+                )
+            )
+
+            available_on_invoice = max(
+                int(received_qty)
+                - int(already_issued_qty)
+                - int(reserved_now),
+                0,
+            )
+
+            if issue_now > available_on_invoice:
+                raise ValueError(
+                    f"Cannot issue {issue_now} pcs of "
+                    f"'{pn}' from invoice '{inv_ref}'. "
+                    f"Received: {int(received_qty)}. "
+                    f"Already issued: "
+                    f"{int(already_issued_qty)}. "
+                    f"Reserved in this operation: "
+                    f"{int(reserved_now)}. "
+                    f"Available: "
+                    f"{available_on_invoice}."
+                )
+
+            invoice_reserved_qty[invoice_key] = (
+                reserved_now + issue_now
+            )
+
+            chosen_receipt_line_id = (
+                int(
+                    getattr(
+                        lot_line,
+                        "id",
+                        0,
+                    )
+                    or 0
+                )
+                or None
+            )
+
+            price_to_fix = float(
+                receipt_line_cost(lot_line)
+            )
+
+            chosen_cost_source = (
+                lot_src
+                or "receipt_inv_match"
+            )[:32]
+
+        else:
+            # STOCK mode.
+            # The picker already used prefer_latest=True.
+            price_to_fix = float(
+                part.unit_cost or 0.0
+            )
+
+            if (
+                price_to_fix <= 0
+                and lot_line is not None
+            ):
+                price_to_fix = float(
+                    receipt_line_cost(lot_line)
+                )
+
+                chosen_cost_source = (
+                    lot_src or "latest"
+                )[:32]
             else:
-                chosen_cost_source = "part_unit_cost_stock"
+                chosen_cost_source = (
+                    "part_unit_cost_stock"
+                )
+
+            # STOCK is not tied to one strict receipt line.
+            chosen_receipt_line_id = None
 
         part.quantity = on_hand - issue_now
         db.session.add(part)
 
-        rec = IssuedPartRecord(
+        record = IssuedPartRecord(
             part_id=part.id,
             quantity=issue_now,
-            issued_to=(issued_to or "").strip(),
-            reference_job=(reference_job or "").strip(),
-            issued_by=getattr(current_user, "username", "system"),
+            issued_to=(
+                issued_to or ""
+            ).strip(),
+            reference_job=(
+                reference_job or ""
+            ).strip(),
+            issued_by=getattr(
+                current_user,
+                "username",
+                "system",
+            ),
             issue_date=issue_date,
             unit_cost_at_issue=price_to_fix,
             location=base_loc,
         )
 
-        if hasattr(rec, "inv_ref"):
-            rec.inv_ref = inv_ref  # None for STOCK
+        if hasattr(record, "inv_ref"):
+            record.inv_ref = inv_ref
 
-        if hasattr(rec, "source_receipt_line_id"):
-            rec.source_receipt_line_id = chosen_receipt_line_id
+        if hasattr(
+            record,
+            "source_receipt_line_id",
+        ):
+            record.source_receipt_line_id = (
+                chosen_receipt_line_id
+            )
 
-        if hasattr(rec, "cost_source"):
-            rec.cost_source = (chosen_cost_source or "")[:32] or None
+        if hasattr(record, "cost_source"):
+            record.cost_source = (
+                chosen_cost_source or ""
+            )[:32] or None
 
-        db.session.add(rec)
-        created_records.append(rec)
+        db.session.add(record)
+        created_records.append(record)
 
     if not created_records:
-        raise ValueError("Nothing available to issue")
+        raise ValueError(
+            "Nothing available to issue."
+        )
 
     db.session.flush()
+
     return issue_date, created_records
 
 def _is_return_record(record: IssuedPartRecord) -> bool:
@@ -4461,17 +4746,20 @@ def wo_detail(wo_id):
     from flask_login import current_user
     from extensions import db
     from models import WorkOrder, WorkUnit, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit
-    from collections import defaultdict, defaultdict as _dd
+    from collections import defaultdict
     import re
-
+    import json
+    from datetime import datetime
     # 1) load WO
     wo = (
         db.session.query(WorkOrder)
         .options(
             selectinload(WorkOrder.parts),
-            selectinload(WorkOrder.units).options(selectinload(WorkUnit.parts)),
+            selectinload(WorkOrder.units)
+            .selectinload(WorkUnit.parts),
         )
-        .get(wo_id)
+        .filter(WorkOrder.id == wo_id)
+        .first()
     )
     if not wo:
         flash(f"Work Order #{wo_id} not found.", "danger")
@@ -4503,23 +4791,6 @@ def wo_detail(wo_id):
 
     can_confirm_any = (role_raw == "superadmin")
     can_view_docs = is_admin_like or is_my_wo or is_user
-
-    # 3) suppliers
-    suppliers = [
-        r[0]
-        for r in (
-            db.session.query(func.trim(WorkOrderPart.supplier))
-            .filter(
-                WorkOrderPart.work_order_id == wo.id,
-                WorkOrderPart.supplier.isnot(None),
-                func.trim(WorkOrderPart.supplier) != "",
-            )
-            .distinct()
-            .order_by(func.trim(WorkOrderPart.supplier).asc())
-            .all()
-        )
-    ]
-
 
 
     # ------------------------------------------------------------
@@ -4595,67 +4866,100 @@ def wo_detail(wo_id):
 
     def _token_match(col, tok: str):
         tok = (tok or "").strip().upper()
+
         if not tok:
             return False
-        c = func.upper(func.coalesce(func.trim(col), ""))
-        return or_(
-            c == tok,
-            c.like(f"{tok} %"),
-            c.like(f"% {tok} %"),
-            c.like(f"% {tok}"),
-            c.like(f"{tok},%"),
-            c.like(f"%,{tok},%"),
-            c.like(f"%,{tok}"),
-            c.like(f"{tok}/%"),
-            c.like(f"%/{tok}/%"),
-            c.like(f"%/{tok}"),
-            c.like(f"{tok}-%"),
-            c.like(f"%-{tok}-%"),
-            c.like(f"%-{tok}"),
+
+        normalized = func.upper(
+            func.trim(
+                func.coalesce(col, "")
+            )
         )
 
-    base_q = (
-        db.session.query(IssuedPartRecord)
-        .options(joinedload(IssuedPartRecord.part), joinedload(IssuedPartRecord.batch))
-        .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
-    )
+        return or_(
+            normalized == tok,
+            normalized.like(f"{tok},%"),
+            normalized.like(f"%,{tok}"),
+            normalized.like(f"%,{tok},%"),
+            normalized.like(f"{tok} %"),
+            normalized.like(f"% {tok}"),
+            normalized.like(f"% {tok} %"),
+        )
 
-    token_ors = []
-    for tok in job_tokens:
-        token_ors.append(_token_match(IssuedPartRecord.reference_job, tok))
-        token_ors.append(_token_match(IssuedBatch.reference_job, tok))
+    # ------------------------------------------------------------
+    # 4) Issued records
+    #
+    # Сначала быстро получаем новые записи через work_order_id.
+    # Legacy-поиск выполняем отдельно только для записей,
+    # которые ещё не связаны напрямую с Work Order.
+    # ------------------------------------------------------------
 
-    if "work_order_id" in IssuedBatch.__table__.c:
-        if token_ors:
-            base_q = base_q.filter(
-                or_(
-                    IssuedBatch.work_order_id == wo.id,
-                    and_(IssuedBatch.work_order_id.is_(None), or_(*token_ors)),
+    def _issued_base_query():
+        return (
+            db.session.query(IssuedPartRecord)
+            .options(
+                joinedload(IssuedPartRecord.part),
+                joinedload(IssuedPartRecord.batch),
+            )
+            .outerjoin(
+                IssuedBatch,
+                IssuedBatch.id == IssuedPartRecord.batch_id,
+            )
+        )
+
+    def _apply_technician_safety(query):
+        tech_aliases = set()
+
+        if wo.technician_name:
+            tech_aliases.add(
+                wo.technician_name.strip().lower()
+            )
+
+        if wo.technician_username:
+            tech_aliases.add(
+                wo.technician_username.strip().lower()
+            )
+
+        technician_obj = getattr(wo, "technician", None)
+
+        if technician_obj and getattr(technician_obj, "username", None):
+            tech_aliases.add(
+                technician_obj.username.strip().lower()
+            )
+
+        if technician_obj and getattr(technician_obj, "username", None):
+            tech_aliases.add(
+                technician_obj.username.strip().lower()
+            )
+
+        tech_aliases = {
+            value
+            for value in tech_aliases
+            if value
+        }
+
+        if not tech_aliases:
+            return query
+
+        issued_to_norm = func.lower(
+            func.trim(
+                func.coalesce(
+                    IssuedPartRecord.issued_to,
+                    "",
                 )
             )
-        else:
-            base_q = base_q.filter(IssuedBatch.work_order_id == wo.id)
-    else:
-        if token_ors:
-            base_q = base_q.filter(or_(*token_ors))
+        )
 
-    # ------------------------------------------------------------
-    # 4b) technician safety (оставлено как у тебя)
-    # ------------------------------------------------------------
-    tech_aliases = set()
-    if wo.technician_name:
-        tech_aliases.add(wo.technician_name.strip().lower())
-    if wo.technician_username:
-        tech_aliases.add(wo.technician_username.strip().lower())
-    if wo.technician and wo.technician.username:
-        tech_aliases.add(wo.technician.username.strip().lower())
-    tech_aliases = {x for x in tech_aliases if x}
+        ref_norm = func.upper(
+            func.trim(
+                func.coalesce(
+                    IssuedPartRecord.reference_job,
+                    "",
+                )
+            )
+        )
 
-    if tech_aliases:
-        issued_to_norm = func.lower(func.trim(func.coalesce(IssuedPartRecord.issued_to, "")))
-        ref_norm = func.upper(func.trim(func.coalesce(IssuedPartRecord.reference_job, "")))
-
-        base_q = base_q.filter(
+        return query.filter(
             or_(
                 issued_to_norm.in_(list(tech_aliases)),
                 issued_to_norm == "",
@@ -4664,10 +4968,120 @@ def wo_detail(wo_id):
             )
         )
 
-    issued_items = base_q.order_by(
-        IssuedPartRecord.issue_date.asc(),
-        IssuedPartRecord.id.asc()
-    ).all()
+    issued_by_id = []
+
+    # Быстрый основной запрос для новых записей.
+    if "work_order_id" in IssuedBatch.__table__.c:
+        linked_query = (
+            _issued_base_query()
+            .filter(
+                IssuedBatch.work_order_id == wo.id
+            )
+        )
+
+        linked_query = _apply_technician_safety(
+            linked_query
+        )
+
+        issued_by_id = (
+            linked_query
+            .order_by(
+                IssuedPartRecord.issue_date.asc(),
+                IssuedPartRecord.id.asc(),
+            )
+            .all()
+        )
+
+    # ------------------------------------------------------------
+    # Legacy records
+    # ------------------------------------------------------------
+    legacy_items = []
+
+    token_ors = []
+
+    for tok in job_tokens:
+        token_ors.append(
+            _token_match(
+                IssuedPartRecord.reference_job,
+                tok,
+            )
+        )
+
+        token_ors.append(
+            _token_match(
+                IssuedBatch.reference_job,
+                tok,
+            )
+        )
+
+    if token_ors:
+        legacy_query = _issued_base_query()
+
+        # Не повторяем записи, уже связанные через work_order_id.
+        if "work_order_id" in IssuedBatch.__table__.c:
+            legacy_query = legacy_query.filter(
+                or_(
+                    IssuedBatch.id.is_(None),
+                    IssuedBatch.work_order_id.is_(None),
+                )
+            )
+
+        legacy_query = legacy_query.filter(
+            or_(*token_ors)
+        )
+
+        legacy_query = _apply_technician_safety(
+            legacy_query
+        )
+
+        legacy_items = (
+            legacy_query
+            .order_by(
+                IssuedPartRecord.issue_date.asc(),
+                IssuedPartRecord.id.asc(),
+            )
+            .all()
+        )
+
+    issued_by_record_id = {
+        record.id: record
+        for record in issued_by_id
+    }
+
+    for record in legacy_items:
+        issued_by_record_id.setdefault(
+            record.id,
+            record,
+        )
+
+    issued_items = sorted(
+        issued_by_record_id.values(),
+        key=lambda record: (
+            record.issue_date or datetime.min,
+            record.id or 0,
+        ),
+    )
+
+    # ------------------------------------------------------------
+    # 4d) Asset Assignments (NEW)
+    # ------------------------------------------------------------
+    from models import AssetAssignment
+
+    asset_assignments = (
+        db.session.query(AssetAssignment)
+        .options(
+            joinedload(AssetAssignment.asset),
+            joinedload(AssetAssignment.receipt),
+        )
+        .filter(
+            AssetAssignment.work_order_id == wo.id
+        )
+        .order_by(
+            AssetAssignment.assigned_at.asc(),
+            AssetAssignment.id.asc(),
+        )
+        .all()
+    )
 
 
     # ------------------------------------------------------------
@@ -4681,14 +5095,28 @@ def wo_detail(wo_id):
 
     for rec in issued_items:
         qty = int(getattr(rec, "quantity", 0) or 0)
-        cost = float(getattr(rec, "unit_cost_at_issue", 0.0) or 0.0)
+        cost = float(
+            getattr(rec, "unit_cost_at_issue", 0.0)
+            or 0.0
+        )
 
-        if qty > 0:
-            issued_qty += qty
-            issued_total += qty * cost
-        elif qty < 0:
+        batch_obj = getattr(rec, "batch", None)
+
+        reference = (
+                getattr(batch_obj, "reference_job", None)
+                or getattr(rec, "reference_job", None)
+                or ""
+        ).upper()
+
+        is_return = qty < 0 or "RETURN" in reference
+
+        if is_return:
             returned_qty += abs(qty)
             returned_total += abs(qty) * cost
+
+        elif qty > 0:
+            issued_qty += qty
+            issued_total += qty * cost
 
     net_total = issued_total - returned_total
     net_qty = issued_qty - returned_qty
@@ -4715,13 +5143,19 @@ def wo_detail(wo_id):
         elif getattr(r, "invoice_number", None):
             key = ("inv", r.invoice_number)
         else:
+            issue_key = (
+                r.issue_date.strftime("%Y%m%d%H%M%S")
+                if r.issue_date
+                else f"NO_DATE_{r.id or 0}"
+            )
+
             key = (
                 "ungrouped",
-                f"{r.issue_date:%Y%m%d%H%M%S}-{r.issued_to}-{r.reference_job or ''}",
+                f"{issue_key}-{r.issued_to or ''}-{r.reference_job or ''}",
             )
         grouped[key].append(r)
 
-    net_by_pn = _dd(int)
+    net_by_pn = defaultdict(int)
     issued_info_by_pn = {}
     batches = []
     for _, recs in grouped.items():
@@ -4809,18 +5243,35 @@ def wo_detail(wo_id):
     if (not all_rows) and getattr(wo, "parts", None):
         all_rows.extend(wo.parts)
 
+    suppliers = sorted({
+        (getattr(row, "supplier", "") or "").strip()
+        for row in all_rows
+        if (getattr(row, "supplier", "") or "").strip()
+    })
 
-    pn_list = []
-    for r in all_rows:
-        pn = (getattr(r, "part_number", "") or "").strip().upper()
-        if pn and pn not in pn_list:
-            pn_list.append(pn)
+    pn_list = sorted({
+        (
+                getattr(row, "part_number", "")
+                or ""
+        ).strip().upper()
+        for row in all_rows
+        if (
+                getattr(row, "part_number", "")
+                or ""
+        ).strip()
+    })
+
 
     inv_cost_map = {}
     if pn_list:
         part_rows = (
-            db.session.query(Part.part_number, Part.unit_cost)
-            .filter(func.upper(Part.part_number).in_(pn_list))
+            db.session.query(
+                Part.part_number,
+                Part.unit_cost,
+            )
+            .filter(
+                Part.part_number.in_(pn_list)
+            )
             .all()
         )
         for part_number, unit_cost in part_rows:
@@ -4907,6 +5358,7 @@ def wo_detail(wo_id):
         display_parts=display_parts,
         grand_total_display=grand_total_display,
         issued_items=issued_items,
+        asset_assignments=asset_assignments,
         issued_total=issued_total,
         returned_total=returned_total,
         net_total=net_total,
@@ -5176,6 +5628,47 @@ def wo_alerts():
         overdue_days=overdue_days,
         bo_days=bo_days,
         today=today,
+    )
+
+@inventory_bp.get(
+    "/assets/receipt/<receipt_number>",
+    endpoint="asset_receipt",
+)
+@login_required
+def asset_receipt(receipt_number):
+    from flask import abort, render_template
+    from sqlalchemy.orm import joinedload
+
+    from models import (
+        AssetAssignment,
+        AssetAssignmentReceipt,
+    )
+
+    receipt = (
+        db.session.query(AssetAssignmentReceipt)
+        .options(
+            joinedload(
+                AssetAssignmentReceipt.assignments
+            ).joinedload(
+                AssetAssignment.asset
+            ),
+            joinedload(
+                AssetAssignmentReceipt.work_order
+            ),
+        )
+        .filter(
+            AssetAssignmentReceipt.receipt_number
+            == receipt_number
+        )
+        .first()
+    )
+
+    if receipt is None:
+        abort(404)
+
+    return render_template(
+        "documents/asset_assignment.html",
+        receipt=receipt,
     )
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
@@ -6306,7 +6799,16 @@ def wo_newx(prefill_wo=None, prefill_units=None):
 @inventory_bp.post("/work_orders/save", endpoint="wo_save")
 @login_required
 def wo_save():
-    from flask import request, session, redirect, url_for, flash, current_app, render_template
+    from flask import (
+        request,
+        session,
+        redirect,
+        url_for,
+        flash,
+        current_app,
+        render_template,
+        jsonify,
+    )
     from models import WorkOrder, WorkUnit, WorkOrderPart, User, JobReservation, WorkOrderAudit
     from extensions import db
     from datetime import datetime, timedelta
@@ -6314,9 +6816,10 @@ def wo_save():
     import re
     from datetime import date
     from sqlalchemy import or_
+    from sqlalchemy.orm import selectinload
     import json
     import os
-
+    from time import perf_counter
     # ---------- helpers ----------
     def _clip(s, n):
         return (s or "").strip()[:n]
@@ -6392,15 +6895,20 @@ def wo_save():
         actor_username = (getattr(current_user, "username", None) or "").strip()
         actor_role = (getattr(current_user, "role", None) or "").strip()
 
-        with open(dbg_path, "a", encoding="utf-8") as fp:
-            fp.write(f"ACTOR: id={actor_id!r} user={actor_username!r} role={actor_role!r}\n")
-            fp.write(
-                "WO_BEFORE: "
-                f"wo_id={getattr(wo, 'id', None)!r} "
-                f"tech_id={getattr(wo, 'technician_id', None)!r} "
-                f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
-                f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
-            )
+        _debug_write(
+            f"ACTOR: "
+            f"id={actor_id!r} "
+            f"user={actor_username!r} "
+            f"role={actor_role!r}\n"
+        )
+
+        _debug_write(
+            "WO_BEFORE: "
+            f"wo_id={getattr(wo, 'id', None)!r} "
+            f"tech_id={getattr(wo, 'technician_id', None)!r} "
+            f"created_by_id={getattr(wo, 'created_by_id', None)!r} "
+            f"updated_by_id={getattr(wo, 'updated_by_id', None)!r}\n"
+        )
 
         try:
             if is_new and not getattr(wo, "created_by_id", None):
@@ -6468,7 +6976,12 @@ def wo_save():
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
 
+
     f = request.form
+
+    ajax_save = (
+        (f.get("_ajax_save") or "").strip() == "1"
+    )
 
     # --- DEBUG FILE (form keys with invoice_number) ---
     WO_SAVE_DEBUG = current_app.config.get("WO_SAVE_DEBUG", False)
@@ -6509,11 +7022,28 @@ def wo_save():
     wo_id = (f.get("wo_id") or "").strip()
     is_new = not wo_id
 
-    # взять WorkOrder
+    # взять WorkOrder сразу вместе с appliances и parts
     if is_new:
         wo = WorkOrder()
+        loaded_units = []
+        loaded_parts = []
     else:
-        wo = WorkOrder.query.get_or_404(int(wo_id))
+        wo = (
+            WorkOrder.query
+            .options(
+                selectinload(WorkOrder.units)
+                .selectinload(WorkUnit.parts),
+            )
+            .filter(WorkOrder.id == int(wo_id))
+            .first_or_404()
+        )
+
+        loaded_units = list(wo.units or [])
+        loaded_parts = [
+            part
+            for unit in loaded_units
+            for part in (unit.parts or [])
+        ]
 
     # ---------- audit snapshot (before) ----------
     before = None
@@ -6528,8 +7058,8 @@ def wo_save():
             "status": (getattr(wo, "status", "") or ""),
             "customer_po": (getattr(wo, "customer_po", None) or ""),
             "note": (getattr(wo, "note", None) or ""),
-            "units_count": len(getattr(wo, "units", []) or []),
-            "parts_count": len(getattr(wo, "parts", []) or []),
+            "units_count": len(loaded_units),
+            "parts_count": len(loaded_parts),
         }
 
     # ---------- заголовок / шапка ----------
@@ -6542,7 +7072,7 @@ def wo_save():
     if tech_id_raw.isdigit():
         try:
             tid = int(tech_id_raw)
-            u = User.query.get(tid)
+            u = db.session.get(User, tid)
             if u:
                 tech_id_val = tid
                 tech_name_val = (u.username or "").strip().upper()
@@ -6832,20 +7362,34 @@ def wo_save():
         )
 
     old_index = {}
+
     if not is_new:
-        for old_u in (wo.units or []):
-            uk = _unit_key(old_u.brand or "", old_u.model or "", old_u.serial or "")
-            for old_p in (old_u.parts or []):
-                pn = ((old_p.part_number or "").strip().upper())
+        for old_u in loaded_units:
+            uk = _unit_key(
+                old_u.brand or "",
+                old_u.model or "",
+                old_u.serial or "",
+            )
+
+            for old_p in list(old_u.parts or []):
+                pn = (old_p.part_number or "").strip().upper()
                 supn = _norm_supplier(old_p.supplier)
+
                 was_ordered = (
-                    bool(getattr(old_p, "ordered_flag", False)) or
-                    ((getattr(old_p, "status", "") or "").lower() == "ordered") or
-                    ((getattr(old_p, "line_status", "") or "").lower() == "ordered")
+                        bool(getattr(old_p, "ordered_flag", False))
+                        or (
+                                (getattr(old_p, "status", "") or "").lower()
+                                == "ordered"
+                        )
+                        or (
+                                (getattr(old_p, "line_status", "") or "").lower()
+                                == "ordered"
+                        )
                 )
+
                 old_index[(uk, pn, supn)] = (
                     was_ordered,
-                    getattr(old_p, "ordered_date", None)
+                    getattr(old_p, "ordered_date", None),
                 )
 
     # =========================================================
@@ -6866,9 +7410,9 @@ def wo_save():
 
         return (uk, (pn or "").strip().upper())
 
-    def _snap_from_existing_workorder(wo_obj):
+    def _snap_from_existing_workorder(existing_units):
         snap = {}
-        for u in (getattr(wo_obj, "units", []) or []):
+        for u in existing_units:
             for p in (getattr(u, "parts", []) or []):
                 k = _part_key(
                     u,
@@ -7087,14 +7631,24 @@ def wo_save():
 
         return summary, meta
 
-    parts_before_snap = _snap_from_existing_workorder(wo) if not is_new else {}
+
+    parts_before_snap = (
+        _snap_from_existing_workorder(loaded_units)
+        if not is_new
+        else {}
+    )
     parts_after_snap = _snap_from_units_payload(units_payload or [])
     parts_summary, parts_meta = _diff_parts(parts_before_snap, parts_after_snap)
 
+
     # ---------- update existing units/parts instead of full delete/recreate ----------
 
+
     suppliers_seen = []
-    existing_units = list(getattr(wo, "units", []) or [])
+    suppliers_seen_lower = set()
+
+    existing_units = loaded_units
+    saved_parts = []
 
     # delete extra old units if user removed appliance from form
     if len(existing_units) > len(units_payload):
@@ -7135,9 +7689,13 @@ def wo_save():
                 db.session.add(wop)
 
             sup = r.get("supplier") or ""
+
             if sup:
                 norm = " ".join(sup.split())
-                if norm and norm.lower() not in [x.lower() for x in suppliers_seen]:
+                norm_lower = norm.lower()
+
+                if norm and norm_lower not in suppliers_seen_lower:
+                    suppliers_seen_lower.add(norm_lower)
                     suppliers_seen.append(norm)
 
             pn_upper = (r.get("part_number") or "").strip().upper()
@@ -7198,6 +7756,8 @@ def wo_save():
                     except Exception:
                         wop.unit_cost = None
 
+            saved_parts.append(wop)
+
             _debug_write(
                 f"UPDATE PART: wo={getattr(wo, 'id', None)} "
                 f"wop_id={getattr(wop, 'id', None)} "
@@ -7223,19 +7783,14 @@ def wo_save():
         wo.brand = (first_unit.get("brand") or "").strip() or None
         wo.model = _clip(first_unit.get("model"), 25) or None
         wo.serial = _clip(first_unit.get("serial"), 25) or None
+
     # =========================
     # AUTO STATUS REEVALUATION
     # =========================
-    db.session.flush()
-
-    all_parts = (
-        WorkOrderPart.query
-        .filter_by(work_order_id=wo.id)
-        .all()
-    )
+    all_parts = saved_parts
 
     has_ordered = False
-    all_issued = True
+    all_issued = bool(all_parts)
 
     for p in all_parts:
         is_ordered = (
@@ -7299,8 +7854,8 @@ def wo_save():
         "status": (getattr(wo, "status", "") or ""),
         "customer_po": (getattr(wo, "customer_po", None) or ""),
         "note": (getattr(wo, "note", None) or ""),
-        "units_count": len(getattr(wo, "units", []) or []),
-        "parts_count": len(getattr(wo, "parts", []) or []),
+        "units_count": len(units_payload),
+        "parts_count": len(saved_parts),
     }
 
     try:
@@ -7372,17 +7927,19 @@ def wo_save():
     except Exception:
         pass
 
+    saved_wo_id = wo.id
+    saved_job_numbers = wo.job_numbers
+
     # ---------- MAIN COMMIT ----------
     try:
         db.session.commit()
 
 
-
         if WO_SAVE_DEBUG:
-            fresh = WorkOrder.query.get(wo.id)
+            fresh = db.session.get(WorkOrder, saved_wo_id)
             _debug_write(
                 "WO_AFTER_COMMIT: "
-                f"wo_id={wo.id} "
+                f"wo_id={saved_wo_id} "
                 f"tech_id={getattr(fresh, 'technician_id', None)!r} "
                 f"created_by_id={getattr(fresh, 'created_by_id', None)!r} "
                 f"updated_by_id={getattr(fresh, 'updated_by_id', None)!r}\n"
@@ -7393,7 +7950,7 @@ def wo_save():
                 f"  current_user.id={getattr(current_user, 'id', None)} "
                 f"username={getattr(current_user, 'username', None)!r}\n"
             )
-            _debug_write(f"  wo.id={wo.id}\n")
+            _debug_write(f"  wo.id={saved_wo_id}\n")
             _debug_write(
                 f"  db.created_by_id={getattr(fresh, 'created_by_id', None)} "
                 f"created_by_user={(fresh.created_by_user.username if fresh.created_by_user else None)!r}\n"
@@ -7405,7 +7962,7 @@ def wo_save():
 
             rows = (
                 WorkOrderPart.query
-                .filter_by(work_order_id=wo.id)
+                .filter_by(work_order_id=saved_wo_id)
                 .with_entities(WorkOrderPart.part_number, WorkOrderPart.invoice_number, WorkOrderPart.eta_date)
                 .all()
             )
@@ -7414,7 +7971,8 @@ def wo_save():
             for pn, inv, eta in rows:
                 _debug_write(f"  pn={pn} inv={inv!r} eta={eta!r}\n")
 
-        flash("Work Order saved.", "success")
+        if not ajax_save:
+            flash("Work Order saved.", "success")
 
     except Exception as e:
         db.session.rollback()
@@ -7425,7 +7983,7 @@ def wo_save():
     # ✅ RELEASE reservation only after successful NEW WO save
     if is_new:
         try:
-            tokens2 = _job_tokens(wo.job_numbers)
+            tokens2 = _job_tokens(saved_job_numbers)
             if tokens2:
                 JobReservation.query.filter(
                     JobReservation.job_token.in_(tokens2),
@@ -7448,19 +8006,51 @@ def wo_save():
             merged.append(x)
         session["recent_suppliers"] = merged[:20]
         session.modified = True
+    # AJAX Save used by Issue Selected.
+    # WO is already committed; do not reload the edit page.
+    if ajax_save:
+        return jsonify({
+            "ok": True,
+            "wo_id": saved_wo_id,
+            "updated_at": (
+                wo.updated_at.isoformat()
+                if wo.updated_at
+                else ""
+            ),
+            "issue_url": url_for(
+                "inventory.wo_issue_instock",
+                wo_id=saved_wo_id,
+            ),
+        })
 
     after_save = (request.form.get("_after_save") or "").strip()
     save_clicked = (request.form.get("_save_clicked") or "").strip()
 
     # если это обычный Save — игнорируем auto_issue полностью
     if save_clicked:
-        return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+        return redirect(
+            url_for(
+                "inventory.wo_detail",
+                wo_id=saved_wo_id,
+            )
+        )
 
     # только если это реально Issue flow
     if after_save == "edit_auto_issue":
-        return redirect(url_for("inventory.wo_edit", wo_id=wo.id, auto_issue=1))
+        return redirect(
+            url_for(
+                "inventory.wo_edit",
+                wo_id=saved_wo_id,
+                auto_issue=1,
+            )
+        )
 
-    return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+    return redirect(
+        url_for(
+            "inventory.wo_detail",
+            wo_id=saved_wo_id,
+        )
+    )
 
 @inventory_bp.get("/work_orders")
 @login_required
@@ -7797,12 +8387,22 @@ def wo_issue_instock(wo_id):
     from markupsafe import Markup
     # from sqlalchemy import func
     from datetime import datetime
-    from flask import request, session
+    from flask import current_app, request, session
     from extensions import db
-    from models import WorkOrder, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit, ToolAsset, \
-        ToolMovement
+    from models import (
+        WorkOrder,
+        WorkOrderPart,
+        Part,
+        IssuedPartRecord,
+        IssuedBatch,
+        WorkOrderAudit,
+    )
     import json
     from services.accounting_service import create_ledger_charges_for_records
+    from services.asset_assignment_service import (
+        AssetAssignmentError,
+        assign_tool_from_work_order,
+    )
 
     wo = WorkOrder.query.get_or_404(wo_id)
     is_ins_job = ((wo.job_type or "").upper() == "INSURANCE")
@@ -8033,120 +8633,56 @@ def wo_issue_instock(wo_id):
             issued_so_far = int(line.issued_qty or 0)
 
             if item_type == "tool":
-                # если tool уже реально привязан к tool_asset — повторно не выдаём эту же строку
-                if issued_so_far >= qty_req and getattr(line, "tool_asset_id", None):
+                # Повторно уже назначенную строку не обрабатываем.
+                if (
+                        issued_so_far >= qty_req
+                        and getattr(line, "tool_asset_id", None)
+                ):
                     continue
-                now_tool = datetime.utcnow()
-
-                if not (wo.technician_name or "").strip():
-                    flash("Select technician before assigning tools.", "danger")
-                    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
-
-                if qty_req != 1:
-                    flash("Tool rows must have quantity 1. Each tool must be a separate asset.", "danger")
-                    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
-
-                tool = ToolAsset.query.filter(
-                    func.upper(ToolAsset.tool_number) == pn
-                ).first()
 
                 try:
-                    tool_total_qty = int(getattr(part, "quantity", 0) or 0) if part else 0
-                except Exception:
-                    tool_total_qty = 0
-
-                if not tool:
-                    tool = ToolAsset(
-                        tool_number=pn,
-                        name=(line.part_name or pn),
-                        quantity=tool_total_qty,
-                        serial_number=None,
-                        status="available",
-                        condition="good",
-                        location="TOOLS",
+                    assign_tool_from_work_order(
+                        work_order=wo,
+                        line=line,
+                        current_user=current_user,
                     )
-                    db.session.add(tool)
-                    db.session.flush()
-                else:
-                    if tool_total_qty > int(tool.quantity or 0):
-                        tool.quantity = tool_total_qty
-                    tool.name = tool.name or (line.part_name or pn)
-                    db.session.add(tool)
 
-                old_status = tool.status or "available"
+                    issued_row_ids.append(line.id)
+                    _touch_wo()
 
-                assigned_qty = (
-                        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
-                        .filter(
-                            ToolMovement.tool_id == tool.id,
-                            ToolMovement.action == "assigned",
-                        )
-                        .scalar()
-                        or 0
-                )
-
-                returned_qty = (
-                        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
-                        .filter(
-                            ToolMovement.tool_id == tool.id,
-                            ToolMovement.action == "returned",
-                        )
-                        .scalar()
-                        or 0
-                )
-
-                assigned_qty = max(int(assigned_qty or 0) - int(returned_qty or 0), 0)
-                free_qty = max(int(tool.quantity or 0) - assigned_qty, 0)
-
-                if free_qty <= 0:
-                    flash(f"Tool {pn} has no free quantity available.", "danger")
+                except AssetAssignmentError as exc:
                     db.session.rollback()
-                    return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+                    flash(str(exc), "danger")
+                    return redirect(
+                        url_for(
+                            "inventory.wo_detail",
+                            wo_id=wo.id,
+                        )
+                    )
 
-                tool.status = "assigned"
-                tool.location = "TECHNICIAN"
-                tool.current_technician_id = getattr(wo, "technician_id", None)
-                tool.current_technician_name = wo.technician_name
-                tool.current_work_order_id = wo.id
-                tool.updated_at = now_tool
+                except Exception as exc:
+                    db.session.rollback()
 
-                db.session.add(ToolMovement(
-                    tool_id=tool.id,
-                    work_order_id=wo.id,
-                    technician_id=getattr(wo, "technician_id", None),
-                    technician_name=wo.technician_name,
-                    action="assigned",
-                    quantity=1,  # <-- ВОТ ЭТУ СТРОКУ ДОБАВИТЬ
-                    from_status=old_status,
-                    to_status="assigned",
-                    note=f"Assigned from WO #{wo.id}",
-                    actor_user_id=getattr(current_user, "id", None),
-                    actor_username=getattr(current_user, "username", "system"),
-                    created_at=now_tool,
-                ))
+                    current_app.logger.exception(
+                        "Unexpected asset assignment error: "
+                        "wo_id=%s line_id=%s asset=%s",
+                        wo.id,
+                        line.id,
+                        pn,
+                    )
 
-                line.tool_asset_id = tool.id
-                line.item_type = "tool"
-                line.issued_qty = 1
-                line.last_issued_at = now_tool
-                line.status = "done"
-                line.line_status = "done"
-                _clear_bo_and_ord(line)
-                db.session.add(line)
+                    flash(
+                        f"Error assigning asset {pn}: {exc}",
+                        "danger",
+                    )
 
-                _add_wo_audit(
-                    action="tool_assigned",
-                    message=f"Assigned tool: {pn} — {(line.part_name or pn)}",
-                    meta={
-                        "tool_id": tool.id,
-                        "tool_number": pn,
-                        "technician": wo.technician_name,
-                        "audit_reason": "tool_assigned",
-                    },
-                )
+                    return redirect(
+                        url_for(
+                            "inventory.wo_detail",
+                            wo_id=wo.id,
+                        )
+                    )
 
-                issued_row_ids.append(line.id)
-                _touch_wo()
                 continue
 
             if issued_so_far >= qty_req:
@@ -9830,13 +10366,14 @@ def tools_tech_report_pdf():
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
 @login_required
 def wo_edit(wo_id: int):
-    from flask import render_template, flash, redirect, url_for, session, request
+    from flask import render_template, flash, redirect, url_for
     from flask_login import current_user
-    from sqlalchemy import func, or_
+    from sqlalchemy import func, or_, and_
+    from sqlalchemy.orm import selectinload
     from collections import defaultdict
 
     from extensions import db
-    from models import WorkOrder, WorkUnit, WorkOrderPart, IssuedPartRecord, IssuedBatch, Part
+    from models import WorkOrder, WorkUnit, IssuedPartRecord, IssuedBatch, Part
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
     readonly_param = request.args.get("readonly", type=int) == 1
@@ -9845,27 +10382,49 @@ def wo_edit(wo_id: int):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    wo = WorkOrder.query.get_or_404(wo_id)
+    wo = (
+        WorkOrder.query
+        .options(
+            selectinload(WorkOrder.units)
+            .selectinload(WorkUnit.parts)
+        )
+        .filter(WorkOrder.id == wo_id)
+        .first_or_404()
+    )
 
     technicians = _query_technicians()
 
-    # --- preselect technician ---
+    tech_by_id = {
+        int(tid): uname
+        for tid, uname in technicians
+        if tid is not None
+    }
+
+    tech_by_name = {
+        (uname or "").strip().lower(): (int(tid), uname)
+        for tid, uname in technicians
+        if tid is not None and (uname or "").strip()
+    }
+
     selected_tech_id = None
     selected_tech_username = None
-    if getattr(wo, "technician_id", None):
-        selected_tech_id = int(wo.technician_id)
-        for tid, uname in technicians:
-            if tid == selected_tech_id:
-                selected_tech_username = uname
-                break
+
+    wo_technician_id = getattr(wo, "technician_id", None)
+
+    if wo_technician_id is not None:
+        try:
+            selected_tech_id = int(wo_technician_id)
+            selected_tech_username = tech_by_id.get(selected_tech_id)
+        except (TypeError, ValueError):
+            selected_tech_id = None
+
     if selected_tech_id is None:
         wo_name = (wo.technician_name or "").strip().lower()
-        if wo_name:
-            for tid, uname in technicians:
-                if (uname or "").strip().lower() == wo_name:
-                    selected_tech_id = tid
-                    selected_tech_username = uname
-                    break
+
+        matched_tech = tech_by_name.get(wo_name)
+
+        if matched_tech:
+            selected_tech_id, selected_tech_username = matched_tech
 
     # ==================================================
     # 1) Фактическая выдача по этому WO (агрегировано, без загрузки всех rows)
@@ -9874,28 +10433,73 @@ def wo_edit(wo_id: int):
     issued_qty_by_pn = defaultdict(int)
 
     if canon:
+        match_conditions = [
+            IssuedPartRecord.reference_job == canon,
+            IssuedBatch.reference_job == canon,
+        ]
+
+        if hasattr(IssuedBatch, "work_order_id"):
+            match_conditions.insert(
+                0,
+                IssuedBatch.work_order_id == wo.id,
+            )
+
+        # Legacy reference_job может содержать несколько jobs.
+        # Ограничиваем LIKE старыми записями без прямой связи с WO.
+        legacy_conditions = [
+            IssuedPartRecord.reference_job.like(f"%{canon}%"),
+        ]
+
+        if hasattr(IssuedBatch, "work_order_id"):
+            legacy_conditions.append(
+                IssuedBatch.work_order_id.is_(None)
+            )
+
+        match_conditions.append(
+            and_(*legacy_conditions)
+        )
+
         qty_rows = (
             db.session.query(
-                func.upper(func.trim(Part.part_number)).label("pn"),
-                func.coalesce(func.sum(IssuedPartRecord.quantity), 0).label("qty"),
+                func.upper(
+                    func.trim(Part.part_number)
+                ).label("pn"),
+                func.coalesce(
+                    func.sum(IssuedPartRecord.quantity),
+                    0,
+                ).label("qty"),
             )
             .select_from(IssuedPartRecord)
-            .join(Part, Part.id == IssuedPartRecord.part_id)
-            .outerjoin(IssuedBatch, IssuedBatch.id == IssuedPartRecord.batch_id)
+            .join(
+                Part,
+                Part.id == IssuedPartRecord.part_id,
+            )
+            .outerjoin(
+                IssuedBatch,
+                IssuedBatch.id == IssuedPartRecord.batch_id,
+            )
             .filter(
-                or_(
-                    func.trim(IssuedPartRecord.reference_job) == canon,
-                    func.trim(IssuedPartRecord.reference_job).like(f"%{canon}%"),
-                    func.trim(IssuedBatch.reference_job) == canon,
+                or_(*match_conditions)
+            )
+            .group_by(
+                func.upper(
+                    func.trim(Part.part_number)
                 )
             )
-            .group_by(func.upper(func.trim(Part.part_number)))
             .all()
         )
 
         for row in qty_rows:
             pn = (row.pn or "").strip().upper()
             qty = int(row.qty or 0)
+
+            if pn and qty:
+                issued_qty_by_pn[pn] = qty
+
+        for row in qty_rows:
+            pn = (row.pn or "").strip().upper()
+            qty = int(row.qty or 0)
+
             if pn and qty:
                 issued_qty_by_pn[pn] = qty
 
@@ -10187,6 +10791,10 @@ def wo_issue_instock_unit(wo_id, unit_id):
     import json
 
     from services.accounting_service import create_ledger_charges_for_records
+    from services.asset_assignment_service import (
+        assign_tool_from_work_order,
+        AssetAssignmentError,
+    )
 
     wo = WorkOrder.query.get_or_404(wo_id)
     unit = next((u for u in (wo.units or []) if u.id == unit_id), None)

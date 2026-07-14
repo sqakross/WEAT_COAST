@@ -158,6 +158,6 @@ del branch git branch -d name
 
 upgrade db:  flask db upgrade
 
-
+stop session: Get-Process python, pythonw -ErrorAction SilentlyContinue | Stop-Process -Force
 
 

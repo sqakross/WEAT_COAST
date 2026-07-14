@@ -336,27 +336,179 @@ class WorkOrderPart(db.Model):
         return f"<WOP id={self.id} pn={self.part_number} ordered={self.ordered_flag} on={self.ordered_date}>"
 
 class ToolAsset(db.Model):
+    """
+    Master record of a reusable company asset.
+
+    The database table name remains tool_assets for backward compatibility,
+    but the model supports all reusable assets, not only technician tools.
+    """
     __tablename__ = "tool_assets"
+    __table_args__ = (
+        db.Index("ix_tool_assets_status_holder", "status", "current_holder_id"),
+        {"extend_existing": True},
+    )
 
     id = db.Column(db.Integer, primary_key=True)
 
-    tool_number = db.Column(db.String(80), nullable=False, unique=True, index=True)
+    # Existing public identifier. Keep the column name for compatibility.
+    tool_number = db.Column(
+        db.String(80),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
     name = db.Column(db.String(120), nullable=False)
 
-    quantity = db.Column(db.Integer, nullable=False, default=0)
+    # TOOL / TEST_EQUIPMENT / PHONE / LAPTOP / VEHICLE / OTHER
+    asset_type = db.Column(
+        db.String(40),
+        nullable=False,
+        default="TOOL",
+        index=True,
+    )
 
-    serial_number = db.Column(db.String(120), nullable=True, index=True)
+    quantity = db.Column(
+        db.Integer,
+        nullable=False,
+        default=1,
+    )
 
-    status = db.Column(db.String(30), nullable=False, default="available", index=True)
-    condition = db.Column(db.String(40), nullable=False, default="good")
-    location = db.Column(db.String(80), nullable=False, default="TOOLS")
+    serial_number = db.Column(
+        db.String(120),
+        nullable=True,
+        index=True,
+    )
 
-    current_technician_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    current_technician_name = db.Column(db.String(80), nullable=True, index=True)
-    current_work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=True, index=True)
+    # available / assigned / maintenance / lost / retired
+    status = db.Column(
+        db.String(30),
+        nullable=False,
+        default="available",
+        index=True,
+    )
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    condition = db.Column(
+        db.String(40),
+        nullable=False,
+        default="good",
+    )
+
+    location = db.Column(
+        db.String(80),
+        nullable=False,
+        default="TOOLS",
+    )
+
+    # ------------------------------------------------------------------
+    # New universal holder fields
+    # ------------------------------------------------------------------
+    current_holder_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    current_holder_name = db.Column(
+        db.String(80),
+        nullable=True,
+        index=True,
+    )
+
+    current_holder = db.relationship(
+        "User",
+        foreign_keys=[current_holder_id],
+        lazy="joined",
+    )
+
+    current_work_order_id = db.Column(
+        db.Integer,
+        db.ForeignKey("work_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    current_work_order = db.relationship(
+        "WorkOrder",
+        foreign_keys=[current_work_order_id],
+        lazy="joined",
+    )
+
+    # ------------------------------------------------------------------
+    # Legacy fields
+    #
+    # Do not remove yet. Existing routes/templates may still use them.
+    # New assignment service will synchronize both old and new fields.
+    # ------------------------------------------------------------------
+    current_technician_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    current_technician_name = db.Column(
+        db.String(80),
+        nullable=True,
+        index=True,
+    )
+
+    current_technician = db.relationship(
+        "User",
+        foreign_keys=[current_technician_id],
+        lazy="joined",
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    @property
+    def asset_number(self) -> str:
+        """Universal alias while keeping tool_number in the database."""
+        return self.tool_number or ""
+
+    @property
+    def holder_name(self) -> str:
+        """
+        Prefer the universal holder fields, but support existing records
+        that still contain only current_technician_name.
+        """
+        if self.current_holder and self.current_holder.username:
+            return self.current_holder.username
+
+        if self.current_holder_name:
+            return self.current_holder_name
+
+        if self.current_technician and self.current_technician.username:
+            return self.current_technician.username
+
+        return self.current_technician_name or ""
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def updated_at_local(self):
+        return utc_to_local(self.updated_at)
+
+    def __repr__(self):
+        return (
+            f"<ToolAsset id={self.id} "
+            f"number={self.tool_number!r} "
+            f"status={self.status!r}>"
+        )
 
 
 class ToolMovement(db.Model):
@@ -366,6 +518,23 @@ class ToolMovement(db.Model):
 
     tool_id = db.Column(db.Integer, db.ForeignKey("tool_assets.id"), nullable=False, index=True)
     work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=True, index=True)
+
+    assignment_id = db.Column(
+        db.Integer,
+        db.ForeignKey("asset_assignments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    receipt_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "asset_assignment_receipts.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
 
     technician_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
     technician_name = db.Column(db.String(80), nullable=True, index=True)
@@ -383,6 +552,477 @@ class ToolMovement(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     tool = db.relationship("ToolAsset", foreign_keys=[tool_id], lazy="joined")
+
+    assignment = db.relationship(
+        "AssetAssignment",
+        foreign_keys=[assignment_id],
+        lazy="joined",
+    )
+
+    receipt = db.relationship(
+        "AssetAssignmentReceipt",
+        foreign_keys=[receipt_id],
+        lazy="joined",
+    )
+
+class AssetAssignmentReceipt(db.Model):
+    """
+    Header of a signable asset assignment document.
+
+    One receipt may contain multiple AssetAssignment rows, but every
+    assignment in the receipt belongs to the same recipient.
+    """
+    __tablename__ = "asset_assignment_receipts"
+    __table_args__ = (
+        db.Index(
+            "ix_asset_receipt_holder_date",
+            "assigned_to_id",
+            "assigned_at",
+        ),
+        db.Index(
+            "ix_asset_receipt_wo_status",
+            "work_order_id",
+            "status",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    receipt_number = db.Column(
+        db.String(30),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    assigned_to_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    # Snapshot protects historical documents if username later changes.
+    assigned_to_name = db.Column(
+        db.String(120),
+        nullable=False,
+        index=True,
+    )
+
+    issued_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    issued_by_name = db.Column(
+        db.String(120),
+        nullable=False,
+    )
+
+    work_order_id = db.Column(
+        db.Integer,
+        db.ForeignKey("work_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    assigned_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    # open / acknowledged / closed / voided
+    status = db.Column(
+        db.String(30),
+        nullable=False,
+        default="open",
+        index=True,
+    )
+
+    note = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    acknowledged_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    acknowledged_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    acknowledged_by_name = db.Column(
+        db.String(120),
+        nullable=True,
+    )
+
+    signature_name = db.Column(
+        db.String(200),
+        nullable=True,
+    )
+
+    # Reserved for a future drawn signature or encoded signature payload.
+    signature_data = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    voided_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    voided_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    voided_by_name = db.Column(
+        db.String(120),
+        nullable=True,
+    )
+
+    void_reason = db.Column(
+        db.String(500),
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    assigned_to = db.relationship(
+        "User",
+        foreign_keys=[assigned_to_id],
+        lazy="joined",
+    )
+
+    issued_by = db.relationship(
+        "User",
+        foreign_keys=[issued_by_id],
+        lazy="joined",
+    )
+
+    acknowledged_by = db.relationship(
+        "User",
+        foreign_keys=[acknowledged_by_id],
+        lazy="joined",
+    )
+
+    voided_by = db.relationship(
+        "User",
+        foreign_keys=[voided_by_id],
+        lazy="joined",
+    )
+
+    work_order = db.relationship(
+        "WorkOrder",
+        foreign_keys=[work_order_id],
+        lazy="joined",
+    )
+
+    assignments = db.relationship(
+        "AssetAssignment",
+        back_populates="receipt",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def assigned_at_local(self):
+        return utc_to_local(self.assigned_at)
+
+    @property
+    def acknowledged_at_local(self):
+        return utc_to_local(self.acknowledged_at)
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def active_assignments(self):
+        return [
+            assignment
+            for assignment in (self.assignments or [])
+            if assignment.status == "assigned"
+        ]
+
+    def __repr__(self):
+        return (
+            f"<AssetAssignmentReceipt id={self.id} "
+            f"number={self.receipt_number!r} "
+            f"status={self.status!r}>"
+        )
+
+class AssetAssignment(db.Model):
+    """
+    Source of truth for an asset custody period.
+
+    A row is never deleted after issue. It is closed as returned or marked
+    voided so the custody history remains auditable.
+    """
+    __tablename__ = "asset_assignments"
+    __table_args__ = (
+        db.Index(
+            "ix_asset_assignment_asset_status",
+            "asset_id",
+            "status",
+        ),
+        db.Index(
+            "ix_asset_assignment_holder_status",
+            "assigned_to_id",
+            "status",
+        ),
+        db.Index(
+            "ix_asset_assignment_wo_status",
+            "work_order_id",
+            "status",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    receipt_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "asset_assignment_receipts.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    asset_id = db.Column(
+        db.Integer,
+        db.ForeignKey("tool_assets.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    assigned_to_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    # Historical snapshot.
+    assigned_to_name = db.Column(
+        db.String(120),
+        nullable=False,
+        index=True,
+    )
+
+    assigned_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    assigned_by_name = db.Column(
+        db.String(120),
+        nullable=False,
+    )
+
+    work_order_id = db.Column(
+        db.Integer,
+        db.ForeignKey("work_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    work_unit_id = db.Column(
+        db.Integer,
+        db.ForeignKey("work_units.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    quantity = db.Column(
+        db.Integer,
+        nullable=False,
+        default=1,
+    )
+
+    assigned_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    # assigned / returned / transferred / voided
+    status = db.Column(
+        db.String(30),
+        nullable=False,
+        default="assigned",
+        index=True,
+    )
+
+    assignment_note = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    returned_at = db.Column(
+        db.DateTime,
+        nullable=True,
+        index=True,
+    )
+
+    returned_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    returned_by_name = db.Column(
+        db.String(120),
+        nullable=True,
+    )
+
+    return_condition = db.Column(
+        db.String(40),
+        nullable=True,
+    )
+
+    return_note = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    voided_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    voided_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    voided_by_name = db.Column(
+        db.String(120),
+        nullable=True,
+    )
+
+    void_reason = db.Column(
+        db.String(500),
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    receipt = db.relationship(
+        "AssetAssignmentReceipt",
+        back_populates="assignments",
+        lazy="joined",
+    )
+
+    asset = db.relationship(
+        "ToolAsset",
+        foreign_keys=[asset_id],
+        lazy="joined",
+        backref=db.backref(
+            "assignments",
+            lazy="selectin",
+        ),
+    )
+
+    assigned_to = db.relationship(
+        "User",
+        foreign_keys=[assigned_to_id],
+        lazy="joined",
+    )
+
+    assigned_by = db.relationship(
+        "User",
+        foreign_keys=[assigned_by_id],
+        lazy="joined",
+    )
+
+    returned_by = db.relationship(
+        "User",
+        foreign_keys=[returned_by_id],
+        lazy="joined",
+    )
+
+    voided_by = db.relationship(
+        "User",
+        foreign_keys=[voided_by_id],
+        lazy="joined",
+    )
+
+    work_order = db.relationship(
+        "WorkOrder",
+        foreign_keys=[work_order_id],
+        lazy="joined",
+    )
+
+    work_unit = db.relationship(
+        "WorkUnit",
+        foreign_keys=[work_unit_id],
+        lazy="joined",
+    )
+
+    @property
+    def assigned_at_local(self):
+        return utc_to_local(self.assigned_at)
+
+    @property
+    def returned_at_local(self):
+        return utc_to_local(self.returned_at)
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == "assigned" and self.returned_at is None
+
+    @property
+    def document_number(self) -> str:
+        return self.receipt.receipt_number if self.receipt else ""
+
+    def __repr__(self):
+        return (
+            f"<AssetAssignment id={self.id} "
+            f"asset={self.asset_id} "
+            f"receipt={self.receipt_id} "
+            f"status={self.status!r}>"
+        )
 
 # --------------------------------
 # Tech receive log
