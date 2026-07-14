@@ -5,8 +5,14 @@ from sqlalchemy.orm import lazyload
 from extensions import db, login_manager
 from models import (
     User,
-    ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER, ROLE_TECHNICIAN,
-    ALLOWED_ROLES, ROLE_ALIASES
+    ROLE_SUPERADMIN,
+    ROLE_ADMIN,
+    ROLE_ACCOUNTING,
+    ROLE_USER,
+    ROLE_VIEWER,
+    ROLE_TECHNICIAN,
+    ALLOWED_ROLES,
+    ROLE_ALIASES,
 )
 
 auth_bp = Blueprint('auth', __name__)
@@ -81,11 +87,12 @@ def register():
 
     # список ролей для селекта
     roles = [
-        (ROLE_TECHNICIAN, 'Technician'),
-        (ROLE_USER, 'User'),
-        (ROLE_VIEWER, 'Viewer'),
-        (ROLE_ADMIN, 'Admin'),
-        (ROLE_SUPERADMIN, 'Superadmin'),
+        (ROLE_TECHNICIAN, "Technician"),
+        (ROLE_USER, "User"),
+        (ROLE_VIEWER, "Viewer"),
+        (ROLE_ACCOUNTING, "Accounting"),
+        (ROLE_ADMIN, "Admin"),
+        (ROLE_SUPERADMIN, "Superadmin"),
     ]
     return render_template('register.html', roles=roles)
 

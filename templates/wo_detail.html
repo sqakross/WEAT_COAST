@@ -464,6 +464,10 @@
 
     <th>Status</th>
 
+    <th>Report #</th>
+
+    <th>Print</th>
+
 </tr>
 
 </thead>
@@ -478,9 +482,54 @@
 
         <td>
 
-            {{ a.receipt.receipt_number }}
+            <a href="{{ url_for(
+                'inventory.asset_receipt',
+                receipt_number=a.receipt.receipt_number
+            ) }}"
+               target="_blank"
+               rel="noopener">
+
+                {{ a.receipt.receipt_number }}
+
+            </a>
 
         </td>
+
+        <td class="text-nowrap">
+
+    <a class="btn btn-sm btn-outline-primary"
+
+       href="{{ url_for(
+            'inventory.asset_receipt',
+            receipt_number=a.receipt.receipt_number
+       ) }}"
+
+       target="_blank"
+       rel="noopener">
+
+        Open Report
+
+    </a>
+
+</td>
+
+<td class="text-nowrap">
+
+    <a class="btn btn-sm btn-outline-primary"
+
+       href="{{ url_for(
+            'inventory.asset_receipt_pdf',
+            receipt_number=a.receipt.receipt_number
+       ) }}"
+
+       target="_blank"
+       rel="noopener">
+
+        Print
+
+    </a>
+
+</td>
 
         <td>
 

@@ -35,6 +35,7 @@ ROLE_ADMIN      = 'admin'
 ROLE_USER       = 'user'
 ROLE_VIEWER     = 'viewer'
 ROLE_TECHNICIAN = 'technician'
+ROLE_ACCOUNTING = "accounting"
 
 ALLOWED_ROLES = {
     ROLE_SUPERADMIN,
@@ -42,6 +43,7 @@ ALLOWED_ROLES = {
     ROLE_TECHNICIAN,
     ROLE_USER,
     ROLE_VIEWER,
+    ROLE_ACCOUNTING,
 }
 
 ROLE_ALIASES = {
@@ -55,6 +57,7 @@ ROLE_ALIASES = {
     'read_only': ROLE_VIEWER,
     'user': ROLE_USER,
     'employee': ROLE_USER,
+    "accounting": ROLE_ACCOUNTING,
 }
 
 

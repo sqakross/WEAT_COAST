@@ -24,7 +24,27 @@ from io import BytesIO
 from datetime import datetime, timedelta, time, date
 from extensions import db
 from utils.invoice_generator import generate_invoice_pdf
-from models import User, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER, ROLE_VIEWER, ROLE_TECHNICIAN, Part, WorkOrder, WorkUnit, WorkOrderPart, EmailOutbox, WorkOrderAudit, TechnicianLedgerEntry
+from models import (
+    User,
+    ROLE_SUPERADMIN,
+    ROLE_ADMIN,
+    ROLE_ACCOUNTING,
+    ROLE_USER,
+    ROLE_VIEWER,
+    ROLE_TECHNICIAN,
+    Part,
+    WorkOrder,
+    WorkUnit,
+    WorkOrderPart,
+    EmailOutbox,
+    WorkOrderAudit,
+    TechnicianLedgerEntry,
+)
+from security import (
+    current_role,
+    is_accounting,
+    can_modify_operational_data,
+)
 from reportlab.lib.pagesizes import letter, landscape
 from compare_cart.run_compare import get_marcone_items, check_cart_items, export_to_docx
 from compare_cart.run_compare_reliable import get_reliable_items
@@ -756,7 +776,7 @@ def api_job_reserve():
     except StaleDataError:
         db.session.rollback()
 
-        current_app.logger.warning(
+        current_app.logger.debug(
             "API_JOB_RESERVE stale reservation user_id=%r tokens=%r",
             uid,
             tokens,
@@ -4151,8 +4171,24 @@ def wo_confirm_lines(wo_id: int):
         flash(f"Work Order #{wo_id} not found.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    role = (current_user.role or "").lower()
-    is_admin_like = role in ("admin", "superadmin")
+    role = current_role()
+
+    if role == ROLE_ACCOUNTING:
+        flash(
+            "Accounting access is read-only.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "inventory.wo_detail",
+                wo_id=wo_id,
+            )
+        )
+
+    is_admin_like = role in (
+        ROLE_ADMIN,
+        ROLE_SUPERADMIN,
+    )
 
     # проверка «свой ли WO» для техника
     if role == "technician":
@@ -4742,7 +4778,7 @@ def api_work_order_stamp(wo_id):
 def wo_detail(wo_id):
     from flask import render_template, flash, redirect, url_for, session
     from sqlalchemy import func, or_, and_, case
-    from sqlalchemy.orm import selectinload, joinedload
+    from sqlalchemy.orm import selectinload, joinedload, lazyload
     from flask_login import current_user
     from extensions import db
     from models import WorkOrder, WorkUnit, WorkOrderPart, Part, IssuedPartRecord, IssuedBatch, WorkOrderAudit
@@ -4768,16 +4804,31 @@ def wo_detail(wo_id):
 
 
     # 2) access
-    role_raw = (getattr(current_user, "role", "") or "").strip().lower()
+    role_raw = current_role()
+
     me_id = getattr(current_user, "id", None)
-    me_name = (getattr(current_user, "username", "") or "").strip().lower()
+    me_name = (
+            getattr(current_user, "username", "") or ""
+    ).strip().lower()
 
     wo_tech_id = getattr(wo, "technician_id", None)
-    wo_tech_name = (wo.technician_username or wo.technician_name or "").strip().lower()
+    wo_tech_name = (
+            wo.technician_username
+            or wo.technician_name
+            or ""
+    ).strip().lower()
 
-    is_admin_like = role_raw in ("admin", "superadmin")
-    is_technician = role_raw in ("technician", "tech")
-    is_user = (role_raw == "user")
+    is_admin_like = role_raw in (
+        ROLE_ADMIN,
+        ROLE_SUPERADMIN,
+    )
+
+    is_accounting_user = role_raw == ROLE_ACCOUNTING
+    is_technician_user = role_raw in (
+        ROLE_TECHNICIAN,
+        "tech",
+    )
+    is_user = role_raw == ROLE_USER
 
     is_my_wo = False
     if wo_tech_id and me_id and wo_tech_id == me_id:
@@ -4785,12 +4836,18 @@ def wo_detail(wo_id):
     elif wo_tech_name and me_name and wo_tech_name == me_name:
         is_my_wo = True
 
-    if is_technician and not is_my_wo:
+    if is_technician_user and not is_my_wo:
         flash("You don't have access to this Work Order.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    can_confirm_any = (role_raw == "superadmin")
-    can_view_docs = is_admin_like or is_my_wo or is_user
+    can_confirm_any = role_raw == ROLE_SUPERADMIN
+
+    can_view_docs = (
+            is_admin_like
+            or is_accounting_user
+            or is_my_wo
+            or is_user
+    )
 
 
     # ------------------------------------------------------------
@@ -5070,6 +5127,7 @@ def wo_detail(wo_id):
     asset_assignments = (
         db.session.query(AssetAssignment)
         .options(
+            lazyload("*"),
             joinedload(AssetAssignment.asset),
             joinedload(AssetAssignment.receipt),
         )
@@ -5082,7 +5140,6 @@ def wo_detail(wo_id):
         )
         .all()
     )
-
 
     # ------------------------------------------------------------
     # 4c) Totals from already loaded issued_items
@@ -5375,6 +5432,7 @@ def wo_detail(wo_id):
         current_user=current_user,
         audit_log=audit_log,
     )
+
 import time
 
 _ALERTS_COUNT_CACHE = {
@@ -5662,6 +5720,57 @@ def wo_alerts():
         today=today,
     )
 
+def _load_asset_assignment_receipt(receipt_number: str):
+    """
+    Fast, controlled loading of one Asset Assignment Receipt.
+
+    Overrides model-level lazy='joined' relationships and loads only
+    the relationships required by HTML/PDF.
+    """
+    from sqlalchemy.orm import (
+        joinedload,
+        lazyload,
+        selectinload,
+    )
+
+    from models import (
+        AssetAssignment,
+        AssetAssignmentReceipt,
+    )
+
+    return (
+        db.session.query(AssetAssignmentReceipt)
+        .options(
+            # Prevent automatic loading of every joined relationship
+            # declared on the models.
+            lazyload("*"),
+
+            joinedload(
+                AssetAssignmentReceipt.assigned_to
+            ),
+
+            joinedload(
+                AssetAssignmentReceipt.work_order
+            ),
+
+            selectinload(
+                AssetAssignmentReceipt.assignments
+            ).options(
+                lazyload("*"),
+                joinedload(AssetAssignment.asset),
+            ),
+        )
+        .filter(
+            AssetAssignmentReceipt.receipt_number == receipt_number
+        )
+        .first()
+    )
+
+@inventory_bp.get(
+    "/assets/receipt/<receipt_number>",
+    endpoint="asset_receipt",
+)
+
 @inventory_bp.get(
     "/assets/receipt/<receipt_number>",
     endpoint="asset_receipt",
@@ -5669,31 +5778,8 @@ def wo_alerts():
 @login_required
 def asset_receipt(receipt_number):
     from flask import abort, render_template
-    from sqlalchemy.orm import joinedload
 
-    from models import (
-        AssetAssignment,
-        AssetAssignmentReceipt,
-    )
-
-    receipt = (
-        db.session.query(AssetAssignmentReceipt)
-        .options(
-            joinedload(
-                AssetAssignmentReceipt.assignments
-            ).joinedload(
-                AssetAssignment.asset
-            ),
-            joinedload(
-                AssetAssignmentReceipt.work_order
-            ),
-        )
-        .filter(
-            AssetAssignmentReceipt.receipt_number
-            == receipt_number
-        )
-        .first()
-    )
+    receipt = _load_asset_assignment_receipt(receipt_number)
 
     if receipt is None:
         abort(404)
@@ -5702,6 +5788,619 @@ def asset_receipt(receipt_number):
         "documents/asset_assignment.html",
         receipt=receipt,
     )
+
+@inventory_bp.get(
+    "/assets/receipt/<receipt_number>/pdf",
+    endpoint="asset_receipt_pdf",
+)
+@login_required
+def asset_receipt_pdf(receipt_number):
+    from io import BytesIO
+
+    from flask import abort, send_file
+    from sqlalchemy.orm import joinedload, selectinload
+
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        KeepTogether,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    from models import (
+        AssetAssignment,
+        AssetAssignmentReceipt,
+    )
+
+    receipt = _load_asset_assignment_receipt(receipt_number)
+
+    if receipt is None:
+        abort(404)
+
+    buffer = BytesIO()
+
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=14 * mm,
+        leftMargin=14 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title=f"Asset Assignment Receipt {receipt.receipt_number}",
+        author="WEST COAST CHIEF REPAIR ERP",
+    )
+
+    styles = getSampleStyleSheet()
+
+    company_style = ParagraphStyle(
+        "AssetCompany",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=15,
+        leading=17,
+        textColor=colors.HexColor("#111827"),
+        spaceAfter=2,
+    )
+
+    title_style = ParagraphStyle(
+        "AssetTitle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=23,
+        leading=25,
+        textColor=colors.HexColor("#111827"),
+    )
+
+    section_style = ParagraphStyle(
+        "AssetSection",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor("#4B5563"),
+        spaceBefore=4,
+        spaceAfter=4,
+    )
+
+    normal_style = ParagraphStyle(
+        "AssetNormal",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor("#111827"),
+    )
+
+    small_style = ParagraphStyle(
+        "AssetSmall",
+        parent=normal_style,
+        fontSize=8,
+        leading=10,
+    )
+
+    small_bold_style = ParagraphStyle(
+        "AssetSmallBold",
+        parent=small_style,
+        fontName="Helvetica-Bold",
+    )
+
+    center_style = ParagraphStyle(
+        "AssetCenter",
+        parent=small_style,
+        alignment=TA_CENTER,
+    )
+
+    right_style = ParagraphStyle(
+        "AssetRight",
+        parent=small_style,
+        alignment=TA_RIGHT,
+    )
+
+    story = []
+
+    def safe_text(value, fallback="-"):
+        text = str(value or "").strip()
+        return text if text else fallback
+
+    def formatted_datetime(value):
+        if not value:
+            return "-"
+        return value.strftime("%m/%d/%Y %I:%M %p")
+
+    def status_label(value):
+        return safe_text(value, "Unknown").replace("_", " ").title()
+
+    def paragraph(value, style=normal_style):
+        return Paragraph(safe_text(value), style)
+
+    # ---------------------------------------------------------
+    # Header
+    # ---------------------------------------------------------
+    header_left = [
+        Paragraph("WEST COAST CHIEF REPAIR", company_style),
+        Paragraph("Asset Assignment Receipt", title_style),
+    ]
+
+    header_meta = Table(
+        [
+            [
+                Paragraph("RECEIPT", small_bold_style),
+                Paragraph(
+                    safe_text(receipt.receipt_number),
+                    small_style,
+                ),
+            ],
+            [
+                Paragraph("STATUS", small_bold_style),
+                Paragraph(
+                    status_label(receipt.status),
+                    small_style,
+                ),
+            ],
+            [
+                Paragraph("ASSIGNED", small_bold_style),
+                Paragraph(
+                    formatted_datetime(receipt.assigned_at_local),
+                    small_style,
+                ),
+            ],
+        ],
+        colWidths=[24 * mm, 40 * mm],
+    )
+
+    header_meta.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F1F5F9")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+
+    header_table = Table(
+        [
+            [
+                header_left,
+                header_meta,
+            ]
+        ],
+        colWidths=[114 * mm, 64 * mm],
+    )
+
+    header_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    story.append(header_table)
+    story.append(Spacer(1, 8 * mm))
+
+    # ---------------------------------------------------------
+    # Assigned To / Reference
+    # ---------------------------------------------------------
+    assigned_to_role = (
+        receipt.assigned_to.role
+        if receipt.assigned_to and receipt.assigned_to.role
+        else "-"
+    )
+
+    assigned_table = Table(
+        [
+            [
+                Paragraph("ASSIGNED TO", section_style),
+                "",
+            ],
+            [
+                Paragraph("Employee", small_bold_style),
+                paragraph(receipt.assigned_to_name, small_style),
+            ],
+            [
+                Paragraph("Role", small_bold_style),
+                paragraph(
+                    assigned_to_role.replace("_", " ").title(),
+                    small_style,
+                ),
+            ],
+            [
+                Paragraph("Issued By", small_bold_style),
+                paragraph(receipt.issued_by_name, small_style),
+            ],
+        ],
+        colWidths=[28 * mm, 57 * mm],
+    )
+
+    assigned_table.setStyle(
+        TableStyle(
+            [
+                ("SPAN", (0, 0), (1, 0)),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
+                ("INNERGRID", (0, 1), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F8FAFC")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+
+    work_order = receipt.work_order
+
+    reference_table = Table(
+        [
+            [
+                Paragraph("REFERENCE", section_style),
+                "",
+            ],
+            [
+                Paragraph("Work Order", small_bold_style),
+                paragraph(
+                    f"#{work_order.id}" if work_order else "-",
+                    small_style,
+                ),
+            ],
+            [
+                Paragraph("Job Number", small_bold_style),
+                paragraph(
+                    work_order.job_numbers if work_order else "-",
+                    small_style,
+                ),
+            ],
+            [
+                Paragraph("Job Type", small_bold_style),
+                paragraph(
+                    work_order.job_type if work_order else "-",
+                    small_style,
+                ),
+            ],
+        ],
+        colWidths=[28 * mm, 57 * mm],
+    )
+
+    reference_table.setStyle(
+        TableStyle(
+            [
+                ("SPAN", (0, 0), (1, 0)),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
+                ("INNERGRID", (0, 1), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F8FAFC")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+
+    info_table = Table(
+        [[assigned_table, reference_table]],
+        colWidths=[88 * mm, 88 * mm],
+    )
+
+    info_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), 3),
+                ("LEFTPADDING", (1, 0), (1, 0), 3),
+                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    story.append(info_table)
+    story.append(Spacer(1, 8 * mm))
+
+    # ---------------------------------------------------------
+    # Assets
+    # ---------------------------------------------------------
+    story.append(Paragraph("ASSIGNED ASSETS", section_style))
+
+    asset_rows = [
+        [
+            Paragraph("ASSET #", small_bold_style),
+            Paragraph("DESCRIPTION", small_bold_style),
+            Paragraph("SERIAL NUMBER", small_bold_style),
+            Paragraph("CONDITION", small_bold_style),
+            Paragraph("QTY", small_bold_style),
+            Paragraph("STATUS", small_bold_style),
+        ]
+    ]
+
+    total_qty = 0
+
+    for assignment in receipt.assignments or []:
+        asset = assignment.asset
+        quantity = int(assignment.quantity or 1)
+        total_qty += quantity
+
+        asset_rows.append(
+            [
+                paragraph(
+                    asset.asset_number if asset else "-",
+                    small_style,
+                ),
+                paragraph(
+                    asset.name if asset else "Asset record unavailable",
+                    small_style,
+                ),
+                paragraph(
+                    asset.serial_number if asset else "-",
+                    small_style,
+                ),
+                paragraph(
+                    (
+                        asset.condition.replace("_", " ").title()
+                        if asset and asset.condition
+                        else "-"
+                    ),
+                    small_style,
+                ),
+                Paragraph(str(quantity), center_style),
+                paragraph(
+                    status_label(assignment.status),
+                    small_style,
+                ),
+            ]
+        )
+
+    if len(asset_rows) == 1:
+        asset_rows.append(
+            [
+                Paragraph("No assets are attached to this receipt.", center_style),
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        )
+
+    assets_table = Table(
+        asset_rows,
+        colWidths=[
+            22 * mm,
+            68 * mm,
+            29 * mm,
+            23 * mm,
+            11 * mm,
+            25 * mm,
+        ],
+        repeatRows=1,
+    )
+
+    asset_style_commands = [
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E2E8F0")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("ALIGN", (4, 1), (4, -1), "CENTER"),
+    ]
+
+    if len(asset_rows) == 2 and not receipt.assignments:
+        asset_style_commands.append(("SPAN", (0, 1), (-1, 1)))
+
+    assets_table.setStyle(TableStyle(asset_style_commands))
+
+    story.append(assets_table)
+    story.append(Spacer(1, 2.5 * mm))
+
+    total_table = Table(
+        [
+            [
+                Paragraph("TOTAL ASSIGNED QUANTITY", small_bold_style),
+                Paragraph(str(total_qty), center_style),
+            ]
+        ],
+        colWidths=[50 * mm, 12 * mm],
+        hAlign="RIGHT",
+    )
+
+    total_table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
+                ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#F8FAFC")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+
+    story.append(total_table)
+
+    # ---------------------------------------------------------
+    # Note
+    # ---------------------------------------------------------
+    if receipt.note:
+        story.append(Spacer(1, 3.5 * mm))
+        story.append(Paragraph("ASSIGNMENT NOTE", section_style))
+
+        note_table = Table(
+            [[paragraph(receipt.note, small_style)]],
+            colWidths=[178 * mm],
+        )
+
+        note_table.setStyle(
+            TableStyle(
+                [
+                    ("BOX", (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+
+        story.append(note_table)
+
+    # ---------------------------------------------------------
+    # Agreement
+    # ---------------------------------------------------------
+    story.append(Spacer(1, 3.5 * mm))
+    story.append(Paragraph("ASSET CUSTODY AGREEMENT", section_style))
+
+    agreement_text = (
+        "I acknowledge receipt of the company assets listed above and understand "
+        "that they remain the property of WEST COAST CHIEF REPAIR. I agree to use "
+        "them only for authorized business purposes, protect them from loss, theft, "
+        "misuse and damage, report any problem immediately, not transfer them without "
+        "authorization, and return them upon request, reassignment, or termination "
+        "of employment."
+    )
+
+    agreement_table = Table(
+        [[Paragraph(agreement_text, small_style)]],
+        colWidths=[178 * mm],
+    )
+
+    agreement_table.setStyle(
+        TableStyle(
+            [
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+
+    story.append(agreement_table)
+
+    # ---------------------------------------------------------
+    # Signatures
+    # ---------------------------------------------------------
+    story.append(Spacer(1, 18 * mm))
+
+    signature_line = "_" * 47
+    date_line = "_" * 22
+
+    signatures = Table(
+        [
+            [
+                Paragraph(signature_line, center_style),
+                Paragraph(signature_line, center_style),
+            ],
+            [
+                Paragraph("Issued By Signature", center_style),
+                Paragraph("Employee Signature", center_style),
+            ],
+            [
+                Paragraph(
+                    safe_text(receipt.issued_by_name),
+                    center_style,
+                ),
+                Paragraph(
+                    safe_text(receipt.assigned_to_name),
+                    center_style,
+                ),
+            ],
+            [
+                Paragraph(f"Date {date_line}", center_style),
+                Paragraph(f"Date {date_line}", center_style),
+            ],
+        ],
+        colWidths=[86 * mm, 86 * mm],
+    )
+
+    signatures.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 1),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+            ]
+        )
+    )
+
+    story.append(signatures)
+    story.append(Spacer(1, 7 * mm))
+
+    # ---------------------------------------------------------
+    # Footer
+    # ---------------------------------------------------------
+    footer_table = Table(
+        [
+            [
+                Paragraph(
+                    f"Document: {safe_text(receipt.receipt_number)}",
+                    small_style,
+                ),
+                Paragraph(
+                    "WEST COAST CHIEF REPAIR ERP",
+                    right_style,
+                ),
+            ]
+        ],
+        colWidths=[89 * mm, 89 * mm],
+    )
+
+    footer_table.setStyle(
+        TableStyle(
+            [
+                ("LINEABOVE", (0, 0), (-1, 0), 0.4, colors.HexColor("#CBD5E1")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    story.append(footer_table)
+
+    document.build(story)
+
+    buffer.seek(0)
+
+    filename = (
+        f"{receipt.receipt_number or 'asset-assignment-receipt'}.pdf"
+    )
+
+    return send_file(
+        buffer,
+        mimetype="application/pdf",
+        as_attachment=False,
+        download_name=filename,
+        max_age=0,
+    )
+
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
 def download_report_xlsx():
@@ -9261,46 +9960,97 @@ def tool_return(tool_id):
 @inventory_bp.get("/tools", endpoint="tools_list")
 @login_required
 def tools_list():
-    from flask import request, render_template
-    from sqlalchemy import func, or_, case
+    from collections import defaultdict
+    from time import perf_counter
+
+    from flask import current_app, render_template, request
+    from sqlalchemy import case, func, or_
+    from sqlalchemy.orm import lazyload
+
+    from extensions import db
     from models import ToolAsset, ToolMovement
 
-    status = (request.args.get("status") or "").strip().lower()
-    q = (request.args.get("q") or "").strip()
+    started_at = perf_counter()
 
-    assigned_qty_expr = func.coalesce(
+    status = (request.args.get("status") or "").strip().lower()
+    search_text = (request.args.get("q") or "").strip()
+
+    # =========================================================
+    # 1. Один агрегат по каждому asset
+    # =========================================================
+
+    net_assigned_expr = func.coalesce(
         func.sum(
             case(
-                (ToolMovement.action == "assigned", ToolMovement.quantity),
-                (ToolMovement.action == "returned", -ToolMovement.quantity),
+                (
+                    ToolMovement.action == "assigned",
+                    ToolMovement.quantity,
+                ),
+                (
+                    ToolMovement.action == "returned",
+                    -ToolMovement.quantity,
+                ),
                 else_=0,
             )
         ),
         0,
     )
 
-    tools_q = (
+    tools_query = (
         db.session.query(
             ToolAsset,
-            assigned_qty_expr.label("assigned_qty"),
+            net_assigned_expr.label("assigned_qty"),
         )
-        .outerjoin(ToolMovement, ToolMovement.tool_id == ToolAsset.id)
-        .group_by(ToolAsset.id)
+        .options(
+            # Отключаем автоматические joined relationships модели.
+            lazyload("*"),
+        )
+        .outerjoin(
+            ToolMovement,
+            ToolMovement.tool_id == ToolAsset.id,
+        )
     )
 
-    if q:
-        like = f"%{q}%"
-        tools_q = tools_q.filter(
+    if search_text:
+        like_value = f"%{search_text}%"
+
+        # EXISTS-подзапрос для поиска по holder.
+        # Он не ломает GROUP BY основного запроса.
+        holder_match = (
+            db.session.query(ToolMovement.id)
+            .filter(
+                ToolMovement.tool_id == ToolAsset.id,
+                ToolMovement.technician_name.ilike(like_value),
+            )
+            .exists()
+        )
+
+        tools_query = tools_query.filter(
             or_(
-                ToolAsset.tool_number.ilike(like),
-                ToolAsset.name.ilike(like),
-                ToolMovement.technician_name.ilike(like),
+                ToolAsset.tool_number.ilike(like_value),
+                ToolAsset.name.ilike(like_value),
+                ToolAsset.serial_number.ilike(like_value),
+                ToolAsset.current_holder_name.ilike(like_value),
+                ToolAsset.current_technician_name.ilike(like_value),
+                holder_match,
             )
         )
 
-    rows = tools_q.order_by(ToolAsset.tool_number.asc()).all()
+    rows = (
+        tools_query
+        .group_by(ToolAsset.id)
+        .order_by(ToolAsset.tool_number.asc())
+        .all()
+    )
+
+    after_tools_query = perf_counter()
+
+    # =========================================================
+    # 2. Формируем список и статистику
+    # =========================================================
 
     tools = []
+
     stats = {
         "total": 0,
         "assigned": 0,
@@ -9310,14 +10060,16 @@ def tools_list():
         "retired": 0,
     }
 
-    for tool, assigned_qty in rows:
-        total_qty = int(getattr(tool, "quantity", 0) or 0)
-        assigned_qty = max(int(assigned_qty or 0), 0)
+    visible_tool_ids = []
+
+    for tool, assigned_qty_value in rows:
+        total_qty = max(int(tool.quantity or 0), 0)
+        assigned_qty = max(int(assigned_qty_value or 0), 0)
         free_qty = max(total_qty - assigned_qty, 0)
 
         raw_status = (tool.status or "").strip().lower()
 
-        if raw_status in ("maintenance", "lost", "retired"):
+        if raw_status in {"maintenance", "lost", "retired"}:
             computed_status = raw_status
         elif assigned_qty > 0:
             computed_status = "assigned"
@@ -9338,84 +10090,132 @@ def tools_list():
         show_row = True
 
         if status == "available":
-            show_row = free_qty > 0 and raw_status not in ("maintenance", "lost", "retired")
+            show_row = (
+                free_qty > 0
+                and raw_status not in {"maintenance", "lost", "retired"}
+            )
 
         elif status == "assigned":
-            show_row = assigned_qty > 0 and raw_status not in ("maintenance", "lost", "retired")
+            show_row = (
+                assigned_qty > 0
+                and raw_status not in {"maintenance", "lost", "retired"}
+            )
 
-        elif status in ("maintenance", "lost", "retired"):
+        elif status in {"maintenance", "lost", "retired"}:
             show_row = raw_status == status
 
         if not show_row:
             continue
 
-        tools.append({
-            "id": tool.id,
-            "tool_number": tool.tool_number,
-            "name": tool.name,
-            "quantity": total_qty,
-            "assigned_qty": assigned_qty,
-            "free_qty": free_qty,
-            "status": computed_status,
-            "location": tool.location or "TOOLS",
-        })
+        visible_tool_ids.append(tool.id)
 
-    assigned_by_tool = {}
+        tools.append(
+            {
+                "id": tool.id,
+                "tool_number": tool.tool_number,
+                "name": tool.name,
+                "asset_type": tool.asset_type,
+                "serial_number": tool.serial_number,
+                "condition": tool.condition,
+                "quantity": total_qty,
+                "assigned_qty": assigned_qty,
+                "free_qty": free_qty,
+                "status": computed_status,
+                "location": tool.location or "TOOLS",
+            }
+        )
 
-    for t in tools:
-        tool_id = int(t["id"])
+    after_python_prep = perf_counter()
 
-        assigned_rows = (
+    # =========================================================
+    # 3. Один bulk-запрос для holders всех видимых assets
+    # =========================================================
+
+    assigned_by_tool = {
+        int(tool_id): []
+        for tool_id in visible_tool_ids
+    }
+
+    if visible_tool_ids:
+        holder_net_expr = func.coalesce(
+            func.sum(
+                case(
+                    (
+                        ToolMovement.action == "assigned",
+                        ToolMovement.quantity,
+                    ),
+                    (
+                        ToolMovement.action == "returned",
+                        -ToolMovement.quantity,
+                    ),
+                    else_=0,
+                )
+            ),
+            0,
+        )
+
+        holder_rows = (
             db.session.query(
-                ToolMovement.technician_name,
-                func.coalesce(func.sum(ToolMovement.quantity), 0)
+                ToolMovement.tool_id.label("tool_id"),
+                ToolMovement.technician_name.label("holder_name"),
+                holder_net_expr.label("holding_qty"),
             )
             .filter(
-                ToolMovement.tool_id == tool_id,
-                ToolMovement.action == "assigned"
+                ToolMovement.tool_id.in_(visible_tool_ids),
+                ToolMovement.action.in_(("assigned", "returned")),
             )
-            .group_by(ToolMovement.technician_name)
+            .group_by(
+                ToolMovement.tool_id,
+                ToolMovement.technician_name,
+            )
+            .having(holder_net_expr > 0)
+            .order_by(
+                ToolMovement.tool_id.asc(),
+                ToolMovement.technician_name.asc(),
+            )
             .all()
         )
 
-        returned_rows = (
-            db.session.query(
-                ToolMovement.technician_name,
-                func.coalesce(func.sum(ToolMovement.quantity), 0)
+        for row in holder_rows:
+            tool_id = int(row.tool_id)
+            holding_qty = max(int(row.holding_qty or 0), 0)
+
+            if holding_qty <= 0:
+                continue
+
+            assigned_by_tool[tool_id].append(
+                {
+                    "tech": row.holder_name or "—",
+                    "qty": holding_qty,
+                }
             )
-            .filter(
-                ToolMovement.tool_id == tool_id,
-                ToolMovement.action == "returned"
-            )
-            .group_by(ToolMovement.technician_name)
-            .all()
-        )
 
-        ret_map = {
-            name: int(qty or 0)
-            for name, qty in returned_rows
-        }
+    finished_at = perf_counter()
 
-        assigned_by_tool[tool_id] = []
-
-        for tech, qty in assigned_rows:
-            qty = int(qty or 0) - ret_map.get(tech, 0)
-
-            if qty > 0:
-                assigned_by_tool[tool_id].append({
-                    "tech": tech or "—",
-                    "qty": qty,
-                })
+    current_app.logger.debug(
+       (
+            "TOOLS_LIST PERF total=%.3fs "
+            "tools_query=%.3fs "
+            "prep=%.3fs "
+            "holders_query=%.3fs "
+            "rows=%s visible=%s"
+        ),
+        finished_at - started_at,
+        after_tools_query - started_at,
+        after_python_prep - after_tools_query,
+        finished_at - after_python_prep,
+        len(rows),
+        len(tools),
+    )
 
     return render_template(
         "tools.html",
         tools=tools,
         stats=stats,
         status=status,
-        q=q,
+        q=search_text,
         assigned_by_tool=assigned_by_tool,
     )
-
 @inventory_bp.get("/tools/<int:tool_id>/transfer", endpoint="tool_transfer_form")
 @login_required
 def tool_transfer_form(tool_id):
@@ -9627,81 +10427,162 @@ def tool_transfer(tool_id):
 @inventory_bp.get("/tools/history", endpoint="tools_history")
 @login_required
 def tools_history():
-    from flask import render_template, request
-    from sqlalchemy import func, case, or_
+    from time import perf_counter
+
+    from flask import current_app, render_template, request
+    from sqlalchemy import case, func, or_
+    from sqlalchemy.orm import joinedload, lazyload
+
+    from extensions import db
     from models import ToolAsset, ToolMovement
 
-    tech_filter = (request.args.get("tech") or "").strip()
+    started_at = perf_counter()
 
-    total_tools = db.session.query(func.coalesce(func.sum(ToolAsset.quantity), 0)).scalar() or 0
+    tech_filter = (
+        request.args.get("tech") or ""
+    ).strip()
 
-    assigned_expr = func.coalesce(
+    total_tools = (
+        db.session.query(
+            func.coalesce(
+                func.sum(ToolAsset.quantity),
+                0,
+            )
+        )
+        .scalar()
+        or 0
+    )
+
+    net_expr = func.coalesce(
         func.sum(
             case(
-                (ToolMovement.action == "assigned", ToolMovement.quantity),
-                (ToolMovement.action == "returned", -ToolMovement.quantity),
+                (
+                    ToolMovement.action == "assigned",
+                    ToolMovement.quantity,
+                ),
+                (
+                    ToolMovement.action == "returned",
+                    -ToolMovement.quantity,
+                ),
                 else_=0,
             )
         ),
         0,
     )
 
-    total_assigned = (
-        db.session.query(assigned_expr)
-        .select_from(ToolMovement)
-        .scalar()
-        or 0
-    )
-
-    total_free = max(int(total_tools) - int(total_assigned), 0)
-
-    tech_rows = (
+    technician_rows = (
         db.session.query(
-            ToolMovement.technician_name,
-            assigned_expr.label("qty"),
+            ToolMovement.technician_name.label("technician_name"),
+            net_expr.label("holding_qty"),
         )
-        .group_by(ToolMovement.technician_name)
+        .filter(
+            ToolMovement.action.in_(("assigned", "returned")),
+        )
+        .group_by(
+            ToolMovement.technician_name
+        )
+        .having(
+            net_expr > 0
+        )
+        .order_by(
+            ToolMovement.technician_name.asc()
+        )
         .all()
     )
 
     by_tech = [
-        {"tech": tech or "—", "qty": int(qty or 0)}
-        for tech, qty in tech_rows
-        if int(qty or 0) > 0
+        {
+            "tech": row.technician_name or "—",
+            "qty": max(
+                int(row.holding_qty or 0),
+                0,
+            ),
+        }
+        for row in technician_rows
+        if int(row.holding_qty or 0) > 0
     ]
 
-    movements_q = (
-        ToolMovement.query
-        .filter(~ToolMovement.note.ilike("Transfer in%"))
-        .filter(~ToolMovement.note.ilike("Transfer out%"))
+    total_assigned = sum(
+        item["qty"]
+        for item in by_tech
+    )
+
+    total_tools = max(
+        int(total_tools or 0),
+        0,
+    )
+
+    total_free = max(
+        total_tools - total_assigned,
+        0,
+    )
+
+    movements_query = (
+        db.session.query(ToolMovement)
+        .options(
+            lazyload("*"),
+            joinedload(ToolMovement.tool),
+        )
+        .filter(
+            ~ToolMovement.note.ilike("Transfer in%"),
+            ~ToolMovement.note.ilike("Transfer out%"),
+        )
     )
 
     if tech_filter:
-        like = f"%{tech_filter}%"
+        like_value = f"%{tech_filter}%"
 
-        movements_q = movements_q.filter(
+        movements_query = movements_query.filter(
             or_(
-                ToolMovement.technician_name.ilike(like),
-                ToolMovement.note.ilike(like),
+                ToolMovement.technician_name.ilike(
+                    like_value
+                ),
+                ToolMovement.note.ilike(
+                    like_value
+                ),
             )
         )
 
     movements = (
-        movements_q
-        .order_by(ToolMovement.created_at.desc(), ToolMovement.id.desc())
+        movements_query
+        .order_by(
+            ToolMovement.created_at.desc(),
+            ToolMovement.id.desc(),
+        )
         .limit(300)
         .all()
     )
 
-    return render_template(
+    finished_at = perf_counter()
+
+    current_app.logger.debug(
+        (
+            "TOOLS_HISTORY PERF total=%.3fs "
+            "movements=%s technicians=%s"
+        ),
+        finished_at - started_at,
+        len(movements),
+        len(by_tech),
+    )
+
+    render_started_at = perf_counter()
+
+    response = render_template(
         "tools_history.html",
-        total_tools=int(total_tools),
-        total_assigned=int(total_assigned),
-        total_free=int(total_free),
+        total_tools=total_tools,
+        total_assigned=total_assigned,
+        total_free=total_free,
         by_tech=by_tech,
         movements=movements,
         tech_filter=tech_filter,
     )
+
+    current_app.logger.debug(
+        "TOOLS_HISTORY RENDER %.3fs",
+        perf_counter() - render_started_at,
+    )
+
+    return response
 
 @inventory_bp.get("/tools/<int:tool_id>", endpoint="tool_detail")
 @login_required
@@ -9839,110 +10720,224 @@ def tool_detail(tool_id):
 @inventory_bp.get("/tools/stats", endpoint="tools_stats")
 @login_required
 def tools_stats():
-    from flask import render_template
-    from sqlalchemy import func, case
+    from collections import defaultdict
+    from time import perf_counter
+
+    from flask import current_app, render_template
+    from sqlalchemy import case, func
+    from sqlalchemy.orm import lazyload
+
+    from extensions import db
     from models import ToolAsset, ToolMovement
 
+    started_at = perf_counter()
+
     total_tools = (
-        db.session.query(func.coalesce(func.sum(ToolAsset.quantity), 0))
+        db.session.query(
+            func.coalesce(func.sum(ToolAsset.quantity), 0)
+        )
         .scalar()
         or 0
     )
 
-    assigned_expr = func.coalesce(
+    movement_net_expr = func.coalesce(
         func.sum(
             case(
-                (ToolMovement.action == "assigned", ToolMovement.quantity),
-                (ToolMovement.action == "returned", -ToolMovement.quantity),
+                (
+                    ToolMovement.action == "assigned",
+                    ToolMovement.quantity,
+                ),
+                (
+                    ToolMovement.action == "returned",
+                    -ToolMovement.quantity,
+                ),
                 else_=0,
             )
         ),
         0,
     )
 
-    total_assigned = (
-        db.session.query(assigned_expr)
-        .select_from(ToolMovement)
-        .scalar()
-        or 0
-    )
-
-    total_assigned = max(int(total_assigned), 0)
-    total_tools = int(total_tools)
-    total_free = max(total_tools - total_assigned, 0)
-
-    tech_rows = (
+    technician_rows = (
         db.session.query(
-            ToolMovement.technician_name,
-            assigned_expr.label("holding"),
-            func.max(ToolMovement.created_at).label("last_move"),
+            ToolMovement.technician_name.label("technician_name"),
+
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            ToolMovement.action == "assigned",
+                            ToolMovement.quantity,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("assigned_total"),
+
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            ToolMovement.action == "returned",
+                            ToolMovement.quantity,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("returned_total"),
+
+            movement_net_expr.label("holding"),
+
+            func.max(
+                ToolMovement.created_at
+            ).label("last_move"),
         )
         .filter(
-            ToolMovement.action.in_(("assigned", "returned"))
+            ToolMovement.action.in_(("assigned", "returned")),
+            ToolMovement.technician_name.isnot(None),
         )
-        .group_by(ToolMovement.technician_name)
+        .group_by(
+            ToolMovement.technician_name
+        )
         .all()
     )
 
-    technicians = []
+    after_tech_query = perf_counter()
 
-    for tech, holding, last_move in tech_rows:
-        holding = max(int(holding or 0), 0)
+    technician_names = [
+        row.technician_name
+        for row in technician_rows
+        if row.technician_name
+    ]
 
-        tools = (
+    tools_by_technician = defaultdict(list)
+
+    if technician_names:
+        tool_holding_expr = func.coalesce(
+            func.sum(
+                case(
+                    (
+                        ToolMovement.action == "assigned",
+                        ToolMovement.quantity,
+                    ),
+                    (
+                        ToolMovement.action == "returned",
+                        -ToolMovement.quantity,
+                    ),
+                    else_=0,
+                )
+            ),
+            0,
+        )
+
+        tool_rows = (
             db.session.query(
-                ToolAsset.tool_number,
-                assigned_expr.label("qty"),
+                ToolMovement.technician_name.label("technician_name"),
+                ToolAsset.tool_number.label("tool_number"),
+                tool_holding_expr.label("holding_qty"),
             )
+            .select_from(ToolMovement)
             .join(
-                ToolMovement,
-                ToolMovement.tool_id == ToolAsset.id,
+                ToolAsset,
+                ToolAsset.id == ToolMovement.tool_id,
+            )
+            .options(
+                lazyload("*"),
             )
             .filter(
-                ToolMovement.technician_name == tech,
-                ToolMovement.action.in_(("assigned", "returned"))
+                ToolMovement.technician_name.in_(technician_names),
+                ToolMovement.action.in_(("assigned", "returned")),
             )
-            .group_by(ToolAsset.id)
-            .having(assigned_expr > 0)
+            .group_by(
+                ToolMovement.technician_name,
+                ToolAsset.id,
+                ToolAsset.tool_number,
+            )
+            .having(
+                tool_holding_expr > 0
+            )
+            .order_by(
+                ToolMovement.technician_name.asc(),
+                ToolAsset.tool_number.asc(),
+            )
             .all()
         )
 
-        tool_list = [
-            f"{pn} x{qty}"
-            for pn, qty in tools
-        ]
+        for row in tool_rows:
+            holding_qty = max(int(row.holding_qty or 0), 0)
 
-        assigned_total = (
-                db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
-                .filter(
-                    ToolMovement.technician_name == tech,
-                    ToolMovement.action == "assigned",
-                )
-                .scalar()
-                or 0
+            if holding_qty <= 0:
+                continue
+
+            tools_by_technician[row.technician_name].append(
+                f"{row.tool_number or '—'} x{holding_qty}"
+            )
+
+    technicians = []
+
+    total_assigned = 0
+
+    for row in technician_rows:
+        technician_name = row.technician_name or "—"
+
+        assigned_total = max(
+            int(row.assigned_total or 0),
+            0,
         )
 
-        returned_total = (
-                db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
-                .filter(
-                    ToolMovement.technician_name == tech,
-                    ToolMovement.action == "returned",
-                )
-                .scalar()
-                or 0
+        returned_total = max(
+            int(row.returned_total or 0),
+            0,
         )
 
-        technicians.append({
-            "tech": tech or "—",
-            "assigned": int(assigned_total or 0),
-            "returned": int(returned_total or 0),
-            "holding": holding,
-            "tools": ", ".join(tool_list),
-            "last_move": last_move,
-        })
+        holding = max(
+            int(row.holding or 0),
+            0,
+        )
+
+        total_assigned += holding
+
+        technicians.append(
+            {
+                "tech": technician_name,
+                "assigned": assigned_total,
+                "returned": returned_total,
+                "holding": holding,
+                "tools": ", ".join(
+                    tools_by_technician.get(
+                        row.technician_name,
+                        [],
+                    )
+                ),
+                "last_move": row.last_move,
+            }
+        )
 
     technicians.sort(
-        key=lambda x: (-x["holding"], x["tech"])
+        key=lambda item: (
+            -item["holding"],
+            item["tech"],
+        )
+    )
+
+    total_tools = max(int(total_tools or 0), 0)
+    total_assigned = max(int(total_assigned or 0), 0)
+    total_free = max(total_tools - total_assigned, 0)
+
+    finished_at = perf_counter()
+
+    current_app.logger.debug(
+        (
+            "TOOLS_STATS PERF total=%.3fs "
+            "tech_query=%.3fs "
+            "tool_query_and_prep=%.3fs "
+            "technicians=%s"
+        ),
+        finished_at - started_at,
+        after_tech_query - started_at,
+        finished_at - after_tech_query,
+        len(technicians),
     )
 
     return render_template(
@@ -9957,146 +10952,297 @@ def tools_stats():
 @login_required
 def tools_by_technician(technician):
     from datetime import datetime
-    from flask import render_template
-    from sqlalchemy import func
+    from time import perf_counter
+
+    from flask import current_app, render_template
+    from sqlalchemy import case, func
+    from sqlalchemy.orm import joinedload, lazyload
+
+    from extensions import db
     from models import ToolAsset, ToolMovement
+
+    started_at = perf_counter()
 
     tech = (technician or "").strip()
 
-    assigned_total = (
-        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
-        .filter(
-            ToolMovement.technician_name == tech,
-            ToolMovement.action == "assigned",
+    if not tech:
+        return render_template(
+            "tools_by_technician.html",
+            technician="",
+            assigned_total=0,
+            returned_total=0,
+            holding=0,
+            current_tools=[],
+            long_held=[],
+            at_risk_tools=[],
+            return_rate=0,
+            tool_summary=[],
+            movements=[],
+            wo_ids=[],
         )
-        .scalar()
-        or 0
-    )
 
-    returned_total = (
-        db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
-        .filter(
-            ToolMovement.technician_name == tech,
-            ToolMovement.action == "returned",
+    # =========================================================
+    # 1. Один запрос: totals по technician
+    # =========================================================
+
+    totals_row = (
+        db.session.query(
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            ToolMovement.action == "assigned",
+                            ToolMovement.quantity,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("assigned_total"),
+
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            ToolMovement.action == "returned",
+                            ToolMovement.quantity,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("returned_total"),
         )
-        .scalar()
-        or 0
-    )
-
-    holding = max(int(assigned_total or 0) - int(returned_total or 0), 0)
-
-    return_rate = (
-        round((int(returned_total or 0) * 100) / int(assigned_total or 0))
-        if int(assigned_total or 0) > 0
-        else 0
-    )
-
-    current_tools = []
-    long_held = []
-    at_risk_tools = []
-    tool_summary = []
-
-    tool_ids = (
-        db.session.query(ToolMovement.tool_id)
         .filter(
             ToolMovement.technician_name == tech,
             ToolMovement.action.in_(("assigned", "returned")),
         )
-        .distinct()
+        .one()
+    )
+
+    assigned_total = max(
+        int(totals_row.assigned_total or 0),
+        0,
+    )
+
+    returned_total = max(
+        int(totals_row.returned_total or 0),
+        0,
+    )
+
+    holding = max(
+        assigned_total - returned_total,
+        0,
+    )
+
+    return_rate = (
+        round((returned_total * 100) / assigned_total)
+        if assigned_total > 0
+        else 0
+    )
+
+    after_totals = perf_counter()
+
+    # =========================================================
+    # 2. Один bulk-запрос: summary по каждому tool
+    # =========================================================
+
+    assigned_expr = func.coalesce(
+        func.sum(
+            case(
+                (
+                    ToolMovement.action == "assigned",
+                    ToolMovement.quantity,
+                ),
+                else_=0,
+            )
+        ),
+        0,
+    )
+
+    returned_expr = func.coalesce(
+        func.sum(
+            case(
+                (
+                    ToolMovement.action == "returned",
+                    ToolMovement.quantity,
+                ),
+                else_=0,
+            )
+        ),
+        0,
+    )
+
+    first_assigned_expr = func.min(
+        case(
+            (
+                ToolMovement.action == "assigned",
+                ToolMovement.created_at,
+            ),
+            else_=None,
+        )
+    )
+
+    last_work_order_expr = func.max(
+        case(
+            (
+                ToolMovement.work_order_id.isnot(None),
+                ToolMovement.work_order_id,
+            ),
+            else_=None,
+        )
+    )
+
+    tool_rows = (
+        db.session.query(
+            ToolAsset.id.label("tool_id"),
+            ToolAsset.tool_number.label("tool_number"),
+            ToolAsset.name.label("tool_name"),
+            ToolAsset.asset_type.label("asset_type"),
+            ToolAsset.serial_number.label("serial_number"),
+            ToolAsset.condition.label("condition"),
+            ToolAsset.status.label("status"),
+            ToolAsset.location.label("location"),
+
+            assigned_expr.label("assigned_qty"),
+            returned_expr.label("returned_qty"),
+            first_assigned_expr.label("first_assigned"),
+            last_work_order_expr.label("last_work_order_id"),
+        )
+        .select_from(ToolMovement)
+        .join(
+            ToolAsset,
+            ToolAsset.id == ToolMovement.tool_id,
+        )
+        .options(
+            lazyload("*"),
+        )
+        .filter(
+            ToolMovement.technician_name == tech,
+            ToolMovement.action.in_(("assigned", "returned")),
+        )
+        .group_by(
+            ToolAsset.id,
+            ToolAsset.tool_number,
+            ToolAsset.name,
+            ToolAsset.asset_type,
+            ToolAsset.serial_number,
+            ToolAsset.condition,
+            ToolAsset.status,
+            ToolAsset.location,
+        )
+        .order_by(
+            ToolAsset.tool_number.asc(),
+        )
         .all()
     )
 
-    for (tool_id,) in tool_ids:
-        tool = ToolAsset.query.get(tool_id)
-        if not tool:
-            continue
+    after_tools = perf_counter()
 
-        assigned = (
-            db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
-            .filter(
-                ToolMovement.tool_id == tool_id,
-                ToolMovement.technician_name == tech,
-                ToolMovement.action == "assigned",
-            )
-            .scalar()
-            or 0
-        )
+    tool_summary = []
+    current_tools = []
+    long_held = []
+    at_risk_tools = []
 
-        returned = (
-            db.session.query(func.coalesce(func.sum(ToolMovement.quantity), 0))
-            .filter(
-                ToolMovement.tool_id == tool_id,
-                ToolMovement.technician_name == tech,
-                ToolMovement.action == "returned",
-            )
-            .scalar()
-            or 0
-        )
+    now = datetime.utcnow()
 
-        assigned = int(assigned or 0)
-        returned = int(returned or 0)
+    for row in tool_rows:
+        assigned = max(int(row.assigned_qty or 0), 0)
+        returned = max(int(row.returned_qty or 0), 0)
         qty = max(assigned - returned, 0)
 
-        first_assigned = (
-            db.session.query(func.min(ToolMovement.created_at))
-            .filter(
-                ToolMovement.tool_id == tool.id,
-                ToolMovement.technician_name == tech,
-                ToolMovement.action == "assigned",
-            )
-            .scalar()
-        )
+        tool_data = {
+            "id": int(row.tool_id),
+            "tool_number": row.tool_number,
+            "name": row.tool_name,
+            "asset_type": row.asset_type,
+            "serial_number": row.serial_number,
+            "condition": row.condition,
+            "status": row.status,
+            "location": row.location,
+        }
 
-        tool_summary.append({
-            "tool": tool,
-            "assigned": assigned,
-            "returned": returned,
-            "holding": qty,
-        })
+        tool_summary.append(
+            {
+                "tool": tool_data,
+                "assigned": assigned,
+                "returned": returned,
+                "holding": qty,
+            }
+        )
 
         if qty <= 0:
             continue
 
+        first_assigned = row.first_assigned
+
         days_held = 0
+
         if first_assigned:
-            days_held = (datetime.utcnow() - first_assigned).days
-
-        current_tools.append({
-            "tool": tool,
-            "qty": qty,
-            "since": first_assigned,
-        })
-
-        long_held.append({
-            "tool": tool,
-            "qty": qty,
-            "days": days_held,
-        })
-
-        if days_held >= 30:
-            last_wo = (
-                db.session.query(ToolMovement.work_order_id)
-                .filter(
-                    ToolMovement.tool_id == tool.id,
-                    ToolMovement.technician_name == tech,
-                    ToolMovement.work_order_id.isnot(None),
-                )
-                .order_by(ToolMovement.created_at.desc())
-                .first()
+            days_held = max(
+                (now - first_assigned).days,
+                0,
             )
 
-            at_risk_tools.append({
-                "tool": tool,
+        current_tools.append(
+            {
+                "tool": tool_data,
+                "qty": qty,
+                "since": first_assigned,
+            }
+        )
+
+        long_held.append(
+            {
+                "tool": tool_data,
                 "qty": qty,
                 "days": days_held,
-                "wo_id": last_wo[0] if last_wo else None,
-            })
+            }
+        )
+
+        if days_held >= 30:
+            at_risk_tools.append(
+                {
+                    "tool": tool_data,
+                    "qty": qty,
+                    "days": days_held,
+                    "wo_id": (
+                        int(row.last_work_order_id)
+                        if row.last_work_order_id
+                        else None
+                    ),
+                }
+            )
+
+    long_held.sort(
+        key=lambda item: (
+            -item["days"],
+            item["tool"]["tool_number"] or "",
+        )
+    )
+
+    at_risk_tools.sort(
+        key=lambda item: (
+            -item["days"],
+            item["tool"]["tool_number"] or "",
+        )
+    )
+
+    # =========================================================
+    # 3. Один запрос: movements
+    # =========================================================
 
     movements = (
-        ToolMovement.query
-        .filter(ToolMovement.technician_name == tech)
-        .filter(~ToolMovement.note.ilike("Transfer in%"))
-        .filter(~ToolMovement.note.ilike("Transfer out%"))
+        db.session.query(ToolMovement)
+        .options(
+            lazyload("*"),
+            joinedload(ToolMovement.tool),
+        )
+        .filter(
+            ToolMovement.technician_name == tech,
+            ~ToolMovement.note.ilike("Transfer in%"),
+            ~ToolMovement.note.ilike("Transfer out%"),
+        )
         .order_by(
             ToolMovement.created_at.desc(),
             ToolMovement.id.desc(),
@@ -10105,23 +11251,26 @@ def tools_by_technician(technician):
         .all()
     )
 
-    related_wos = (
-        db.session.query(ToolMovement.work_order_id)
-        .filter(
-            ToolMovement.technician_name == tech,
-            ToolMovement.work_order_id.isnot(None),
-        )
-        .distinct()
-        .all()
+    # =========================================================
+    # 4. Related WO ids уже берём из movements
+    # =========================================================
+
+    wo_ids = sorted(
+        {
+            int(movement.work_order_id)
+            for movement in movements
+            if movement.work_order_id
+        },
+        reverse=True,
     )
 
-    wo_ids = [r[0] for r in related_wos]
+    before_render = perf_counter()
 
-    return render_template(
+    response = render_template(
         "tools_by_technician.html",
         technician=tech,
-        assigned_total=int(assigned_total or 0),
-        returned_total=int(returned_total or 0),
+        assigned_total=assigned_total,
+        returned_total=returned_total,
         holding=holding,
         current_tools=current_tools,
         long_held=long_held,
@@ -10131,6 +11280,28 @@ def tools_by_technician(technician):
         movements=movements,
         wo_ids=wo_ids,
     )
+
+    finished_at = perf_counter()
+
+    current_app.logger.debug(
+        (
+            "TOOLS_BY_TECH PERF total=%.3fs "
+            "totals=%.3fs "
+            "tools=%.3fs "
+            "prep_and_movements=%.3fs "
+            "render=%.3fs "
+            "tool_rows=%s movements=%s"
+        ),
+        finished_at - started_at,
+        after_totals - started_at,
+        after_tools - after_totals,
+        before_render - after_tools,
+        finished_at - before_render,
+        len(tool_rows),
+        len(movements),
+    )
+
+    return response
 
 @inventory_bp.get("/tools/technician_report.pdf", endpoint="tools_tech_report_pdf")
 @login_required
@@ -10145,13 +11316,6 @@ def tools_tech_report_pdf():
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import inch
-    from reportlab.platypus import (
-        SimpleDocTemplate,
-        Paragraph,
-        Spacer,
-        Table,
-        TableStyle,
-    )
 
     from models import ToolAsset, ToolMovement
 
@@ -13768,11 +14932,9 @@ def download_report_pdf():
                      download_name=f"report_{start or 'all'}_{end or 'all'}.pdf",
                      mimetype='application/pdf')
 
-
 @inventory_bp.route("/users", methods=["GET", "POST"])
 @login_required
 def users():
-    # ---- Создание нового пользователя (разрешено только superadmin)
     if request.method == "POST":
         if current_user.role != ROLE_SUPERADMIN:
             flash("Access denied", "danger")
@@ -13780,43 +14942,66 @@ def users():
 
         username = (request.form.get("username") or "").strip()
         password = request.form.get("password") or ""
-        role     = (request.form.get("role") or "").strip().lower()
+
+        role_raw = (request.form.get("role") or "").strip().lower()
+        role = ROLE_ALIASES.get(role_raw, role_raw)
 
         if not username or not password:
-            flash("Username and password are required.", "warning")
+            flash(
+                "Username and password are required.",
+                "warning",
+            )
             return redirect(url_for("inventory.users"))
 
-        # case-insensitive проверка уникальности
+        if role not in ALLOWED_ROLES:
+            flash("Invalid user role.", "danger")
+            return redirect(url_for("inventory.users"))
+
         exists = (
             db.session.query(User.id)
-            .filter(func.lower(User.username) == username.lower())
+            .filter(
+                func.lower(User.username) == username.lower()
+            )
             .first()
         )
+
         if exists:
             flash("User already exists.", "warning")
             return redirect(url_for("inventory.users"))
 
-        # модель сама нормализует роль (валидатор), дефолт — technician
-        u = User(username=username, role=role or ROLE_TECHNICIAN)
-        u.password = password
-        db.session.add(u)
+        user = User(
+            username=username,
+            role=role,
+        )
+        user.password = password
+
+        db.session.add(user)
         db.session.commit()
+
         flash("User created.", "success")
         return redirect(url_for("inventory.users"))
 
-    # ---- Список пользователей
-    users = User.query.order_by(User.username.asc()).all()
+    users = (
+        User.query
+        .order_by(User.username.asc())
+        .all()
+    )
 
-    # Опции ролей для селекта
     role_options = [
-        ("technician", "Technician"),
-        ("user",       "User"),
-        ("viewer",     "Viewer"),
-        ("admin",      "Admin"),
-        ("superadmin", "Superadmin"),
+        (ROLE_TECHNICIAN, "Technician"),
+        (ROLE_USER, "User"),
+        (ROLE_VIEWER, "Viewer"),
+        (ROLE_ACCOUNTING, "Accounting"),
+        (ROLE_ADMIN, "Admin"),
+        (ROLE_SUPERADMIN, "Superadmin"),
     ]
 
-    return render_template("users.html", users=users, role_options=role_options)
+    return render_template(
+        "users.html",
+        users=users,
+        role_options=role_options,
+    )
+
 @inventory_bp.route('/users/add', methods=['GET', 'POST'])
 @login_required
 def add_user():
@@ -13873,24 +15058,30 @@ def edit_user(user_id):
     # Список ролей для селекта:
     # - супер-админ видит все роли
     # - админ может назначать только user/viewer/technician; себе — оставлять admin
+
     role_options = []
-    if me_role == 'superadmin':
+
+    if me_role == ROLE_SUPERADMIN:
         role_options = [
-            ('technician', 'Technician'),
-            ('user', 'User'),
-            ('viewer', 'Viewer'),
-            ('admin', 'Admin'),
-            ('superadmin', 'Superadmin'),
+            (ROLE_TECHNICIAN, "Technician"),
+            (ROLE_USER, "User"),
+            (ROLE_VIEWER, "Viewer"),
+            (ROLE_ACCOUNTING, "Accounting"),
+            (ROLE_ADMIN, "Admin"),
+            (ROLE_SUPERADMIN, "Superadmin"),
         ]
+
     else:  # admin
         role_options = [
-            ('technician', 'Technician'),
-            ('user', 'User'),
-            ('viewer', 'Viewer'),
+            (ROLE_TECHNICIAN, "Technician"),
+            (ROLE_USER, "User"),
+            (ROLE_VIEWER, "Viewer"),
         ]
-        # если админ редактирует себя — оставляем возможность иметь admin (но не менять на супер-админа)
+
         if user.id == current_user.id:
-            role_options.append(('admin', 'Admin'))
+            role_options.append(
+                (ROLE_ADMIN, "Admin")
+            )
 
     if request.method == 'POST':
         new_username = (request.form.get('username') or '').strip()
@@ -13910,16 +15101,34 @@ def edit_user(user_id):
             user.username = new_username
 
         # роль — только в пределах разрешённых опций
-        allowed_values = {val for val, _ in role_options}
-        if new_role_raw in allowed_values:
-            user.role = new_role_raw  # у вас в модели стоит нормализация/дефолт
-        else:
-            # ничего не меняем, чтобы не сломать существующее значение
-            pass
+        allowed_values = {value for value, _caption in role_options}
 
-        db.session.commit()
-        flash("User updated successfully", "success")
-        return redirect(url_for('inventory.users'))
+        if new_role_raw not in allowed_values:
+            flash(
+                f"Invalid role received: {new_role_raw!r}",
+                "danger",
+            )
+            return redirect(
+                url_for("inventory.edit_user", user_id=user.id)
+            )
+
+        user.role = new_role_raw
+
+        try:
+            db.session.commit()
+            db.session.refresh(user)
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Failed to update user: {e}", "danger")
+            return redirect(
+                url_for("inventory.edit_user", user_id=user.id)
+            )
+
+        flash(
+            f"User updated successfully. Saved role: {user.role}",
+            "success",
+        )
+        return redirect(url_for("inventory.users"))
 
     return render_template('edit_user.html', user=user, role_options=role_options)
 
@@ -17233,7 +18442,7 @@ def add_part_batch():
     # --- надёжное чтение payload ---
     payload_raw = (request.form.get("batch_payload") or "").strip()
     if not payload_raw:
-        current_app.logger.warning("Empty batch_payload in POST form")
+        current_app.logger.debug("Empty batch_payload in POST form")
         flash("Invalid batch data: empty payload", "danger")
         return redirect(url_for("inventory.dashboard"))
 
@@ -17281,7 +18490,7 @@ def add_part_batch():
             unit_cost_val = 0.0
 
         if not pn or qty <= 0:
-            current_app.logger.warning("Skip invalid row in add-batch: %r", row)
+            current_app.logger.debug("Skip invalid row in add-batch: %r", row)
             continue
 
         line = ReceivingItem(
