@@ -126,17 +126,17 @@
           <a href="{{ url_for('inventory.download_report_xlsx',
                              start_date=start_date, end_date=end_date,
                              q=q) }}"
-             class="btn btn-outline-secondary">📊 Export Issued (XLSX)</a>
+             class="btn btn-outline-secondary">📊 Issued Report(XLSX)</a>
 
           <a href="{{ url_for('inventory.download_returns_xlsx',
                              start_date=start_date, end_date=end_date,
                              q=q) }}"
-             class="btn btn-outline-warning">↩️ Export Returns (XLSX)</a>
+             class="btn btn-outline-warning">↩️ Returns Report (XLSX)</a>
 
           <a href="{{ url_for('inventory.download_stock_xlsx',
                              start_date=start_date, end_date=end_date,
                              q=q) }}"
-             class="btn btn-outline-info">📦 Export Stock (XLSX)</a>
+             class="btn btn-outline-info">📦 Stock Issue Report (XLSX)</a>
 
           <a href="{{ url_for('inventory.dashboard') }}" class="btn btn-outline-primary">🏠 Dashboard</a>
           <a href="{{ url_for('inventory.issue_part') }}" class="btn btn-outline-success">🧾 Issue Part</a>

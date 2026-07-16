@@ -96,6 +96,171 @@
       box-shadow:0 2px 4px rgba(0,0,0,.8),0 6px 16px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.9);
     }
     .tech-toolbar-inner .btn-tech-nav:active { filter:brightness(1.05); }
+
+    /* =========================================================
+   RESPONSIVE NAVBAR FOR LAPTOPS
+   992px–1599px: user panel on top, navigation on second row
+   ========================================================= */
+@media (min-width: 992px) and (max-width: 1599.98px) {
+
+  .wccr-navbar .container-fluid {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    padding-top: .55rem !important;
+    padding-bottom: 0 !important;
+  }
+
+  /* Company logo: first row, left side */
+  .wccr-navbar .navbar-brand {
+    flex: 0 0 auto;
+    margin-right: 0;
+    padding-top: .15rem;
+    padding-bottom: .55rem;
+    font-size: .82rem;
+  }
+
+  .wccr-navbar .navbar-brand span.sub {
+    font-size: .55rem;
+  }
+
+  /*
+   Navbar content becomes a full-width block.
+   User controls are placed in the upper-right corner.
+   Menu links occupy the complete second row.
+  */
+  .wccr-navbar #navbarMain {
+    display: flex !important;
+    flex-basis: 100%;
+    width: 100%;
+    flex-grow: 1;
+    flex-wrap: wrap;
+    margin-top: 0 !important;
+  }
+
+  /* User information and buttons: upper-right */
+  .wccr-navbar .wccr-userbox {
+    position: absolute;
+    top: .48rem;
+    right: .75rem;
+
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-end;
+
+    width: auto;
+    max-width: calc(100% - 270px);
+    margin-left: 0 !important;
+    gap: .35rem;
+
+    font-size: .62rem;
+  }
+
+  .wccr-navbar .wccr-userbox > div {
+    flex-wrap: nowrap !important;
+    gap: .35rem !important;
+    margin-right: 0 !important;
+  }
+
+  .wccr-navbar .role-badge,
+  .wccr-navbar .actor-badge {
+    font-size: .53rem;
+    padding: .2rem .32rem;
+  }
+
+  .wccr-navbar .wccr-btn-ghost,
+  .wccr-navbar .wccr-btn-solid {
+    font-size: .55rem;
+    padding: .34rem .52rem;
+  }
+
+  /* Navigation menu: clean second row */
+  .wccr-navbar .navbar-nav {
+    order: 2;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+
+    width: 100%;
+    margin: 0 !important;
+    padding: .32rem 0 .42rem;
+
+    align-items: stretch;
+    justify-content: space-between;
+
+    border-top: 1px solid rgba(255,255,255,.13);
+  }
+
+  .wccr-navbar .navbar-nav .nav-item {
+    display: flex;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .wccr-navbar .navbar-nav .nav-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: .46rem .38rem;
+    font-size: .57rem;
+    line-height: 1.1;
+    letter-spacing: .015em;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .wccr-navbar .navbar-nav .badge {
+    font-size: .48rem;
+    padding: .18rem .3rem;
+  }
+
+  /*
+   Fixed navbar is now taller because it contains two rows.
+   Push page content down so the navbar does not cover it.
+  */
+  main.main-wrapper {
+    padding-top: 7.15rem;
+  }
+}
+
+
+/* Slightly smaller laptop screens */
+@media (min-width: 992px) and (max-width: 1399.98px) {
+
+  .wccr-navbar .navbar-nav .nav-link {
+    padding-left: .26rem;
+    padding-right: .26rem;
+    font-size: .53rem;
+    letter-spacing: 0;
+  }
+
+  .wccr-navbar .wccr-userbox {
+    gap: .25rem;
+  }
+
+  .wccr-navbar .wccr-userbox > div {
+    gap: .25rem !important;
+  }
+
+  .wccr-navbar .wccr-btn-ghost,
+  .wccr-navbar .wccr-btn-solid {
+    font-size: .51rem;
+    padding: .31rem .44rem;
+  }
+}
+
+
+/* Normal large monitor: keep current one-row navbar */
+@media (min-width: 1600px) {
+
+  main.main-wrapper {
+    padding-top: 4.75rem;
+  }
+}
+
   </style>
 
   {% block extra_head %}{% endblock %}

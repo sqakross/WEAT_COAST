@@ -7041,7 +7041,7 @@ def download_stock_xlsx():
     from datetime import datetime
     from io import BytesIO
     # from sqlalchemy import func
-    from sqlalchemy import or_
+    from sqlalchemy import func, or_
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
@@ -7075,75 +7075,99 @@ def download_stock_xlsx():
     )
 
     if start_dt:
-        q = q.filter(IssuedPartRecord.issue_date >= start_dt)
+        q = q.filter(
+            IssuedPartRecord.issue_date >= start_dt
+        )
+
     if end_dt:
-        q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
+        q = q.filter(
+            IssuedPartRecord.issue_date < end_dt + timedelta(days=1)
+        )
 
     # ---------- unified search q ----------
     if q_s:
         like = f"%{q_s}%"
         inv_no = None
+
         try:
             inv_no = int(q_s)
-        except Exception:
+        except (TypeError, ValueError):
             inv_no = None
 
         conds = [
             IssuedPartRecord.issued_to.ilike(like),
             IssuedPartRecord.reference_job.ilike(like),
-            func.coalesce(IssuedPartRecord.inv_ref, "").ilike(like),
+            func.coalesce(
+                IssuedPartRecord.inv_ref,
+                "",
+            ).ilike(like),
             Part.part_number.ilike(like),
             Part.name.ilike(like),
-            func.coalesce(IssuedPartRecord.location, "").ilike(like),
+            func.coalesce(
+                IssuedPartRecord.location,
+                "",
+            ).ilike(like),
         ]
+
         if inv_no is not None:
-            conds.append(IssuedPartRecord.invoice_number == inv_no)
+            conds.append(
+                IssuedPartRecord.invoice_number == inv_no
+            )
 
         q = q.filter(or_(*conds))
 
     # ---------- location filter ----------
     if location:
-        q = q.filter(IssuedPartRecord.location == location)
+        q = q.filter(
+            IssuedPartRecord.location == location
+        )
 
     # ---------- status filter ----------
     if status == "OPEN":
         q = q.filter(
             IssuedPartRecord.quantity > 0,
-            func.coalesce(IssuedPartRecord.consumed_qty, 0) == 0
+            func.coalesce(
+                IssuedPartRecord.consumed_qty,
+                0,
+            ) == 0,
         )
+
     elif status == "PARTIAL":
         q = q.filter(
             IssuedPartRecord.quantity > 0,
-            func.coalesce(IssuedPartRecord.consumed_qty, 0) > 0,
-            func.coalesce(IssuedPartRecord.consumed_qty, 0) < IssuedPartRecord.quantity
+            func.coalesce(
+                IssuedPartRecord.consumed_qty,
+                0,
+            ) > 0,
+            func.coalesce(
+                IssuedPartRecord.consumed_qty,
+                0,
+            ) < IssuedPartRecord.quantity,
         )
+
     elif status == "CONSUMED":
         q = q.filter(
             IssuedPartRecord.quantity > 0,
-            func.coalesce(IssuedPartRecord.consumed_qty, 0) >= IssuedPartRecord.quantity
+            func.coalesce(
+                IssuedPartRecord.consumed_qty,
+                0,
+            ) >= IssuedPartRecord.quantity,
         )
 
-    # STOCK: is_stock=True или STOCK* в reference_job/location
-    is_stock_col = getattr(IssuedPartRecord, "is_stock", None)
-    if is_stock_col is not None:
-        q = q.filter(
-            or_(
-                is_stock_col.is_(True),
-                IssuedPartRecord.reference_job.ilike("STOCK%"),
-                IssuedPartRecord.location.ilike("STOCK%"),
+    # ---------- internal stock issued ----------
+    q = q.filter(
+        IssuedPartRecord.quantity > 0,
+        func.trim(
+            func.coalesce(
+                IssuedPartRecord.inv_ref,
+                "",
             )
-        )
-    else:
-        q = q.filter(
-            or_(
-                IssuedPartRecord.reference_job.ilike("STOCK%"),
-                IssuedPartRecord.location.ilike("STOCK%"),
-            )
-        )
+        ) == "",
+    )
 
     q = q.order_by(
-        IssuedPartRecord.location.asc().nullsfirst(),
         IssuedPartRecord.issue_date.asc(),
+        IssuedPartRecord.invoice_number.asc().nullsfirst(),
         IssuedPartRecord.id.asc(),
     )
 
@@ -7151,7 +7175,7 @@ def download_stock_xlsx():
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Stock Movements"
+    ws.title = "Stock Issued"
 
     header_fill = PatternFill("solid", fgColor="FFD9D9D9")
     stock_fill = PatternFill("solid", fgColor="FFDEEBF7")
@@ -7195,7 +7219,7 @@ def download_stock_xlsx():
 
     filters_line = "Filters: " + ("; ".join(filters_parts) if filters_parts else "(none)")
 
-    ws["A1"] = "Stock Movements Report"
+    ws["A1"] = "Stock Issued Report"
     ws.merge_cells("A1:J1")
     ws["A1"].font = title_font
     ws["A1"].alignment = center_align
@@ -7262,7 +7286,7 @@ def download_stock_xlsx():
     if rows:
         ws.append([])
         ws.append([
-            "", "", "", "", "TOTAL STOCK MOVEMENTS:",
+            "", "", "", "", "TOTAL STOCK ISSUED:",
             "", "", round(total_sum, 2),
             "", ""
         ])
@@ -7295,7 +7319,7 @@ def download_stock_xlsx():
     return send_file(
         output,
         as_attachment=True,
-        download_name="stock_movements_report.xlsx",
+        download_name="stock_issued_report.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
