@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="container-sm" style="max-width: 720px;">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h2 class="mb-1">Opening Balance</h2>
+      <div class="text-muted">
+        Technician: <strong>{{ technician_name }}</strong>
+      </div>
+    </div>
+
+    <a class="btn btn-outline-secondary"
+       href="{{ url_for(
+         'accounting.technician_ledger',
+         technician_name=technician_name
+       ) }}">
+      ← Back
+    </a>
+  </div>
+
+  {% if existing %}
+
+    <div class="alert alert-warning">
+      <div class="fw-bold mb-1">
+        Opening balance already exists.
+      </div>
+
+      <div>
+        Entry #{{ existing.id }},
+        date {{ existing.entry_date }},
+        amount ${{ '%.2f'|format(existing.amount or 0) }}.
+      </div>
+
+      <div class="mt-2">
+        Do not create another opening balance.
+        Use an adjustment when the balance needs correction.
+      </div>
+    </div>
+
+  {% else %}
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+
+        <div class="alert alert-info">
+          Opening Balance should be entered only once when the
+          technician account is introduced into the accounting ledger.
+        </div>
+
+        <form method="POST"
+              action="{{ url_for(
+                'accounting.opening_balance_create',
+                technician_name=technician_name
+              ) }}">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">
+              Opening Date
+            </label>
+
+            <input type="date"
+                   name="opening_date"
+                   class="form-control"
+                   value="{{ today }}"
+                   required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">
+              Amount
+            </label>
+
+            <div class="input-group">
+              <span class="input-group-text">$</span>
+
+              <input type="number"
+                     name="amount"
+                     class="form-control"
+                     min="0.01"
+                     step="0.01"
+                     placeholder="0.00"
+                     required
+                     autofocus>
+            </div>
+
+            <div class="form-text">
+              Enter the amount owed by the technician as of the
+              opening date.
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label fw-semibold">
+              Note
+            </label>
+
+            <textarea name="note"
+                      class="form-control"
+                      rows="3"
+                      maxlength="500"
+                      placeholder="Optional explanation or source document"></textarea>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit"
+                    class="btn btn-warning"
+                    onclick="return confirm(
+                      'Post this opening balance? It should only be created once.'
+                    );">
+              Post Opening Balance
+            </button>
+
+            <a class="btn btn-outline-secondary"
+               href="{{ url_for(
+                 'accounting.technician_ledger',
+                 technician_name=technician_name
+               ) }}">
+              Cancel
+            </a>
+          </div>
+
+        </form>
+      </div>
+    </div>
+
+  {% endif %}
+
+</div>
+
+{% endblock %}

@@ -1597,6 +1597,30 @@ class SupplierReturnBatch(db.Model):
     source_kind = db.Column(db.String(32), nullable=True, index=True)
     source_return_record_id = db.Column(db.Integer, nullable=True, index=True)
 
+    # Supplier credit information (filled after statement reconciliation)
+
+    supplier_credit_document = db.Column(
+        db.String(64),
+        nullable=True,
+        index=True,
+    )
+
+    supplier_credit_date = db.Column(
+        db.Date,
+        nullable=True,
+    )
+
+    reconciled_at = db.Column(
+        db.DateTime,
+        nullable=True,
+    )
+
+    reconciled_by = db.Column(
+        db.Integer,
+        nullable=True,
+        index=True,
+    )
+
     items = db.relationship(
         "SupplierReturnItem",
         back_populates="batch",
@@ -1639,6 +1663,22 @@ class SupplierReturnItem(db.Model):
     tech_note    = db.Column(db.String(255))
 
     batch = db.relationship("SupplierReturnBatch", back_populates="items", lazy="joined")
+
+    # Link back to original issued part (for accounting reconciliation)
+    issued_part_record_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "issued_part_record.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    issued_part_record = db.relationship(
+        "IssuedPartRecord",
+        lazy="joined",
+    )
 
     def __repr__(self):
         return f"<SupplierReturnItem id={self.id} pn={self.part_number!r} qty={self.qty_returned} loc={self.location!r}>"

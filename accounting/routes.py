@@ -59,19 +59,65 @@ def technician_ledger(technician_name):
     from services.accounting_service import (
         get_technician_ledger,
         get_technician_summary,
+        get_technician_payments,
     )
 
-    rows = get_technician_ledger(technician_name)
+    show_paid = (
+        request.args.get("show_paid") or ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
 
+    all_rows = get_technician_ledger(technician_name)
+    payments = get_technician_payments(technician_name)
     summary = get_technician_summary(technician_name)
+
+    if show_paid:
+        rows = all_rows
+    else:
+        rows = [
+            row
+            for row in all_rows
+            if (row.status or "").strip().lower()
+            in {"open", "partial"}
+        ]
+
+    payment_total = round(
+        sum(
+            float(payment.amount or 0.0)
+            for payment in payments
+            if (payment.status or "").lower() == "posted"
+        ),
+        2,
+    )
+
+    payment_applied = round(
+        sum(
+            float(payment.applied_amount or 0.0)
+            for payment in payments
+            if (payment.status or "").lower() == "posted"
+        ),
+        2,
+    )
+
+    payment_unapplied = round(
+        sum(
+            float(payment.unapplied_amount or 0.0)
+            for payment in payments
+            if (payment.status or "").lower() == "posted"
+        ),
+        2,
+    )
 
     return render_template(
         "accounting/technician_ledger.html",
         technician_name=technician_name,
         rows=rows,
+        payments=payments,
         summary=summary,
+        show_paid=show_paid,
+        payment_total=payment_total,
+        payment_applied=payment_applied,
+        payment_unapplied=payment_unapplied,
     )
-
 @accounting_bp.route(
     "/technicians/<technician_name>/payment/new",
     methods=["GET", "POST"],
@@ -147,3 +193,271 @@ def payment_create(technician_name):
             "accounting.payment_new",
             technician_name=technician_name,
         ))
+
+@accounting_bp.get("/technicians/<technician_name>/adjustment/new")
+@login_required
+def adjustment_new(technician_name):
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from services.accounting_service import get_technician_summary
+
+    summary = get_technician_summary(technician_name)
+
+    return render_template(
+        "accounting/adjustment_new.html",
+        technician_name=technician_name,
+        summary=summary,
+    )
+
+@accounting_bp.post("/technicians/<technician_name>/adjustment")
+@login_required
+def adjustment_create(technician_name):
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from extensions import db
+    from services.accounting_service import create_technician_adjustment
+
+    try:
+        adjustment_type = (
+            request.form.get("adjustment_type") or ""
+        ).strip().upper()
+
+        amount = float(request.form.get("amount") or 0)
+        reason = (request.form.get("reason") or "").strip()
+
+        if not reason:
+            raise ValueError("Adjustment reason is required")
+
+        entry = create_technician_adjustment(
+            technician_name=technician_name,
+            amount=amount,
+            adjustment_type=adjustment_type,
+            reason=reason,
+            created_by=getattr(current_user, "id", None),
+        )
+
+        flash(
+            f"Adjustment #{entry.id} posted successfully.",
+            "success",
+        )
+
+        return redirect(url_for(
+            "accounting.technician_ledger",
+            technician_name=technician_name,
+        ))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(str(e) or "Adjustment failed.", "danger")
+
+        return redirect(url_for(
+            "accounting.adjustment_new",
+            technician_name=technician_name,
+        ))
+
+
+@accounting_bp.get(
+    "/technicians/<technician_name>/opening-balance/new"
+)
+@login_required
+def opening_balance_new(technician_name):
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from datetime import date
+    from models import TechnicianLedgerEntry
+
+    tech = (technician_name or "").strip()
+
+    existing = (
+        TechnicianLedgerEntry.query
+        .filter(
+            TechnicianLedgerEntry.technician_name == tech,
+            TechnicianLedgerEntry.entry_type == "OPENING_BALANCE",
+            TechnicianLedgerEntry.voided == False,
+        )
+        .first()
+    )
+
+    return render_template(
+        "accounting/opening_balance_new.html",
+        technician_name=tech,
+        today=date.today().isoformat(),
+        existing=existing,
+    )
+
+
+@accounting_bp.post(
+    "/technicians/<technician_name>/opening-balance"
+)
+@login_required
+def opening_balance_create(technician_name):
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from datetime import datetime
+    from extensions import db
+    from services.accounting_service import (
+        create_technician_opening_balance,
+    )
+
+    try:
+        amount_raw = (request.form.get("amount") or "").strip()
+        date_raw = (
+                request.form.get("opening_date") or ""
+        ).strip()
+
+        if not amount_raw:
+            raise ValueError("Opening balance amount is required")
+
+        if not date_raw:
+            raise ValueError("Opening balance date is required")
+
+        amount = float(amount_raw)
+
+        opening_date = datetime.strptime(
+            date_raw,
+            "%Y-%m-%d",
+        ).date()
+
+        entry = create_technician_opening_balance(
+            technician_name=technician_name,
+            amount=amount,
+            opening_date=opening_date,
+            note=request.form.get("note"),
+            created_by=getattr(current_user, "id", None),
+        )
+
+        flash(
+            f"Opening balance #{entry.id} posted successfully.",
+            "success",
+        )
+
+        return redirect(url_for(
+            "accounting.technician_ledger",
+            technician_name=technician_name,
+        ))
+
+    except Exception as e:
+        db.session.rollback()
+
+        flash(
+            str(e) or "Opening balance failed.",
+            "danger",
+        )
+
+        return redirect(url_for(
+            "accounting.opening_balance_new",
+            technician_name=technician_name,
+        ))
+
+@accounting_bp.post("/payments/<int:payment_id>/void")
+@login_required
+def payment_void(payment_id):
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from extensions import db
+    from services.accounting_service import (
+        void_technician_payment,
+    )
+
+    technician_name = (
+        request.form.get("technician_name") or ""
+    ).strip()
+
+    try:
+        reason = (
+            request.form.get("void_reason") or ""
+        ).strip()
+
+        payment = void_technician_payment(
+            payment_id=payment_id,
+            void_reason=reason,
+            voided_by=getattr(current_user, "id", None),
+        )
+
+        flash(
+            f"Payment #{payment.id} was voided successfully. "
+            "All invoice allocations were reversed.",
+            "success",
+        )
+
+    except Exception as e:
+        db.session.rollback()
+
+        flash(
+            str(e) or "Payment void failed.",
+            "danger",
+        )
+
+    if technician_name:
+        return redirect(url_for(
+            "accounting.technician_ledger",
+            technician_name=technician_name,
+        ))
+
+    return redirect(url_for(
+        "accounting.technician_balances",
+    ))
+
+@accounting_bp.get("/statements")
+@login_required
+def supplier_statements():
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from models import SupplierStatement
+
+    rows = (
+        SupplierStatement.query
+        .order_by(
+            SupplierStatement.statement_period.desc(),
+            SupplierStatement.created_at.desc(),
+        )
+        .all()
+    )
+
+    return render_template(
+        "accounting/supplier_statements.html",
+        rows=rows,
+    )
+
+@accounting_bp.get("/")
+@login_required
+def dashboard():
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    return render_template(
+        "accounting/dashboard.html",
+    )
+
+@accounting_bp.get("/statements/<int:statement_id>")
+@login_required
+def statement_view(statement_id):
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from models import SupplierStatement
+
+    from services.statement_matching_service import (
+        build_statement_view,
+    )
+
+    view = build_statement_view(statement_id)
+
+    return render_template(
+        "accounting/statement_view.html",
+        view=view,
+    )

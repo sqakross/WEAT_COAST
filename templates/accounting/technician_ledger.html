@@ -3,24 +3,21 @@
 
 <div class="d-flex justify-content-between align-items-start mb-3">
   <div>
-    <h2 class="mb-3">
-      {{ technician_name }}
-    </h2>
+    <h2 class="mb-1">{{ technician_name }}</h2>
+    <div class="text-muted">Technician Accounting</div>
   </div>
 
-  <div>
-    <a class="btn btn-outline-secondary"
-       href="{{ url_for('accounting.technician_balances') }}">
-      ← Back
-    </a>
-  </div>
+  <a class="btn btn-outline-secondary"
+     href="{{ url_for('accounting.technician_balances') }}">
+    ← Back
+  </a>
 </div>
 
 {% if summary %}
 <div class="row g-3 mb-3">
 
   <div class="col-md-2">
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm h-100">
       <div class="card-body">
         <small class="text-muted">Open Invoices</small>
         <h3 class="mb-0">{{ summary.open_invoices }}</h3>
@@ -29,7 +26,7 @@
   </div>
 
   <div class="col-md-2">
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm h-100">
       <div class="card-body">
         <small class="text-muted">Charges</small>
         <h5 class="mb-0">${{ '%.2f'|format(summary.charges) }}</h5>
@@ -38,16 +35,18 @@
   </div>
 
   <div class="col-md-2">
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm h-100">
       <div class="card-body">
         <small class="text-muted">Payments</small>
-        <h5 class="mb-0 text-success">${{ '%.2f'|format(summary.payments) }}</h5>
+        <h5 class="mb-0 text-success">
+          ${{ '%.2f'|format(summary.payments) }}
+        </h5>
       </div>
     </div>
   </div>
 
   <div class="col-md-2">
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm h-100">
       <div class="card-body">
         <small class="text-muted">Adjustments</small>
         <h5 class="mb-0">${{ '%.2f'|format(summary.adjustments) }}</h5>
@@ -56,7 +55,7 @@
   </div>
 
   <div class="col-md-2">
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm h-100">
       <div class="card-body">
         <small class="text-muted">Opening</small>
         <h5 class="mb-0">${{ '%.2f'|format(summary.opening_balance) }}</h5>
@@ -65,10 +64,12 @@
   </div>
 
   <div class="col-md-2">
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm h-100">
       <div class="card-body">
         <small class="text-muted">Remaining</small>
-        <h4 class="mb-0 text-danger">${{ '%.2f'|format(summary.remaining) }}</h4>
+        <h4 class="mb-0 text-danger">
+          ${{ '%.2f'|format(summary.remaining) }}
+        </h4>
       </div>
     </div>
   </div>
@@ -76,22 +77,430 @@
 </div>
 {% endif %}
 
-<a class="btn btn-success me-2"
-   href="{{ url_for('accounting.payment_new', technician_name=technician_name) }}">
-  + Payment
-</a>
+<div class="d-flex flex-wrap gap-2 mb-4">
 
-  <button class="btn btn-primary me-2" disabled>
+  <a class="btn btn-success"
+     href="{{ url_for(
+       'accounting.payment_new',
+       technician_name=technician_name
+     ) }}">
+    + Payment
+  </a>
+
+  <a class="btn btn-primary"
+     href="{{ url_for(
+       'accounting.adjustment_new',
+       technician_name=technician_name
+     ) }}">
     + Adjustment
-  </button>
+  </a>
 
-  <button class="btn btn-warning" disabled>
+  <a class="btn btn-warning"
+     href="{{ url_for(
+       'accounting.opening_balance_new',
+       technician_name=technician_name
+     ) }}">
     Opening Balance
-  </button>
+  </a>
+
+</div>
+
+<!-- PAYMENT HISTORY -->
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <div>
+    <h4 class="mb-0">Payment History</h4>
+    <small class="text-muted">
+      Posted, voided and allocated technician payments
+    </small>
+  </div>
+
+  <span class="text-muted">
+    {{ payments|length }} payment(s)
+  </span>
+</div>
+
+<div class="row g-3 mb-3">
+
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <small class="text-muted">Active Payments</small>
+        <h4 class="mb-0 text-primary">
+          ${{ '%.2f'|format(payment_total) }}
+        </h4>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <small class="text-muted">Active Applied</small>
+        <h4 class="mb-0 text-success">
+          ${{ '%.2f'|format(payment_applied) }}
+        </h4>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <small class="text-muted">Active Unapplied</small>
+        <h4 class="mb-0 {% if payment_unapplied > 0 %}text-warning{% endif %}">
+          ${{ '%.2f'|format(payment_unapplied) }}
+        </h4>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="table-responsive mb-5">
+  <table class="table table-sm table-striped table-hover align-middle">
+
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Payment</th>
+        <th>Method</th>
+        <th>Reference</th>
+        <th class="text-end">Amount</th>
+        <th class="text-end">Applied</th>
+        <th class="text-end">Unapplied</th>
+        <th>Status</th>
+        <th class="text-end">Actions</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {% for p in payments %}
+
+      <tr>
+        <td>{{ p.payment_date }}</td>
+
+        <td>
+          <strong>{{ p.document_number }}</strong>
+        </td>
+
+        <td>{{ p.method or '—' }}</td>
+
+        <td>{{ p.reference or '—' }}</td>
+
+        <td class="text-end fw-semibold text-primary">
+          ${{ '%.2f'|format(p.amount) }}
+        </td>
+
+        <td class="text-end fw-semibold text-success">
+          ${{ '%.2f'|format(p.applied_amount) }}
+        </td>
+
+        <td class="text-end fw-semibold">
+          {% if p.unapplied_amount > 0 %}
+            <span class="text-warning">
+              ${{ '%.2f'|format(p.unapplied_amount) }}
+            </span>
+          {% else %}
+            $0.00
+          {% endif %}
+        </td>
+
+        <td>
+          {% if p.status == 'posted' %}
+            <span class="badge bg-success">Posted</span>
+          {% elif p.status == 'void' %}
+            <span class="badge bg-secondary">Void</span>
+          {% elif p.status == 'draft' %}
+            <span class="badge bg-warning text-dark">Draft</span>
+          {% else %}
+            <span class="badge bg-secondary">{{ p.status }}</span>
+          {% endif %}
+        </td>
+
+        <td class="text-end">
+          <div class="d-inline-flex flex-wrap gap-1 justify-content-end">
+
+            {% if p.allocations %}
+            <button class="btn btn-sm btn-outline-primary"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#paymentDetails{{ p.id }}"
+                    aria-expanded="false"
+                    aria-controls="paymentDetails{{ p.id }}">
+              {{ p.allocations|length }}
+              allocation{% if p.allocations|length != 1 %}s{% endif %}
+            </button>
+            {% endif %}
+
+            {% if p.status == 'posted' %}
+            <button class="btn btn-sm btn-outline-danger"
+                    type="button"
+                    data-bs-toggle="modal"
+                    data-bs-target="#voidPaymentModal{{ p.id }}">
+              Void
+            </button>
+            {% elif p.status == 'void' %}
+            <span class="badge bg-secondary align-self-center">
+              Voided
+            </span>
+            {% endif %}
+
+          </div>
+        </td>
+      </tr>
+
+      {% if p.allocations %}
+      <tr class="collapse"
+          id="paymentDetails{{ p.id }}">
+
+        <td colspan="9" class="p-0">
+
+          <div class="bg-light border-start border-4 border-primary p-3">
+
+            <div class="d-flex justify-content-between align-items-start mb-2">
+
+              <div>
+                <div class="fw-semibold">
+                  {% if p.status == 'void' %}
+                    Original FIFO Allocations
+                  {% else %}
+                    {{ p.document_number }} Allocations
+                  {% endif %}
+                </div>
+
+                <small class="text-muted">
+                  {% if p.status == 'void' %}
+                    Historical allocations before this payment was voided
+                  {% else %}
+                    FIFO allocation to the oldest open ledger entries
+                  {% endif %}
+                </small>
+              </div>
+
+              <span class="badge bg-primary">
+                {{ p.allocations|length }}
+                allocation{% if p.allocations|length != 1 %}s{% endif %}
+              </span>
+
+            </div>
+
+            <div class="table-responsive">
+
+              <table class="table table-sm table-bordered bg-white mb-2">
+
+                <thead>
+                  <tr>
+                    <th>Invoice</th>
+                    <th>Invoice Date</th>
+                    <th>Job</th>
+                    <th>Ledger Ref.</th>
+                    <th class="text-end">Applied</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {% for a in p.allocations %}
+
+                  <tr>
+                    <td>
+                      <strong>{{ a.supplier_invoice or '—' }}</strong>
+                    </td>
+
+                    <td>{{ a.entry_date or '—' }}</td>
+
+                    <td>{{ a.job_number or '—' }}</td>
+
+                    <td>
+                      <small class="text-muted">
+                        Ledger #{{ a.ledger_entry_id }}
+                      </small>
+                    </td>
+
+                    <td class="text-end fw-semibold text-success">
+                      ${{ '%.2f'|format(a.amount) }}
+                    </td>
+                  </tr>
+
+                  {% endfor %}
+                </tbody>
+
+                <tfoot>
+                  <tr>
+                    <th colspan="4" class="text-end">
+                      {% if p.status == 'void' %}
+                        Originally Applied
+                      {% else %}
+                        Total Applied
+                      {% endif %}
+                    </th>
+
+                    <th class="text-end text-success">
+                      {% if p.status == 'void' %}
+                        ${{ '%.2f'|format(p.historical_applied_amount) }}
+                      {% else %}
+                        ${{ '%.2f'|format(p.applied_amount) }}
+                      {% endif %}
+                    </th>
+                  </tr>
+                </tfoot>
+
+              </table>
+            </div>
+
+            <div class="card border-0 shadow-sm mt-3">
+              <div class="card-body py-2">
+
+                <div class="row g-2 small">
+
+                  <div class="col-md-3">
+                    <span class="text-muted">Document</span>
+                    <div class="fw-semibold">
+                      {{ p.document_number }}
+                    </div>
+                  </div>
+
+                  <div class="col-md-3">
+                    <span class="text-muted">Created By</span>
+                    <div class="fw-semibold">
+                      {{ p.created_by_name or 'System' }}
+                    </div>
+                  </div>
+
+                  <div class="col-md-3">
+                    <span class="text-muted">Created At</span>
+                    <div class="fw-semibold">
+                      {{ p.created_at or '—' }}
+                    </div>
+                  </div>
+
+                  <div class="col-md-3">
+                    <span class="text-muted">Posted By</span>
+                    <div class="fw-semibold">
+                      {{ p.posted_by_name or p.created_by_name or 'System' }}
+                    </div>
+                  </div>
+
+                  {% if p.posted_at %}
+                  <div class="col-md-3">
+                    <span class="text-muted">Posted At</span>
+                    <div class="fw-semibold">
+                      {{ p.posted_at }}
+                    </div>
+                  </div>
+                  {% endif %}
+
+                </div>
+
+                {% if p.status == 'void' %}
+                <hr class="my-2">
+
+                <div class="row g-2 small">
+
+                  <div class="col-md-3">
+                    <span class="text-muted">Voided By</span>
+                    <div class="fw-semibold text-danger">
+                      {{ p.voided_by_name or 'Unknown' }}
+                    </div>
+                  </div>
+
+                  <div class="col-md-3">
+                    <span class="text-muted">Voided At</span>
+                    <div class="fw-semibold">
+                      {{ p.voided_at or '—' }}
+                    </div>
+                  </div>
+
+                  <div class="col-md-6">
+                    <span class="text-muted">Void Reason</span>
+                    <div class="fw-semibold">
+                      {{ p.void_reason or 'No reason provided' }}
+                    </div>
+                  </div>
+
+                </div>
+                {% endif %}
+
+              </div>
+            </div>
+
+            {% if p.note %}
+            <div class="mt-2">
+              <strong>Note:</strong> {{ p.note }}
+            </div>
+            {% endif %}
+
+          </div>
+
+        </td>
+      </tr>
+      {% endif %}
+
+      {% else %}
+      <tr>
+        <td colspan="9"
+            class="text-center text-muted py-4">
+          No payments found.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+
+  </table>
+</div>
+
+<!-- LEDGER -->
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+
+  <div>
+    <h4 class="mb-0">
+      {% if show_paid %}
+        Full Ledger
+      {% else %}
+        Open Ledger
+      {% endif %}
+    </h4>
+
+    <small class="text-muted">
+      {% if show_paid %}
+        Showing open, partial and paid entries
+      {% else %}
+        Showing only entries with a remaining balance
+      {% endif %}
+    </small>
+  </div>
+
+  <div>
+    {% if show_paid %}
+
+    <a class="btn btn-sm btn-outline-secondary"
+       href="{{ url_for(
+         'accounting.technician_ledger',
+         technician_name=technician_name
+       ) }}">
+      Show Open Only
+    </a>
+
+    {% else %}
+
+    <a class="btn btn-sm btn-outline-primary"
+       href="{{ url_for(
+         'accounting.technician_ledger',
+         technician_name=technician_name,
+         show_paid=1
+       ) }}">
+      Show Paid Entries
+    </a>
+
+    {% endif %}
+  </div>
+
 </div>
 
 <div class="table-responsive">
   <table class="table table-sm table-striped table-hover align-middle">
+
     <thead>
       <tr>
         <th>Date</th>
@@ -103,51 +512,216 @@
         <th class="text-end">Paid</th>
         <th class="text-end">Remaining</th>
         <th>Status</th>
+        <th>Created By</th>
       </tr>
     </thead>
 
     <tbody>
       {% for r in rows %}
+
       <tr>
         <td>{{ r.entry_date }}</td>
-        <td>{{ r.entry_type }}</td>
+
+        <td>
+          {% if r.entry_type == 'CHARGE' %}
+            <span class="badge bg-danger">Charge</span>
+
+          {% elif r.entry_type == 'OPENING_BALANCE' %}
+            <span class="badge bg-warning text-dark">Opening</span>
+
+          {% elif r.entry_type == 'ADJUSTMENT_PLUS' %}
+            <span class="badge bg-primary">Adjustment +</span>
+
+          {% elif r.entry_type == 'ADJUSTMENT_MINUS' %}
+            <span class="badge bg-info text-dark">Adjustment −</span>
+
+          {% else %}
+            <span class="badge bg-secondary">{{ r.entry_type }}</span>
+          {% endif %}
+        </td>
+
         <td>{{ r.supplier_name or '' }}</td>
-        <td>{{ r.supplier_invoice or '' }}</td>
-        <td>{{ r.job_number or '' }}</td>
+
+        <td>
+          {% if r.supplier_invoice %}
+            <strong>{{ r.supplier_invoice }}</strong>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+
+        <td>{{ r.job_number or '—' }}</td>
 
         <td class="text-end">
           ${{ '%.2f'|format(r.amount) }}
         </td>
 
-        <td class="text-end">
+        <td class="text-end text-success">
           ${{ '%.2f'|format(r.paid_amount) }}
         </td>
 
         <td class="text-end fw-bold">
-          ${{ '%.2f'|format(r.remaining_amount) }}
+          {% if r.remaining_amount > 0 %}
+            <span class="text-danger">
+              ${{ '%.2f'|format(r.remaining_amount) }}
+            </span>
+          {% else %}
+            $0.00
+          {% endif %}
         </td>
 
         <td>
           {% if r.status == 'open' %}
             <span class="badge bg-danger">Open</span>
+
           {% elif r.status == 'partial' %}
             <span class="badge bg-warning text-dark">Partial</span>
+
           {% elif r.status == 'paid' %}
             <span class="badge bg-success">Paid</span>
+
+          {% elif r.status == 'void' %}
+            <span class="badge bg-secondary">Void</span>
+
           {% else %}
             <span class="badge bg-secondary">{{ r.status }}</span>
           {% endif %}
         </td>
-      </tr>
-      {% else %}
-      <tr>
-        <td colspan="9" class="text-center text-muted py-4">
-          No ledger entries found.
+
+        <td>
+          <div class="fw-semibold">
+            {{ r.created_by_name or 'System' }}
+          </div>
+
+          {% if r.created_at %}
+          <small class="text-muted">
+            {{ r.created_at }}
+          </small>
+          {% endif %}
         </td>
       </tr>
+
+      {% else %}
+
+      <tr>
+        <td colspan="10"
+            class="text-center text-muted py-4">
+
+          {% if show_paid %}
+            No ledger entries found.
+          {% else %}
+            No open or partially paid ledger entries.
+          {% endif %}
+
+        </td>
+      </tr>
+
       {% endfor %}
     </tbody>
+
   </table>
 </div>
+
+<!-- VOID PAYMENT MODALS -->
+<!-- Важно: modal находятся вне table/tbody -->
+
+{% for p in payments %}
+  {% if p.status == 'posted' %}
+
+  <div class="modal fade"
+       id="voidPaymentModal{{ p.id }}"
+       tabindex="-1"
+       aria-labelledby="voidPaymentModalLabel{{ p.id }}"
+       aria-hidden="true">
+
+    <div class="modal-dialog">
+      <div class="modal-content">
+
+        <form method="POST"
+              action="{{ url_for(
+                'accounting.payment_void',
+                payment_id=p.id
+              ) }}">
+
+          <input type="hidden"
+                 name="technician_name"
+                 value="{{ technician_name }}">
+
+          <div class="modal-header">
+
+            <h5 class="modal-title"
+                id="voidPaymentModalLabel{{ p.id }}">
+              Void {{ p.document_number }}
+            </h5>
+
+            <button type="button"
+                    class="btn-close"
+                    data-bs-dismiss="modal"
+                    aria-label="Close">
+            </button>
+
+          </div>
+
+          <div class="modal-body">
+
+            <div class="alert alert-warning">
+              This will reverse all allocations and restore the affected
+              ledger balances. The payment and audit history will remain.
+            </div>
+
+            <dl class="row mb-3">
+
+              <dt class="col-sm-4">Technician</dt>
+              <dd class="col-sm-8">{{ technician_name }}</dd>
+
+              <dt class="col-sm-4">Payment</dt>
+              <dd class="col-sm-8">{{ p.document_number }}</dd>
+
+              <dt class="col-sm-4">Amount</dt>
+              <dd class="col-sm-8">
+                ${{ '%.2f'|format(p.amount) }}
+              </dd>
+
+              <dt class="col-sm-4">Payment Date</dt>
+              <dd class="col-sm-8">{{ p.payment_date }}</dd>
+
+            </dl>
+
+            <label class="form-label fw-semibold">
+              Void Reason
+            </label>
+
+            <textarea name="void_reason"
+                      class="form-control"
+                      rows="3"
+                      maxlength="255"
+                      placeholder="Explain why this payment is being voided"
+                      required></textarea>
+
+          </div>
+
+          <div class="modal-footer">
+
+            <button type="button"
+                    class="btn btn-outline-secondary"
+                    data-bs-dismiss="modal">
+              Cancel
+            </button>
+
+            <button type="submit"
+                    class="btn btn-danger">
+              Void Payment
+            </button>
+
+          </div>
+
+        </form>
+
+      </div>
+    </div>
+  </div>
+
+  {% endif %}
+{% endfor %}
 
 {% endblock %}

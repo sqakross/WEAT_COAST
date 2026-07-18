@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="container-fluid">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+
+        <div>
+
+            <h3 class="mb-1">
+                Supplier Statements
+            </h3>
+
+            <div class="text-muted">
+                Import monthly supplier statements and reconcile supplier credits.
+            </div>
+
+        </div>
+
+        <a
+            class="btn btn-primary"
+            href="{{ url_for('accounting.statement_upload') }}"
+        >
+            <i class="bi bi-upload me-1"></i>
+            Upload Statement
+        </a>
+
+    </div>
+
+    <div class="card shadow-sm border-0">
+
+        <div class="table-responsive">
+
+            <table class="table table-hover align-middle mb-0">
+
+                <thead class="table-light">
+
+                <tr>
+
+                    <th style="width:220px;">
+                        Supplier
+                    </th>
+
+                    <th style="width:150px;">
+                        Period
+                    </th>
+
+                    <th class="text-end" style="width:160px;">
+                        Balance Due
+                    </th>
+
+                    <th class="text-center" style="width:120px;">
+                        Credits
+                    </th>
+
+                    <th class="text-center" style="width:140px;">
+                        Status
+                    </th>
+
+                    <th class="text-end" style="width:120px;">
+                        Action
+                    </th>
+
+                </tr>
+
+                </thead>
+
+                <tbody>
+
+                {% for s in rows %}
+
+                {% set status = (s.status or "").lower() %}
+
+                <tr>
+
+                    <td class="fw-semibold">
+
+                        {{ s.supplier_name }}
+
+                    </td>
+
+                    <td>
+
+                        {% if s.statement_period %}
+                            {{ s.statement_period.strftime("%b %Y") }}
+                        {% endif %}
+
+                    </td>
+
+                    <td class="text-end">
+
+                        ${{ "{:,.2f}".format(s.balance_due or 0) }}
+
+                    </td>
+
+                    <td class="text-center">
+
+                        {{ s.lines|length }}
+
+                    </td>
+
+                    <td class="text-center">
+
+                        {% if status == "draft" %}
+
+                            <span class="badge bg-secondary">
+                                Imported
+                            </span>
+
+                        {% elif status == "matched" %}
+
+                            <span class="badge bg-info">
+                                Matched
+                            </span>
+
+                        {% elif status == "confirmed" %}
+
+                            <span class="badge bg-success">
+                                Confirmed
+                            </span>
+
+                        {% else %}
+
+                            <span class="badge bg-light text-dark">
+                                {{ s.status }}
+                            </span>
+
+                        {% endif %}
+
+                    </td>
+
+                    <td class="text-end">
+
+                        <a
+                            href="{{ url_for(
+                                'accounting.statement_view',
+                                statement_id=s.id
+                            ) }}"
+                            class="btn btn-sm btn-outline-primary"
+                        >
+                            Open
+                        </a>
+
+                    </td>
+
+                </tr>
+
+                {% else %}
+
+                <tr>
+
+                    <td colspan="6" class="text-center py-5 text-muted">
+
+                        <div class="mb-2">
+
+                            <i class="bi bi-file-earmark-text fs-1"></i>
+
+                        </div>
+
+                        <div class="fw-semibold">
+
+                            No supplier statements imported.
+
+                        </div>
+
+                        <div>
+
+                            Click <strong>Upload Statement</strong> to import the first supplier PDF.
+
+                        </div>
+
+                    </td>
+
+                </tr>
+
+                {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

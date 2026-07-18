@@ -401,6 +401,119 @@ def create_technician_payment_fifo(
         db.session.rollback()
         raise
 
+def void_technician_payment(
+    payment_id: int,
+    void_reason: str,
+    voided_by: int | None = None,
+) -> TechnicianPayment:
+    """
+    Void a posted technician payment.
+
+    The payment and its allocation history are preserved.
+    Applied amounts are reversed from ledger entries.
+    """
+
+    from datetime import datetime
+
+    reason = (void_reason or "").strip()
+
+    if not reason:
+        raise ValueError("Void reason is required")
+
+    payment = (
+        TechnicianPayment.query
+        .filter(TechnicianPayment.id == int(payment_id))
+        .first()
+    )
+
+    if payment is None:
+        raise ValueError("Payment was not found")
+
+    if payment.voided or (payment.status or "").lower() == "void":
+        raise ValueError(
+            f"Payment #{payment.id} has already been voided"
+        )
+
+    if (payment.status or "").lower() != "posted":
+        raise ValueError(
+            "Only a posted payment can be voided"
+        )
+
+    try:
+        for allocation in payment.allocations or []:
+            entry = allocation.ledger_entry
+
+            if entry is None:
+                raise ValueError(
+                    f"Ledger entry for allocation "
+                    f"#{allocation.id} was not found"
+                )
+
+            applied = round(
+                float(allocation.amount or 0.0),
+                2,
+            )
+
+            if applied <= 0:
+                continue
+
+            current_paid = round(
+                float(entry.paid_amount or 0.0),
+                2,
+            )
+
+            if applied > current_paid:
+                raise ValueError(
+                    f"Cannot void payment #{payment.id}: "
+                    f"allocation ${applied:.2f} exceeds the "
+                    f"current paid amount for ledger entry "
+                    f"#{entry.id}."
+                )
+
+            original_amount = round(
+                float(entry.amount or 0.0),
+                2,
+            )
+
+            new_paid = round(
+                current_paid - applied,
+                2,
+            )
+
+            new_remaining = round(
+                original_amount - new_paid,
+                2,
+            )
+
+            entry.paid_amount = max(0.0, new_paid)
+            entry.remaining_amount = max(
+                0.0,
+                new_remaining,
+            )
+
+            _sync_ledger_status(entry)
+
+        payment.status = "void"
+        payment.voided = True
+        payment.voided_at = datetime.utcnow()
+        payment.voided_by = voided_by
+        payment.void_reason = reason[:255]
+
+        # После void деньги больше не считаются действующим payment.
+        # Allocations остаются в БД как исторический audit trail.
+        payment.unapplied_amount = round(
+            float(payment.amount or 0.0),
+            2,
+        )
+
+        db.session.commit()
+
+        return payment
+
+    except Exception:
+        db.session.rollback()
+        raise
+
 def create_ledger_charge_from_issued_record(
     record,
     invoice_number: int | str | None = None,
@@ -636,19 +749,140 @@ def create_technician_adjustment(
 
     return entry
 
+def create_technician_opening_balance(
+    technician_name: str,
+    amount: float,
+    opening_date: date,
+    note: str | None = None,
+    created_by: int | None = None,
+) -> TechnicianLedgerEntry:
+    """
+    Create one opening balance for a technician.
+
+    Opening balance is stored as an immutable ledger entry.
+    Existing accounting history is not rewritten.
+    """
+
+    tech = (technician_name or "").strip()
+    opening_amount = round(float(amount or 0.0), 2)
+    clean_note = (note or "").strip()
+
+    if not tech:
+        raise ValueError("Technician name is required")
+
+    if opening_amount <= 0:
+        raise ValueError("Opening balance must be greater than zero")
+
+    if not opening_date:
+        raise ValueError("Opening balance date is required")
+
+    existing = (
+        TechnicianLedgerEntry.query
+        .filter(
+            TechnicianLedgerEntry.technician_name == tech,
+            TechnicianLedgerEntry.entry_type == "OPENING_BALANCE",
+            TechnicianLedgerEntry.voided == False,
+        )
+        .first()
+    )
+
+    if existing:
+        raise ValueError(
+            f"Opening balance already exists for {tech}. "
+            f"Entry #{existing.id}. Use an adjustment instead."
+        )
+
+    try:
+        entry = TechnicianLedgerEntry(
+            technician_name=tech,
+            entry_date=opening_date,
+            entry_type="OPENING_BALANCE",
+            status="open",
+
+            amount=opening_amount,
+            paid_amount=0.0,
+            remaining_amount=opening_amount,
+
+            supplier_name=None,
+            supplier_invoice=None,
+            job_number=None,
+
+            adjustment_reason=None,
+
+            issued_part_record_id=None,
+            reference_type="opening_balance",
+            reference_id=None,
+
+            note=clean_note[:500] or "Opening balance",
+            created_by=created_by,
+            voided=False,
+        )
+
+        db.session.add(entry)
+        db.session.commit()
+
+        return entry
+
+    except Exception:
+        db.session.rollback()
+        raise
+
+@dataclass(frozen=True)
+class TechnicianPaymentAllocationRow:
+    ledger_entry_id: int
+    entry_date: str
+    supplier_invoice: str
+    job_number: str
+    amount: float
+
+
+@dataclass(frozen=True)
+class TechnicianPaymentRow:
+    id: int
+    document_number: str
+
+    payment_date: str
+    amount: float
+    applied_amount: float
+    historical_applied_amount: float
+    unapplied_amount: float
+
+    method: str
+    reference: str
+    note: str
+    status: str
+
+    created_by_name: str
+    created_at: str
+
+    posted_by_name: str
+    posted_at: str
+
+    voided_by_name: str
+    voided_at: str
+    void_reason: str
+
+    allocations: list[TechnicianPaymentAllocationRow]
+
 @dataclass(frozen=True)
 class TechnicianLedgerRow:
     id: int
     entry_date: str
     entry_type: str
+
     supplier_name: str | None
     supplier_invoice: str | None
     job_number: str | None
+
     amount: float
     paid_amount: float
     remaining_amount: float
+
     status: str
     note: str | None
+
+    created_by_name: str
+    created_at: str
 
 @dataclass(frozen=True)
 class TechnicianSummary:
@@ -666,18 +900,225 @@ class TechnicianSummary:
 
     open_invoices: int
 
-
-def get_technician_ledger(
+def get_technician_payments(
     technician_name: str,
-) -> list[TechnicianLedgerRow]:
-    from models import TechnicianLedgerEntry
+) -> list[TechnicianPaymentRow]:
+    """
+    Return technician payment history with FIFO allocations
+    and complete audit information.
+
+    Read-only: does not modify accounting records.
+    """
+
+    from models import User, utc_to_local
 
     tech = (technician_name or "").strip()
 
     if not tech:
         return []
 
-    rows = (
+    payments = (
+        TechnicianPayment.query
+        .filter(
+            TechnicianPayment.technician_name == tech,
+        )
+        .order_by(
+            TechnicianPayment.payment_date.desc(),
+            TechnicianPayment.created_at.desc(),
+            TechnicianPayment.id.desc(),
+        )
+        .all()
+    )
+
+    # Собираем user IDs одним запросом, чтобы не создавать N+1 queries.
+    user_ids = set()
+
+    for payment in payments:
+        for user_id in (
+            payment.created_by,
+            payment.posted_by,
+            payment.voided_by,
+        ):
+            if user_id:
+                user_ids.add(int(user_id))
+
+    users_by_id = {}
+
+    if user_ids:
+        users = (
+            User.query
+            .filter(User.id.in_(user_ids))
+            .all()
+        )
+
+        users_by_id = {
+            int(user.id): user.username
+            for user in users
+        }
+
+    def username_for(user_id) -> str:
+        if not user_id:
+            return ""
+
+        return users_by_id.get(
+            int(user_id),
+            f"User #{user_id}",
+        )
+
+    def format_datetime(value) -> str:
+        if not value:
+            return ""
+
+        local_value = utc_to_local(value)
+
+        if not local_value:
+            return ""
+
+        return local_value.strftime("%m/%d/%Y %I:%M %p")
+
+    rows: list[TechnicianPaymentRow] = []
+
+    for payment in payments:
+        allocation_rows = []
+
+        historical_applied = 0.0
+
+        for allocation in payment.allocations or []:
+            ledger_entry = allocation.ledger_entry
+
+            allocation_amount = round(
+                float(allocation.amount or 0.0),
+                2,
+            )
+
+            historical_applied = round(
+                historical_applied + allocation_amount,
+                2,
+            )
+
+            allocation_rows.append(
+                TechnicianPaymentAllocationRow(
+                    ledger_entry_id=(
+                        ledger_entry.id
+                        if ledger_entry
+                        else allocation.ledger_entry_id
+                    ),
+                    entry_date=(
+                        ledger_entry.entry_date.strftime("%m/%d/%Y")
+                        if ledger_entry and ledger_entry.entry_date
+                        else ""
+                    ),
+                    supplier_invoice=(
+                        ledger_entry.supplier_invoice
+                        if ledger_entry
+                        else ""
+                    ) or "",
+                    job_number=(
+                        ledger_entry.job_number
+                        if ledger_entry
+                        else ""
+                    ) or "",
+                    amount=allocation_amount,
+                )
+            )
+
+        allocation_rows.sort(
+            key=lambda row: (
+                row.entry_date,
+                row.ledger_entry_id,
+            )
+        )
+
+        amount = round(
+            float(payment.amount or 0.0),
+            2,
+        )
+
+        unapplied = round(
+            float(payment.unapplied_amount or 0.0),
+            2,
+        )
+
+        is_void = bool(
+            payment.voided
+            or (payment.status or "").strip().lower() == "void"
+        )
+
+        if is_void:
+            active_applied = 0.0
+            status = "void"
+        else:
+            active_applied = round(
+                amount - unapplied,
+                2,
+            )
+            status = (payment.status or "").strip().lower()
+
+        rows.append(
+            TechnicianPaymentRow(
+                id=payment.id,
+                document_number=f"PAY-{payment.id:06d}",
+
+                payment_date=(
+                    payment.payment_date.strftime("%m/%d/%Y")
+                    if payment.payment_date
+                    else ""
+                ),
+
+                amount=amount,
+                applied_amount=max(0.0, active_applied),
+                historical_applied_amount=max(
+                    0.0,
+                    historical_applied,
+                ),
+                unapplied_amount=max(0.0, unapplied),
+
+                method=(payment.method or "").strip(),
+                reference=(payment.reference or "").strip(),
+                note=(payment.note or "").strip(),
+                status=status,
+
+                created_by_name=username_for(
+                    payment.created_by
+                ),
+                created_at=format_datetime(
+                    payment.created_at
+                ),
+
+                posted_by_name=username_for(
+                    payment.posted_by
+                ),
+                posted_at=format_datetime(
+                    payment.posted_at
+                ),
+
+                voided_by_name=username_for(
+                    payment.voided_by
+                ),
+                voided_at=format_datetime(
+                    payment.voided_at
+                ),
+                void_reason=(
+                    payment.void_reason or ""
+                ).strip(),
+
+                allocations=allocation_rows,
+            )
+        )
+
+    return rows
+
+def get_technician_ledger(
+    technician_name: str,
+) -> list[TechnicianLedgerRow]:
+    from models import TechnicianLedgerEntry, User, utc_to_local
+
+    tech = (technician_name or "").strip()
+
+    if not tech:
+        return []
+
+    entries = (
         TechnicianLedgerEntry.query
         .filter(
             TechnicianLedgerEntry.technician_name == tech,
@@ -691,26 +1132,83 @@ def get_technician_ledger(
         .all()
     )
 
-    return [
-        TechnicianLedgerRow(
-            id=r.id,
-            entry_date=(
-                r.entry_date.strftime("%m/%d/%Y")
-                if r.entry_date
-                else ""
-            ),
-            entry_type=r.entry_type or "",
-            supplier_name=r.supplier_name,
-            supplier_invoice=r.supplier_invoice,
-            job_number=r.job_number,
-            amount=round(float(r.amount or 0.0), 2),
-            paid_amount=round(float(r.paid_amount or 0.0), 2),
-            remaining_amount=round(float(r.remaining_amount or 0.0), 2),
-            status=r.status or "",
-            note=r.note,
+    creator_ids = {
+        int(entry.created_by)
+        for entry in entries
+        if entry.created_by
+    }
+
+    users_by_id = {}
+
+    if creator_ids:
+        users = (
+            User.query
+            .filter(User.id.in_(creator_ids))
+            .all()
         )
-        for r in rows
-    ]
+
+        users_by_id = {
+            int(user.id): user.username
+            for user in users
+        }
+
+    rows = []
+
+    for entry in entries:
+        created_by_name = ""
+
+        if entry.created_by:
+            created_by_name = users_by_id.get(
+                int(entry.created_by),
+                f"User #{entry.created_by}",
+            )
+
+        created_at_local = utc_to_local(entry.created_at)
+
+        rows.append(
+            TechnicianLedgerRow(
+                id=entry.id,
+
+                entry_date=(
+                    entry.entry_date.strftime("%m/%d/%Y")
+                    if entry.entry_date
+                    else ""
+                ),
+
+                entry_type=entry.entry_type or "",
+
+                supplier_name=entry.supplier_name,
+                supplier_invoice=entry.supplier_invoice,
+                job_number=entry.job_number,
+
+                amount=round(
+                    float(entry.amount or 0.0),
+                    2,
+                ),
+                paid_amount=round(
+                    float(entry.paid_amount or 0.0),
+                    2,
+                ),
+                remaining_amount=round(
+                    float(entry.remaining_amount or 0.0),
+                    2,
+                ),
+
+                status=entry.status or "",
+                note=entry.note,
+
+                created_by_name=created_by_name,
+                created_at=(
+                    created_at_local.strftime(
+                        "%m/%d/%Y %I:%M %p"
+                    )
+                    if created_at_local
+                    else ""
+                ),
+            )
+        )
+
+    return rows
 
 def get_technician_summary(
     technician_name: str,
@@ -729,6 +1227,21 @@ def get_technician_summary(
             TechnicianLedgerEntry.voided == False,
         )
         .all()
+    )
+    payment_total = (
+        db.session.query(
+            func.coalesce(
+                func.sum(TechnicianPayment.amount),
+                0.0,
+            )
+        )
+        .filter(
+            TechnicianPayment.technician_name == tech,
+            TechnicianPayment.status == "posted",
+            TechnicianPayment.voided == False,
+        )
+        .scalar()
+        or 0.0
     )
 
     charges = 0.0
@@ -761,8 +1274,7 @@ def get_technician_summary(
         ):
             adjustments += float(r.amount or 0)
 
-        elif t == "PAYMENT":
-            payments += abs(float(r.amount or 0))
+        payments = float(payment_total or 0.0)
 
     return TechnicianSummary(
         technician=tech,

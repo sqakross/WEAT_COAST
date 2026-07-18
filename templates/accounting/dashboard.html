@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="container-fluid">
+
+    <h3 class="mb-4">
+        Accounting
+    </h3>
+
+    <div class="row g-4">
+
+        <div class="col-lg-6">
+
+            <div class="card shadow-sm h-100">
+
+                <div class="card-body">
+
+                    <h5 class="card-title">
+                        Employee Accounting
+                    </h5>
+
+                    <p class="text-muted mb-4">
+
+                        Technician balances, ledger,
+                        FIFO payments, adjustments and
+                        opening balances.
+
+                    </p>
+
+                    <a
+                        href="{{ url_for('accounting.technician_balances') }}"
+                        class="btn btn-primary"
+                    >
+                        Open
+                    </a>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="col-lg-6">
+
+            <div class="card shadow-sm h-100">
+
+                <div class="card-body">
+
+                    <h5 class="card-title">
+                        Supplier Statements
+                    </h5>
+
+                    <p class="text-muted mb-4">
+
+                        Import supplier statements,
+                        reconcile credits and verify
+                        accounting differences.
+
+                    </p>
+
+                    <a
+                        href="{{ url_for('accounting.supplier_statements') }}"
+                        class="btn btn-outline-primary"
+                    >
+                        Open
+                    </a>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

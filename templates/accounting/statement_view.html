@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="container-fluid">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+
+        <div>
+
+            <h3 class="mb-1">
+                Supplier Statement
+            </h3>
+
+            <div class="text-muted">
+
+                {{ view.statement.supplier_name }}
+
+                {% if view.statement.statement_period %}
+                    • {{ view.statement.statement_period.strftime("%B %Y") }}
+                {% endif %}
+
+            </div>
+
+        </div>
+
+        <div>
+
+            <a
+                href="{{ url_for('accounting.supplier_statements') }}"
+                class="btn btn-outline-secondary"
+            >
+                ← Back
+            </a>
+
+        </div>
+
+    </div>
+
+
+    <div class="row mb-4">
+
+        <div class="col-md-3">
+
+            <div class="card shadow-sm border-0">
+
+                <div class="card-body">
+
+                    <div class="text-muted small">
+                        Supplier
+                    </div>
+
+                    <div class="fw-bold">
+                        {{ view.statement.supplier_name }}
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="col-md-3">
+
+            <div class="card shadow-sm border-0">
+
+                <div class="card-body">
+
+                    <div class="text-muted small">
+                        Statement Period
+                    </div>
+
+                    <div class="fw-bold">
+
+                        {% if view.statement.statement_period %}
+                            {{ view.statement.statement_period.strftime("%B %Y") }}
+                        {% endif %}
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="col-md-3">
+
+            <div class="card shadow-sm border-0">
+
+                <div class="card-body">
+
+                    <div class="text-muted small">
+                        Balance Due
+                    </div>
+
+                    <div class="fw-bold">
+                        ${{ "{:,.2f}".format(view.statement.balance_due or 0) }}
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="col-md-3">
+
+            <div class="card shadow-sm border-0">
+
+                <div class="card-body">
+
+                    <div class="text-muted small">
+                        Imported Credits
+                    </div>
+
+                    <div class="fw-bold">
+                        {{ view.rows|length }}
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="card shadow-sm border-0">
+
+        <div class="table-responsive">
+
+            <table class="table table-hover align-middle mb-0">
+
+                <thead class="table-light">
+
+                <tr>
+
+                    <th style="width:130px;">Date</th>
+
+                    <th style="width:140px;">Document</th>
+
+                    <th>Description</th>
+
+                    <th class="text-end" style="width:120px;">
+                        Credit
+                    </th>
+
+                    <th style="width:220px;">
+                        Match
+                    </th>
+
+                    <th class="text-end" style="width:120px;">
+                        Difference
+                    </th>
+
+                    <th class="text-center" style="width:140px;">
+                        Status
+                    </th>
+
+                </tr>
+
+                </thead>
+
+                <tbody>
+
+                {% for row in view.rows %}
+
+                <tr>
+
+                    <td>
+
+                        {% if row.statement_line.document_date %}
+                            {{ row.statement_line.document_date.strftime("%Y-%m-%d") }}
+                        {% endif %}
+
+                    </td>
+
+                    <td>
+
+                        <strong>
+
+                            {{ row.statement_line.document_number }}
+
+                        </strong>
+
+                    </td>
+
+                    <td>
+
+                        {{ row.statement_line.description }}
+
+                    </td>
+
+                    <td class="text-end">
+
+                        ${{ "{:,.2f}".format(row.statement_line.credit_amount or 0) }}
+
+                    </td>
+
+                    <td>
+
+                        {% if row.technician_job %}
+
+                            {{ row.technician_job }}
+
+                        {% else %}
+
+                            <span class="text-muted">
+                                —
+                            </span>
+
+                        {% endif %}
+
+                    </td>
+
+                    <td class="text-end">
+
+                        ${{ "{:,.2f}".format(row.difference) }}
+
+                    </td>
+
+                    <td class="text-center">
+
+                        {% if row.status == "MATCHED" %}
+
+                            <span class="badge bg-success">
+                                Matched
+                            </span>
+
+                        {% elif row.status == "ALREADY_RECONCILED" %}
+
+                            <span class="badge bg-primary">
+                                Reconciled
+                            </span>
+
+                        {% elif row.status == "MULTIPLE_MATCHES" %}
+
+                            <span class="badge bg-warning text-dark">
+                                Multiple
+                            </span>
+
+                        {% else %}
+
+                            <span class="badge bg-secondary">
+                                Not Found
+                            </span>
+
+                        {% endif %}
+
+                    </td>
+
+                </tr>
+
+                {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

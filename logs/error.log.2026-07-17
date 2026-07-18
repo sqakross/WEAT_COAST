@@ -1,0 +1,16 @@
+2026-07-17 13:46:45 | CRITICAL | app:141 | UNHANDLED EXCEPTION
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 336, in <module>
+    from inventory.routes import inventory_bp
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 6404, in <module>
+    @accounting_bp.get("/technicians/<technician_name>/adjustment/new")
+     ^^^^^^^^^^^^^
+NameError: name 'accounting_bp' is not defined
+2026-07-17 13:47:34 | CRITICAL | app:141 | UNHANDLED EXCEPTION
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 336, in <module>
+    from inventory.routes import inventory_bp
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 6404, in <module>
+    @accounting_bp.get("/technicians/<technician_name>/adjustment/new")
+     ^^^^^^^^^^^^^
+NameError: name 'accounting_bp' is not defined

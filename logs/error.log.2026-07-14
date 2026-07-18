@@ -1,0 +1,1682 @@
+2026-07-14 10:57:42 | ERROR    | app:875 | Exception on /dashboard/location_report [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 11527, in location_report
+    return render_template(
+        'location_report.html',
+    ...<4 lines>...
+        grand_total_value=grand_total_value
+    )
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\templating.py", line 150, in render_template
+    return _render(app, template, context)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\templating.py", line 127, in _render
+    app.update_template_context(context)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 530, in update_template_context
+    context.update(self.ensure_sync(func)())
+                   ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 5397, in inject_alerts_count
+    now = time.monotonic()
+          ^^^^^^^^^^^^^^
+AttributeError: type object 'datetime.time' has no attribute 'monotonic'
+2026-07-14 11:29:10 | ERROR    | app:503 | Failed to ensure column work_order_parts.ordered_flag: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column work_order_parts.ordered_date: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column work_orders.ordered_date: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_qty: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_flag: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_at: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_by: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_note: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column issued_batch.consumed_flag: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column issued_batch.consumed_at: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column issued_batch.consumed_by: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | ERROR    | app:503 | Failed to ensure column issued_batch.is_stock: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:11 | CRITICAL | app:141 | UNHANDLED EXCEPTION
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 594, in <module>
+    db.create_all()
+    ~~~~~~~~~~~~~^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 900, in create_all
+    self._call_for_binds(bind_key, "create_all")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 871, in _call_for_binds
+    engine = self.engines[key]
+             ^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column work_order_parts.ordered_flag: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column work_order_parts.ordered_date: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column work_orders.ordered_date: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_qty: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_flag: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_at: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_by: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_note: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column issued_batch.consumed_flag: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column issued_batch.consumed_at: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column issued_batch.consumed_by: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | ERROR    | app:503 | Failed to ensure column issued_batch.is_stock: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:29:52 | CRITICAL | app:141 | UNHANDLED EXCEPTION
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 594, in <module>
+    db.create_all()
+    ~~~~~~~~~~~~~^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 900, in create_all
+    self._call_for_binds(bind_key, "create_all")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 871, in _call_for_binds
+    engine = self.engines[key]
+             ^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column work_order_parts.ordered_flag: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column work_order_parts.ordered_date: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column work_orders.ordered_date: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_qty: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_flag: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_at: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_by: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column issued_part_record.consumed_note: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column issued_batch.consumed_flag: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column issued_batch.consumed_at: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column issued_batch.consumed_by: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | ERROR    | app:503 | Failed to ensure column issued_batch.is_stock: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 485, in _ensure_column
+    row = db.session.execute(
+          ~~~~~~~~~~~~~~~~~~^
+        db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        {"t": table}
+        ^^^^^^^^^^^^
+    ).fetchone()
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 779, in execute
+    return self._proxied.execute(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2365, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2239, in _execute_internal
+    bind = self.get_bind(**bind_arguments)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\session.py", line 53, in get_bind
+    engines = self._db.engines
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 11:30:21 | CRITICAL | app:141 | UNHANDLED EXCEPTION
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 594, in <module>
+    db.create_all()
+    ~~~~~~~~~~~~~^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 900, in create_all
+    self._call_for_binds(bind_key, "create_all")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 871, in _call_for_binds
+    engine = self.engines[key]
+             ^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_sqlalchemy\extension.py", line 690, in engines
+    raise RuntimeError(
+    ...<3 lines>...
+    )
+RuntimeError: The current Flask app is not registered with this 'SQLAlchemy' instance. Did you forget to call 'init_app', or did you create multiple 'SQLAlchemy' instances?
+2026-07-14 12:27:05 | ERROR    | app:875 | Exception on /users [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13830, in users
+    (ROLE_ACCOUNTING, "Accounting"),
+     ^^^^^^^^^^^^^^^
+NameError: name 'ROLE_ACCOUNTING' is not defined
+2026-07-14 12:27:27 | ERROR    | app:875 | Exception on /users [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13830, in users
+    (ROLE_ACCOUNTING, "Accounting"),
+     ^^^^^^^^^^^^^^^
+NameError: name 'ROLE_ACCOUNTING' is not defined
+2026-07-14 12:27:29 | ERROR    | app:875 | Exception on /users [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13830, in users
+    (ROLE_ACCOUNTING, "Accounting"),
+     ^^^^^^^^^^^^^^^
+NameError: name 'ROLE_ACCOUNTING' is not defined
+2026-07-14 12:28:35 | ERROR    | app:875 | Exception on /users [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13830, in users
+    (ROLE_ACCOUNTING, "Accounting"),
+     ^^^^^^^^^^^^^^^
+NameError: name 'ROLE_ACCOUNTING' is not defined
+2026-07-14 14:19:55 | ERROR    | app:875 | Exception on /assets/receipt/AR-000003/pdf [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 6379, in asset_receipt_pdf
+    document.build(story)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\reportlab\platypus\doctemplate.py", line 1322, in build
+    BaseDocTemplate.build(self,flowables, canvasmaker=canvasmaker)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\reportlab\platypus\doctemplate.py", line 1083, in build
+    self.handle_flowable(flowables)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\reportlab\platypus\doctemplate.py", line 962, in handle_flowable
+    raise LayoutError(ident)
+reportlab.platypus.doctemplate.LayoutError: Flowable <Table@0x1B1F4B14CD0 1 rows x 2 cols(tallest row 16777215)> with cell(0,0) containing
+'<KeepTogether at 0x1b1ef9af770> containing :<Paragraph at 0x'(504.5669291338583 x 16777215), tallest cell 16777215.0 points,  too large on page 2 in frame 'normal'(515.244094488189 x 773.1968503937009*) of template 'Later'
+2026-07-14 14:21:22 | ERROR    | app:875 | Exception on /assets/receipt/AR-000003/pdf [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 6379, in asset_receipt_pdf
+    document.build(story)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\reportlab\platypus\doctemplate.py", line 1322, in build
+    BaseDocTemplate.build(self,flowables, canvasmaker=canvasmaker)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\reportlab\platypus\doctemplate.py", line 1083, in build
+    self.handle_flowable(flowables)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\reportlab\platypus\doctemplate.py", line 962, in handle_flowable
+    raise LayoutError(ident)
+reportlab.platypus.doctemplate.LayoutError: Flowable <Table@0x112C73151D0 1 rows x 2 cols(tallest row 16777215)> with cell(0,0) containing
+'<KeepTogether at 0x112c8f5b770> containing :<Paragraph at 0x'(504.5669291338583 x 16777215), tallest cell 16777215.0 points,  too large on page 2 in frame 'normal'(515.244094488189 x 773.1968503937009*) of template 'Later'
