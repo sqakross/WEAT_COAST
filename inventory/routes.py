@@ -14967,8 +14967,7 @@ def users():
         username = (request.form.get("username") or "").strip()
         password = request.form.get("password") or ""
 
-        role_raw = (request.form.get("role") or "").strip().lower()
-        role = ROLE_ALIASES.get(role_raw, role_raw)
+        role = (request.form.get("role") or "").strip().lower()
 
         if not username or not password:
             flash(
@@ -14977,7 +14976,16 @@ def users():
             )
             return redirect(url_for("inventory.users"))
 
-        if role not in ALLOWED_ROLES:
+        allowed_roles = {
+            ROLE_TECHNICIAN,
+            ROLE_USER,
+            ROLE_VIEWER,
+            ROLE_ACCOUNTING,
+            ROLE_ADMIN,
+            ROLE_SUPERADMIN,
+        }
+
+        if role not in allowed_roles:
             flash("Invalid user role.", "danger")
             return redirect(url_for("inventory.users"))
 
@@ -15005,8 +15013,13 @@ def users():
         flash("User created.", "success")
         return redirect(url_for("inventory.users"))
 
+
     users = (
-        User.query
+        db.session.query(
+            User.id,
+            User.username,
+            User.role,
+        )
         .order_by(User.username.asc())
         .all()
     )
@@ -15020,11 +15033,13 @@ def users():
         (ROLE_SUPERADMIN, "Superadmin"),
     ]
 
-    return render_template(
+    response = render_template(
         "users.html",
         users=users,
         role_options=role_options,
     )
+
+    return response
 
 @inventory_bp.route('/users/add', methods=['GET', 'POST'])
 @login_required

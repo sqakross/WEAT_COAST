@@ -1,0 +1,421 @@
+2026-07-23 01:13:42 | INFO     | app:130 | Logging subsystem initialized.
+2026-07-23 01:13:42 | INFO     | app:211 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-23 01:13:42 | INFO     | app:252 | Sentry DSN not set; skipping Sentry init.
+2026-07-23 01:13:42 | INFO     | app:272 | WCCR flags: enabled=1, dry=0
+2026-07-23 01:13:52 | INFO     | app:352 | Flask app configured and blueprints registered.
+2026-07-23 01:13:52 | INFO     | app:596 | DB tables ensured (create_all).
+2026-07-23 01:13:55 | INFO     | app:535 | Backfill: created 0 units; updated 0 parts
+2026-07-23 01:13:55 | INFO     | app:608 | Old .docx cleanup complete.
+2026-07-23 01:13:55 | INFO     | app:616 | ======================================================================
+2026-07-23 01:13:55 | INFO     | app:617 | WEST COAST CHIEF REPAIR ERP
+2026-07-23 01:13:55 | INFO     | app:618 | Version : 1.1.1.45
+2026-07-23 01:13:55 | INFO     | app:619 | Python  : 3.13.5
+2026-07-23 01:13:55 | INFO     | app:620 | PID     : 4828
+2026-07-23 01:13:55 | INFO     | app:621 | Debug   : False
+2026-07-23 01:13:55 | INFO     | app:622 | SSL     : True
+2026-07-23 01:13:55 | INFO     | app:623 | Port    : 5000
+2026-07-23 01:13:55 | INFO     | app:624 | ======================================================================
+2026-07-23 01:13:55 | INFO     | app:631 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-23 07:32:41 | WARNING  | app:188 | SLOW_REQUEST 2.191s | POST /login | endpoint=auth.login | status=302 | bytes=211
+2026-07-23 07:40:09 | WARNING  | app:188 | SLOW_REQUEST 2.030s | POST /login | endpoint=auth.login | status=302 | bytes=211
+2026-07-23 07:40:13 | WARNING  | app:188 | SLOW_REQUEST 1.239s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=330211
+2026-07-23 07:41:27 | WARNING  | app:188 | SLOW_REQUEST 1.085s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=330211
+2026-07-23 07:43:36 | WARNING  | app:188 | SLOW_REQUEST 2.061s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 07:44:58 | WARNING  | app:188 | SLOW_REQUEST 1.278s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=330211
+2026-07-23 07:46:13 | WARNING  | app:188 | SLOW_REQUEST 1.196s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=330211
+2026-07-23 07:53:28 | WARNING  | app:188 | SLOW_REQUEST 1.701s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 07:53:30 | WARNING  | app:188 | SLOW_REQUEST 2.013s | POST /work_orders/4804/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 08:08:12 | WARNING  | app:188 | SLOW_REQUEST 2.327s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 08:10:59 | WARNING  | app:188 | SLOW_REQUEST 1.518s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 08:24:10 | WARNING  | app:188 | SLOW_REQUEST 1.096s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 08:26:50 | WARNING  | app:188 | SLOW_REQUEST 1.014s | POST /work_orders/save | endpoint=inventory.wo_save | status=302 | bytes=221
+2026-07-23 08:30:50 | WARNING  | app:188 | SLOW_REQUEST 1.323s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 08:34:03 | WARNING  | app:188 | SLOW_REQUEST 1.080s | POST /work_orders/save | endpoint=inventory.wo_save | status=302 | bytes=221
+2026-07-23 08:39:04 | WARNING  | app:188 | SLOW_REQUEST 1.970s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 08:45:23 | WARNING  | app:188 | SLOW_REQUEST 1.086s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=338828
+2026-07-23 09:36:07 | WARNING  | app:188 | SLOW_REQUEST 4.792s | POST /import-parts | endpoint=inventory.import_parts_upload | status=200 | bytes=72015
+2026-07-23 09:38:46 | WARNING  | app:188 | SLOW_REQUEST 2.336s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 09:42:14 | WARNING  | app:188 | SLOW_REQUEST 5.445s | POST /import-parts | endpoint=inventory.import_parts_upload | status=302 | bytes=217
+2026-07-23 09:42:14 | WARNING  | routes:18009 | [RECV_DETAIL consume-check] batch 2483: raw_pns=['W10830162', '5304530853', 'LCD605X440R', '240372409', '240357704', 'LCD405X440R', 'WR51X10108', '240364787', '240561502', 'LCD4075X440R', '240350620', 'LCD455X440R', 'WH16X27180'], direct_part_ids(pre)=[]
+2026-07-23 09:42:14 | WARNING  | routes:18022 | [RECV_DETAIL consume-check] batch 2483: part_ids_from_pn=[3701, 3703, 3700, 3702, 3704, 3699, 2461, 2703, 2457, 2460, 66, 888, 3698], parts_matched=['240350620', '240357704', '240364787', '240372409', '240561502', '5304530853', 'LCD405X440R', 'LCD4075X440R', 'LCD455X440R', 'LCD605X440R', 'W10830162', 'WH16X27180', 'WR51X10108']
+2026-07-23 09:42:14 | WARNING  | routes:18029 | [RECV_DETAIL consume-check] batch 2483: all_part_ids(final)=[66, 2703, 3698, 3699, 3700, 3701, 3702, 3703, 3704, 2457, 888, 2460, 2461]
+2026-07-23 09:42:14 | WARNING  | routes:18050 | [RECV_DETAIL consume-check] batch 2483: issued_rows=[(506, 888, 2, datetime.datetime(2025, 11, 14, 17, 59, 16, 292638)), (884, 888, 2, datetime.datetime(2025, 12, 4, 19, 23, 29, 371717)), (950, 888, 2, datetime.datetime(2025, 12, 5, 18, 38, 5, 183732)), (1047, 888, 2, datetime.datetime(2025, 12, 9, 18, 1, 22, 195675)), (1071, 888, 2, datetime.datetime(2025, 12, 10, 19, 50, 37, 746341))]
+2026-07-23 09:42:14 | WARNING  | routes:18075 | [RECV_DETAIL FLAGS] batch 2483 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 09:44:18 | WARNING  | app:188 | SLOW_REQUEST 2.280s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 09:44:57 | WARNING  | app:188 | SLOW_REQUEST 1.634s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 09:46:30 | WARNING  | app:188 | SLOW_REQUEST 2.054s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 09:46:31 | WARNING  | app:188 | SLOW_REQUEST 1.762s | POST /work_orders/4741/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=291
+2026-07-23 09:48:16 | WARNING  | app:188 | SLOW_REQUEST 2.346s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 09:50:13 | WARNING  | app:188 | SLOW_REQUEST 1.964s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 09:50:41 | WARNING  | app:188 | SLOW_REQUEST 1.960s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 09:50:44 | WARNING  | app:188 | SLOW_REQUEST 2.137s | POST /work_orders/4795/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 10:21:26 | WARNING  | app:188 | SLOW_REQUEST 1.759s | POST /import-parts | endpoint=inventory.import_parts_upload | status=200 | bytes=71872
+2026-07-23 10:22:09 | WARNING  | app:188 | SLOW_REQUEST 5.720s | POST /import-parts | endpoint=inventory.import_parts_upload | status=302 | bytes=217
+2026-07-23 10:22:09 | WARNING  | routes:18009 | [RECV_DETAIL consume-check] batch 2484: raw_pns=['WH12X22744', '140137975102', 'WB26X10262', 'WB21X38548', '240534701', 'WB02K10156', 'DA97-10595E', '5304406099', '10006917', '137032600', '134587700', 'WB20K8'], direct_part_ids(pre)=[]
+2026-07-23 10:22:09 | WARNING  | routes:18022 | [RECV_DETAIL consume-check] batch 2484: part_ids_from_pn=[3707, 1007, 781, 2827, 1891, 780, 3705, 2077, 2349, 213, 3706, 805], parts_matched=['10006917', '134587700', '137032600', '140137975102', '240534701', '5304406099', 'DA97-10595E', 'WB02K10156', 'WB20K8', 'WB21X38548', 'WB26X10262', 'WH12X22744']
+2026-07-23 10:22:09 | WARNING  | routes:18029 | [RECV_DETAIL consume-check] batch 2484: all_part_ids(final)=[1891, 805, 2827, 780, 781, 2349, 1007, 213, 3705, 3706, 3707, 2077]
+2026-07-23 10:22:09 | WARNING  | routes:18050 | [RECV_DETAIL consume-check] batch 2484: issued_rows=[(375, 780, 1, datetime.datetime(2025, 11, 10, 18, 10, 59, 938595)), (376, 781, 1, datetime.datetime(2025, 11, 10, 18, 10, 59, 938595)), (411, 805, 1, datetime.datetime(2025, 11, 11, 18, 31, 22, 312361)), (704, 781, 1, datetime.datetime(2025, 11, 25, 0, 17, 17, 523256)), (705, 780, 1, datetime.datetime(2025, 11, 25, 0, 17, 17, 523256))]
+2026-07-23 10:22:09 | WARNING  | routes:18075 | [RECV_DETAIL FLAGS] batch 2484 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 10:23:57 | WARNING  | app:188 | SLOW_REQUEST 1.820s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:24:05 | WARNING  | app:188 | SLOW_REQUEST 3.041s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:24:07 | WARNING  | app:188 | SLOW_REQUEST 1.606s | POST /work_orders/4778/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=267
+2026-07-23 10:26:11 | WARNING  | app:188 | SLOW_REQUEST 2.818s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:26:13 | WARNING  | app:188 | SLOW_REQUEST 1.658s | POST /work_orders/4776/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 10:28:19 | WARNING  | app:188 | SLOW_REQUEST 2.913s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:28:22 | WARNING  | app:188 | SLOW_REQUEST 2.349s | POST /work_orders/4787/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 10:30:30 | WARNING  | app:188 | SLOW_REQUEST 2.238s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:30:32 | WARNING  | app:188 | SLOW_REQUEST 2.070s | POST /work_orders/4788/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 10:31:44 | WARNING  | app:188 | SLOW_REQUEST 1.373s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:32:20 | WARNING  | app:188 | SLOW_REQUEST 3.262s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:32:23 | WARNING  | app:188 | SLOW_REQUEST 2.246s | POST /work_orders/4748/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 10:34:36 | WARNING  | app:188 | SLOW_REQUEST 2.101s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:34:39 | WARNING  | app:188 | SLOW_REQUEST 2.092s | POST /work_orders/4768/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 10:36:45 | WARNING  | app:188 | SLOW_REQUEST 1.957s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:36:46 | WARNING  | app:188 | SLOW_REQUEST 1.685s | POST /work_orders/4797/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=315
+2026-07-23 10:38:18 | WARNING  | app:188 | SLOW_REQUEST 1.985s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:38:19 | WARNING  | app:188 | SLOW_REQUEST 1.313s | POST /work_orders/4802/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 10:40:25 | WARNING  | app:188 | SLOW_REQUEST 1.477s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 10:40:27 | WARNING  | app:188 | SLOW_REQUEST 1.666s | POST /work_orders/4803/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=279
+2026-07-23 10:43:30 | WARNING  | app:188 | SLOW_REQUEST 1.347s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:00:01 | WARNING  | app:188 | SLOW_REQUEST 1.239s | POST /import-parts | endpoint=inventory.import_parts_upload | status=200 | bytes=41013
+2026-07-23 11:00:40 | WARNING  | app:188 | SLOW_REQUEST 2.251s | POST /import-parts | endpoint=inventory.import_parts_upload | status=302 | bytes=217
+2026-07-23 11:00:40 | WARNING  | routes:18009 | [RECV_DETAIL consume-check] batch 2485: raw_pns=['805396'], direct_part_ids(pre)=[]
+2026-07-23 11:00:40 | WARNING  | routes:18022 | [RECV_DETAIL consume-check] batch 2485: part_ids_from_pn=[3708], parts_matched=['805396']
+2026-07-23 11:00:40 | WARNING  | routes:18029 | [RECV_DETAIL consume-check] batch 2485: all_part_ids(final)=[3708]
+2026-07-23 11:00:40 | WARNING  | routes:18050 | [RECV_DETAIL consume-check] batch 2485: issued_rows=[]
+2026-07-23 11:00:40 | WARNING  | routes:18075 | [RECV_DETAIL FLAGS] batch 2485 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-23 11:00:55 | WARNING  | app:188 | SLOW_REQUEST 1.960s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:01:01 | WARNING  | app:188 | SLOW_REQUEST 1.657s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:05:42 | WARNING  | app:188 | SLOW_REQUEST 1.905s | POST /import-parts | endpoint=inventory.import_parts_upload | status=200 | bytes=41030
+2026-07-23 11:06:49 | WARNING  | app:188 | SLOW_REQUEST 2.945s | POST /import-parts | endpoint=inventory.import_parts_upload | status=302 | bytes=217
+2026-07-23 11:06:49 | WARNING  | routes:18009 | [RECV_DETAIL consume-check] batch 2486: raw_pns=['WR50X10069'], direct_part_ids(pre)=[]
+2026-07-23 11:06:49 | WARNING  | routes:18022 | [RECV_DETAIL consume-check] batch 2486: part_ids_from_pn=[3709], parts_matched=['WR50X10069']
+2026-07-23 11:06:49 | WARNING  | routes:18029 | [RECV_DETAIL consume-check] batch 2486: all_part_ids(final)=[3709]
+2026-07-23 11:06:49 | WARNING  | routes:18050 | [RECV_DETAIL consume-check] batch 2486: issued_rows=[]
+2026-07-23 11:06:49 | WARNING  | routes:18075 | [RECV_DETAIL FLAGS] batch 2486 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-23 11:07:20 | WARNING  | app:188 | SLOW_REQUEST 2.767s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:07:22 | WARNING  | app:188 | SLOW_REQUEST 1.743s | POST /work_orders/4773/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=267
+2026-07-23 11:10:54 | WARNING  | app:188 | SLOW_REQUEST 1.221s | POST /work_orders/save | endpoint=inventory.wo_save | status=302 | bytes=221
+2026-07-23 11:11:21 | WARNING  | app:188 | SLOW_REQUEST 1.206s | POST /import-parts | endpoint=inventory.import_parts_upload | status=200 | bytes=41038
+2026-07-23 11:11:40 | WARNING  | app:188 | SLOW_REQUEST 1.948s | POST /import-parts | endpoint=inventory.import_parts_upload | status=302 | bytes=217
+2026-07-23 11:11:40 | WARNING  | routes:18009 | [RECV_DETAIL consume-check] batch 2487: raw_pns=['ERM245'], direct_part_ids(pre)=[]
+2026-07-23 11:11:40 | WARNING  | routes:18022 | [RECV_DETAIL consume-check] batch 2487: part_ids_from_pn=[3361], parts_matched=['ERM245']
+2026-07-23 11:11:40 | WARNING  | routes:18029 | [RECV_DETAIL consume-check] batch 2487: all_part_ids(final)=[3361]
+2026-07-23 11:11:40 | WARNING  | routes:18050 | [RECV_DETAIL consume-check] batch 2487: issued_rows=[(6056, 3361, 1, datetime.datetime(2026, 6, 9, 17, 5, 26, 719812)), (6225, 3361, 1, datetime.datetime(2026, 6, 18, 16, 10, 36, 515894)), (6285, 3361, 1, datetime.datetime(2026, 6, 22, 14, 46, 24, 50329))]
+2026-07-23 11:11:40 | WARNING  | routes:18075 | [RECV_DETAIL FLAGS] batch 2487 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 11:11:54 | WARNING  | app:188 | SLOW_REQUEST 2.019s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:11:56 | WARNING  | app:188 | SLOW_REQUEST 1.677s | POST /work_orders/4766/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 11:13:28 | WARNING  | app:188 | SLOW_REQUEST 3.251s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=217311
+2026-07-23 11:16:31 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2488. Status before='draft', item count=2.
+2026-07-23 11:16:31 | INFO     | receiving:289 | [RECEIVING_POST] Created Part '402937' (id=3710, incoming=2).
+2026-07-23 11:16:31 | INFO     | receiving:289 | [RECEIVING_POST] Created Part '402837' (id=3711, incoming=4).
+2026-07-23 11:16:31 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2488 posted successfully. Applied items=2, final status='posted'.
+2026-07-23 11:16:31 | WARNING  | app:188 | SLOW_REQUEST 1.509s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 11:16:31 | WARNING  | routes:18009 | [RECV_DETAIL consume-check] batch 2488: raw_pns=['402937', '402837'], direct_part_ids(pre)=[]
+2026-07-23 11:16:31 | WARNING  | routes:18022 | [RECV_DETAIL consume-check] batch 2488: part_ids_from_pn=[3711, 3710], parts_matched=['402837', '402937']
+2026-07-23 11:16:31 | WARNING  | routes:18029 | [RECV_DETAIL consume-check] batch 2488: all_part_ids(final)=[3710, 3711]
+2026-07-23 11:16:31 | WARNING  | routes:18050 | [RECV_DETAIL consume-check] batch 2488: issued_rows=[]
+2026-07-23 11:16:31 | WARNING  | routes:18075 | [RECV_DETAIL FLAGS] batch 2488 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-23 11:18:03 | WARNING  | app:188 | SLOW_REQUEST 1.521s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:19:27 | WARNING  | app:188 | SLOW_REQUEST 1.815s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:20:28 | WARNING  | app:188 | SLOW_REQUEST 1.246s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:26:01 | WARNING  | app:188 | SLOW_REQUEST 2.183s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:26:46 | WARNING  | app:188 | SLOW_REQUEST 2.994s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452790
+2026-07-23 11:26:52 | WARNING  | routes:18009 | [RECV_DETAIL consume-check] batch 2488: raw_pns=['402937', '402837'], direct_part_ids(pre)=[]
+2026-07-23 11:26:52 | WARNING  | routes:18022 | [RECV_DETAIL consume-check] batch 2488: part_ids_from_pn=[3711, 3710], parts_matched=['402837', '402937']
+2026-07-23 11:26:52 | WARNING  | routes:18029 | [RECV_DETAIL consume-check] batch 2488: all_part_ids(final)=[3710, 3711]
+2026-07-23 11:26:52 | WARNING  | routes:18050 | [RECV_DETAIL consume-check] batch 2488: issued_rows=[]
+2026-07-23 11:26:52 | WARNING  | routes:18075 | [RECV_DETAIL FLAGS] batch 2488 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-23 11:28:28 | WARNING  | app:188 | SLOW_REQUEST 3.020s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:28:49 | WARNING  | app:188 | SLOW_REQUEST 1.970s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:29:41 | WARNING  | app:188 | SLOW_REQUEST 2.338s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:29:43 | WARNING  | app:188 | SLOW_REQUEST 2.384s | POST /work_orders/4252/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=267
+2026-07-23 11:30:04 | WARNING  | app:188 | SLOW_REQUEST 2.432s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:30:06 | WARNING  | app:188 | SLOW_REQUEST 2.393s | POST /work_orders/4252/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=267
+2026-07-23 11:32:38 | WARNING  | app:188 | SLOW_REQUEST 1.291s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:34:05 | WARNING  | app:188 | SLOW_REQUEST 2.068s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:34:30 | WARNING  | app:188 | SLOW_REQUEST 3.702s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=140
+2026-07-23 11:38:28 | WARNING  | app:188 | SLOW_REQUEST 2.080s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=140
+2026-07-23 11:41:27 | WARNING  | app:188 | SLOW_REQUEST 2.247s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=140
+2026-07-23 11:46:11 | WARNING  | app:188 | SLOW_REQUEST 3.314s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:46:32 | WARNING  | app:188 | SLOW_REQUEST 2.774s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 11:47:26 | WARNING  | app:188 | SLOW_REQUEST 2.336s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=140
+2026-07-23 11:54:08 | WARNING  | app:188 | SLOW_REQUEST 2.100s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=140
+2026-07-23 12:11:49 | WARNING  | app:188 | SLOW_REQUEST 12.435s | GET /users | endpoint=inventory.users | status=200 | bytes=187424
+2026-07-23 12:11:51 | WARNING  | app:188 | SLOW_REQUEST 12.481s | GET /users | endpoint=inventory.users | status=200 | bytes=187424
+2026-07-23 12:15:45 | INFO     | app:130 | Logging subsystem initialized.
+2026-07-23 12:15:45 | INFO     | app:211 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-23 12:15:45 | INFO     | app:252 | Sentry DSN not set; skipping Sentry init.
+2026-07-23 12:15:45 | INFO     | app:272 | WCCR flags: enabled=1, dry=0
+2026-07-23 12:15:47 | INFO     | app:352 | Flask app configured and blueprints registered.
+2026-07-23 12:15:47 | INFO     | app:596 | DB tables ensured (create_all).
+2026-07-23 12:15:52 | INFO     | app:535 | Backfill: created 0 units; updated 0 parts
+2026-07-23 12:15:52 | INFO     | app:608 | Old .docx cleanup complete.
+2026-07-23 12:15:52 | INFO     | app:616 | ======================================================================
+2026-07-23 12:15:52 | INFO     | app:617 | WEST COAST CHIEF REPAIR ERP
+2026-07-23 12:15:52 | INFO     | app:618 | Version : 1.1.1.45
+2026-07-23 12:15:52 | INFO     | app:619 | Python  : 3.13.5
+2026-07-23 12:15:52 | INFO     | app:620 | PID     : 11828
+2026-07-23 12:15:52 | INFO     | app:621 | Debug   : False
+2026-07-23 12:15:52 | INFO     | app:622 | SSL     : True
+2026-07-23 12:15:52 | INFO     | app:623 | Port    : 5000
+2026-07-23 12:15:52 | INFO     | app:624 | ======================================================================
+2026-07-23 12:15:52 | INFO     | app:631 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-23 12:23:12 | INFO     | app:642 | Server stopped.
+2026-07-23 12:23:30 | INFO     | app:130 | Logging subsystem initialized.
+2026-07-23 12:23:30 | INFO     | app:211 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-23 12:23:30 | INFO     | app:252 | Sentry DSN not set; skipping Sentry init.
+2026-07-23 12:23:30 | INFO     | app:272 | WCCR flags: enabled=1, dry=0
+2026-07-23 12:23:39 | INFO     | app:352 | Flask app configured and blueprints registered.
+2026-07-23 12:23:39 | INFO     | app:596 | DB tables ensured (create_all).
+2026-07-23 12:23:44 | INFO     | app:535 | Backfill: created 0 units; updated 0 parts
+2026-07-23 12:23:44 | INFO     | app:608 | Old .docx cleanup complete.
+2026-07-23 12:23:44 | INFO     | app:616 | ======================================================================
+2026-07-23 12:23:44 | INFO     | app:617 | WEST COAST CHIEF REPAIR ERP
+2026-07-23 12:23:44 | INFO     | app:618 | Version : 1.1.1.45
+2026-07-23 12:23:44 | INFO     | app:619 | Python  : 3.13.5
+2026-07-23 12:23:44 | INFO     | app:620 | PID     : 3164
+2026-07-23 12:23:44 | INFO     | app:621 | Debug   : False
+2026-07-23 12:23:44 | INFO     | app:622 | SSL     : True
+2026-07-23 12:23:44 | INFO     | app:623 | Port    : 5000
+2026-07-23 12:23:44 | INFO     | app:624 | ======================================================================
+2026-07-23 12:23:44 | INFO     | app:631 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-23 12:23:48 | WARNING  | app:188 | SLOW_REQUEST 1.073s | GET /work_orders/4631 | endpoint=inventory.wo_detail | status=200 | bytes=51913
+2026-07-23 12:24:05 | WARNING  | app:188 | SLOW_REQUEST 11.570s | GET /users | endpoint=inventory.users | status=200 | bytes=187424
+2026-07-23 12:28:06 | INFO     | app:130 | Logging subsystem initialized.
+2026-07-23 12:28:06 | INFO     | app:211 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-23 12:28:06 | INFO     | app:252 | Sentry DSN not set; skipping Sentry init.
+2026-07-23 12:28:06 | INFO     | app:272 | WCCR flags: enabled=1, dry=0
+2026-07-23 12:28:10 | INFO     | app:352 | Flask app configured and blueprints registered.
+2026-07-23 12:28:10 | INFO     | app:596 | DB tables ensured (create_all).
+2026-07-23 12:28:14 | INFO     | app:535 | Backfill: created 0 units; updated 0 parts
+2026-07-23 12:28:15 | INFO     | app:608 | Old .docx cleanup complete.
+2026-07-23 12:28:15 | INFO     | app:616 | ======================================================================
+2026-07-23 12:28:15 | INFO     | app:617 | WEST COAST CHIEF REPAIR ERP
+2026-07-23 12:28:15 | INFO     | app:618 | Version : 1.1.1.45
+2026-07-23 12:28:15 | INFO     | app:619 | Python  : 3.13.5
+2026-07-23 12:28:15 | INFO     | app:620 | PID     : 10188
+2026-07-23 12:28:15 | INFO     | app:621 | Debug   : False
+2026-07-23 12:28:15 | INFO     | app:622 | SSL     : True
+2026-07-23 12:28:15 | INFO     | app:623 | Port    : 5000
+2026-07-23 12:28:15 | INFO     | app:624 | ======================================================================
+2026-07-23 12:28:15 | INFO     | app:631 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-23 12:30:07 | WARNING  | app:188 | SLOW_REQUEST 6.993s | GET /users | endpoint=inventory.users | status=200 | bytes=187424
+2026-07-23 12:30:26 | WARNING  | app:188 | SLOW_REQUEST 4.502s | GET /users | endpoint=inventory.users | status=200 | bytes=190352
+2026-07-23 12:38:03 | INFO     | app:130 | Logging subsystem initialized.
+2026-07-23 12:38:03 | INFO     | app:211 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-23 12:38:03 | INFO     | app:252 | Sentry DSN not set; skipping Sentry init.
+2026-07-23 12:38:03 | INFO     | app:272 | WCCR flags: enabled=1, dry=0
+2026-07-23 12:38:10 | INFO     | app:352 | Flask app configured and blueprints registered.
+2026-07-23 12:38:10 | INFO     | app:596 | DB tables ensured (create_all).
+2026-07-23 12:38:13 | INFO     | app:535 | Backfill: created 0 units; updated 0 parts
+2026-07-23 12:38:14 | INFO     | app:608 | Old .docx cleanup complete.
+2026-07-23 12:38:15 | INFO     | app:616 | ======================================================================
+2026-07-23 12:38:15 | INFO     | app:617 | WEST COAST CHIEF REPAIR ERP
+2026-07-23 12:38:15 | INFO     | app:618 | Version : 1.1.1.45
+2026-07-23 12:38:15 | INFO     | app:619 | Python  : 3.13.5
+2026-07-23 12:38:15 | INFO     | app:620 | PID     : 10876
+2026-07-23 12:38:15 | INFO     | app:621 | Debug   : False
+2026-07-23 12:38:15 | INFO     | app:622 | SSL     : True
+2026-07-23 12:38:15 | INFO     | app:623 | Port    : 5000
+2026-07-23 12:38:15 | INFO     | app:624 | ======================================================================
+2026-07-23 12:38:15 | INFO     | app:631 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-23 12:38:29 | WARNING  | routes:15055 | USERS_PAGE PERF total=0.241s query=0.002s render=0.239s users=59
+2026-07-23 12:38:37 | WARNING  | app:188 | SLOW_REQUEST 5.099s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452790
+2026-07-23 12:38:42 | WARNING  | app:188 | SLOW_REQUEST 2.411s | GET /reports_grouped | endpoint=inventory.reports_grouped | status=200 | bytes=871807
+2026-07-23 12:38:44 | WARNING  | routes:15055 | USERS_PAGE PERF total=0.010s query=0.001s render=0.008s users=59
+2026-07-23 12:42:06 | INFO     | app:642 | Server stopped.
+2026-07-23 12:42:14 | INFO     | app:130 | Logging subsystem initialized.
+2026-07-23 12:42:14 | INFO     | app:211 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-23 12:42:14 | INFO     | app:252 | Sentry DSN not set; skipping Sentry init.
+2026-07-23 12:42:14 | INFO     | app:272 | WCCR flags: enabled=1, dry=0
+2026-07-23 12:42:19 | INFO     | app:352 | Flask app configured and blueprints registered.
+2026-07-23 12:42:19 | INFO     | app:596 | DB tables ensured (create_all).
+2026-07-23 12:42:23 | INFO     | app:535 | Backfill: created 0 units; updated 0 parts
+2026-07-23 12:42:23 | INFO     | app:608 | Old .docx cleanup complete.
+2026-07-23 12:42:23 | INFO     | app:616 | ======================================================================
+2026-07-23 12:42:23 | INFO     | app:617 | WEST COAST CHIEF REPAIR ERP
+2026-07-23 12:42:23 | INFO     | app:618 | Version : 1.1.1.45
+2026-07-23 12:42:23 | INFO     | app:619 | Python  : 3.13.5
+2026-07-23 12:42:23 | INFO     | app:620 | PID     : 9272
+2026-07-23 12:42:23 | INFO     | app:621 | Debug   : False
+2026-07-23 12:42:23 | INFO     | app:622 | SSL     : True
+2026-07-23 12:42:23 | INFO     | app:623 | Port    : 5000
+2026-07-23 12:42:23 | INFO     | app:624 | ======================================================================
+2026-07-23 12:42:23 | INFO     | app:631 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-23 12:42:28 | WARNING  | app:188 | SLOW_REQUEST 1.094s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=457622
+2026-07-23 12:42:35 | WARNING  | app:188 | SLOW_REQUEST 5.637s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452790
+2026-07-23 12:42:58 | INFO     | app:642 | Server stopped.
+2026-07-23 12:43:06 | INFO     | app:130 | Logging subsystem initialized.
+2026-07-23 12:43:06 | INFO     | app:211 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-23 12:43:06 | INFO     | app:252 | Sentry DSN not set; skipping Sentry init.
+2026-07-23 12:43:06 | INFO     | app:272 | WCCR flags: enabled=1, dry=0
+2026-07-23 12:43:09 | INFO     | app:352 | Flask app configured and blueprints registered.
+2026-07-23 12:43:09 | INFO     | app:596 | DB tables ensured (create_all).
+2026-07-23 12:43:13 | INFO     | app:535 | Backfill: created 0 units; updated 0 parts
+2026-07-23 12:43:13 | INFO     | app:608 | Old .docx cleanup complete.
+2026-07-23 12:43:13 | INFO     | app:616 | ======================================================================
+2026-07-23 12:43:13 | INFO     | app:617 | WEST COAST CHIEF REPAIR ERP
+2026-07-23 12:43:13 | INFO     | app:618 | Version : 1.1.1.45
+2026-07-23 12:43:13 | INFO     | app:619 | Python  : 3.13.5
+2026-07-23 12:43:13 | INFO     | app:620 | PID     : 11308
+2026-07-23 12:43:13 | INFO     | app:621 | Debug   : False
+2026-07-23 12:43:13 | INFO     | app:622 | SSL     : True
+2026-07-23 12:43:13 | INFO     | app:623 | Port    : 5000
+2026-07-23 12:43:13 | INFO     | app:624 | ======================================================================
+2026-07-23 12:43:13 | INFO     | app:631 | Starting secure server on https://0.0.0.0:5000, debug=False
+2026-07-23 12:55:11 | WARNING  | app:188 | SLOW_REQUEST 1.070s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=316208
+2026-07-23 12:55:42 | WARNING  | app:188 | SLOW_REQUEST 1.833s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=202
+2026-07-23 12:56:08 | WARNING  | app:188 | SLOW_REQUEST 3.813s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 12:56:12 | WARNING  | app:188 | SLOW_REQUEST 3.148s | POST /work_orders/4824/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 13:27:50 | WARNING  | app:188 | SLOW_REQUEST 4.126s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452790
+2026-07-23 13:28:27 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2489. Status before='draft', item count=1.
+2026-07-23 13:28:27 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part '5304526183' (id=595, before=0, incoming=1).
+2026-07-23 13:28:27 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2489 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 13:28:27 | WARNING  | app:188 | SLOW_REQUEST 2.262s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 13:28:27 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2489: raw_pns=['5304526183'], direct_part_ids(pre)=[]
+2026-07-23 13:28:27 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2489: part_ids_from_pn=[595], parts_matched=['5304526183']
+2026-07-23 13:28:27 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2489: all_part_ids(final)=[595]
+2026-07-23 13:28:27 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2489: issued_rows=[(218, 595, 1, datetime.datetime(2025, 10, 29, 19, 49, 58, 769515)), (256, 595, 1, datetime.datetime(2025, 11, 3, 20, 27, 45, 312985)), (283, 595, 1, datetime.datetime(2025, 11, 4, 20, 55, 57, 763918)), (346, 595, 1, datetime.datetime(2025, 11, 6, 22, 3, 10, 844431)), (1273, 595, 3, datetime.datetime(2025, 12, 16, 21, 5, 48, 226854))]
+2026-07-23 13:28:27 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2489 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 13:28:40 | WARNING  | app:188 | SLOW_REQUEST 2.718s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 13:29:28 | WARNING  | app:188 | SLOW_REQUEST 5.290s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452688
+2026-07-23 13:30:05 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2490. Status before='draft', item count=1.
+2026-07-23 13:30:05 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part 'DC31-00054A' (id=3334, before=0, incoming=1).
+2026-07-23 13:30:05 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2490 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 13:30:05 | WARNING  | app:188 | SLOW_REQUEST 1.671s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 13:30:05 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2490: raw_pns=['DC31-00054A'], direct_part_ids(pre)=[]
+2026-07-23 13:30:05 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2490: part_ids_from_pn=[3334], parts_matched=['DC31-00054A']
+2026-07-23 13:30:05 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2490: all_part_ids(final)=[3334]
+2026-07-23 13:30:05 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2490: issued_rows=[(5919, 3334, 1, datetime.datetime(2026, 6, 3, 21, 50, 26, 510465))]
+2026-07-23 13:30:05 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2490 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 13:30:18 | WARNING  | app:188 | SLOW_REQUEST 2.272s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 13:30:22 | WARNING  | app:188 | SLOW_REQUEST 3.734s | POST /work_orders/4737/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 13:34:08 | WARNING  | app:188 | SLOW_REQUEST 4.109s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452655
+2026-07-23 13:34:50 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2491. Status before='draft', item count=1.
+2026-07-23 13:34:50 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'WPW10464673' (id=3712, incoming=1).
+2026-07-23 13:34:50 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2491 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 13:34:50 | WARNING  | app:188 | SLOW_REQUEST 2.358s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 13:34:50 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2491: raw_pns=['WPW10464673'], direct_part_ids(pre)=[]
+2026-07-23 13:34:50 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2491: part_ids_from_pn=[3712], parts_matched=['WPW10464673']
+2026-07-23 13:34:50 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2491: all_part_ids(final)=[3712]
+2026-07-23 13:34:50 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2491: issued_rows=[]
+2026-07-23 13:34:50 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2491 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-23 13:35:05 | WARNING  | app:188 | SLOW_REQUEST 3.007s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 13:35:08 | WARNING  | app:188 | SLOW_REQUEST 2.484s | POST /work_orders/4753/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 13:37:00 | WARNING  | app:188 | SLOW_REQUEST 2.563s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 13:37:59 | WARNING  | app:188 | SLOW_REQUEST 4.700s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452367
+2026-07-23 13:38:42 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2492. Status before='draft', item count=1.
+2026-07-23 13:38:42 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'DD81-02265A' (id=3713, incoming=1).
+2026-07-23 13:38:42 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2492 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 13:38:42 | WARNING  | app:188 | SLOW_REQUEST 3.319s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 13:38:43 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2492: raw_pns=['DD81-02265A'], direct_part_ids(pre)=[]
+2026-07-23 13:38:43 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2492: part_ids_from_pn=[3713], parts_matched=['DD81-02265A']
+2026-07-23 13:38:43 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2492: all_part_ids(final)=[3713]
+2026-07-23 13:38:43 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2492: issued_rows=[]
+2026-07-23 13:38:43 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2492 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-23 13:39:14 | WARNING  | app:188 | SLOW_REQUEST 3.450s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 13:39:18 | WARNING  | app:188 | SLOW_REQUEST 3.050s | POST /work_orders/4785/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 13:42:12 | WARNING  | app:188 | SLOW_REQUEST 3.659s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452339
+2026-07-23 13:42:47 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2493. Status before='draft', item count=1.
+2026-07-23 13:42:47 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part 'RB170002' (id=264, before=0, incoming=1).
+2026-07-23 13:42:47 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2493 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 13:42:47 | WARNING  | app:188 | SLOW_REQUEST 2.123s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 13:42:48 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2493: raw_pns=['RB170002'], direct_part_ids(pre)=[]
+2026-07-23 13:42:48 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2493: part_ids_from_pn=[264], parts_matched=['RB170002']
+2026-07-23 13:42:48 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2493: all_part_ids(final)=[264]
+2026-07-23 13:42:48 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2493: issued_rows=[(29, 264, 1, datetime.datetime(2025, 8, 18, 15, 16, 35, 714915)), (468, 264, 1, datetime.datetime(2025, 11, 13, 15, 39, 30, 972525)), (537, 264, 4, datetime.datetime(2025, 11, 17, 19, 48, 0, 250110)), (975, 264, 2, datetime.datetime(2025, 12, 6, 17, 12, 53, 953686)), (1133, 264, 1, datetime.datetime(2025, 12, 12, 17, 57, 35, 382473))]
+2026-07-23 13:42:48 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2493 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 13:44:16 | WARNING  | app:188 | SLOW_REQUEST 3.430s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 13:44:19 | WARNING  | app:188 | SLOW_REQUEST 3.092s | POST /work_orders/4789/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 13:45:36 | WARNING  | app:188 | SLOW_REQUEST 3.927s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452306
+2026-07-23 13:46:12 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2494. Status before='draft', item count=1.
+2026-07-23 13:46:12 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part 'WP3412D021-09' (id=2039, before=0, incoming=1).
+2026-07-23 13:46:12 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2494 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 13:46:12 | WARNING  | app:188 | SLOW_REQUEST 2.083s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 13:46:12 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2494: raw_pns=['WP3412D021-09'], direct_part_ids(pre)=[]
+2026-07-23 13:46:12 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2494: part_ids_from_pn=[2039], parts_matched=['WP3412D021-09']
+2026-07-23 13:46:12 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2494: all_part_ids(final)=[2039]
+2026-07-23 13:46:12 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2494: issued_rows=[(2381, 2039, 1, datetime.datetime(2026, 1, 29, 16, 37, 55, 663530))]
+2026-07-23 13:46:12 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2494 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 13:47:02 | WARNING  | app:188 | SLOW_REQUEST 1.938s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 13:47:04 | WARNING  | app:188 | SLOW_REQUEST 2.354s | POST /work_orders/4763/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 13:52:12 | WARNING  | app:188 | SLOW_REQUEST 4.003s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452306
+2026-07-23 13:52:54 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2495. Status before='draft', item count=1.
+2026-07-23 13:52:54 | INFO     | receiving:289 | [RECEIVING_POST] Created Part 'WB27X11079' (id=3714, incoming=1).
+2026-07-23 13:52:54 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2495 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 13:52:54 | WARNING  | app:188 | SLOW_REQUEST 1.950s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 13:52:54 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2495: raw_pns=['WB27X11079'], direct_part_ids(pre)=[]
+2026-07-23 13:52:54 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2495: part_ids_from_pn=[3714], parts_matched=['WB27X11079']
+2026-07-23 13:52:54 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2495: all_part_ids(final)=[3714]
+2026-07-23 13:52:54 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2495: issued_rows=[]
+2026-07-23 13:52:54 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2495 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-23 13:53:04 | WARNING  | app:188 | SLOW_REQUEST 2.832s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 13:53:07 | WARNING  | app:188 | SLOW_REQUEST 2.646s | POST /work_orders/4752/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=267
+2026-07-23 13:56:30 | WARNING  | app:188 | SLOW_REQUEST 1.169s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=457541
+2026-07-23 13:57:46 | WARNING  | app:188 | SLOW_REQUEST 2.706s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452315
+2026-07-23 13:58:59 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2496. Status before='draft', item count=1.
+2026-07-23 13:58:59 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part '242219206' (id=302, before=0, incoming=1).
+2026-07-23 13:59:00 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2496 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 13:59:00 | WARNING  | app:188 | SLOW_REQUEST 3.416s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 13:59:00 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2496: raw_pns=['242219206'], direct_part_ids(pre)=[]
+2026-07-23 13:59:00 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2496: part_ids_from_pn=[302], parts_matched=['242219206']
+2026-07-23 13:59:00 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2496: all_part_ids(final)=[302]
+2026-07-23 13:59:00 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2496: issued_rows=[(91, 302, 1, datetime.datetime(2025, 9, 23, 18, 5, 27, 235026)), (334, 302, 1, datetime.datetime(2025, 11, 6, 19, 44, 43, 464872)), (406, 302, 1, datetime.datetime(2025, 11, 11, 18, 20, 9, 158438)), (473, 302, -1, datetime.datetime(2025, 11, 6, 19, 44, 43)), (1184, 302, 1, datetime.datetime(2025, 12, 15, 16, 29, 41, 334723))]
+2026-07-23 13:59:00 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2496 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 13:59:12 | WARNING  | app:188 | SLOW_REQUEST 3.562s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 13:59:15 | WARNING  | app:188 | SLOW_REQUEST 2.370s | POST /work_orders/4800/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 14:01:51 | WARNING  | app:188 | SLOW_REQUEST 5.181s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452317
+2026-07-23 14:03:23 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2497. Status before='draft', item count=1.
+2026-07-23 14:03:23 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part 'S97011220' (id=3484, before=0, incoming=1).
+2026-07-23 14:03:23 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2497 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 14:03:23 | WARNING  | app:188 | SLOW_REQUEST 1.834s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 14:03:23 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2497: raw_pns=['S97011220'], direct_part_ids(pre)=[]
+2026-07-23 14:03:23 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2497: part_ids_from_pn=[3484], parts_matched=['S97011220']
+2026-07-23 14:03:23 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2497: all_part_ids(final)=[3484]
+2026-07-23 14:03:23 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2497: issued_rows=[(6413, 3484, 1, datetime.datetime(2026, 6, 25, 19, 57, 25, 335420)), (6448, 3484, 1, datetime.datetime(2026, 6, 27, 0, 14, 23, 712742))]
+2026-07-23 14:03:23 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2497 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 14:03:36 | WARNING  | app:188 | SLOW_REQUEST 3.000s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 14:03:39 | WARNING  | app:188 | SLOW_REQUEST 2.822s | POST /work_orders/4779/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 14:06:54 | WARNING  | app:188 | SLOW_REQUEST 3.552s | GET /receiving | endpoint=inventory.receiving_list | status=200 | bytes=452171
+2026-07-23 14:07:20 | INFO     | receiving:225 | [RECEIVING_POST] Posting batch 2498. Status before='draft', item count=1.
+2026-07-23 14:07:20 | INFO     | receiving:320 | [RECEIVING_POST] Updating Part '5304505004' (id=67, before=0, incoming=1).
+2026-07-23 14:07:20 | INFO     | receiving:374 | [RECEIVING_POST] Batch 2498 posted successfully. Applied items=1, final status='posted'.
+2026-07-23 14:07:20 | WARNING  | app:188 | SLOW_REQUEST 3.293s | POST /receiving/save | endpoint=inventory.receiving_save | status=302 | bytes=217
+2026-07-23 14:07:20 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2498: raw_pns=['5304505004'], direct_part_ids(pre)=[]
+2026-07-23 14:07:20 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2498: part_ids_from_pn=[67], parts_matched=['5304505004']
+2026-07-23 14:07:20 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2498: all_part_ids(final)=[67]
+2026-07-23 14:07:20 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2498: issued_rows=[(83, 67, 1, datetime.datetime(2025, 9, 17, 21, 32, 12, 966819)), (2443, 67, 1, datetime.datetime(2026, 1, 30, 17, 35, 23, 293768)), (4100, 67, 1, datetime.datetime(2026, 3, 25, 18, 56, 44, 565608))]
+2026-07-23 14:07:20 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2498 status=posted posted?=True consumed?=True is_super=True => can_edit=False can_unpost=False
+2026-07-23 14:07:32 | WARNING  | app:188 | SLOW_REQUEST 3.017s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 14:07:35 | WARNING  | app:188 | SLOW_REQUEST 2.720s | POST /work_orders/4679/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 14:22:52 | WARNING  | app:188 | SLOW_REQUEST 2.484s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=140
+2026-07-23 14:33:33 | WARNING  | app:188 | SLOW_REQUEST 3.482s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=140
+2026-07-23 14:36:22 | WARNING  | app:188 | SLOW_REQUEST 1.589s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 15:40:07 | WARNING  | app:188 | SLOW_REQUEST 1.257s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 15:44:06 | WARNING  | app:188 | SLOW_REQUEST 2.892s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 15:45:46 | WARNING  | app:188 | SLOW_REQUEST 2.951s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 15:47:34 | WARNING  | app:188 | SLOW_REQUEST 3.145s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 15:47:58 | WARNING  | app:188 | SLOW_REQUEST 4.382s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 15:50:07 | WARNING  | app:188 | SLOW_REQUEST 2.564s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 15:53:00 | WARNING  | app:188 | SLOW_REQUEST 2.807s | POST /import-parts | endpoint=inventory.import_parts_upload | status=200 | bytes=41012
+2026-07-23 15:53:49 | WARNING  | app:188 | SLOW_REQUEST 1.762s | POST /import-parts | endpoint=inventory.import_parts_upload | status=302 | bytes=217
+2026-07-23 15:53:49 | WARNING  | routes:18024 | [RECV_DETAIL consume-check] batch 2499: raw_pns=['DD82-01385A'], direct_part_ids(pre)=[]
+2026-07-23 15:53:49 | WARNING  | routes:18037 | [RECV_DETAIL consume-check] batch 2499: part_ids_from_pn=[3715], parts_matched=['DD82-01385A']
+2026-07-23 15:53:49 | WARNING  | routes:18044 | [RECV_DETAIL consume-check] batch 2499: all_part_ids(final)=[3715]
+2026-07-23 15:53:49 | WARNING  | routes:18065 | [RECV_DETAIL consume-check] batch 2499: issued_rows=[]
+2026-07-23 15:53:49 | WARNING  | routes:18090 | [RECV_DETAIL FLAGS] batch 2499 status=posted posted?=True consumed?=False is_super=True => can_edit=True can_unpost=True
+2026-07-23 15:54:07 | WARNING  | app:188 | SLOW_REQUEST 4.092s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 15:54:11 | WARNING  | app:188 | SLOW_REQUEST 3.847s | POST /work_orders/3502/issue_instock | endpoint=inventory.wo_issue_instock | status=302 | bytes=255
+2026-07-23 16:17:42 | WARNING  | app:188 | SLOW_REQUEST 1.889s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=344047
+2026-07-23 16:17:43 | WARNING  | app:188 | SLOW_REQUEST 3.350s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 16:17:56 | WARNING  | app:188 | SLOW_REQUEST 1.944s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=344047
+2026-07-23 16:19:20 | WARNING  | app:188 | SLOW_REQUEST 2.677s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 16:19:23 | WARNING  | app:188 | SLOW_REQUEST 2.164s | GET /work_orders | endpoint=inventory.wo_list | status=200 | bytes=344047
+2026-07-23 16:20:06 | WARNING  | app:188 | SLOW_REQUEST 2.602s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 16:21:15 | WARNING  | app:188 | SLOW_REQUEST 4.262s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=140
+2026-07-23 16:21:22 | WARNING  | app:188 | SLOW_REQUEST 6.879s | GET /api/job_reserve | endpoint=inventory.api_job_reserve | status=200 | bytes=140
+2026-07-23 16:36:06 | WARNING  | app:188 | SLOW_REQUEST 1.687s | POST /work_orders/save | endpoint=inventory.wo_save | status=200 | bytes=113
+2026-07-23 16:47:11 | WARNING  | app:188 | SLOW_REQUEST 1.136s | GET / | endpoint=inventory.dashboard | status=200 | bytes=5748072
+2026-07-23 16:47:34 | WARNING  | app:188 | SLOW_REQUEST 1.195s | GET / | endpoint=inventory.dashboard | status=200 | bytes=5748357
+2026-07-23 16:47:42 | WARNING  | app:188 | SLOW_REQUEST 1.995s | GET / | endpoint=inventory.dashboard | status=200 | bytes=5748357

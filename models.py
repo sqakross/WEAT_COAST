@@ -1771,11 +1771,123 @@ class SupplierStatementLine(db.Model):
         lazy="joined",
     )
 
+    components = db.relationship(
+        "SupplierStatementLineComponent",
+        back_populates="statement_line",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
     @property
     def signed_amount(self) -> float:
         if (self.line_type or "").lower() in {"credit", "payment", "return"}:
             return -abs(float(self.credit_amount or 0.0))
         return float(self.invoice_amount or 0.0)
+
+class SupplierStatementLineComponent(db.Model):
+    __tablename__ = "supplier_statement_line_component"
+    __table_args__ = (
+        db.Index(
+            "ix_sslc_statement_line_id",
+            "statement_line_id",
+        ),
+        db.Index(
+            "ix_sslc_matched_record_id",
+            "matched_issued_part_record_id",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    statement_line_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "supplier_statement_line.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    amount = db.Column(
+        db.Float,
+        nullable=False,
+        default=0.0,
+    )
+
+    matched_issued_part_record_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "issued_part_record.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    note = db.Column(
+        db.String(255),
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    created_by = db.Column(
+        db.Integer,
+        nullable=True,
+        index=True,
+    )
+
+    statement_line = db.relationship(
+        "SupplierStatementLine",
+        back_populates="components",
+        lazy="joined",
+    )
+
+    matched_record = db.relationship(
+        "IssuedPartRecord",
+        lazy="joined",
+        foreign_keys=[matched_issued_part_record_id],
+    )
+
+    @property
+    def display_match(self) -> str:
+        record = self.matched_record
+
+        if record is None:
+            return f"RETURN • ${float(self.amount or 0):,.2f}"
+
+        technician = (
+            record.issued_to or ""
+        ).strip()
+
+        job_number = (
+            record.reference_job or ""
+        ).strip()
+
+        if job_number.upper().startswith("RETURN "):
+            job_number = job_number[7:].strip()
+
+        label = f"RETURN • ${float(self.amount or 0):,.2f}"
+
+        if technician and job_number:
+            return f"{label} - {technician} / {job_number}"
+
+        if technician:
+            return f"{label} - {technician}"
+
+        if job_number:
+            return f"{label} - {job_number}"
+
+        return label
 
 # --------------------------------
 # Accounting: Technician Ledger

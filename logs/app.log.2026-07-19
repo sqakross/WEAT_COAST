@@ -1,0 +1,18 @@
+2026-07-19 01:13:41 | INFO     | app:130 | Logging subsystem initialized.
+2026-07-19 01:13:41 | INFO     | app:211 | WCCR flags (FINAL): enabled=1, dry=0
+2026-07-19 01:13:41 | INFO     | app:252 | Sentry DSN not set; skipping Sentry init.
+2026-07-19 01:13:41 | INFO     | app:272 | WCCR flags: enabled=1, dry=0
+2026-07-19 01:13:50 | INFO     | app:352 | Flask app configured and blueprints registered.
+2026-07-19 01:13:50 | INFO     | app:596 | DB tables ensured (create_all).
+2026-07-19 01:13:53 | INFO     | app:535 | Backfill: created 0 units; updated 0 parts
+2026-07-19 01:13:53 | INFO     | app:608 | Old .docx cleanup complete.
+2026-07-19 01:13:53 | INFO     | app:616 | ======================================================================
+2026-07-19 01:13:53 | INFO     | app:617 | WEST COAST CHIEF REPAIR ERP
+2026-07-19 01:13:53 | INFO     | app:618 | Version : 1.1.1.45
+2026-07-19 01:13:53 | INFO     | app:619 | Python  : 3.13.5
+2026-07-19 01:13:53 | INFO     | app:620 | PID     : 4880
+2026-07-19 01:13:53 | INFO     | app:621 | Debug   : False
+2026-07-19 01:13:53 | INFO     | app:622 | SSL     : True
+2026-07-19 01:13:53 | INFO     | app:623 | Port    : 5000
+2026-07-19 01:13:53 | INFO     | app:624 | ======================================================================
+2026-07-19 01:13:53 | INFO     | app:631 | Starting secure server on https://0.0.0.0:5000, debug=False

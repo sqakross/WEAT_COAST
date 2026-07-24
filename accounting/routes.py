@@ -431,16 +431,6 @@ def supplier_statements():
         rows=rows,
     )
 
-@accounting_bp.get("/")
-@login_required
-def dashboard():
-    if not _accounting_access_required():
-        flash("Access denied", "danger")
-        return redirect(url_for("inventory.wo_list"))
-
-    return render_template(
-        "accounting/dashboard.html",
-    )
 
 @accounting_bp.get("/statements/<int:statement_id>")
 @login_required
@@ -461,3 +451,449 @@ def statement_view(statement_id):
         "accounting/statement_view.html",
         view=view,
     )
+
+@accounting_bp.route(
+    "/statements/upload",
+    methods=["GET", "POST"],
+)
+@login_required
+def statement_upload():
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    if request.method == "GET":
+        return render_template(
+            "accounting/statement_upload.html",
+        )
+
+    import os
+    import tempfile
+
+    from extensions import db
+    from services.statement_reconciliation_service import (
+        parse_statement_pdf,
+        save_parsed_statement,
+    )
+
+    uploaded_file = request.files.get("statement_file")
+
+    if uploaded_file is None or not uploaded_file.filename:
+        flash("Please select a statement PDF.", "danger")
+        return redirect(url_for("accounting.statement_upload"))
+
+    original_filename = uploaded_file.filename.strip()
+
+    if not original_filename.lower().endswith(".pdf"):
+        flash("Only PDF statements are supported.", "danger")
+        return redirect(url_for("accounting.statement_upload"))
+
+    temporary_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="supplier_statement_",
+            suffix=".pdf",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+            uploaded_file.save(temporary_path)
+
+        parsed_statement = parse_statement_pdf(
+            temporary_path
+        )
+
+        from sqlalchemy import func
+        from models import SupplierStatement
+
+        supplier_name = (
+                parsed_statement.supplier_name or ""
+        ).strip().lower()
+
+        account_number = (
+                parsed_statement.account_number or ""
+        ).strip()
+
+        balance_due = round(
+            float(parsed_statement.balance_due or 0.0),
+            2,
+        )
+
+        existing = (
+            SupplierStatement.query
+            .filter(
+                func.lower(
+                    func.trim(
+                        SupplierStatement.supplier_name
+                    )
+                ) == supplier_name,
+
+                SupplierStatement.statement_period
+                == parsed_statement.statement_period,
+
+                func.coalesce(
+                    SupplierStatement.account_number,
+                    "",
+                ) == account_number,
+
+                func.abs(
+                    SupplierStatement.balance_due - balance_due
+                ) <= 0.01,
+            )
+            .first()
+        )
+
+        if existing:
+            flash(
+                f"This supplier statement is already imported "
+                f"(Statement #{existing.id}).",
+                "warning",
+            )
+
+            return redirect(
+                url_for(
+                    "accounting.statement_view",
+                    statement_id=existing.id,
+                )
+            )
+
+        statement = save_parsed_statement(
+            parsed_statement,
+            source_file=original_filename,
+            created_by=getattr(current_user, "id", None),
+        )
+
+        flash(
+            f"{statement.supplier_name} statement imported successfully. "
+            f"{len(statement.lines)} credit lines were saved.",
+            "success",
+        )
+
+        return redirect(url_for(
+            "accounting.statement_view",
+            statement_id=statement.id,
+        ))
+
+    except Exception as exc:
+        db.session.rollback()
+
+        flash(
+            str(exc) or "Statement import failed.",
+            "danger",
+        )
+
+        return redirect(url_for(
+            "accounting.statement_upload",
+        ))
+
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            try:
+                os.remove(temporary_path)
+            except OSError:
+                pass
+
+@accounting_bp.route(
+    "/statements/line/<int:line_id>/split",
+    methods=["GET", "POST"],
+)
+@login_required
+def statement_line_split(line_id):
+    if not _accounting_access_required():
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    from sqlalchemy import func
+
+    from extensions import db
+    from models import (
+        SupplierStatementLine,
+        SupplierStatementLineComponent,
+        IssuedPartRecord,
+        ReturnDestination,
+    )
+
+    line = SupplierStatementLine.query.get_or_404(line_id)
+
+    supplier_name = (
+        line.supplier_name
+        or line.statement.supplier_name
+        or ""
+    ).strip().lower()
+
+    def find_candidates(
+        amount: float,
+        excluded_ids: set[int] | None = None,
+    ):
+        query = (
+            IssuedPartRecord.query
+            .join(
+                ReturnDestination,
+                IssuedPartRecord.return_destination_id
+                == ReturnDestination.id,
+            )
+            .filter(
+                func.upper(
+                    func.trim(IssuedPartRecord.return_to)
+                ) == "VENDOR",
+
+                IssuedPartRecord.quantity < 0,
+
+                func.lower(
+                    func.trim(ReturnDestination.name)
+                ) == supplier_name,
+
+                func.abs(
+                    func.abs(
+                        IssuedPartRecord.quantity
+                        * IssuedPartRecord.unit_cost_at_issue
+                    ) - float(amount)
+                ) <= 0.011,
+            )
+        )
+
+        if excluded_ids:
+            query = query.filter(
+                ~IssuedPartRecord.id.in_(excluded_ids)
+            )
+
+        return (
+            query
+            .order_by(
+                IssuedPartRecord.issue_date.desc(),
+                IssuedPartRecord.id.desc(),
+            )
+            .all()
+        )
+
+    if request.method == "GET":
+        used_by_other_lines = {
+            int(record_id)
+            for (record_id,) in (
+                db.session.query(
+                    SupplierStatementLineComponent
+                    .matched_issued_part_record_id
+                )
+                .filter(
+                    SupplierStatementLineComponent
+                    .matched_issued_part_record_id
+                    .isnot(None),
+
+                    SupplierStatementLineComponent
+                    .statement_line_id != line.id,
+                )
+                .all()
+            )
+            if record_id is not None
+        }
+
+        candidate_map = {}
+
+        for component in line.components or []:
+            candidate_map[component.id] = find_candidates(
+                amount=float(component.amount or 0.0),
+                excluded_ids=used_by_other_lines,
+            )
+
+        return render_template(
+            "accounting/statement_line_split.html",
+            line=line,
+            candidate_map=candidate_map,
+        )
+
+    amount_values = request.form.getlist(
+        "component_amount"
+    )
+
+    selected_record_values = request.form.getlist(
+        "component_record_id"
+    )
+
+    try:
+        amounts = []
+
+        for raw_value in amount_values:
+            value = (raw_value or "").strip()
+
+            if not value:
+                continue
+
+            amount = round(float(value), 2)
+
+            if amount <= 0:
+                raise ValueError(
+                    "Every return amount must be greater than zero."
+                )
+
+            amounts.append(amount)
+
+        if not amounts:
+            raise ValueError(
+                "Add at least one return amount."
+            )
+
+        statement_amount = round(
+            abs(float(line.credit_amount or 0.0)),
+            2,
+        )
+
+        components_total = round(sum(amounts), 2)
+        difference = round(
+            statement_amount - components_total,
+            2,
+        )
+
+        if abs(difference) > 0.009:
+            raise ValueError(
+                "Return amounts must equal the statement credit. "
+                f"Statement: ${statement_amount:,.2f}; "
+                f"Returns: ${components_total:,.2f}; "
+                f"Difference: ${difference:,.2f}."
+            )
+
+        while len(selected_record_values) < len(amounts):
+            selected_record_values.append("")
+
+        used_by_other_lines = {
+            int(record_id)
+            for (record_id,) in (
+                db.session.query(
+                    SupplierStatementLineComponent
+                    .matched_issued_part_record_id
+                )
+                .filter(
+                    SupplierStatementLineComponent
+                    .matched_issued_part_record_id
+                    .isnot(None),
+
+                    SupplierStatementLineComponent
+                    .statement_line_id != line.id,
+                )
+                .all()
+            )
+            if record_id is not None
+        }
+
+        for component in list(line.components or []):
+            db.session.delete(component)
+
+        db.session.flush()
+
+        selected_in_current_split: set[int] = set()
+
+        for index, amount in enumerate(amounts):
+            selected_raw = (
+                selected_record_values[index] or ""
+            ).strip()
+
+            excluded_ids = (
+                used_by_other_lines
+                | selected_in_current_split
+            )
+
+            candidates = find_candidates(
+                amount=amount,
+                excluded_ids=excluded_ids,
+            )
+
+            candidate_ids = {
+                candidate.id
+                for candidate in candidates
+            }
+
+            matched_record_id = None
+            note = None
+
+            if selected_raw:
+                selected_id = int(selected_raw)
+
+                if selected_id not in candidate_ids:
+                    raise ValueError(
+                        f"The selected return for "
+                        f"${amount:,.2f} is no longer available."
+                    )
+
+                matched_record_id = selected_id
+                selected_in_current_split.add(selected_id)
+
+            elif len(candidates) == 1:
+                matched_record_id = candidates[0].id
+                selected_in_current_split.add(
+                    matched_record_id
+                )
+
+            elif len(candidates) == 0:
+                note = (
+                    "No matching supplier return was found."
+                )
+
+            else:
+                note = (
+                    f"{len(candidates)} possible supplier "
+                    f"returns were found for ${amount:,.2f}. "
+                    "Select the correct return."
+                )
+
+            db.session.add(
+                SupplierStatementLineComponent(
+                    statement_line_id=line.id,
+                    amount=amount,
+                    matched_issued_part_record_id=(
+                        matched_record_id
+                    ),
+                    note=note,
+                    created_by=getattr(
+                        current_user,
+                        "id",
+                        None,
+                    ),
+                )
+            )
+
+        db.session.commit()
+
+        saved_components = list(line.components or [])
+
+        matched_count = sum(
+            1
+            for component in saved_components
+            if component.matched_issued_part_record_id
+        )
+
+        if matched_count == len(saved_components):
+            flash(
+                f"Split saved. All {matched_count} "
+                "return amounts were matched.",
+                "success",
+            )
+        else:
+            flash(
+                f"Split saved. {matched_count} of "
+                f"{len(saved_components)} return amounts "
+                "were matched. Select candidates for the rest.",
+                "warning",
+            )
+
+        return redirect(
+            url_for(
+                "accounting.statement_line_split",
+                line_id=line.id,
+            )
+        )
+
+    except Exception as exc:
+        db.session.rollback()
+
+        flash(
+            str(exc) or "Could not save split credit.",
+            "danger",
+        )
+
+        return redirect(
+            url_for(
+                "accounting.statement_line_split",
+                line_id=line.id,
+            )
+        )
+
+
