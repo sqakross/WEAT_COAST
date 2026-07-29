@@ -120,6 +120,75 @@ class JobReservation(db.Model):
 
     holder = db.relationship("User", foreign_keys=[holder_user_id], lazy="joined")
 
+class WorkOrderEditSession(db.Model):
+    """
+    Temporary edit lock for an existing Work Order.
+
+    Only one active editor may own a Work Order at a time.
+    last_seen_at is refreshed by browser heartbeat.
+    Stale sessions are treated as expired by application logic.
+    """
+    __tablename__ = "work_order_edit_session"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "work_order_id",
+            name="uq_work_order_edit_session_work_order_id",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    work_order_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "work_orders.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    username = db.Column(
+        db.String(64),
+        nullable=False,
+    )
+
+    opened_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    last_seen_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+
+    def __repr__(self):
+        return (
+            f"<WorkOrderEditSession "
+            f"wo={self.work_order_id} "
+            f"user={self.username!r} "
+            f"last_seen={self.last_seen_at}>"
+        )
+
 # --------------------------------
 # Work Orders
 # --------------------------------

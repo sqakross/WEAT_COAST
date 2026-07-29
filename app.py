@@ -425,19 +425,34 @@ ALLOWED_VIEWER_ENDPOINTS = {
 def restrict_role_routes():
     """
     Ограничиваем доступ по ролям technician/viewer.
-
-    Static-файлы пропускаем сразу, не загружая current_user из БД.
+    TEMP PERF: измеряем загрузку current_user.
     """
+    t0 = time.perf_counter()
+
     try:
         ep = (request.endpoint or "").strip()
 
-        # КРИТИЧНО ДЛЯ СКОРОСТИ:
-        # не загружаем current_user и не обращаемся к БД
-        # для CSS, JS, manifest, icons и других static-файлов.
         if ep == "static" or request.path.startswith("/static/"):
             return
 
-        if not getattr(current_user, "is_authenticated", False):
+        t_user = time.perf_counter()
+
+        is_authenticated = getattr(
+            current_user,
+            "is_authenticated",
+            False,
+        )
+
+        user_load_time = time.perf_counter() - t_user
+
+        if user_load_time >= 0.1:
+            logging.warning(
+                "AUTH PERF endpoint=%s current_user_load=%.3fs",
+                ep,
+                user_load_time,
+            )
+
+        if not is_authenticated:
             return
 
         role = (
@@ -464,7 +479,7 @@ def restrict_role_routes():
 
             return redirect(url_for("inventory.wo_list"))
 
-        # admin / superadmin / user
+        g.role_check_finished_at = time.perf_counter()
         return
 
     except Exception:
@@ -478,6 +493,16 @@ def restrict_role_routes():
             return redirect(url_for("inventory.wo_list"))
         except Exception:
             return
+
+    finally:
+        total = time.perf_counter() - t0
+
+        if total >= 0.1:
+            logging.warning(
+                "ROLE PERF endpoint=%s total=%.3fs",
+                request.endpoint,
+                total,
+            )
 # -------------------------------------------------------------------
 # 10) Вспомогательные миграции (безопасные автополевые апдейты)
 # -------------------------------------------------------------------

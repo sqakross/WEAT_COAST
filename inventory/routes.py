@@ -7564,7 +7564,15 @@ def wo_save():
         render_template,
         jsonify,
     )
-    from models import WorkOrder, WorkUnit, WorkOrderPart, User, JobReservation, WorkOrderAudit
+    from models import (
+        WorkOrder,
+        WorkUnit,
+        WorkOrderPart,
+        User,
+        JobReservation,
+        WorkOrderAudit,
+        WorkOrderEditSession,
+    )
     from extensions import db
     from datetime import datetime, timedelta
     from flask_login import current_user
@@ -7574,7 +7582,8 @@ def wo_save():
     from sqlalchemy.orm import selectinload
     import json
     import os
-    from time import perf_counter
+
+
     # ---------- helpers ----------
     def _clip(s, n):
         return (s or "").strip()[:n]
@@ -7782,6 +7791,7 @@ def wo_save():
         wo = WorkOrder()
         loaded_units = []
         loaded_parts = []
+
     else:
         wo = (
             WorkOrder.query
@@ -7792,6 +7802,55 @@ def wo_save():
             .filter(WorkOrder.id == int(wo_id))
             .first_or_404()
         )
+
+        # ==================================================
+        # WORK ORDER EDIT LOCK — SAVE OWNERSHIP CHECK
+        # ==================================================
+        actor_id = getattr(current_user, "id", None)
+
+        edit_lock_owner = (
+            db.session.query(
+                WorkOrderEditSession.user_id
+            )
+            .filter(
+                WorkOrderEditSession.work_order_id == wo.id
+            )
+            .scalar()
+        )
+
+        if edit_lock_owner != actor_id:
+            db.session.rollback()
+
+            if ajax_save:
+                return jsonify({
+                    "ok": False,
+                    "lost_lock": True,
+                    "message": (
+                        "You no longer have the edit lock for this Work Order. "
+                        "Reload the Work Order before making changes."
+                    ),
+                }), 409
+
+            flash(
+                "You no longer have the edit lock for this Work Order. "
+                "Your changes were NOT saved. Please reopen the Work Order.",
+                "warning",
+            )
+
+            return redirect(
+                url_for(
+                    "inventory.wo_detail",
+                    wo_id=wo.id,
+                )
+            )
+
+        # We still own the lock.
+        # Save itself also counts as activity.
+
+
+        # ==================================================
+        # /WORK ORDER EDIT LOCK
+        # ==================================================
 
         loaded_units = list(wo.units or [])
         loaded_parts = [
@@ -8526,8 +8585,10 @@ def wo_save():
             if old_id not in seen_part_ids:
                 db.session.delete(old_part)
 
+
     try:
         db.session.flush()
+
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to save units on Work Order: {e}", "danger")
@@ -8585,6 +8646,7 @@ def wo_save():
             wo.status = "done"
         else:
             wo.status = "search_ordered"
+
 
     # ---------- FINAL AUDIT (MUST BE RIGHT BEFORE COMMIT) ----------
     actor_id = getattr(current_user, "id", None)
@@ -8682,12 +8744,22 @@ def wo_save():
     except Exception:
         pass
 
-    saved_wo_id = wo.id
+
+    saved_wo_id = int(wo.id)
     saved_job_numbers = wo.job_numbers
+
+    # Save primitive value BEFORE commit.
+    # After commit SQLAlchemy may expire the WO object.
+    saved_updated_at = (
+        wo.updated_at.isoformat()
+        if wo.updated_at
+        else ""
+    )
 
     # ---------- MAIN COMMIT ----------
     try:
         db.session.commit()
+
 
 
         if WO_SAVE_DEBUG:
@@ -8767,11 +8839,7 @@ def wo_save():
         return jsonify({
             "ok": True,
             "wo_id": saved_wo_id,
-            "updated_at": (
-                wo.updated_at.isoformat()
-                if wo.updated_at
-                else ""
-            ),
+            "updated_at": saved_updated_at,
             "issue_url": url_for(
                 "inventory.wo_issue_instock",
                 wo_id=saved_wo_id,
@@ -9142,6 +9210,7 @@ def wo_issue_instock(wo_id):
     from markupsafe import Markup
     # from sqlalchemy import func
     from datetime import datetime
+    from time import perf_counter
     from flask import current_app, request, session
     from extensions import db
     from models import (
@@ -9151,6 +9220,7 @@ def wo_issue_instock(wo_id):
         IssuedPartRecord,
         IssuedBatch,
         WorkOrderAudit,
+        WorkOrderEditSession,
     )
     import json
     from services.accounting_service import create_ledger_charges_for_records
@@ -9159,8 +9229,68 @@ def wo_issue_instock(wo_id):
         assign_tool_from_work_order,
     )
 
+    t_issue_total = perf_counter()
+    t_issue_mark = t_issue_total
+    issue_perf_rows = []
+
+    def _issue_perf(name):
+        nonlocal t_issue_mark
+
+        now = perf_counter()
+
+        issue_perf_rows.append(
+            (
+                name,
+                now - t_issue_mark,
+                now - t_issue_total,
+            )
+        )
+
+        t_issue_mark = now
+
+    def _issue_perf_log():
+        total = perf_counter() - t_issue_total
+
+        parts = [
+            f"{name}={step:.3f}s"
+            for name, step, _total in issue_perf_rows
+        ]
+
+        current_app.logger.warning(
+            "WO_ISSUE PERF wo=%s total=%.3fs | %s",
+            wo_id,
+            total,
+            " | ".join(parts),
+        )
+
     wo = WorkOrder.query.get_or_404(wo_id)
     is_ins_job = ((wo.job_type or "").upper() == "INSURANCE")
+
+    _issue_perf("load_wo")
+
+    def _release_edit_lock_in_transaction():
+        """
+        Schedule deletion of this user's WO edit lock.
+
+        IMPORTANT:
+        No commit here.
+        The lock is deleted together with the main Issue transaction.
+        """
+        uid = getattr(current_user, "id", None)
+
+        if not uid:
+            return
+
+        (
+            WorkOrderEditSession.query
+            .filter(
+                WorkOrderEditSession.work_order_id == wo_id,
+                WorkOrderEditSession.user_id == uid,
+            )
+            .delete(
+                synchronize_session=False
+            )
+        )
 
     # --- clear flags ONLY when line is fully satisfied ---
     def _clear_bo_and_ord(line: WorkOrderPart):
@@ -9200,6 +9330,8 @@ def wo_issue_instock(wo_id):
     except Exception:
         avail_rows = []
 
+    _issue_perf("compute_availability")
+
     stock_map: dict[str, int] = {}
     hint_map: dict[str, str] = {}
     for r in avail_rows:
@@ -9213,6 +9345,8 @@ def wo_issue_instock(wo_id):
             or r.get("hint")
             or ("STOCK" if on_hand > 0 else "WAIT")
         )
+
+    _issue_perf("build_stock_maps")
 
     def _add_wo_audit(action: str, message: str, meta: dict | None = None):
         db.session.add(WorkOrderAudit(
@@ -9328,6 +9462,9 @@ def wo_issue_instock(wo_id):
             )
             .all()
         )
+
+        _issue_perf("load_selected_wops")
+
         if not wops:
             flash("Selected parts not found.", "warning")
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
@@ -9353,6 +9490,8 @@ def wo_issue_instock(wo_id):
                 .filter(func.upper(Part.part_number).in_(selected_pns))
                 .all()
             )
+
+        _issue_perf("preload_parts")
 
         parts_by_pn: dict[str, list[Part]] = {}
         for p in part_rows:
@@ -9562,6 +9701,8 @@ def wo_issue_instock(wo_id):
             issued_row_ids.append(line.id)
             issued_delta_by_line_id[int(line.id)] = issued_delta_by_line_id.get(int(line.id), 0) + qty_req
 
+        _issue_perf("prepare_selected_items")
+
         if not issued_row_ids and not items_to_issue and not new_records:
             if skipped_rows:
                 flash("Selected item(s) are not available in stock. Nothing was issued.", "warning")
@@ -9571,8 +9712,17 @@ def wo_issue_instock(wo_id):
 
         if issued_row_ids and not items_to_issue and not new_records:
             try:
+                tool_wo_id = int(wo.id)
+
+                _release_edit_lock_in_transaction()
+
                 db.session.commit()
-                flash("Tool(s) assigned to technician.", "success")
+
+                flash(
+                    "Tool(s) assigned to technician.",
+                    "success",
+                )
+
             except Exception as e:
                 db.session.rollback()
                 flash(f"Error assigning tool(s): {e}", "danger")
@@ -9587,6 +9737,9 @@ def wo_issue_instock(wo_id):
                     reference_job=wo.canonical_job,
                     items=items_to_issue,
                 )
+
+                _issue_perf("issue_records_bulk")
+
                 if issue_date_stock:
                     issue_date = issue_date_stock
                 if created_records:
@@ -9617,6 +9770,8 @@ def wo_issue_instock(wo_id):
                     _clear_bo_and_ord(line)
 
                 db.session.add(line)
+
+        _issue_perf("apply_issued_deltas")
 
         if issued_row_ids or new_records or items_to_issue:
             _touch_wo()
@@ -9655,6 +9810,8 @@ def wo_issue_instock(wo_id):
                     note_prefix="WO unit issue",
                 )
 
+                _issue_perf("ledger_charges")
+
                 issued_summary = []
                 for r in new_records:
                     pn = getattr(getattr(r, "part", None), "part_number", None) or getattr(r, "part_number",
@@ -9674,26 +9831,57 @@ def wo_issue_instock(wo_id):
                 )
 
                 _touch_wo()
+
+                # Keep primitive values BEFORE commit.
+                # SQLAlchemy may expire ORM objects after commit.
+                saved_wo_id = int(wo.id)
+                saved_job_ref = (wo.canonical_job or "").strip()
+
+                # Release edit lock in the SAME transaction as Issue.
+                _release_edit_lock_in_transaction()
+
+                _issue_perf("release_lock_prepare")
+
                 db.session.commit()
+
+                _issue_perf("main_commit")
 
                 params = urlencode({
                     "invoice_number": inv_no,
-                    "ref_job": (wo.canonical_job or "").strip(),
+                    "ref_job": saved_job_ref,
                 })
+
                 session["last_invoice_url"] = f"/invoice/pdf?{params}"
 
-                return redirect(url_for(
-                    "inventory.wo_detail",
-                    wo_id=wo.id,
-                    issued_ids=",".join(map(str, issued_row_ids))
-                ))
+                _issue_perf("before_redirect")
+                _issue_perf_log()
+
+                return redirect(
+                    url_for(
+                        "inventory.wo_detail",
+                        wo_id=saved_wo_id,
+                        issued_ids=",".join(map(str, issued_row_ids)),
+                    )
+                )
             except Exception:
                 db.session.rollback()
                 # fallback below
 
+        fallback_wo_id = int(wo.id)
+        fallback_tech_name = (wo.technician_name or "").strip()
+        fallback_job_ref = (wo.canonical_job or "").strip()
+
         try:
             if issued_row_ids or new_records or items_to_issue:
+                _release_edit_lock_in_transaction()
+
+                _issue_perf("fallback_release_prepare")
+
                 db.session.commit()
+
+                _issue_perf("fallback_commit")
+
+
         except Exception as e:
             db.session.rollback()
             flash(f"Error saving issue result: {e}", "danger")
@@ -9705,8 +9893,8 @@ def wo_issue_instock(wo_id):
         params = urlencode({
             "start_date": d,
             "end_date": d,
-            "recipient": wo.technician_name,
-            "reference_job": wo.canonical_job,
+            "recipient": fallback_tech_name,
+            "reference_job": fallback_job_ref,
         })
         link = f"/reports_grouped?{params}"
 
@@ -9718,9 +9906,12 @@ def wo_issue_instock(wo_id):
             f'<a href="{link}" target="_blank" rel="noopener">Open invoice group</a> to print.'
         ), "success")
 
+        _issue_perf("before_fallback_redirect")
+        _issue_perf_log()
+
         return redirect(url_for(
             "inventory.wo_detail",
-            wo_id=wo.id,
+            wo_id=fallback_wo_id,
             issued_ids=",".join(map(str, issued_row_ids))
         ))
 
@@ -9821,6 +10012,8 @@ def wo_issue_instock(wo_id):
     _touch_wo()
     inv_no = _reserve_invoice_number()
 
+    _issue_perf("reserve_invoice_number")
+
     batch = IssuedBatch(
         invoice_number=inv_no,
         issued_to=wo.technician_name,
@@ -9896,9 +10089,32 @@ def wo_issue_instock(wo_id):
     after_save = (request.form.get("_after_save") or "").strip()
 
     if after_save == "edit_auto_issue":
-        return redirect(url_for("inventory.wo_edit", wo_id=wo.id, auto_issue=1))
+        return redirect(
+            url_for(
+                "inventory.wo_edit",
+                wo_id=wo.id,
+                auto_issue=1,
+            )
+        )
 
-    return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+    # Mass issue path currently commits business data above.
+    # Release its lock here.
+    try:
+        _release_edit_lock_in_transaction()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Failed to release WO edit lock after mass issue: wo_id=%s",
+            wo.id,
+        )
+
+    return redirect(
+        url_for(
+            "inventory.wo_detail",
+            wo_id=wo.id,
+        )
+    )
 
 @inventory_bp.post("/tools/<int:tool_id>/return", endpoint="tool_return")
 @login_required
@@ -11583,6 +11799,85 @@ def tools_tech_report_pdf():
         mimetype="application/pdf",
     )
 
+WORK_ORDER_EDIT_LOCK_TIMEOUT_SECONDS = 150
+
+
+def _acquire_work_order_edit_lock(work_order_id: int):
+    from datetime import datetime, timedelta
+    from sqlalchemy.exc import IntegrityError
+    from flask_login import current_user
+
+    from extensions import db
+    from models import WorkOrderEditSession
+
+    now = datetime.utcnow()
+    cutoff = now - timedelta(
+        seconds=WORK_ORDER_EDIT_LOCK_TIMEOUT_SECONDS
+    )
+
+    user_id = getattr(current_user, "id", None)
+    username = (
+        getattr(current_user, "username", None) or ""
+    ).strip()
+
+    if not user_id:
+        return False, None
+
+    row = (
+        WorkOrderEditSession.query
+        .filter_by(work_order_id=work_order_id)
+        .first()
+    )
+
+    # Уже наш собственный lock — просто обновляем активность.
+    if row and row.user_id == user_id:
+        row.username = username or row.username
+        row.last_seen_at = now
+        db.session.commit()
+        return True, row
+
+    # Другой пользователь всё ещё активен.
+    if (
+        row
+        and row.last_seen_at
+        and row.last_seen_at >= cutoff
+    ):
+        return False, row
+
+    # Старый lock умер — освобождаем.
+    if row:
+        db.session.delete(row)
+        db.session.flush()
+
+    new_row = WorkOrderEditSession(
+        work_order_id=work_order_id,
+        user_id=user_id,
+        username=username or "Unknown user",
+        opened_at=now,
+        last_seen_at=now,
+    )
+
+    db.session.add(new_row)
+
+    try:
+        db.session.commit()
+        return True, new_row
+
+    except IntegrityError:
+        # Два пользователя могли открыть WO практически одновременно.
+        db.session.rollback()
+
+        winner = (
+            WorkOrderEditSession.query
+            .filter_by(work_order_id=work_order_id)
+            .first()
+        )
+
+        if winner and winner.user_id == user_id:
+            return True, winner
+
+        return False, winner
+
 @inventory_bp.get("/work_orders/<int:wo_id>/edit", endpoint="wo_edit")
 @login_required
 def wo_edit(wo_id: int):
@@ -11591,16 +11886,50 @@ def wo_edit(wo_id: int):
     from sqlalchemy import func, or_, and_
     from sqlalchemy.orm import selectinload
     from collections import defaultdict
-
     from extensions import db
-    from models import WorkOrder, WorkUnit, IssuedPartRecord, IssuedBatch, Part
+    from models import (
+        WorkOrder,
+        WorkUnit,
+        IssuedPartRecord,
+        IssuedBatch,
+        Part,
+    )
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
     readonly_param = request.args.get("readonly", type=int) == 1
     readonly = (role not in ("admin", "superadmin")) or readonly_param
+
     if not readonly and role not in ("admin", "superadmin"):
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
+
+    # ==================================================
+    # WORK ORDER EDIT LOCK
+    # IMPORTANT:
+    # acquire lock BEFORE loading the full WorkOrder.
+    # _acquire_work_order_edit_lock() performs COMMIT and
+    # SQLAlchemy expires already-loaded ORM objects on commit.
+    # ==================================================
+
+    if not readonly:
+        lock_ok, lock_row = _acquire_work_order_edit_lock(wo_id)
+
+        if not lock_ok:
+            wo_locked = (
+                WorkOrder.query
+                .filter(WorkOrder.id == wo_id)
+                .first_or_404()
+            )
+
+            return render_template(
+                "wo_edit_locked.html",
+                wo=wo_locked,
+                lock_row=lock_row,
+            )
+
+    # ==================================================
+    # NOW load WorkOrder AFTER lock transaction is finished
+    # ==================================================
 
     wo = (
         WorkOrder.query
@@ -11611,6 +11940,10 @@ def wo_edit(wo_id: int):
         .filter(WorkOrder.id == wo_id)
         .first_or_404()
     )
+
+    # ==================================================
+    # /WORK ORDER EDIT LOCK
+    # ==================================================
 
     technicians = _query_technicians()
 
@@ -11646,8 +11979,10 @@ def wo_edit(wo_id: int):
         if matched_tech:
             selected_tech_id, selected_tech_username = matched_tech
 
+
+
     # ==================================================
-    # 1) Фактическая выдача по этому WO (агрегировано, без загрузки всех rows)
+    # 1) Фактическая выдача по этому WO
     # ==================================================
     canon = (wo.canonical_job or "").strip()
     issued_qty_by_pn = defaultdict(int)
@@ -11679,6 +12014,7 @@ def wo_edit(wo_id: int):
             and_(*legacy_conditions)
         )
 
+
         qty_rows = (
             db.session.query(
                 func.upper(
@@ -11709,12 +12045,6 @@ def wo_edit(wo_id: int):
             .all()
         )
 
-        for row in qty_rows:
-            pn = (row.pn or "").strip().upper()
-            qty = int(row.qty or 0)
-
-            if pn and qty:
-                issued_qty_by_pn[pn] = qty
 
         for row in qty_rows:
             pn = (row.pn or "").strip().upper()
@@ -11722,12 +12052,15 @@ def wo_edit(wo_id: int):
 
             if pn and qty:
                 issued_qty_by_pn[pn] = qty
+
 
     remaining_issued = dict(issued_qty_by_pn)
+
 
     # ==================================================
     # 2) units payload c issued_qty + ALT PN + INS-флагом
     # ==================================================
+
     units = []
     for u in (getattr(wo, "units", []) or []):
         rows = []
@@ -11827,6 +12160,7 @@ def wo_edit(wo_id: int):
             }],
         }]
 
+
     recent_suppliers = session.get("recent_suppliers", []) or []
 
     return render_template(
@@ -11839,6 +12173,91 @@ def wo_edit(wo_id: int):
         selected_tech_id=selected_tech_id,
         selected_tech_username=selected_tech_username,
     )
+
+@inventory_bp.post(
+    "/work_orders/<int:wo_id>/edit-heartbeat",
+    endpoint="wo_edit_heartbeat",
+)
+@login_required
+def wo_edit_heartbeat(wo_id: int):
+    from datetime import datetime
+    from flask import jsonify
+    from flask_login import current_user
+
+    from extensions import db
+    from models import WorkOrderEditSession
+
+    user_id = getattr(current_user, "id", None)
+
+    if not user_id:
+        return jsonify({
+            "ok": False,
+            "lost_lock": True,
+        }), 401
+
+    updated = (
+        WorkOrderEditSession.query
+        .filter(
+            WorkOrderEditSession.work_order_id == wo_id,
+            WorkOrderEditSession.user_id == user_id,
+        )
+        .update(
+            {
+                WorkOrderEditSession.last_seen_at: datetime.utcnow(),
+            },
+            synchronize_session=False,
+        )
+    )
+
+    if not updated:
+        db.session.rollback()
+
+        return jsonify({
+            "ok": False,
+            "lost_lock": True,
+        }), 409
+
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+    })
+
+@inventory_bp.post(
+    "/work_orders/<int:wo_id>/edit-release",
+    endpoint="wo_edit_release",
+)
+@login_required
+def wo_edit_release(wo_id: int):
+    from flask import jsonify
+    from flask_login import current_user
+
+    from extensions import db
+    from models import WorkOrderEditSession
+
+    user_id = getattr(current_user, "id", None)
+
+    if not user_id:
+        return jsonify({
+            "ok": False,
+        }), 401
+
+    (
+        WorkOrderEditSession.query
+        .filter(
+            WorkOrderEditSession.work_order_id == wo_id,
+            WorkOrderEditSession.user_id == user_id,
+        )
+        .delete(
+            synchronize_session=False
+        )
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+    })
 
 @inventory_bp.post("/work_orders/<int:wo_id>/delete", endpoint="wo_delete")
 @login_required
@@ -12103,108 +12522,86 @@ def wo_issue_instock_unit(wo_id, unit_id):
             flash(f"{pn} is not available in stock. Cannot issue.", "danger")
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    now = datetime.utcnow()
-    tool_summary = []
+    # ============================================================
+    # REUSABLE ASSET ASSIGNMENT
+    # Single source of truth:
+    # services.asset_assignment_service.assign_tool_from_work_order
+    # ============================================================
 
-    if tool_assignments and not (wo.technician_name or "").strip():
-        flash("Select technician before assigning tools.", "danger")
-        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+    assigned_receipts = []
+    if tool_assignments:
+        if (
+                not getattr(wo, "technician_id", None)
+                or not (getattr(wo, "technician_name", "") or "").strip()
+        ):
+            flash(
+                "Select a valid employee before assigning tools.",
+                "danger",
+            )
+            return redirect(
+                url_for("inventory.wo_detail", wo_id=wo.id)
+            )
 
-    try:
-        for t in tool_assignments:
-            line = t["wop"]
-            tool_number = t["tool_number"]
-            tool_name = t["tool_name"]
+        try:
 
-            tool = ToolAsset.query.filter(
-                func.upper(ToolAsset.tool_number) == pn
-            ).first()
+            for t in tool_assignments:
+                line = t["wop"]
 
-            if not tool:
-                try:
-                    tool_total_qty = int(getattr(part, "quantity", 0) or 0) if part else 0
-                except Exception:
-                    tool_total_qty = 0
-
-                tool = ToolAsset(
-                    tool_number=pn,
-                    name=(line.part_name or pn),
-                    quantity=tool_total_qty,
-                    serial_number=None,
-                    status="available",
-                    condition="good",
-                    location="TOOLS",
+                result = assign_tool_from_work_order(
+                    work_order=wo,
+                    line=line,
+                    current_user=current_user,
                 )
-                db.session.add(tool)
-                db.session.flush()
 
-            old_status = tool.status or "available"
-
-            if old_status == "assigned" and tool.current_technician_name:
-                flash(
-                    f"Tool {tool_number} is already assigned to {tool.current_technician_name}. Return or transfer it first.",
-                    "danger"
+                assigned_receipts.append(
+                    result.receipt.receipt_number
                 )
-                db.session.rollback()
-                return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-            tool.status = "assigned"
-            tool.location = "TECHNICIAN"
-            tool.current_technician_id = getattr(wo, "technician_id", None)
-            tool.current_technician_name = wo.technician_name
-            tool.current_work_order_id = wo.id
-            tool.updated_at = now
+            # One transaction for all selected assets.
+            db.session.commit()
 
-            db.session.add(ToolMovement(
-                tool_id=tool.id,
-                work_order_id=None,
-                technician_id=None,
-                technician_name=f"{from_tech} → {to_tech}",
-                action="transferred",
-                quantity=qty,
-                from_status="assigned",
-                to_status="assigned",
-                note=f"{from_tech} -> {to_tech}",
-                actor_user_id=actor_id,
-                actor_username=actor_name,
-                created_at=now,
-            ))
+        except AssetAssignmentError as e:
+            db.session.rollback()
 
-            if line:
-                line.item_type = "tool"
-                line.tool_asset_id = tool.id
-                line.issued_qty = int(line.issued_qty or 0) + 1
-                line.last_issued_at = now
-                line.status = "done"
-                line.line_status = "done"
-                _clear_bo_and_ord(line)
-                db.session.add(line)
+            flash(
+                str(e),
+                "danger",
+            )
 
-            tool_summary.append(f"{tool_number} — {tool_name}")
+            return redirect(
+                url_for("inventory.wo_detail", wo_id=wo.id)
+            )
 
-        if tool_summary:
-            db.session.add(WorkOrderAudit(
-                work_order_id=wo.id,
-                action="tool_assigned",
-                message=("Assigned tool(s): " + "; ".join(tool_summary))[:255],
-                meta_json=json.dumps({
-                    "tools": tool_summary,
-                    "audit_reason": "tool_assigned",
-                }, ensure_ascii=False),
-                actor_user_id=getattr(current_user, "id", None),
-                actor_username=getattr(current_user, "username", "system"),
-            ))
+        except Exception as e:
+            db.session.rollback()
 
-        db.session.commit()
+            current_app.logger.exception(
+                "WO asset assignment failed "
+                "wo_id=%s unit_id=%s",
+                wo.id,
+                unit_id,
+            )
 
-    except Exception as e:
-        db.session.rollback()
-        flash(f"Tool assignment error: {e}", "danger")
-        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+            flash(
+                f"Tool assignment error: {e}",
+                "danger",
+            )
+
+            return redirect(
+                url_for("inventory.wo_detail", wo_id=wo.id)
+            )
 
     if not items:
-        flash("Tool(s) assigned to technician.", "success")
-        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+        receipt_text = ", ".join(assigned_receipts)
+
+        flash(
+            f"Tool(s) assigned successfully. Receipt: {receipt_text}",
+            "success",
+        )
+
+        return redirect(
+            url_for("inventory.wo_detail", wo_id=wo.id)
+        )
     # --- создаём строки выдачи ---
     issue_date, maybe_records = _issue_records_bulk(
         issued_to=wo.technician_name,
@@ -12253,6 +12650,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         )
         db.session.add(batch)
         db.session.flush()  # чтобы появился batch.id
+
 
         for r in new_records:
             r.batch_id = batch.id
@@ -13349,6 +13747,11 @@ def reports_grouped():
     invoice_search = invoice_s or None  # общий поиск (и invoice_number, и inv_ref)
     location       = (params.get('location') or '').strip() or None
     status         = (params.get('status') or '').strip().upper()
+
+    # ==================================================
+    # PERF: WO SAVE
+    # ==================================================
+
 
     # роль/текущий пользователь
     role_low = (getattr(current_user, "role", "") or "").strip().lower()
