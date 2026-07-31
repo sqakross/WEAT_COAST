@@ -13894,9 +13894,36 @@ def reports_grouped():
             Part.name.ilike(like),
         ]
         if q_int is not None:
-            ors.append(IssuedPartRecord.invoice_number == q_int)
+            # If q is an exact existing invoice number,
+            # treat it as an invoice lookup, not broad text search.
+            exact_invoice_exists = (
+                db.session.query(IssuedPartRecord.id)
+                .outerjoin(
+                    IssuedBatch,
+                    IssuedBatch.id == IssuedPartRecord.batch_id
+                )
+                .filter(
+                    or_(
+                        IssuedPartRecord.invoice_number == q_int,
+                        IssuedBatch.invoice_number == q_int,
+                    )
+                )
+                .first()
+                is not None
+            )
 
-        q = q.filter(or_(*ors))
+            if exact_invoice_exists:
+                q = q.filter(
+                    or_(
+                        IssuedPartRecord.invoice_number == q_int,
+                        IssuedBatch.invoice_number == q_int,
+                    )
+                )
+            else:
+                # Number may be job/ref/etc. — keep normal broad search.
+                q = q.filter(or_(*ors))
+        else:
+            q = q.filter(or_(*ors))
 
     # ---------- Фильтр по статусу строки ----------
     if status == "OPEN":
@@ -14063,6 +14090,264 @@ def reports_grouped():
         reverse=True
     )
 
+    # ==========================================================
+    # RELATED INVOICES — same job as the currently opened invoice
+    # ==========================================================
+    related_invoices = []
+
+    # Always initialize job totals.
+    # In normal Reports mode there may be no selected invoice.
+    job_issued_total = 0.0
+    job_returned_total = 0.0
+    job_net_total = 0.0
+
+    current_invoice_no = None
+
+    # Основной сценарий сейчас: /reports_grouped?q=24957
+    if q_s:
+        try:
+            current_invoice_no = int(q_s)
+        except (TypeError, ValueError):
+            current_invoice_no = None
+
+    # Поддерживаем также старые ссылки ?invoice_number=24957
+    if current_invoice_no is None and invoice_search:
+        try:
+            current_invoice_no = int(invoice_search)
+        except (TypeError, ValueError):
+            current_invoice_no = None
+
+    if current_invoice_no is not None:
+
+        # Находим строки именно открытого invoice.
+        current_rows = (
+            db.session.query(IssuedPartRecord)
+            .outerjoin(
+                IssuedBatch,
+                IssuedBatch.id == IssuedPartRecord.batch_id
+            )
+            .filter(
+                or_(
+                    IssuedPartRecord.invoice_number == current_invoice_no,
+                    IssuedBatch.invoice_number == current_invoice_no,
+                )
+            )
+            .all()
+        )
+
+        # ------------------------------------------------------
+        # Нормализация:
+        #   1015546        -> 1015546
+        #   RETURN 1015546 -> 1015546
+        # ------------------------------------------------------
+        def _canonical_job_ref(value):
+            value = (value or "").strip()
+            if not value:
+                return ""
+
+            value_up = value.upper()
+
+            if value_up.startswith("RETURN"):
+                value = value[6:].strip()
+
+            return value.strip()
+
+        job_refs = set()
+
+        for row in current_rows:
+            row_ref = _canonical_job_ref(
+                row.reference_job
+                or (
+                    row.batch.reference_job
+                    if getattr(row, "batch", None)
+                    else None
+                )
+            )
+
+            if row_ref:
+                job_refs.add(row_ref)
+
+        if job_refs:
+            # Build SQL conditions only for the current job(s).
+            #
+            # We support both:
+            #   1015546
+            #   RETURN 1015546
+            #
+            # and check both record.reference_job and batch.reference_job.
+            related_job_conditions = []
+
+            for job_ref in job_refs:
+                clean_ref = (job_ref or "").strip()
+
+                if not clean_ref:
+                    continue
+
+                related_job_conditions.extend([
+                    func.trim(
+                        func.coalesce(
+                            IssuedPartRecord.reference_job,
+                            ""
+                        )
+                    ) == clean_ref,
+
+                    func.upper(
+                        func.trim(
+                            func.coalesce(
+                                IssuedPartRecord.reference_job,
+                                ""
+                            )
+                        )
+                    ) == f"RETURN {clean_ref}".upper(),
+
+                    func.trim(
+                        func.coalesce(
+                            IssuedBatch.reference_job,
+                            ""
+                        )
+                    ) == clean_ref,
+
+                    func.upper(
+                        func.trim(
+                            func.coalesce(
+                                IssuedBatch.reference_job,
+                                ""
+                            )
+                        )
+                    ) == f"RETURN {clean_ref}".upper(),
+                ])
+
+            if related_job_conditions:
+                candidate_rows = (
+                    db.session.query(IssuedPartRecord)
+                    .outerjoin(
+                        IssuedBatch,
+                        IssuedBatch.id == IssuedPartRecord.batch_id
+                    )
+                    .options(
+                        selectinload(IssuedPartRecord.batch),
+                    )
+                    .filter(
+                        IssuedPartRecord.invoice_number.isnot(None),
+                        or_(*related_job_conditions),
+                    )
+                    .order_by(
+                        IssuedPartRecord.id.desc()
+                    )
+                    .all()
+                )
+            else:
+                candidate_rows = []
+
+
+            related_map = {}
+
+            for row in candidate_rows:
+                inv_no = row.invoice_number
+
+                if not inv_no:
+                    continue
+
+                # Сам текущий invoice в Related не показываем.
+                if int(inv_no) == int(current_invoice_no):
+                    continue
+
+                row_ref = _canonical_job_ref(
+                    row.reference_job
+                    or (
+                        row.batch.reference_job
+                        if getattr(row, "batch", None)
+                        else None
+                    )
+                )
+
+                if row_ref not in job_refs:
+                    continue
+
+                entry = related_map.setdefault(
+                    int(inv_no),
+                    {
+                        "invoice_number": int(inv_no),
+                        "reference_job": row.reference_job or "",
+                        "issue_date": (
+                            row.issue_date
+                            or (
+                                row.batch.issue_date
+                                if getattr(row, "batch", None)
+                                else None
+                            )
+                        ),
+                        "total_value": 0.0,
+                        "is_return": False,
+                    }
+                )
+
+                entry["total_value"] += (
+                    (row.quantity or 0)
+                    * (row.unit_cost_at_issue or 0.0)
+                )
+
+                if (
+                    (row.quantity or 0) < 0
+                    or (row.reference_job or "").strip().upper().startswith("RETURN")
+                ):
+                    entry["is_return"] = True
+
+                row_date = (
+                    row.issue_date
+                    or (
+                        row.batch.issue_date
+                        if getattr(row, "batch", None)
+                        else None
+                    )
+                )
+
+                if row_date and (
+                    entry["issue_date"] is None
+                    or row_date > entry["issue_date"]
+                ):
+                    entry["issue_date"] = row_date
+
+            related_invoices = sorted(
+                related_map.values(),
+                key=lambda x: (
+                    x.get("issue_date") or datetime.min,
+                    x.get("invoice_number") or 0,
+                ),
+                reverse=True,
+            )
+
+            # ==========================================================
+            # JOB TOTALS — current invoice + related invoices
+            # ==========================================================
+            job_issued_total = 0.0
+            job_returned_total = 0.0
+
+            if current_invoice_no is not None:
+
+                all_job_invoices = []
+
+                # Current invoice currently shown at the top
+                for inv in invoices:
+                    if (
+                            inv.get("invoice_number")
+                            and int(inv.get("invoice_number")) == int(current_invoice_no)
+                    ):
+                        all_job_invoices.append(inv)
+
+                # Other invoices for the same job
+                all_job_invoices.extend(related_invoices)
+
+                for inv in all_job_invoices:
+                    value = float(inv.get("total_value") or 0.0)
+
+                    if inv.get("is_return"):
+                        job_returned_total += abs(value)
+                    else:
+                        job_issued_total += value
+
+            job_net_total = job_issued_total - job_returned_total
+
     return render_template(
         'reports_grouped.html',
         invoices=invoices,
@@ -14076,6 +14361,13 @@ def reports_grouped():
         # ✅ For dropdown + stable display in template
         return_destinations=return_destinations,
         dest_map=dest_map,
+
+        # Related ISSUE / RETURN invoices for the same job
+        related_invoices=related_invoices,
+        current_invoice_no=current_invoice_no,
+        job_issued_total=job_issued_total,
+        job_returned_total=job_returned_total,
+        job_net_total=job_net_total,
     )
 
 

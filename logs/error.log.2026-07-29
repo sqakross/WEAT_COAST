@@ -1,0 +1,616 @@
+2026-07-29 09:00:53 | ERROR    | app:875 | Exception on /work_orders/4910/edit [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 11992, in wo_edit
+    return render_template(
+        "wo_form_units.html",
+    ...<6 lines>...
+        selected_tech_username=selected_tech_username,
+    )
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\templating.py", line 149, in render_template
+    template = app.jinja_env.get_or_select_template(template_name_or_list)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\jinja2\environment.py", line 1087, in get_or_select_template
+    return self.get_template(template_name_or_list, parent, globals)
+           ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\jinja2\environment.py", line 1016, in get_template
+    return self._load_template(name, globals)
+           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\jinja2\environment.py", line 975, in _load_template
+    template = self.loader.load(self, name, self.make_globals(globals))
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\jinja2\loaders.py", line 138, in load
+    code = environment.compile(source, name, filename)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\jinja2\environment.py", line 771, in compile
+    self.handle_exception(source=source_hint)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\jinja2\environment.py", line 942, in handle_exception
+    raise rewrite_traceback_stack(source=source)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\templates\wo_form_units.html", line 701, in template
+    {% block extra_js %}
+jinja2.exceptions.TemplateAssertionError: block 'extra_js' defined twice
+2026-07-29 11:51:33 | ERROR    | app:875 | Exception on /work_orders/4919/edit [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 11811, in wo_edit
+    t_load_wo = perf_counter() - t0
+                                 ^^
+UnboundLocalError: cannot access local variable 't0' where it is not associated with a value
+2026-07-29 11:54:32 | ERROR    | routes:799 | API_JOB_RESERVE failed user_id=2 tokens=['1016268']
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.IntegrityError: UNIQUE constraint failed: job_reservation.job_token
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 774, in api_job_reserve
+    db.session.commit()
+    ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\scoping.py", line 599, in commit
+    return self._proxied.commit()
+           ~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2032, in commit
+    trans.commit(_to_root=True)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "<string>", line 2, in commit
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1313, in commit
+    self._prepare_impl()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "<string>", line 2, in _prepare_impl
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1288, in _prepare_impl
+    self.session.flush()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4345, in flush
+    self._flush(objects)
+    ~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4480, in _flush
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4441, in _flush
+    flush_context.execute()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 466, in execute
+    rec.execute(self)
+    ~~~~~~~~~~~^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.mapper,
+        ^^^^^^^^^^^^
+        uow.states_for_mapper_hierarchy(self.mapper, False, False),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        uow,
+        ^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\persistence.py", line 93, in save_obj
+    _emit_insert_statements(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        base_mapper,
+        ^^^^^^^^^^^^
+    ...<3 lines>...
+        insert,
+        ^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\persistence.py", line 1233, in _emit_insert_statements
+    result = connection.execute(
+        statement,
+        params,
+        execution_options=execution_options,
+    )
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1415, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\sql\elements.py", line 523, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1637, in _execute_clauseelement
+    ret = self._execute_context(
+        dialect,
+    ...<8 lines>...
+        cache_hit=cache_hit,
+    )
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1842, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1982, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2351, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) UNIQUE constraint failed: job_reservation.job_token
+[SQL: INSERT INTO job_reservation (job_token, holder_user_id, holder_username, expires_at, created_at, updated_at, work_order_id) VALUES (?, ?, ?, ?, ?, ?, ?)]
+[parameters: ('1016268', 2, 'LEONARD', '2026-07-29 19:14:32.088243', '2026-07-29 18:54:32.097659', '2026-07-29 18:54:32.097674', None)]
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
+2026-07-29 12:01:35 | ERROR    | app:875 | Exception on /work_orders/4920/edit [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 12107, in wo_edit
+    t_pre_canon,
+    ^^^^^^^^^^^
+NameError: name 't_pre_canon' is not defined
+2026-07-29 12:34:27 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:34:30 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:34:31 | ERROR    | app:875 | Exception on /work_orders/save [POST]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 7745, in wo_save
+    _save_perf("request_form")
+    ^^^^^^^^^^
+NameError: name '_save_perf' is not defined
+2026-07-29 12:34:37 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:34:41 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:34:50 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:35:00 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:35:00 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:35:01 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:35:01 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:35:01 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:35:47 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:35:51 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:35:59 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:36:25 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:36:31 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:36:44 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:37:10 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 12:37:34 | ERROR    | app:875 | Exception on /reports_grouped [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 13793, in reports_grouped
+    t_save_total = perf_counter()
+                   ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
+2026-07-29 15:44:30 | CRITICAL | app:141 | UNHANDLED EXCEPTION
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 336, in <module>
+    from inventory.routes import inventory_bp
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 7867
+    current_app.logger.warning(
+    ^^^^^^^^^^^
+IndentationError: expected an indented block after 'if' statement on line 7866
+2026-07-29 15:46:35 | ERROR    | app:875 | Exception on /work_orders/save [POST]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 7590, in wo_save
+    g,
+    ^
+NameError: name 'g' is not defined
+2026-07-29 16:16:57 | CRITICAL | app:141 | UNHANDLED EXCEPTION
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\app.py", line 336, in <module>
+    from inventory.routes import inventory_bp
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 8761
+    db.session.commit())
+                       ^
+SyntaxError: unmatched ')'
+2026-07-29 16:18:40 | ERROR    | app:875 | Exception on /work_orders/4931/edit [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 11984, in wo_edit
+    _perf_mark("technician_prepare")
+    ^^^^^^^^^^
+NameError: name '_perf_mark' is not defined
+2026-07-29 16:23:07 | ERROR    | app:875 | Exception on /work_orders/4931/edit [GET]
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py", line 12019, in wo_edit
+    t0 = perf_counter()
+         ^^^^^^^^^^^^
+NameError: name 'perf_counter' is not defined
