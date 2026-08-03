@@ -8999,66 +8999,134 @@ def wo_list():
 
         qnorm = qtext.strip()
 
-        # ---- Issued INV# search (handles "000918" and "918") ----
+        # =====================================================
+        # EXACT ISSUED INVOICE SEARCH
+        # If q is an existing invoice number, invoice lookup
+        # gets priority over the broad Search(any).
+        # =====================================================
         if qnorm.isdigit():
-            matched_by_invoice = True
-            matched_invoice_number = qnorm
-
             inv_raw = qnorm
             inv_trim = inv_raw.lstrip("0") or "0"
             inv_z6 = inv_trim.zfill(6)
+
             inv_variants = {inv_raw, inv_trim, inv_z6}
-            inv_int = int(inv_trim) if inv_trim.isdigit() else None
+            inv_int = int(inv_trim)
 
             ref_jobs = set()
 
-            # IssuedBatch.invoice_number can be int OR string -> compare as string + (optional) as int
-            qb = db.session.query(IssuedBatch.reference_job).filter(
-                or_(
-                    func.trim(func.cast(IssuedBatch.invoice_number, String)).in_(list(inv_variants)),
-                    (IssuedBatch.invoice_number == inv_int) if inv_int is not None else False,
+            # ---------------------------------------------
+            # Search exact invoice in IssuedBatch
+            # ---------------------------------------------
+            qb = (
+                db.session.query(IssuedBatch.reference_job)
+                .filter(
+                    or_(
+                        func.trim(
+                            func.cast(
+                                IssuedBatch.invoice_number,
+                                String
+                            )
+                        ).in_(list(inv_variants)),
+
+                        IssuedBatch.invoice_number == inv_int,
+                    )
                 )
             )
+
             for (ref,) in qb.all():
                 if ref:
                     ref_jobs.add(str(ref).strip())
 
-            # fallback: IssuedPartRecord.invoice_number (old rows)
-            qr = db.session.query(IssuedPartRecord.reference_job).filter(
-                or_(
-                    func.trim(func.cast(IssuedPartRecord.invoice_number, String)).in_(list(inv_variants)),
-                    (IssuedPartRecord.invoice_number == inv_int) if inv_int is not None else False,
+            # ---------------------------------------------
+            # Fallback for old IssuedPartRecord rows
+            # ---------------------------------------------
+            qr = (
+                db.session.query(IssuedPartRecord.reference_job)
+                .filter(
+                    or_(
+                        func.trim(
+                            func.cast(
+                                IssuedPartRecord.invoice_number,
+                                String
+                            )
+                        ).in_(list(inv_variants)),
+
+                        IssuedPartRecord.invoice_number == inv_int,
+                    )
                 )
             )
+
             for (ref,) in qr.all():
                 if ref:
                     ref_jobs.add(str(ref).strip())
 
-            # Turn ref_jobs into TOKENS, because ref might be "991472 991929"
-            invoice_job_tokens = []
-            for ref in ref_jobs:
-                for t in re.findall(r"[A-Za-z0-9]+", ref or ""):
-                    tt = (t or "").strip()
-                    if tt:
-                        invoice_job_tokens.append(tt)
+            # -------------------------------------------------
+            # Exact invoice exists -> search WO only by jobs
+            # belonging to that invoice.
+            # -------------------------------------------------
+            if ref_jobs:
+                matched_by_invoice = True
+                matched_invoice_number = qnorm
 
-            # de-dup keep order
-            seen = set()
-            invoice_job_tokens = [x for x in invoice_job_tokens if not (x in seen or seen.add(x))]
+                invoice_job_tokens = []
 
-            # Add invoice-derived job tokens into WO search (NO canonical_job property!)
-            for tok in invoice_job_tokens:
-                conds.append(_job_token_match(WorkOrder.job_numbers, tok))
+                for ref in ref_jobs:
+                    clean_ref = (ref or "").strip()
 
-            # Also compute wo_ids to mark rows in UI as "matched by invoice"
-            if invoice_job_tokens:
-                id_q = db.session.query(WorkOrder.id).filter(
-                    or_(*[_job_token_match(WorkOrder.job_numbers, tok) for tok in invoice_job_tokens])
-                )
-                # Respect same visibility/explicit filters (technician filter etc.)
-                if filters:
-                    id_q = id_q.filter(and_(*filters))
-                invoice_matched_wo_ids = {int(x[0]) for x in id_q.all()}
+                    # RETURN 1015959 -> 1015959
+                    if clean_ref.upper().startswith("RETURN"):
+                        clean_ref = clean_ref[6:].strip()
+
+                    for tok in re.findall(
+                        r"[A-Za-z0-9]+",
+                        clean_ref
+                    ):
+                        tok = (tok or "").strip()
+
+                        if tok:
+                            invoice_job_tokens.append(tok)
+
+                # Remove duplicates, preserve order
+                seen = set()
+                invoice_job_tokens = [
+                    tok
+                    for tok in invoice_job_tokens
+                    if not (tok in seen or seen.add(tok))
+                ]
+
+                if invoice_job_tokens:
+                    invoice_wo_conditions = [
+                        _job_token_match(
+                            WorkOrder.job_numbers,
+                            tok
+                        )
+                        for tok in invoice_job_tokens
+                    ]
+
+                    # IMPORTANT:
+                    # Replace broad Search(any) conditions.
+                    # Do NOT append to them.
+                    conds = invoice_wo_conditions
+
+                    # Existing UI marker support
+                    id_q = (
+                        db.session.query(WorkOrder.id)
+                        .filter(
+                            or_(*invoice_wo_conditions)
+                        )
+                    )
+
+                    # Respect technician/access/explicit filters
+                    if filters:
+                        id_q = id_q.filter(
+                            and_(*filters)
+                        )
+
+                    invoice_matched_wo_ids = {
+                        int(row[0])
+                        for row in id_q.all()
+                    }
+
 
         filters.append(or_(*conds))
 

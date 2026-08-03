@@ -8,10 +8,18 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ParsedStatementLine:
+    line_type: str
+
     document_number: str
     document_date: object | None
+    due_date: object | None
+
     description: str
+
+    invoice_amount: float
     credit_amount: float
+    open_balance: float
+
     raw_text: str
 
 
@@ -27,8 +35,9 @@ class ParsedStatement:
 def _money_to_float(value: str | None) -> float:
     """
     Converts:
-        ($82.29) -> 82.29
+        ($82.29)   -> 82.29
         $1,234.56 -> 1234.56
+        123.45    -> 123.45
     """
     text = (value or "").strip()
 
@@ -47,33 +56,42 @@ def _money_to_float(value: str | None) -> float:
 
 
 def _parse_mmddyyyy(value: str):
-    return datetime.strptime(value, "%m/%d/%Y").date()
+    return datetime.strptime(
+        value,
+        "%m/%d/%Y",
+    ).date()
 
 
-def parse_marcone_statement_text(text: str) -> ParsedStatement:
+def parse_marcone_statement_text(
+    text: str,
+) -> ParsedStatement:
     """
-    Parse Marcone CUSTOMER STATEMENT text.
+    Parse a Marcone CUSTOMER STATEMENT.
 
-    V1 intentionally parses only OPEN CREDITS & PAYMENTS.
+    Parses both sections:
+    - OPEN CREDITS & PAYMENTS
+    - OPEN INVOICES
 
-    It does NOT:
-    - modify ledger;
+    This parser only extracts data. It does not:
+    - modify inventory;
+    - modify employee ledger;
     - create payments;
     - create returns;
-    - touch inventory.
-
-    It only extracts statement data for reconciliation.
+    - perform reconciliation.
     """
 
     raw_text = text or ""
 
-    if "MARCONe".lower() not in raw_text.lower():
-        raise ValueError("This does not appear to be a Marcone statement.")
+    if "marcone" not in raw_text.lower():
+        raise ValueError(
+            "This does not appear to be a Marcone statement."
+        )
 
     # ---------------------------------------------------------
     # Statement period
+    #
     # Example:
-    # May 2026 CUSTOMER STATEMENT
+    # June 2026 CUSTOMER STATEMENT
     # ---------------------------------------------------------
     period_match = re.search(
         r"\b("
@@ -85,7 +103,9 @@ def parse_marcone_statement_text(text: str) -> ParsedStatement:
     )
 
     if not period_match:
-        raise ValueError("Could not determine statement period.")
+        raise ValueError(
+            "Could not determine statement period."
+        )
 
     month_name = period_match.group(1)
     year = int(period_match.group(2))
@@ -97,9 +117,10 @@ def parse_marcone_statement_text(text: str) -> ParsedStatement:
 
     # ---------------------------------------------------------
     # Account number
-    # Marcone sample:
+    #
+    # Example:
     # Account *To Be Applied...
-    # 965767 ($3,353.42)
+    # 965767 ($3,005.49)
     # ---------------------------------------------------------
     account_number = None
 
@@ -110,13 +131,16 @@ def parse_marcone_statement_text(text: str) -> ParsedStatement:
     )
 
     if account_match:
-        account_number = account_match.group(1).strip()
+        account_number = (
+            account_match.group(1) or ""
+        ).strip() or None
 
     # ---------------------------------------------------------
     # Balance Due
+    #
     # Example:
-    # Balance Due 06/20/2026
-    # $12,387.49
+    # Balance Due 07/20/2026
+    # $12,067.51
     # ---------------------------------------------------------
     balance_due = 0.0
 
@@ -128,12 +152,17 @@ def parse_marcone_statement_text(text: str) -> ParsedStatement:
     )
 
     if balance_match:
-        balance_due = _money_to_float(balance_match.group(1))
+        balance_due = _money_to_float(
+            balance_match.group(1)
+        )
 
-    # ---------------------------------------------------------
-    # Extract only OPEN CREDITS & PAYMENTS section
-    # ---------------------------------------------------------
-    section_match = re.search(
+    # All parsed statement lines are collected here.
+    lines: list[ParsedStatementLine] = []
+
+    # =========================================================
+    # OPEN CREDITS & PAYMENTS
+    # =========================================================
+    credits_section_match = re.search(
         r"OPEN\s+CREDITS\s*&\s*PAYMENTS"
         r"(.*?)"
         r"OPEN\s+INVOICES",
@@ -141,26 +170,14 @@ def parse_marcone_statement_text(text: str) -> ParsedStatement:
         flags=re.IGNORECASE | re.DOTALL,
     )
 
-    if not section_match:
+    if not credits_section_match:
         raise ValueError(
             "OPEN CREDITS & PAYMENTS section was not found."
         )
 
-    section = section_match.group(1)
+    credits_section = credits_section_match.group(1)
 
-    lines: list[ParsedStatementLine] = []
-
-    # Typical Marcone line:
-    #
-    # 05/08/2026 73863995 RETURN 04302026
-    # 05/08/2026 ($217.80) ($217.80) $0.00
-    #
-    # Or:
-    #
-    # 05/04/2026 73713681 LEONARD
-    # 05/04/2026 ($82.29) ($82.29) $0.00
-    #
-    line_pattern = re.compile(
+    credit_pattern = re.compile(
         r"(?P<document_date>\d{2}/\d{2}/\d{4})\s+"
         r"(?P<document_number>\d+)\s+"
         r"(?P<description>.*?)\s+"
@@ -171,7 +188,9 @@ def parse_marcone_statement_text(text: str) -> ParsedStatement:
         flags=re.IGNORECASE,
     )
 
-    for match in line_pattern.finditer(section):
+    for match in credit_pattern.finditer(
+        credits_section
+    ):
         document_number = (
             match.group("document_number") or ""
         ).strip()
@@ -180,29 +199,136 @@ def parse_marcone_statement_text(text: str) -> ParsedStatement:
             match.group("description") or ""
         ).strip()
 
-        credit_amount = _money_to_float(
-            match.group("credit_amount")
-        )
+        description_upper = description.upper()
 
-        document_date = _parse_mmddyyyy(
-            match.group("document_date")
-        )
-
-        raw_line = match.group(0).strip()
+        if description_upper.startswith("RETURN"):
+            line_type = "return"
+        elif "PAYMENT" in description_upper:
+            line_type = "payment"
+        else:
+            line_type = "credit"
 
         lines.append(
             ParsedStatementLine(
+                line_type=line_type,
+
                 document_number=document_number,
-                document_date=document_date,
+
+                document_date=_parse_mmddyyyy(
+                    match.group("document_date")
+                ),
+
+                due_date=_parse_mmddyyyy(
+                    match.group("due_date")
+                ),
+
                 description=description,
-                credit_amount=credit_amount,
-                raw_text=raw_line,
+
+                invoice_amount=0.0,
+
+                credit_amount=_money_to_float(
+                    match.group("credit_amount")
+                ),
+
+                open_balance=_money_to_float(
+                    match.group("remaining_credit")
+                ),
+
+                raw_text=match.group(0).strip(),
             )
         )
 
-    if not lines:
+    # =========================================================
+    # OPEN INVOICES
+    # =========================================================
+    invoice_section_match = re.search(
+        r"OPEN\s+INVOICES"
+        r"(.*?)"
+        r"Aged\s+Summary",
+        raw_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    if not invoice_section_match:
+        raise ValueError(
+            "OPEN INVOICES section was not found."
+        )
+
+    invoice_section = invoice_section_match.group(1)
+
+    invoice_pattern = re.compile(
+        r"(?P<document_date>\d{2}/\d{2}/\d{4})\s+"
+        r"(?P<document_number>\d+)\s+"
+        r"(?P<description>.*?)\s+"
+        r"(?P<due_date>\d{2}/\d{2}/\d{4})\s+"
+        r"\$(?P<invoice_amount>[\d,]+\.\d{2})\s+"
+        r"\$(?P<open_balance>[\d,]+\.\d{2})\s+"
+        r"\$(?P<balance_due>[\d,]+\.\d{2})",
+        flags=re.IGNORECASE,
+    )
+
+    for match in invoice_pattern.finditer(
+        invoice_section
+    ):
+        lines.append(
+            ParsedStatementLine(
+                line_type="invoice",
+
+                document_number=(
+                    match.group("document_number") or ""
+                ).strip(),
+
+                document_date=_parse_mmddyyyy(
+                    match.group("document_date")
+                ),
+
+                due_date=_parse_mmddyyyy(
+                    match.group("due_date")
+                ),
+
+                description=(
+                    match.group("description") or ""
+                ).strip(),
+
+                invoice_amount=_money_to_float(
+                    match.group("invoice_amount")
+                ),
+
+                credit_amount=0.0,
+
+                open_balance=_money_to_float(
+                    match.group("open_balance")
+                ),
+
+                raw_text=match.group(0).strip(),
+            )
+        )
+
+    credit_count = sum(
+        1
+        for line in lines
+        if line.line_type in {
+            "credit",
+            "return",
+            "payment",
+        }
+    )
+
+    invoice_count = sum(
+        1
+        for line in lines
+        if line.line_type == "invoice"
+    )
+
+    if credit_count == 0:
         raise ValueError(
             "No credit/payment lines could be parsed "
+            "from the Marcone statement."
+        )
+
+    if invoice_count == 0:
+        raise ValueError(
+            "No open invoice lines could be parsed "
             "from the Marcone statement."
         )
 
@@ -215,22 +341,21 @@ def parse_marcone_statement_text(text: str) -> ParsedStatement:
     )
 
 
-def extract_pdf_text(pdf_path: str | Path) -> str:
+def extract_pdf_text(
+    pdf_path: str | Path,
+) -> str:
     """
     Extract text from a text-based PDF.
 
-    Uses pypdf because it is lightweight and sufficient
-    for normal supplier statement PDFs.
-
-    Scanned/image-only PDFs are intentionally not handled
-    in V1.
+    Scanned/image-only PDFs are not handled here.
     """
 
     try:
         from pypdf import PdfReader
     except ImportError as exc:
         raise RuntimeError(
-            "pypdf is required. Install it with: pip install pypdf"
+            "pypdf is required. "
+            "Install it with: pip install pypdf"
         ) from exc
 
     path = Path(pdf_path)
@@ -242,7 +367,7 @@ def extract_pdf_text(pdf_path: str | Path) -> str:
 
     reader = PdfReader(str(path))
 
-    pages_text = []
+    pages_text: list[str] = []
 
     for page in reader.pages:
         page_text = page.extract_text() or ""
@@ -267,21 +392,24 @@ def parse_statement_pdf(
 ) -> ParsedStatement:
     """
     Main parser entry point.
-
-    Later we can add other supplier parsers here without
-    changing Accounting or reconciliation logic.
     """
 
     text = extract_pdf_text(pdf_path)
 
-    supplier = (supplier_name or "").strip().lower()
+    supplier = (
+        supplier_name or ""
+    ).strip().lower()
 
-    if supplier == "marcone" or "marcone" in text.lower():
+    if (
+        supplier == "marcone"
+        or "marcone" in text.lower()
+    ):
         return parse_marcone_statement_text(text)
 
     raise ValueError(
         "Unsupported supplier statement format."
     )
+
 
 def save_parsed_statement(
     parsed_statement,
@@ -290,22 +418,33 @@ def save_parsed_statement(
     created_by: int | None = None,
 ):
     """
-    Сохраняет уже распарсенный supplier statement в БД.
+    Save the complete parsed supplier statement.
 
-    V1:
-    - сохраняет header statement;
-    - сохраняет OPEN CREDITS & PAYMENTS;
-    - не изменяет Employee Ledger;
-    - не создаёт adjustments;
-    - не выполняет reconciliation автоматически.
+    Saves:
+    - statement header;
+    - OPEN CREDITS & PAYMENTS;
+    - OPEN INVOICES.
+
+    Does not:
+    - modify inventory;
+    - modify employee ledger;
+    - create adjustments;
+    - reconcile automatically.
     """
-    from pathlib import Path
 
     from extensions import db
-    from models import SupplierStatement, SupplierStatementLine
+    from models import (
+        SupplierStatement,
+        SupplierStatementLine,
+    )
 
     supplier_name = (
-        getattr(parsed_statement, "supplier_name", None) or ""
+        getattr(
+            parsed_statement,
+            "supplier_name",
+            None,
+        )
+        or ""
     ).strip()
 
     statement_period = getattr(
@@ -315,32 +454,53 @@ def save_parsed_statement(
     )
 
     account_number = (
-        getattr(parsed_statement, "account_number", None) or ""
+        getattr(
+            parsed_statement,
+            "account_number",
+            None,
+        )
+        or ""
     ).strip() or None
 
     balance_due = float(
-        getattr(parsed_statement, "balance_due", 0.0) or 0.0
+        getattr(
+            parsed_statement,
+            "balance_due",
+            0.0,
+        )
+        or 0.0
     )
 
     parsed_lines = list(
-        getattr(parsed_statement, "lines", None) or []
+        getattr(
+            parsed_statement,
+            "lines",
+            None,
+        )
+        or []
     )
 
     if not supplier_name:
-        raise ValueError("Supplier name is missing.")
+        raise ValueError(
+            "Supplier name is missing."
+        )
 
     if statement_period is None:
-        raise ValueError("Statement period is missing.")
+        raise ValueError(
+            "Statement period is missing."
+        )
 
     if not parsed_lines:
         raise ValueError(
-            "Statement does not contain parsed credit/payment lines."
+            "Statement does not contain parsed lines."
         )
 
     clean_source_file = None
 
     if source_file:
-        clean_source_file = Path(source_file).name
+        clean_source_file = Path(
+            source_file
+        ).name
 
     try:
         statement = SupplierStatement(
@@ -358,55 +518,116 @@ def save_parsed_statement(
 
         for parsed_line in parsed_lines:
             document_number = (
-                getattr(parsed_line, "document_number", None) or ""
+                getattr(
+                    parsed_line,
+                    "document_number",
+                    None,
+                )
+                or ""
             ).strip()
 
             if not document_number:
                 raise ValueError(
-                    "Parsed statement line has no document number."
+                    "Parsed statement line has "
+                    "no document number."
                 )
 
-            credit_amount = float(
-                getattr(parsed_line, "credit_amount", 0.0) or 0.0
-            )
+            line_type = (
+                getattr(
+                    parsed_line,
+                    "line_type",
+                    None,
+                )
+                or ""
+            ).strip().lower()
+
+            if line_type not in {
+                "credit",
+                "return",
+                "payment",
+                "invoice",
+            }:
+                raise ValueError(
+                    f"Unsupported statement line type: "
+                    f"{line_type!r}."
+                )
 
             description = (
-                getattr(parsed_line, "description", None) or ""
+                getattr(
+                    parsed_line,
+                    "description",
+                    None,
+                )
+                or ""
             ).strip() or None
 
-            raw_text = (
-                getattr(parsed_line, "raw_text", None) or ""
+            raw_line_text = (
+                getattr(
+                    parsed_line,
+                    "raw_text",
+                    None,
+                )
+                or ""
             ).strip() or None
 
-            description_upper = (description or "").upper()
+            invoice_amount = abs(
+                float(
+                    getattr(
+                        parsed_line,
+                        "invoice_amount",
+                        0.0,
+                    )
+                    or 0.0
+                )
+            )
 
-            if description_upper.startswith("RETURN"):
-                line_type = "return"
-            elif "PAYMENT" in description_upper:
-                line_type = "payment"
-            else:
-                line_type = "credit"
+            credit_amount = abs(
+                float(
+                    getattr(
+                        parsed_line,
+                        "credit_amount",
+                        0.0,
+                    )
+                    or 0.0
+                )
+            )
+
+            open_balance = abs(
+                float(
+                    getattr(
+                        parsed_line,
+                        "open_balance",
+                        0.0,
+                    )
+                    or 0.0
+                )
+            )
 
             statement_line = SupplierStatementLine(
                 statement_id=statement.id,
                 supplier_name=supplier_name,
                 line_type=line_type,
                 document_number=document_number,
+
                 document_date=getattr(
                     parsed_line,
                     "document_date",
                     None,
                 ),
+
                 due_date=getattr(
                     parsed_line,
                     "due_date",
                     None,
                 ),
+
                 description=description,
-                invoice_amount=0.0,
-                credit_amount=abs(credit_amount),
-                open_balance=0.0,
-                raw_text=raw_text,
+
+                invoice_amount=invoice_amount,
+                credit_amount=credit_amount,
+                open_balance=open_balance,
+
+                raw_text=raw_line_text,
             )
 
             db.session.add(statement_line)

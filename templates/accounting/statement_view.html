@@ -4,6 +4,7 @@
 <div class="container-fluid">
 
     <div class="d-flex justify-content-between align-items-center mb-4">
+
         <div>
             <h3 class="mb-1">
                 Supplier Statement
@@ -18,21 +19,35 @@
             </div>
         </div>
 
-        <div>
-            <a
-                href="{{ url_for('accounting.supplier_statements') }}"
-                class="btn btn-outline-secondary"
-            >
-                ← Back
-            </a>
-        </div>
+        <a
+            href="{{ url_for('accounting.supplier_statements') }}"
+            class="btn btn-outline-secondary"
+        >
+            ← Back
+        </a>
+
     </div>
+
+
+    {% set counts = namespace(credits=0, invoices=0) %}
+
+    {% for row in view.rows %}
+
+        {% if (row.statement_line.line_type or "")|lower == "invoice" %}
+            {% set counts.invoices = counts.invoices + 1 %}
+        {% else %}
+            {% set counts.credits = counts.credits + 1 %}
+        {% endif %}
+
+    {% endfor %}
+
 
     <div class="row mb-4">
 
         <div class="col-md-3">
             <div class="card shadow-sm border-0">
                 <div class="card-body">
+
                     <div class="text-muted small">
                         Supplier
                     </div>
@@ -40,29 +55,39 @@
                     <div class="fw-bold">
                         {{ view.statement.supplier_name }}
                     </div>
+
                 </div>
             </div>
         </div>
 
+
         <div class="col-md-3">
             <div class="card shadow-sm border-0">
                 <div class="card-body">
+
                     <div class="text-muted small">
                         Statement Period
                     </div>
 
                     <div class="fw-bold">
+
                         {% if view.statement.statement_period %}
                             {{ view.statement.statement_period.strftime("%B %Y") }}
+                        {% else %}
+                            —
                         {% endif %}
+
                     </div>
+
                 </div>
             </div>
         </div>
 
-        <div class="col-md-3">
+
+        <div class="col-md-2">
             <div class="card shadow-sm border-0">
                 <div class="card-body">
+
                     <div class="text-muted small">
                         Balance Due
                     </div>
@@ -70,25 +95,294 @@
                     <div class="fw-bold">
                         ${{ "{:,.2f}".format(view.statement.balance_due or 0) }}
                     </div>
+
                 </div>
             </div>
         </div>
 
-        <div class="col-md-3">
+
+        <div class="col-md-2">
             <div class="card shadow-sm border-0">
                 <div class="card-body">
+
                     <div class="text-muted small">
-                        Imported Credits
+                        Credits & Returns
                     </div>
 
                     <div class="fw-bold">
-                        {{ view.rows|length }}
+                        {{ counts.credits }}
                     </div>
+
+                </div>
+            </div>
+        </div>
+
+
+        <div class="col-md-2">
+            <div class="card shadow-sm border-0">
+                <div class="card-body">
+
+                    <div class="text-muted small">
+                        Open Invoices
+                    </div>
+
+                    <div class="fw-bold">
+                        {{ counts.invoices }}
+                    </div>
+
                 </div>
             </div>
         </div>
 
     </div>
+
+
+    {# ===================================================== #}
+    {# CREDITS & RETURNS                                     #}
+    {# ===================================================== #}
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+
+        <div>
+            <h5 class="mb-0">
+                Credits & Returns
+            </h5>
+
+            <div class="text-muted small">
+                Supplier credits, payments and vendor returns.
+            </div>
+        </div>
+
+        <span class="badge bg-secondary">
+            {{ counts.credits }}
+        </span>
+
+    </div>
+
+
+    <div class="card shadow-sm border-0 mb-5">
+
+        <div class="table-responsive">
+
+            <table class="table table-hover align-middle mb-0">
+
+                <thead class="table-light">
+
+                <tr>
+
+                    <th style="width:120px;">
+                        Date
+                    </th>
+
+                    <th style="width:130px;">
+                        Document
+                    </th>
+
+                    <th>
+                        Description
+                    </th>
+
+                    <th class="text-end" style="width:110px;">
+                        Credit
+                    </th>
+
+                    <th style="width:280px;">
+                        Match
+                    </th>
+
+                    <th class="text-end" style="width:110px;">
+                        Difference
+                    </th>
+
+                    <th class="text-center" style="width:120px;">
+                        Status
+                    </th>
+
+                    <th class="text-end" style="width:90px;">
+                        Action
+                    </th>
+
+                </tr>
+
+                </thead>
+
+                <tbody>
+
+                {% for row in view.rows %}
+
+                    {% if (row.statement_line.line_type or "")|lower != "invoice" %}
+
+                        <tr>
+
+                            <td>
+
+                                {% if row.statement_line.document_date %}
+                                    {{ row.statement_line.document_date.strftime("%Y-%m-%d") }}
+                                {% else %}
+                                    —
+                                {% endif %}
+
+                            </td>
+
+                            <td class="fw-semibold">
+                                {{ row.statement_line.document_number }}
+                            </td>
+
+                            <td>
+                                {{ row.statement_line.description or "—" }}
+                            </td>
+
+                            <td class="text-end">
+
+                                ${{ "{:,.2f}".format(
+                                    row.statement_line.credit_amount or 0
+                                ) }}
+
+                            </td>
+
+                            <td>
+
+                                {% if row.technician_job %}
+
+                                    <div style="white-space: pre-line;">
+                                        {{ row.technician_job }}
+                                    </div>
+
+                                {% else %}
+
+                                    <span class="text-muted">
+                                        —
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td class="text-end">
+
+                                {% if row.status in [
+                                    "MATCHED",
+                                    "ALREADY_RECONCILED",
+                                    "PARTIAL_MATCH"
+                                ] %}
+
+                                    ${{ "{:,.2f}".format(row.difference) }}
+
+                                {% else %}
+
+                                    <span class="text-muted">
+                                        —
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td class="text-center">
+
+                                {% if row.status == "MATCHED" %}
+
+                                    <span class="badge bg-success">
+                                        Matched
+                                    </span>
+
+                                {% elif row.status == "ALREADY_RECONCILED" %}
+
+                                    <span class="badge bg-primary">
+                                        Reconciled
+                                    </span>
+
+                                {% elif row.status == "MULTIPLE_MATCHES" %}
+
+                                    <span class="badge bg-warning text-dark">
+                                        Multiple
+                                    </span>
+
+                                {% elif row.status == "PARTIAL_MATCH" %}
+
+                                    <span class="badge bg-info text-dark">
+                                        Partial
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="badge bg-secondary">
+                                        Not Found
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td class="text-end">
+
+                                <a
+                                    href="{{ url_for(
+                                        'accounting.statement_line_split',
+                                        line_id=row.statement_line.id
+                                    ) }}"
+                                    class="btn btn-sm btn-outline-primary"
+                                >
+                                    Split
+                                </a>
+
+                            </td>
+
+                        </tr>
+
+                    {% endif %}
+
+                {% endfor %}
+
+
+                {% if counts.credits == 0 %}
+
+                    <tr>
+
+                        <td
+                            colspan="8"
+                            class="text-center text-muted py-4"
+                        >
+                            No credits or returns found.
+                        </td>
+
+                    </tr>
+
+                {% endif %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+
+    {# ===================================================== #}
+    {# OPEN INVOICES                                         #}
+    {# ===================================================== #}
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+
+        <div>
+
+            <h5 class="mb-0">
+                Open Invoices
+            </h5>
+
+            <div class="text-muted small">
+                Supplier invoices matched against technician work orders.
+            </div>
+
+        </div>
+
+        <span class="badge bg-secondary">
+            {{ counts.invoices }}
+        </span>
+
+    </div>
+
 
     <div class="card shadow-sm border-0">
 
@@ -97,16 +391,26 @@
             <table class="table table-hover align-middle mb-0">
 
                 <thead class="table-light">
-                <tr>
-                    <th style="width:130px;">Date</th>
-                    <th style="width:140px;">Document</th>
-                    <th>Description</th>
 
-                    <th class="text-end" style="width:120px;">
-                        Credit
+                <tr>
+
+                    <th style="width:120px;">
+                        Date
                     </th>
 
-                    <th style="width:260px;">
+                    <th style="width:130px;">
+                        Document
+                    </th>
+
+                    <th>
+                        Description
+                    </th>
+
+                    <th class="text-end" style="width:120px;">
+                        Invoice
+                    </th>
+
+                    <th style="width:320px;">
                         Match
                     </th>
 
@@ -121,104 +425,163 @@
                     <th class="text-end" style="width:100px;">
                         Action
                     </th>
+
                 </tr>
+
                 </thead>
 
                 <tbody>
 
                 {% for row in view.rows %}
 
-                <tr>
-                    <td>
-                        {% if row.statement_line.document_date %}
-                            {{ row.statement_line.document_date.strftime("%Y-%m-%d") }}
-                        {% endif %}
-                    </td>
+                    {% if (row.statement_line.line_type or "")|lower == "invoice" %}
 
-                    <td>
-                        <strong>
-                            {{ row.statement_line.document_number }}
-                        </strong>
-                    </td>
+                        <tr>
 
-                    <td>
-                        {{ row.statement_line.description }}
-                    </td>
+                            <td>
 
-                    <td class="text-end">
-                        ${{ "{:,.2f}".format(row.statement_line.credit_amount or 0) }}
-                    </td>
+                                {% if row.statement_line.document_date %}
+                                    {{ row.statement_line.document_date.strftime("%Y-%m-%d") }}
+                                {% else %}
+                                    —
+                                {% endif %}
 
-                    <td>
-                        {% if row.technician_job %}
-                            <div style="white-space: pre-line;">
-                                {{ row.technician_job }}
-                            </div>
-                        {% else %}
-                            <span class="text-muted">—</span>
-                        {% endif %}
-                    </td>
+                            </td>
 
-                    <td class="text-end">
-                        {% if row.status in ["MATCHED", "ALREADY_RECONCILED", "PARTIAL_MATCH"] %}
-                            ${{ "{:,.2f}".format(row.difference) }}
-                        {% else %}
-                            <span class="text-muted">—</span>
-                        {% endif %}
-                    </td>
+                            <td class="fw-semibold">
+                                {{ row.statement_line.document_number }}
+                            </td>
 
-                    <td class="text-center">
+                            <td>
+                                {{ row.statement_line.description or "—" }}
+                            </td>
 
-                        {% if row.status == "MATCHED" %}
-                            <span class="badge bg-success">
-                                Matched
-                            </span>
+                            <td class="text-end">
 
-                        {% elif row.status == "ALREADY_RECONCILED" %}
-                            <span class="badge bg-primary">
-                                Reconciled
-                            </span>
+                                ${{ "{:,.2f}".format(
+                                    row.statement_line.invoice_amount or 0
+                                ) }}
 
-                        {% elif row.status == "MULTIPLE_MATCHES" %}
-                            <span class="badge bg-warning text-dark">
-                                Multiple
-                            </span>
+                            </td>
 
-                        {% elif row.status == "PARTIAL_MATCH" %}
-                            <span class="badge bg-info text-dark">
-                                Partial
-                            </span>
+                            <td>
 
-                        {% else %}
-                            <span class="badge bg-secondary">
-                                Not Found
-                            </span>
-                        {% endif %}
+                                <td>
 
-                    </td>
+                                    {% if row.match_label %}
 
-                    <td class="text-end">
-                        <a
-                            href="{{ url_for(
-                                'accounting.statement_line_split',
-                                line_id=row.statement_line.id
-                            ) }}"
-                            class="btn btn-sm btn-outline-primary"
-                        >
-                            Split
-                        </a>
-                    </td>
-                </tr>
+                                        <div
+                                            class="fw-semibold"
+                                            style="white-space: pre-line;"
+                                        >
+                                            {{ row.match_label }}
+                                        </div>
 
-                {% else %}
+                                        <div class="small text-muted mt-1">
+                                            System total:
+                                            ${{ "{:,.2f}".format(row.system_amount or 0) }}
+                                        </div>
 
-                <tr>
-                    <td colspan="8" class="text-center text-muted py-4">
-                        No statement lines found.
-                    </td>
-                </tr>
+                                    {% else %}
+
+                                        <span class="text-muted">
+                                            —
+                                        </span>
+
+                                    {% endif %}
+
+                                </td>
+
+                            <td class="text-end">
+
+                                {% if row.status in [
+                                    "INVOICE_MATCHED",
+                                    "INVOICE_AMOUNT_MISMATCH"
+                                ] %}
+
+                                    ${{ "{:,.2f}".format(row.difference) }}
+
+                                {% else %}
+
+                                    <span class="text-muted">
+                                        —
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td class="text-center">
+
+                                {% if row.status == "INVOICE_MATCHED" %}
+
+                                    <span class="badge bg-success">
+                                        Matched
+                                    </span>
+
+                                {% elif row.status == "INVOICE_AMOUNT_MISMATCH" %}
+
+                                    <span class="badge bg-danger">
+                                        Amount Mismatch
+                                    </span>
+
+                                {% elif row.status == "INVOICE_MULTIPLE" %}
+
+                                    <span class="badge bg-warning text-dark">
+                                        Multiple
+                                    </span>
+
+                                {% elif row.status == "INVOICE_NOT_FOUND" %}
+
+                                    <span class="badge bg-secondary">
+                                        Not Found
+                                    </span>
+
+                                {% else %}
+
+                                    <span class="badge bg-secondary">
+                                        Not Found
+                                    </span>
+
+                                {% endif %}
+
+                            </td>
+
+                            <td class="text-end">
+
+                                <a
+                                    href="{{ url_for(
+                                        'accounting.statement_line_invoice_match',
+                                        line_id=row.statement_line.id
+                                    ) }}"
+                                    class="btn btn-sm btn-outline-primary"
+                                >
+                                    Match
+                                </a>
+
+                            </td>
+
+                        </tr>
+
+                    {% endif %}
 
                 {% endfor %}
+
+
+                {% if counts.invoices == 0 %}
+
+                    <tr>
+
+                        <td
+                            colspan="8"
+                            class="text-center text-muted py-4"
+                        >
+                            No open invoices found.
+                        </td>
+
+                    </tr>
+
+                {% endif %}
 
                 </tbody>
 

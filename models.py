@@ -1799,40 +1799,94 @@ class SupplierStatement(db.Model):
     def created_at_local(self):
         return utc_to_local(self.created_at)
 
-
 class SupplierStatementLine(db.Model):
     __tablename__ = "supplier_statement_line"
     __table_args__ = (
-        db.Index("ix_ssl_supplier_doc", "supplier_name", "document_number"),
-        db.Index("ix_ssl_type_date", "line_type", "document_date"),
+        db.Index(
+            "ix_ssl_supplier_doc",
+            "supplier_name",
+            "document_number",
+        ),
+        db.Index(
+            "ix_ssl_type_date",
+            "line_type",
+            "document_date",
+        ),
         {"extend_existing": True},
     )
 
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
 
     statement_id = db.Column(
         db.Integer,
-        db.ForeignKey("supplier_statement.id", ondelete="CASCADE"),
+        db.ForeignKey(
+            "supplier_statement.id",
+            ondelete="CASCADE",
+        ),
         nullable=False,
         index=True,
     )
 
-    supplier_name = db.Column(db.String(200), nullable=False, index=True)
+    supplier_name = db.Column(
+        db.String(200),
+        nullable=False,
+        index=True,
+    )
 
-    line_type = db.Column(db.String(20), nullable=False, index=True)
+    line_type = db.Column(
+        db.String(20),
+        nullable=False,
+        index=True,
+    )
     # invoice / credit / payment / return
 
-    document_number = db.Column(db.String(64), nullable=False, index=True)
-    document_date = db.Column(db.Date, nullable=True, index=True)
-    due_date = db.Column(db.Date, nullable=True)
+    document_number = db.Column(
+        db.String(64),
+        nullable=False,
+        index=True,
+    )
 
-    description = db.Column(db.String(255), nullable=True)
+    document_date = db.Column(
+        db.Date,
+        nullable=True,
+        index=True,
+    )
 
-    invoice_amount = db.Column(db.Float, nullable=False, default=0.0)
-    credit_amount = db.Column(db.Float, nullable=False, default=0.0)
-    open_balance = db.Column(db.Float, nullable=False, default=0.0)
+    due_date = db.Column(
+        db.Date,
+        nullable=True,
+    )
 
-    raw_text = db.Column(db.Text, nullable=True)
+    description = db.Column(
+        db.String(255),
+        nullable=True,
+    )
+
+    invoice_amount = db.Column(
+        db.Float,
+        nullable=False,
+        default=0.0,
+    )
+
+    credit_amount = db.Column(
+        db.Float,
+        nullable=False,
+        default=0.0,
+    )
+
+    open_balance = db.Column(
+        db.Float,
+        nullable=False,
+        default=0.0,
+    )
+
+    raw_text = db.Column(
+        db.Text,
+        nullable=True,
+    )
 
     statement = db.relationship(
         "SupplierStatement",
@@ -1840,6 +1894,7 @@ class SupplierStatementLine(db.Model):
         lazy="joined",
     )
 
+    # Manual return/credit split components.
     components = db.relationship(
         "SupplierStatementLineComponent",
         back_populates="statement_line",
@@ -1847,14 +1902,41 @@ class SupplierStatementLine(db.Model):
         lazy="selectin",
     )
 
+    # Manual open-invoice match components.
+    invoice_components = db.relationship(
+        "SupplierStatementInvoiceComponent",
+        back_populates="statement_line",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
     @property
     def signed_amount(self) -> float:
-        if (self.line_type or "").lower() in {"credit", "payment", "return"}:
-            return -abs(float(self.credit_amount or 0.0))
-        return float(self.invoice_amount or 0.0)
+        if (self.line_type or "").lower() in {
+            "credit",
+            "payment",
+            "return",
+        }:
+            return -abs(
+                float(
+                    self.credit_amount or 0.0
+                )
+            )
+
+        return float(
+            self.invoice_amount or 0.0
+        )
+
 
 class SupplierStatementLineComponent(db.Model):
-    __tablename__ = "supplier_statement_line_component"
+    """
+    Manual matching component for a supplier credit or return.
+    """
+
+    __tablename__ = (
+        "supplier_statement_line_component"
+    )
+
     __table_args__ = (
         db.Index(
             "ix_sslc_statement_line_id",
@@ -1924,7 +2006,9 @@ class SupplierStatementLineComponent(db.Model):
     matched_record = db.relationship(
         "IssuedPartRecord",
         lazy="joined",
-        foreign_keys=[matched_issued_part_record_id],
+        foreign_keys=[
+            matched_issued_part_record_id
+        ],
     )
 
     @property
@@ -1932,7 +2016,10 @@ class SupplierStatementLineComponent(db.Model):
         record = self.matched_record
 
         if record is None:
-            return f"RETURN • ${float(self.amount or 0):,.2f}"
+            return (
+                f"RETURN • "
+                f"${float(self.amount or 0):,.2f}"
+            )
 
         technician = (
             record.issued_to or ""
@@ -1942,19 +2029,225 @@ class SupplierStatementLineComponent(db.Model):
             record.reference_job or ""
         ).strip()
 
-        if job_number.upper().startswith("RETURN "):
+        if job_number.upper().startswith(
+            "RETURN "
+        ):
             job_number = job_number[7:].strip()
 
-        label = f"RETURN • ${float(self.amount or 0):,.2f}"
+        label = (
+            f"RETURN • "
+            f"${float(self.amount or 0):,.2f}"
+        )
 
         if technician and job_number:
-            return f"{label} - {technician} / {job_number}"
+            return (
+                f"{label} - "
+                f"{technician} / {job_number}"
+            )
 
         if technician:
-            return f"{label} - {technician}"
+            return (
+                f"{label} - {technician}"
+            )
 
         if job_number:
-            return f"{label} - {job_number}"
+            return (
+                f"{label} - {job_number}"
+            )
+
+        return label
+
+
+class SupplierStatementInvoiceComponent(db.Model):
+    """
+    Manual matching component for an OPEN INVOICE statement line.
+
+    A statement invoice can be manually split into one or more
+    amounts. Each amount may be linked to a GoodsReceiptLine.
+    """
+
+    __tablename__ = (
+        "supplier_statement_invoice_component"
+    )
+
+    __table_args__ = (
+        db.Index(
+            "ix_ssic_statement_line_id",
+            "statement_line_id",
+        ),
+        db.Index(
+            "ix_ssic_receipt_line_id",
+            "matched_goods_receipt_line_id",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    statement_line_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "supplier_statement_line.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    amount = db.Column(
+        db.Float,
+        nullable=False,
+        default=0.0,
+    )
+
+    matched_goods_receipt_line_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "goods_receipt_lines.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    note = db.Column(
+        db.String(500),
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    created_by = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    statement_line = db.relationship(
+        "SupplierStatementLine",
+        back_populates="invoice_components",
+        lazy="joined",
+    )
+
+    matched_receipt_line = db.relationship(
+        "GoodsReceiptLine",
+        foreign_keys=[
+            matched_goods_receipt_line_id
+        ],
+        lazy="joined",
+    )
+
+    creator = db.relationship(
+        "User",
+        foreign_keys=[created_by],
+        lazy="joined",
+    )
+
+    @property
+    def matched_receipt(self):
+        receipt_line = (
+            self.matched_receipt_line
+        )
+
+        if receipt_line is None:
+            return None
+
+        return receipt_line.goods_receipt
+
+    @property
+    def receipt_line_amount(self) -> float:
+        receipt_line = (
+            self.matched_receipt_line
+        )
+
+        if receipt_line is None:
+            return 0.0
+
+        quantity = abs(
+            float(
+                receipt_line.quantity or 0
+            )
+        )
+
+        if (
+            receipt_line.actual_unit_cost
+            is not None
+        ):
+            unit_cost = (
+                receipt_line.actual_unit_cost
+            )
+        else:
+            unit_cost = (
+                receipt_line.unit_cost
+            )
+
+        return round(
+            quantity
+            * abs(
+                float(
+                    unit_cost or 0.0
+                )
+            ),
+            2,
+        )
+
+    @property
+    def display_match(self) -> str:
+        receipt_line = (
+            self.matched_receipt_line
+        )
+
+        label = (
+            f"INVOICE • "
+            f"${float(self.amount or 0):,.2f}"
+        )
+
+        if receipt_line is None:
+            return label
+
+        receipt = (
+            receipt_line.goods_receipt
+        )
+
+        invoice_number = ""
+
+        if receipt is not None:
+            invoice_number = str(
+                receipt.invoice_number or ""
+            ).strip()
+
+        part_number = (
+            receipt_line.part_number or ""
+        ).strip()
+
+        details = []
+
+        if invoice_number:
+            details.append(
+                f"INV {invoice_number}"
+            )
+
+        if part_number:
+            details.append(
+                part_number
+            )
+
+        if details:
+            return (
+                f"{label} - "
+                + " / ".join(details)
+            )
 
         return label
 
