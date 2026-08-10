@@ -627,10 +627,28 @@ def statement_line_split(line_id):
     )
 
     supplier_name = (
-        line.supplier_name
-        or line.statement.supplier_name
-        or ""
+            line.supplier_name
+            or line.statement.supplier_name
+            or ""
     ).strip().lower()
+
+    # Convert statement supplier name to the exact
+    # ReturnDestination name stored in our database.
+    supplier_lookup_name = supplier_name
+
+    if supplier_name in {
+        "reliable parts",
+        "reliable parts inc",
+        "reliable",
+        "rel",
+    }:
+        supplier_lookup_name = "reliable"
+
+    elif supplier_name in {
+        "marcone",
+        "mar",
+    }:
+        supplier_lookup_name = "marcone"
 
     # ========================================================
     # GET
@@ -665,7 +683,7 @@ def statement_line_split(line_id):
 
             candidate_results = (
                 find_return_candidates(
-                    supplier_name=supplier_name,
+                    supplier_name=supplier_lookup_name,
                     amount=float(
                         component.amount or 0.0
                     ),
@@ -793,7 +811,7 @@ def statement_line_split(line_id):
 
             candidate_results = (
                 find_return_candidates(
-                    supplier_name=supplier_name,
+                    supplier_name=supplier_lookup_name,
                     amount=amount,
                     excluded_ids=excluded_ids,
                 )

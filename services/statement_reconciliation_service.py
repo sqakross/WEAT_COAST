@@ -340,6 +340,261 @@ def parse_marcone_statement_text(
         lines=lines,
     )
 
+def parse_reliable_statement_text(
+    text: str,
+) -> ParsedStatement:
+    """
+    Parse a Reliable Parts customer statement.
+
+    Reliable statement rows contain:
+        Invoice Date
+        Invoice Number
+        Due Date
+        Customer PO (optional)
+        Amount
+
+    Positive amount = invoice.
+    Negative amount = credit.
+
+    This parser only extracts data.
+    It does not modify inventory, employee ledger,
+    payments, returns, or reconciliation.
+    """
+
+    raw_text = text or ""
+
+    if (
+        "reliable parts" not in raw_text.lower()
+        and "reliableparts" not in raw_text.lower()
+    ):
+        raise ValueError(
+            "This does not appear to be a Reliable Parts statement."
+        )
+
+    # ---------------------------------------------------------
+    # Statement Date / Period
+    #
+    # Example:
+    # Statement Date
+    # 07/31/26
+    # ---------------------------------------------------------
+
+    statement_date_match = re.search(
+        r"Statement\s+Date\s+"
+        r"(?P<date>\d{2}/\d{2}/\d{2})",
+        raw_text,
+        flags=re.IGNORECASE,
+    )
+
+    if not statement_date_match:
+        raise ValueError(
+            "Could not determine Reliable statement date."
+        )
+
+    statement_date = datetime.strptime(
+        statement_date_match.group("date"),
+        "%m/%d/%y",
+    ).date()
+
+    statement_period = statement_date.replace(day=1)
+
+    # ---------------------------------------------------------
+    # Account
+    #
+    # Example:
+    # Account
+    # 099011
+    # ---------------------------------------------------------
+
+    account_number = None
+
+    account_match = re.search(
+        r"\bAccount\s+(?P<account>\d+)",
+        raw_text,
+        flags=re.IGNORECASE,
+    )
+
+    if account_match:
+        account_number = (
+            account_match.group("account") or ""
+        ).strip() or None
+
+    # ---------------------------------------------------------
+    # Ending Balance
+    #
+    # Example:
+    # Ending Balance $ 12,604.41
+    # ---------------------------------------------------------
+
+    balance_match = re.search(
+        r"Ending\s+Balance\s+\$\s*"
+        r"(?P<amount>[\d,]+\.\d{1,2})",
+        raw_text,
+        flags=re.IGNORECASE,
+    )
+
+    if not balance_match:
+        raise ValueError(
+            "Could not determine Reliable ending balance."
+        )
+
+    balance_due = _money_to_float(
+        balance_match.group("amount")
+    )
+
+    # ---------------------------------------------------------
+    # Transaction rows
+    #
+    # With Customer PO:
+    #
+    # 07/01/26 5150861 08/10/26 VALERII
+    # 46.20 46.2 5150861 46.20
+    #
+    # Without Customer PO:
+    #
+    # 07/16/26 2912537 08/10/26
+    # -27.80 -27.8 2912537 -27.80
+    #
+    # The invoice number is repeated near the end of each row.
+    # We use that repetition as validation to avoid matching
+    # statement headers/totals.
+    # ---------------------------------------------------------
+
+    row_pattern = re.compile(
+        r"(?m)^"
+        r"(?P<document_date>\d{2}/\d{2}/\d{2})\s+"
+        r"(?P<document_number>\d+)\s+"
+        r"(?P<due_date>\d{2}/\d{2}/\d{2})\s+"
+        r"(?:(?P<customer_po>"
+        r"[A-Za-z][A-Za-z0-9 _./#-]*?"
+        r")\s+)?"
+        r"(?P<amount>-?[\d,]+\.\d{2})\s+"
+        r"-?[\d,]+(?:\.\d+)?\s+"
+        r"(?P=document_number)\s+"
+        r"-?[\d,]+\.\d{2}"
+        r"\s*$",
+        flags=re.IGNORECASE,
+    )
+
+    lines: list[ParsedStatementLine] = []
+
+    for match in row_pattern.finditer(raw_text):
+
+        amount_text = (
+            match.group("amount") or ""
+        ).strip()
+
+        amount = round(
+            float(
+                amount_text.replace(",", "")
+            ),
+            2,
+        )
+
+        document_number = (
+            match.group("document_number") or ""
+        ).strip()
+
+        customer_po = (
+            match.group("customer_po") or ""
+        ).strip()
+
+        document_date = datetime.strptime(
+            match.group("document_date"),
+            "%m/%d/%y",
+        ).date()
+
+        due_date = datetime.strptime(
+            match.group("due_date"),
+            "%m/%d/%y",
+        ).date()
+
+        if amount < 0:
+            line_type = "credit"
+            invoice_amount = 0.0
+            credit_amount = abs(amount)
+            open_balance = abs(amount)
+        else:
+            line_type = "invoice"
+            invoice_amount = amount
+            credit_amount = 0.0
+            open_balance = amount
+
+        lines.append(
+            ParsedStatementLine(
+                line_type=line_type,
+                document_number=document_number,
+                document_date=document_date,
+                due_date=due_date,
+
+                # Reliable's Customer PO is useful for matching
+                # and is stored in the existing description field.
+                description=customer_po,
+
+                invoice_amount=invoice_amount,
+                credit_amount=credit_amount,
+                open_balance=open_balance,
+
+                raw_text=match.group(0).strip(),
+            )
+        )
+
+    if not lines:
+        raise ValueError(
+            "No transaction lines could be parsed "
+            "from the Reliable Parts statement."
+        )
+
+    invoice_count = sum(
+        1
+        for line in lines
+        if line.line_type == "invoice"
+    )
+
+    credit_count = sum(
+        1
+        for line in lines
+        if line.line_type == "credit"
+    )
+
+    if invoice_count == 0:
+        raise ValueError(
+            "No invoice lines could be parsed "
+            "from the Reliable Parts statement."
+        )
+
+    # ---------------------------------------------------------
+    # Safety validation
+    #
+    # Reliable Ending Balance for this statement represents
+    # the net of the listed positive invoices and credits.
+    # Refuse import if parsing silently missed a row.
+    # ---------------------------------------------------------
+
+    parsed_net = round(
+        sum(
+            line.invoice_amount - line.credit_amount
+            for line in lines
+        ),
+        2,
+    )
+
+    if abs(parsed_net - balance_due) > 0.01:
+        raise ValueError(
+            "Reliable statement totals do not match. "
+            f"Parsed net: ${parsed_net:.2f}; "
+            f"Ending balance: ${balance_due:.2f}. "
+            "Statement was not imported."
+        )
+
+    return ParsedStatement(
+        supplier_name="Reliable Parts",
+        statement_period=statement_period,
+        account_number=account_number,
+        balance_due=balance_due,
+        lines=lines,
+    )
+
 
 def extract_pdf_text(
     pdf_path: str | Path,
@@ -385,13 +640,16 @@ def extract_pdf_text(
 
     return text
 
-
 def parse_statement_pdf(
     pdf_path: str | Path,
     supplier_name: str | None = None,
 ) -> ParsedStatement:
     """
-    Main parser entry point.
+    Main supplier statement parser entry point.
+
+    Supported:
+    - Marcone
+    - Reliable Parts
     """
 
     text = extract_pdf_text(pdf_path)
@@ -400,11 +658,32 @@ def parse_statement_pdf(
         supplier_name or ""
     ).strip().lower()
 
+    text_lower = text.lower()
+
+    # ---------------------------------------------------------
+    # Marcone
+    # ---------------------------------------------------------
+
     if (
         supplier == "marcone"
-        or "marcone" in text.lower()
+        or "marcone" in text_lower
     ):
         return parse_marcone_statement_text(text)
+
+    # ---------------------------------------------------------
+    # Reliable Parts
+    # ---------------------------------------------------------
+
+    if (
+        supplier in {
+            "reliable",
+            "reliable parts",
+            "reliable parts inc",
+        }
+        or "reliable parts" in text_lower
+        or "reliableparts" in text_lower
+    ):
+        return parse_reliable_statement_text(text)
 
     raise ValueError(
         "Unsupported supplier statement format."

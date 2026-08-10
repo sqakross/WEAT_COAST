@@ -2705,9 +2705,10 @@ return;
   const form = document.getElementById('woForm');
   if (!form) return;
 
-  const jobInput  = form.querySelector('input[name="job_numbers"]');
-  const saveBtn   = form.querySelector('button[type="submit"]');
-  const issueBtn  = document.getElementById('issueSelectedBtn');
+  const jobInput = form.querySelector('input[name="job_numbers"]');
+  const saveBtn  = form.querySelector('button[type="submit"]');
+  const issueBtn = document.getElementById('issueSelectedBtn');
+
   if (!jobInput) return;
 
   const statusLine = document.createElement('div');
@@ -2745,7 +2746,9 @@ return;
 
   function parseISO(iso){
     if (!iso) return null;
-    if (/[zZ]|[+-]\d\d:\d\d$/.test(iso)) return new Date(iso);
+    if (/[zZ]|[+-]\d\d:\d\d$/.test(iso)) {
+      return new Date(iso);
+    }
     return new Date(iso + 'Z');
   }
 
@@ -2759,7 +2762,10 @@ return;
   function fmtLocalPT(iso){
     try{
       const d = parseISO(iso) || new Date(iso);
-      if (isNaN(d.getTime())) return "";
+
+      if (isNaN(d.getTime())) {
+        return "";
+      }
 
       return new Intl.DateTimeFormat('en-US', {
         timeZone: 'America/Los_Angeles',
@@ -2772,168 +2778,503 @@ return;
         hour12: true,
         timeZoneName: 'short'
       }).format(d);
+
     }catch(e){
       return "";
     }
   }
 
   function hasAnyToken(s){
-    return /\d+/.test((s||"").trim());
+    return /\d+/.test((s || "").trim());
   }
 
-  let tmr = null;
+
+  /*
+   * ------------------------------------------------------------
+   * JOB RESERVATION STATE
+   * ------------------------------------------------------------
+   */
+
+  let reserveTimer = null;
+
+  let reserveController = null;
+
+  let reserveRequestSeq = 0;
+
   let lastSent = "";
   let lastStatus = "idle";
+
   let suppressBlurReserve = false;
 
-  async function reserveNow(){
-    const raw = (jobInput.value || "").trim();
-    if (!hasAnyToken(raw)){
-      lastStatus = "idle";
-      lastSent = "";
-      setIdle();
-      return;
+
+  function cancelPendingReserve(){
+    if (reserveTimer) {
+      clearTimeout(reserveTimer);
+      reserveTimer = null;
     }
 
-    if (raw === lastSent && (lastStatus === "reserved")) return;
+    if (reserveController) {
+      reserveController.abort();
+      reserveController = null;
+    }
+  }
+
+
+  async function reserveNow(options = {}){
+    const force = !!options.force;
+
+    const raw = (jobInput.value || "").trim();
+
+    if (!hasAnyToken(raw)){
+      cancelPendingReserve();
+
+      lastStatus = "idle";
+      lastSent = "";
+
+      setIdle();
+
+      return true;
+    }
+
+
+    /*
+     * Если этот exact value уже проверен,
+     * второй запрос не нужен.
+     */
+    if (
+      !force &&
+      raw === lastSent &&
+      (
+        lastStatus === "reserved" ||
+        lastStatus === "exists" ||
+        lastStatus === "locked"
+      )
+    ){
+      return lastStatus === "reserved";
+    }
+
+
+    /*
+     * Отменяем предыдущий HTTP request.
+     *
+     * Это главное изменение:
+     * при наборе нового Job Number старый fetch
+     * больше не должен продолжать жить в браузере.
+     */
+    if (reserveController) {
+      reserveController.abort();
+    }
+
+    const controller = new AbortController();
+    reserveController = controller;
+
+    /*
+     * Каждый request получает свой sequence number.
+     * Старый response не имеет права менять UI.
+     */
+    const requestSeq = ++reserveRequestSeq;
+
     lastSent = raw;
+    lastStatus = "checking";
 
     statusLine.className = "form-text text-muted";
     statusLine.textContent = "Checking…";
 
-    let resp, data;
+
+    let resp;
+    let data;
+
     try{
-      const qs = new URLSearchParams({ job_numbers: raw }).toString();
-      resp = await fetch(API_RESERVE + "?" + qs, {
-        method: "GET",
-        credentials: "same-origin",
-        headers: { "Accept": "application/json" }
-      });
+      const qs = new URLSearchParams({
+        job_numbers: raw
+      }).toString();
+
+      resp = await fetch(
+        API_RESERVE + "?" + qs,
+        {
+          method: "GET",
+          credentials: "same-origin",
+
+          headers: {
+            "Accept": "application/json"
+          },
+
+          signal: controller.signal
+        }
+      );
+
+      /*
+       * Пока request выполнялся пользователь мог
+       * изменить Job Number.
+       *
+       * Такой response уже устарел.
+       */
+      if (
+        requestSeq !== reserveRequestSeq ||
+        raw !== (jobInput.value || "").trim()
+      ){
+        return false;
+      }
+
       data = await resp.json();
+
     }catch(e){
+
+      /*
+       * AbortError — нормальная ситуация.
+       * Пользователь продолжил печатать.
+       */
+      if (e && e.name === "AbortError") {
+        return false;
+      }
+
+      /*
+       * Если это уже старый request —
+       * ничего в UI не меняем.
+       */
+      if (requestSeq !== reserveRequestSeq) {
+        return false;
+      }
+
       lastStatus = "neterr";
+
       statusLine.className = "form-text text-warning";
-      statusLine.textContent = "Reserve check failed (network). You can try Save, server will still protect.";
+      statusLine.textContent =
+        "Reserve check failed (network). You can try Save, server will still protect.";
+
       setButtonsEnabled(true);
-      return;
+
+      return false;
+
+    }finally{
+
+      if (reserveController === controller) {
+        reserveController = null;
+      }
     }
+
+
+    /*
+     * Дополнительная защита:
+     * response мог прийти после изменения input.
+     */
+    if (
+      requestSeq !== reserveRequestSeq ||
+      raw !== (jobInput.value || "").trim()
+    ){
+      return false;
+    }
+
 
     if (!resp.ok || !data || data.ok === false){
       lastStatus = "bad";
-      setWarn((data && data.error) ? data.error : "Reserve check failed.");
-      return;
+
+      setWarn(
+        (data && data.error)
+          ? data.error
+          : "Reserve check failed."
+      );
+
+      return false;
     }
+
 
     if (data.status === "exists"){
       lastStatus = "exists";
 
-      const existingId = String(data.existing_id || '').trim();
-      const token = escapeHtml(data.token || '');
+      const existingId =
+        String(data.existing_id || '').trim();
 
-      const urlTpl = "{{ url_for('inventory.wo_detail', wo_id=0) }}";
-      const url = urlTpl.replace("0", existingId);
+      const token =
+        escapeHtml(data.token || '');
+
+      const urlTpl =
+        "{{ url_for('inventory.wo_detail', wo_id=0) }}";
+
+      const url =
+        urlTpl.replace("0", existingId);
 
       setWarn(
-        `Duplicate: Work Order <a href="${url}" class="fw-bold text-danger" target="_blank">#${escapeHtml(existingId)}</a> already exists for job ${token}. ` +
-        `<a href="${url}" class="btn btn-sm btn-outline-primary ms-2" target="_blank">Open</a>`
+        `Duplicate: Work Order ` +
+        `<a href="${url}" ` +
+        `class="fw-bold text-danger" ` +
+        `target="_blank">#${escapeHtml(existingId)}</a> ` +
+        `already exists for job ${token}. ` +
+        `<a href="${url}" ` +
+        `class="btn btn-sm btn-outline-primary ms-2" ` +
+        `target="_blank">Open</a>`
       );
-      return;
+
+      return false;
     }
+
 
     if (data.status === "locked"){
       lastStatus = "locked";
-      const b = (data.blocked && data.blocked[0]) ? data.blocked[0] : null;
-      const who = b ? (b.holder || "another user") : "another user";
-      const until = b && b.expires_at ? (" until " + fmtLocalPT(b.expires_at)) : "";
-      setWarn(`Locked by ${who}${until}. Try again later.`);
-      return;
+
+      const b =
+        (data.blocked && data.blocked[0])
+          ? data.blocked[0]
+          : null;
+
+      const who =
+        b
+          ? (b.holder || "another user")
+          : "another user";
+
+      const until =
+        b && b.expires_at
+          ? (" until " + fmtLocalPT(b.expires_at))
+          : "";
+
+      setWarn(
+        `Locked by ${escapeHtml(who)}${escapeHtml(until)}. Try again later.`
+      );
+
+      return false;
     }
 
-    if (data.status === "reserved" || data.status === "empty"){
+
+    if (
+      data.status === "reserved" ||
+      data.status === "empty"
+    ){
       lastStatus = "reserved";
-      const list = (data.reserved || []).join(", ");
-      setOk(list ? `Reserved: ${list}` : "Reserved");
-      return;
+
+      const list =
+        (data.reserved || []).join(", ");
+
+      setOk(
+        list
+          ? `Reserved: ${list}`
+          : "Reserved"
+      );
+
+      return true;
     }
+
 
     lastStatus = "unknown";
-    statusLine.className = "form-text text-warning";
-    statusLine.textContent = "Unknown reserve status. Server will still protect on Save.";
+
+    statusLine.className =
+      "form-text text-warning";
+
+    statusLine.textContent =
+      "Unknown reserve status. Server will still protect on Save.";
+
     setButtonsEnabled(true);
+
+    return false;
   }
 
-  function scheduleReserve(){
-    if (IS_RO) return;
-    clearTimeout(tmr);
-    tmr = setTimeout(reserveNow, 600);
+
+  /*
+   * ------------------------------------------------------------
+   * DEBOUNCE
+   * ------------------------------------------------------------
+   */
+
+  function handleJobInput(){
+  if (IS_RO) return;
+
+  /*
+   * Во время набора НЕ обращаемся к серверу.
+   * Только сбрасываем старый статус.
+   */
+  cancelPendingReserve();
+
+  lastStatus = "typing";
+  lastSent = "";
+
+  jobInput.classList.remove('is-invalid');
+
+  statusLine.className = "form-text text-muted";
+  statusLine.textContent = "Finish entering job number(s) to check.";
+
+  setButtonsEnabled(true);
+}
+
+jobInput.addEventListener(
+  'input',
+  handleJobInput
+);
+
+
+  /*
+   * BLUR
+   *
+   * Если пользователь закончил ввод и ушёл
+   * из поля — проверяем сразу.
+   *
+   * Но сначала отменяем debounce timer,
+   * чтобы через 900ms не ушёл второй request.
+   */
+  jobInput.addEventListener('blur', () => {
+
+  if (suppressBlurReserve) {
+    suppressBlurReserve = false;
+    return;
   }
 
-  jobInput.addEventListener('input', scheduleReserve);
+  /*
+   * Реальный reserve только когда пользователь
+   * закончил ввод и вышел из поля.
+   */
+  reserveNow();
+});
 
-    jobInput.addEventListener('blur', () => {
-      if (suppressBlurReserve) {
-        suppressBlurReserve = false;
-        return;
-      }
-      reserveNow();
-    });
 
   setIdle();
 
-      statusLine.addEventListener('mousedown', (e) => {
-      const link = e.target.closest('a[href]');
+
+  /*
+   * Клик по Duplicate/Open не должен
+   * запускать новый reserve через blur.
+   */
+  statusLine.addEventListener(
+    'mousedown',
+    (e) => {
+      const link =
+        e.target.closest('a[href]');
+
       if (!link) return;
 
       suppressBlurReserve = true;
-    });
+    }
+  );
 
-    statusLine.addEventListener('click', (e) => {
-      const link = e.target.closest('a[href]');
+
+  statusLine.addEventListener(
+    'click',
+    (e) => {
+      const link =
+        e.target.closest('a[href]');
+
       if (!link) return;
 
       suppressBlurReserve = true;
-    });
+    }
+  );
+
+
+  /*
+   * ------------------------------------------------------------
+   * RELEASE RESERVATION
+   * ------------------------------------------------------------
+   */
 
   function releaseLock(){
-    const raw = (jobInput.value || "").trim();
-    if (!hasAnyToken(raw)) return;
+    const raw =
+      (jobInput.value || "").trim();
+
+    if (!hasAnyToken(raw)) {
+      return;
+    }
 
     try{
-      const body = new URLSearchParams({ job_numbers: raw }).toString();
+      const body =
+        new URLSearchParams({
+          job_numbers: raw
+        }).toString();
+
       if (navigator.sendBeacon){
-        const blob = new Blob([body], { type: "application/x-www-form-urlencoded" });
-        navigator.sendBeacon(API_RELEASE, blob);
+
+        const blob =
+          new Blob(
+            [body],
+            {
+              type:
+                "application/x-www-form-urlencoded"
+            }
+          );
+
+        navigator.sendBeacon(
+          API_RELEASE,
+          blob
+        );
+
         return;
       }
+
     }catch(e){}
 
+
     try{
-      fetch(API_RELEASE, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ job_numbers: raw }).toString(),
-        keepalive: true
-      });
+      fetch(
+        API_RELEASE,
+        {
+          method: "POST",
+          credentials: "same-origin",
+
+          headers: {
+            "Content-Type":
+              "application/x-www-form-urlencoded"
+          },
+
+          body:
+            new URLSearchParams({
+              job_numbers: raw
+            }).toString(),
+
+          keepalive: true
+        }
+      );
+
     }catch(e){}
   }
 
-  window.addEventListener('beforeunload', releaseLock);
+
+  window.addEventListener(
+    'beforeunload',
+    releaseLock
+  );
 
 
-  form.addEventListener('submit', async (e)=>{
-    if (lastStatus === "locked" || lastStatus === "exists"){
-      e.preventDefault();
-      return;
-    }
-    try{
-      await reserveNow();
-      if (lastStatus === "locked" || lastStatus === "exists"){
+  /*
+   * ------------------------------------------------------------
+   * FINAL CHECK BEFORE SAVE
+   * ------------------------------------------------------------
+   */
+
+  form.addEventListener(
+    'submit',
+    async (e) => {
+
+      /*
+       * Уже точно знаем, что job занят/duplicate.
+       */
+      if (
+        lastStatus === "locked" ||
+        lastStatus === "exists"
+      ){
         e.preventDefault();
         return;
       }
-    }catch(err){}
-  });
+
+      /*
+       * Отменяем отложенный debounce.
+       * Save сам делает final reserve check.
+       */
+      if (reserveTimer) {
+        clearTimeout(reserveTimer);
+        reserveTimer = null;
+      }
+
+      try{
+        await reserveNow();
+
+        if (
+          lastStatus === "locked" ||
+          lastStatus === "exists"
+        ){
+          e.preventDefault();
+          return;
+        }
+
+      }catch(err){}
+    }
+  );
+
 })();
 </script>
 {% endblock %}

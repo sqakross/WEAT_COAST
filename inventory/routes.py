@@ -653,122 +653,196 @@ def model_research():
 @login_required
 def api_job_reserve():
     from sqlalchemy.orm.exc import StaleDataError
+    from sqlalchemy import or_
     from flask import request, jsonify, current_app, make_response
     from models import JobReservation, WorkOrder
     from extensions import db
     from datetime import datetime, timedelta, timezone
+    import time
+
+    started = time.perf_counter()
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
-    if role not in ("admin", "superadmin"):
-        resp = make_response(jsonify({"ok": False, "error": "Access denied"}), 403)
+
+    def _response(payload, status=200):
+        resp = make_response(jsonify(payload), status)
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
         return resp
+
+    if role not in ("admin", "superadmin"):
+        return _response(
+            {"ok": False, "error": "Access denied"},
+            403,
+        )
 
     job_numbers = (request.args.get("job_numbers") or "").strip()
     tokens = _job_tokens_from_text(job_numbers)
 
-    current_app.logger.debug(
-        "API_JOB_RESERVE start user_id=%r user=%r raw=%r tokens=%r",
-        getattr(current_user, "id", None),
-        getattr(current_user, "username", None),
-        job_numbers,
-        tokens,
-    )
-
     if not tokens:
-        resp = make_response(jsonify({"ok": True, "tokens": [], "status": "empty"}))
-        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
-        return resp
+        return _response({
+            "ok": True,
+            "tokens": [],
+            "status": "empty",
+        })
 
     now = datetime.utcnow()
+
     ttl_minutes = 20
     ttl = timedelta(minutes=ttl_minutes)
     exp = now + ttl
 
+    uid = getattr(current_user, "id", None)
+    uname = getattr(current_user, "username", None)
+
     def _iso_utc_z(dt):
         if not dt:
             return None
-        return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
 
-    # clean expired only sometimes to avoid DB write on every check
-    if request.args.get("cleanup") == "1":
-        JobReservation.query.filter(JobReservation.expires_at < now).delete(synchronize_session=False)
-
-    # duplicate check against existing WO
-    for t in tokens:
-        wo = (
-            WorkOrder.query
-            .filter(WorkOrder.job_numbers.ilike(f"%{t}%"))
-            .order_by(WorkOrder.id.desc())
-            .first()
+        return (
+            dt.replace(tzinfo=timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
         )
-        if wo:
-            current_app.logger.debug(
-                "API_JOB_RESERVE exists token=%r existing_wo=%r", t, wo.id
+
+    # ============================================================
+    # OPTIONAL EXPIRED CLEANUP
+    # ============================================================
+
+    if request.args.get("cleanup") == "1":
+        JobReservation.query.filter(
+            JobReservation.expires_at < now
+        ).delete(
+            synchronize_session=False
+        )
+
+    # ============================================================
+    # DUPLICATE WORK ORDER CHECK
+    #
+    # IMPORTANT:
+    # One SQL query for all tokens instead of one query per token.
+    # ============================================================
+
+    duplicate_started = time.perf_counter()
+
+    duplicate_filters = [
+        WorkOrder.job_numbers.ilike(f"%{token}%")
+        for token in tokens
+    ]
+
+    possible_work_orders = []
+
+    if duplicate_filters:
+        possible_work_orders = (
+            WorkOrder.query
+            .filter(or_(*duplicate_filters))
+            .order_by(WorkOrder.id.desc())
+            .limit(100)
+            .all()
+        )
+
+    # Exact token comparison in Python so:
+    # job 123 does not incorrectly match 1234.
+    token_set = set(tokens)
+
+    for wo in possible_work_orders:
+        existing_tokens = set(
+            _job_tokens_from_text(
+                getattr(wo, "job_numbers", "") or ""
             )
-            resp = make_response(jsonify({
+        )
+
+        intersection = token_set & existing_tokens
+
+        if intersection:
+            existing_token = sorted(intersection)[0]
+
+            current_app.logger.info(
+                "API_JOB_RESERVE EXISTS | "
+                "token=%s | wo_id=%s | duplicate_check=%.3fs",
+                existing_token,
+                wo.id,
+                time.perf_counter() - duplicate_started,
+            )
+
+            return _response({
                 "ok": True,
                 "status": "exists",
                 "existing_id": wo.id,
-                "token": t
-            }))
-            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-            resp.headers["Pragma"] = "no-cache"
-            resp.headers["Expires"] = "0"
-            return resp
+                "token": existing_token,
+            })
 
-    uid = getattr(current_user, "id", None)
-    uname = getattr(current_user, "username", None)
+    # ============================================================
+    # LOAD ALL CURRENT RESERVATIONS IN ONE QUERY
+    # ============================================================
+
+    reservations_started = time.perf_counter()
+
+    existing_rows = (
+        JobReservation.query
+        .filter(
+            JobReservation.job_token.in_(tokens)
+        )
+        .all()
+    )
+
+    rows_by_token = {
+        row.job_token: row
+        for row in existing_rows
+    }
 
     blocked = []
     reserved = []
 
-    for t in tokens:
-        row = JobReservation.query.filter_by(job_token=t).first()
+    for token in tokens:
+        row = rows_by_token.get(token)
 
-        if row and row.expires_at and row.expires_at >= now:
+        if (
+            row
+            and row.expires_at
+            and row.expires_at >= now
+        ):
             if row.holder_user_id == uid:
                 row.expires_at = exp
                 row.holder_username = uname
-                reserved.append(t)
-                current_app.logger.debug(
-                    "API_JOB_RESERVE refresh token=%r user_id=%r exp=%r",
-                    t, uid, exp
-                )
+                reserved.append(token)
+
             else:
                 blocked.append({
-                    "token": t,
-                    "holder": row.holder_username or "unknown",
-                    "expires_at": _iso_utc_z(row.expires_at)
+                    "token": token,
+                    "holder": (
+                        row.holder_username
+                        or "unknown"
+                    ),
+                    "expires_at": _iso_utc_z(
+                        row.expires_at
+                    ),
                 })
-                current_app.logger.debug(
-                    "API_JOB_RESERVE blocked token=%r holder_user_id=%r holder=%r exp=%r",
-                    t, row.holder_user_id, row.holder_username, row.expires_at
-                )
+
         else:
             if row:
                 row.holder_user_id = uid
                 row.holder_username = uname
                 row.expires_at = exp
+
             else:
                 row = JobReservation(
-                    job_token=t,
+                    job_token=token,
                     holder_user_id=uid,
                     holder_username=uname,
                     expires_at=exp,
                 )
+
                 db.session.add(row)
 
-            reserved.append(t)
+            reserved.append(token)
 
-            current_app.logger.debug(
-                "API_JOB_RESERVE new token=%r user_id=%r exp=%r",
-                t, uid, exp
-            )
+    # ============================================================
+    # COMMIT
+    # ============================================================
+
+    commit_started = time.perf_counter()
 
     try:
         db.session.commit()
@@ -776,41 +850,55 @@ def api_job_reserve():
     except StaleDataError:
         db.session.rollback()
 
-        current_app.logger.debug(
-            "API_JOB_RESERVE stale reservation user_id=%r tokens=%r",
+        current_app.logger.warning(
+            "API_JOB_RESERVE STALE | "
+            "user_id=%r | tokens=%r",
             uid,
             tokens,
         )
 
-        resp = make_response(jsonify({
+        return _response({
             "ok": False,
             "status": "retry",
-            "error": "Reservation changed by another request. Please try again."
-        }), 409)
-
-        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
-        return resp
+            "error": (
+                "Reservation changed by another request. "
+                "Please try again."
+            ),
+        }, 409)
 
     except Exception:
         db.session.rollback()
 
         current_app.logger.exception(
-            "API_JOB_RESERVE failed user_id=%r tokens=%r",
+            "API_JOB_RESERVE FAILED | "
+            "user_id=%r | tokens=%r",
             uid,
             tokens,
         )
 
-        resp = make_response(jsonify({
+        return _response({
             "ok": False,
-            "error": "Failed to reserve job number."
-        }), 500)
+            "error": "Failed to reserve job number.",
+        }, 500)
 
-        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
-        return resp
+    total_elapsed = time.perf_counter() - started
+
+    # Log only slow reserve requests.
+    if total_elapsed >= 0.5:
+        current_app.logger.warning(
+            "API_JOB_RESERVE PERF | "
+            "total=%.3fs | "
+            "duplicate_check=%.3fs | "
+            "reservation_load_update=%.3fs | "
+            "commit=%.3fs | "
+            "tokens=%r | user_id=%r",
+            total_elapsed,
+            reservations_started - duplicate_started,
+            commit_started - reservations_started,
+            time.perf_counter() - commit_started,
+            tokens,
+            uid,
+        )
 
     payload = {
         "ok": True,
@@ -821,14 +909,7 @@ def api_job_reserve():
         "expires_at": _iso_utc_z(exp),
     }
 
-    current_app.logger.debug("API_JOB_RESERVE done payload=%r", payload)
-
-    resp = make_response(jsonify(payload))
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
-    return resp
-
+    return _response(payload)
 
 @inventory_bp.post("/api/job_release", endpoint="api_job_release")
 @login_required
@@ -836,31 +917,48 @@ def api_job_release():
     from flask import request, jsonify, current_app
     from models import JobReservation
     from extensions import db
+    import time
 
-    role = (getattr(current_user, "role", "") or "").strip().lower()
+    started = time.perf_counter()
+
+    role = (
+        getattr(current_user, "role", "")
+        or ""
+    ).strip().lower()
+
     if role not in ("admin", "superadmin"):
-        return jsonify({"ok": False, "error": "Access denied"}), 403
+        return jsonify({
+            "ok": False,
+            "error": "Access denied",
+        }), 403
 
-    job_numbers = (request.form.get("job_numbers") or "").strip()
+    job_numbers = (
+        request.form.get("job_numbers")
+        or ""
+    ).strip()
+
     tokens = _job_tokens_from_text(job_numbers)
+
     if not tokens:
         return jsonify({"ok": True})
 
     uid = getattr(current_user, "id", None)
 
-    current_app.logger.debug(
-        "API_JOB_RELEASE start user_id=%r user=%r raw=%r tokens=%r",
-        uid,
-        getattr(current_user, "username", None),
-        job_numbers,
-        tokens,
+    delete_started = time.perf_counter()
+
+    # One DELETE for all tokens.
+    deleted_count = (
+        JobReservation.query
+        .filter(
+            JobReservation.job_token.in_(tokens),
+            JobReservation.holder_user_id == uid,
+        )
+        .delete(
+            synchronize_session=False
+        )
     )
 
-    for t in tokens:
-        JobReservation.query.filter_by(
-            job_token=t,
-            holder_user_id=uid
-        ).delete(synchronize_session=False)
+    commit_started = time.perf_counter()
 
     try:
         db.session.commit()
@@ -869,23 +967,42 @@ def api_job_release():
         db.session.rollback()
 
         current_app.logger.exception(
-            "API_JOB_RELEASE failed user_id=%r tokens=%r",
+            "API_JOB_RELEASE FAILED | "
+            "user_id=%r | tokens=%r",
             uid,
             tokens,
         )
 
         return jsonify({
             "ok": False,
-            "error": "Failed to release job reservation."
+            "error": (
+                "Failed to release job reservation."
+            ),
         }), 500
 
-    current_app.logger.debug(
-        "API_JOB_RELEASE done user_id=%r tokens=%r",
-        uid, tokens
-    )
+    total_elapsed = time.perf_counter() - started
 
-    return jsonify({"ok": True})
+    if total_elapsed >= 0.5:
+        current_app.logger.warning(
+            "API_JOB_RELEASE PERF | "
+            "total=%.3fs | "
+            "delete=%.3fs | "
+            "commit=%.3fs | "
+            "deleted=%s | "
+            "tokens=%r | "
+            "user_id=%r",
+            total_elapsed,
+            commit_started - delete_started,
+            time.perf_counter() - commit_started,
+            deleted_count,
+            tokens,
+            uid,
+        )
 
+    return jsonify({
+        "ok": True,
+        "deleted": int(deleted_count or 0),
+    })
 
 @inventory_bp.post("/receiving/<int:batch_id>/delete", endpoint="receiving_delete")
 @login_required
@@ -6404,13 +6521,13 @@ def asset_receipt_pdf(receipt_number):
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
 def download_report_xlsx():
-    from flask import request, send_file
-    from datetime import datetime
+    from flask import request, send_file, flash, redirect, url_for
+    from datetime import datetime, timedelta
     from io import BytesIO
     from sqlalchemy import or_, func
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-
+    from sqlalchemy.orm import selectinload
     from extensions import db
     from models import IssuedPartRecord, Part
 
@@ -6435,16 +6552,48 @@ def download_report_xlsx():
         except ValueError:
             end_dt = None
 
+    # ============================================================
+    # XLSX SAFETY GUARD
+    # Full-history Excel exports can overload the ERP.
+    # Require an explicit reporting period, maximum 366 days.
+    # ============================================================
+    if not start_dt or not end_dt:
+        flash(
+            "Please select Start Date and End Date before exporting Excel.",
+            "warning",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
+    if end_dt < start_dt:
+        flash(
+            "End Date cannot be earlier than Start Date.",
+            "warning",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
+    if (end_dt - start_dt).days > 366:
+        flash(
+            "Excel export is limited to a maximum period of 1 year.",
+            "warning",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
+    end_dt_exclusive = end_dt + timedelta(days=1)
+
     # --------- запрос ---------
     q = (
         db.session.query(IssuedPartRecord)
         .join(Part, IssuedPartRecord.part_id == Part.id)
+        .options(
+            selectinload(IssuedPartRecord.part),
+            selectinload(IssuedPartRecord.return_destination),
+        )
     )
 
-    if start_dt:
-        q = q.filter(IssuedPartRecord.issue_date >= start_dt)
-    if end_dt:
-        q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
+    q = q.filter(
+        IssuedPartRecord.issue_date >= start_dt,
+        IssuedPartRecord.issue_date < end_dt_exclusive,
+    )
 
     # ---------- unified search q ----------
     if q_s:
@@ -6773,50 +6922,106 @@ def download_report_xlsx():
 @inventory_bp.get("/reports_grouped/returns_xlsx", endpoint="download_returns_xlsx")
 @login_required
 def download_returns_xlsx():
-    from flask import request, send_file
-    from datetime import datetime
+    from flask import request, send_file, flash, redirect, url_for
+    from datetime import datetime, timedelta
     from io import BytesIO
 
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+
     from sqlalchemy import or_, func
+    from sqlalchemy.orm import selectinload
+
     from extensions import db
     from models import IssuedPartRecord, Part
 
-    # --------- filters (unified, matches reports_grouped) ---------
+    # ============================================================
+    # FILTERS
+    # ============================================================
+
     q_s = (request.args.get("q") or "").strip() or None
     location = (request.args.get("location") or "").strip() or None
     status = (request.args.get("status") or "").strip().upper() or ""
 
-    start_date_str = request.args.get("start_date") or None
-    end_date_str = request.args.get("end_date") or None
+    start_date_str = (request.args.get("start_date") or "").strip() or None
+    end_date_str = (request.args.get("end_date") or "").strip() or None
 
     start_dt = None
     end_dt = None
+
     if start_date_str:
         try:
             start_dt = datetime.strptime(start_date_str, "%Y-%m-%d")
         except ValueError:
             start_dt = None
+
     if end_date_str:
         try:
             end_dt = datetime.strptime(end_date_str, "%Y-%m-%d")
         except ValueError:
             end_dt = None
 
+    # ============================================================
+    # XLSX SAFETY GUARD
+    #
+    # Full-history exports can overload the ERP.
+    # Require explicit dates and limit export to maximum 1 year.
+    # ============================================================
+
+    if not start_dt or not end_dt:
+        flash(
+            "Please select Start Date and End Date before exporting Returns Excel.",
+            "warning",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
+    if end_dt < start_dt:
+        flash(
+            "End Date cannot be earlier than Start Date.",
+            "warning",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
+    if (end_dt - start_dt).days > 366:
+        flash(
+            "Returns Excel export is limited to a maximum period of 1 year.",
+            "warning",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
+    # Exclusive upper boundary.
+    # Example:
+    # end_date = 2026-08-10
+    # query uses < 2026-08-11 00:00:00
+    end_dt_exclusive = end_dt + timedelta(days=1)
+
+    # ============================================================
+    # QUERY
+    # ============================================================
+
     q = (
         db.session.query(IssuedPartRecord)
-        .join(Part, IssuedPartRecord.part_id == Part.id)
+        .join(
+            Part,
+            IssuedPartRecord.part_id == Part.id,
+        )
+        .options(
+            selectinload(IssuedPartRecord.part),
+            selectinload(IssuedPartRecord.return_destination),
+        )
+        .filter(
+            IssuedPartRecord.issue_date >= start_dt,
+            IssuedPartRecord.issue_date < end_dt_exclusive,
+        )
     )
 
-    if start_dt:
-        q = q.filter(IssuedPartRecord.issue_date >= start_dt)
-    if end_dt:
-        q = q.filter(IssuedPartRecord.issue_date < end_dt.replace(hour=23, minute=59, second=59))
+    # ============================================================
+    # SEARCH
+    # ============================================================
 
-    # ---------- unified search q ----------
     if q_s:
         like = f"%{q_s}%"
+
         inv_no = None
         try:
             inv_no = int(q_s)
@@ -6826,42 +7031,78 @@ def download_returns_xlsx():
         conds = [
             IssuedPartRecord.issued_to.ilike(like),
             IssuedPartRecord.reference_job.ilike(like),
-            func.coalesce(IssuedPartRecord.inv_ref, "").ilike(like),
+            func.coalesce(
+                IssuedPartRecord.inv_ref,
+                "",
+            ).ilike(like),
             Part.part_number.ilike(like),
             Part.name.ilike(like),
-            func.coalesce(IssuedPartRecord.location, "").ilike(like),
+            func.coalesce(
+                IssuedPartRecord.location,
+                "",
+            ).ilike(like),
         ]
+
         if inv_no is not None:
-            conds.append(IssuedPartRecord.invoice_number == inv_no)
+            conds.append(
+                IssuedPartRecord.invoice_number == inv_no
+            )
 
         q = q.filter(or_(*conds))
 
-    # ---------- location filter ----------
-    if location:
-        q = q.filter(IssuedPartRecord.location == location)
+    # ============================================================
+    # LOCATION
+    # ============================================================
 
-    # ---------- status filter ----------
+    if location:
+        q = q.filter(
+            IssuedPartRecord.location == location
+        )
+
+    # ============================================================
+    # STATUS
+    # ============================================================
+
     if status == "OPEN":
         q = q.filter(
             IssuedPartRecord.quantity > 0,
-            func.coalesce(IssuedPartRecord.consumed_qty, 0) == 0
+            func.coalesce(
+                IssuedPartRecord.consumed_qty,
+                0,
+            ) == 0,
         )
+
     elif status == "PARTIAL":
         q = q.filter(
             IssuedPartRecord.quantity > 0,
-            func.coalesce(IssuedPartRecord.consumed_qty, 0) > 0,
-            func.coalesce(IssuedPartRecord.consumed_qty, 0) < IssuedPartRecord.quantity
+            func.coalesce(
+                IssuedPartRecord.consumed_qty,
+                0,
+            ) > 0,
+            func.coalesce(
+                IssuedPartRecord.consumed_qty,
+                0,
+            ) < IssuedPartRecord.quantity,
         )
+
     elif status == "CONSUMED":
         q = q.filter(
             IssuedPartRecord.quantity > 0,
-            func.coalesce(IssuedPartRecord.consumed_qty, 0) >= IssuedPartRecord.quantity
+            func.coalesce(
+                IssuedPartRecord.consumed_qty,
+                0,
+            ) >= IssuedPartRecord.quantity,
         )
 
-    # только возвраты
+    # ============================================================
+    # RETURNS ONLY
+    # ============================================================
+
     q = q.filter(
-        (IssuedPartRecord.quantity < 0) |
-        (IssuedPartRecord.reference_job.ilike("RETURN%"))
+        or_(
+            IssuedPartRecord.quantity < 0,
+            IssuedPartRecord.reference_job.ilike("RETURN%"),
+        )
     )
 
     q = q.order_by(
@@ -6872,12 +7113,23 @@ def download_returns_xlsx():
 
     rows = q.all()
 
+    # ============================================================
+    # EXCEL
+    # ============================================================
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Returns"
 
-    header_fill = PatternFill("solid", fgColor="FFD9D9D9")
-    return_fill = PatternFill("solid", fgColor="FFF8CBAD")
+    header_fill = PatternFill(
+        "solid",
+        fgColor="FFD9D9D9",
+    )
+
+    return_fill = PatternFill(
+        "solid",
+        fgColor="FFF8CBAD",
+    )
 
     bold_font = Font(bold=True)
     title_font = Font(bold=True, size=14)
@@ -6893,36 +7145,48 @@ def download_returns_xlsx():
         bottom=Side(style="thin"),
     )
 
-    # >>> 13 колонок (как и в Issued) <<<
     header = [
-        "Date",             # A
-        "Invoice #",        # B
-        "Part #",           # C
-        "Name",             # D
-        "Qty",              # E
-        "Unit Cost",        # F
-        "Total",            # G
-        "Issued To",        # H
-        "Job Ref.",         # I
-        "Location",         # J
-        "INV# (vendor)",    # K
-        "Return To",        # L
-        "Return Company",   # M
+        "Date",
+        "Invoice #",
+        "Part #",
+        "Name",
+        "Qty",
+        "Unit Cost",
+        "Total",
+        "Issued To",
+        "Job Ref.",
+        "Location",
+        "INV# (vendor)",
+        "Return To",
+        "Return Company",
     ]
 
-    # фильтры
-    # фильтры
-    filters_parts = []
-    if start_date_str or end_date_str:
-        filters_parts.append(f"from {start_date_str or '…'} to {end_date_str or '…'}")
-    if q_s:
-        filters_parts.append(f"Search q = '{q_s}'")
-    if location:
-        filters_parts.append(f"Location = '{location}'")
-    if status:
-        filters_parts.append(f"Status = {status}")
+    # ============================================================
+    # FILTER DESCRIPTION
+    # ============================================================
 
-    filters_line = "Filters: " + ("; ".join(filters_parts) if filters_parts else "(none)")
+    filters_parts = [
+        f"from {start_date_str} to {end_date_str}"
+    ]
+
+    if q_s:
+        filters_parts.append(
+            f"Search q = '{q_s}'"
+        )
+
+    if location:
+        filters_parts.append(
+            f"Location = '{location}'"
+        )
+
+    if status:
+        filters_parts.append(
+            f"Status = {status}"
+        )
+
+    filters_line = (
+        "Filters: " + "; ".join(filters_parts)
+    )
 
     ws["A1"] = "Returns Report"
     ws.merge_cells("A1:M1")
@@ -6935,6 +7199,7 @@ def download_returns_xlsx():
 
     ws.append([])
     ws.append(header)
+
     header_row = ws.max_row
 
     for cell in ws[header_row]:
@@ -6950,22 +7215,41 @@ def download_returns_xlsx():
     def fmt_invoice_num(inv):
         if inv is None:
             return ""
+
         try:
             return f"{int(inv):06d}"
         except (TypeError, ValueError):
             return str(inv)
 
+    # ============================================================
+    # DATA
+    # ============================================================
+
     for rec in rows:
         part = rec.part
+
         qty = rec.quantity or 0
         unit_cost = rec.unit_cost_at_issue or 0
         line_total = qty * unit_cost
+
         total_sum += float(line_total)
 
-        inv_str = fmt_invoice_num(rec.invoice_number)
+        inv_str = fmt_invoice_num(
+            rec.invoice_number
+        )
+
+        return_destination = getattr(
+            rec,
+            "return_destination",
+            None,
+        )
 
         ws.append([
-            rec.issue_date.date().isoformat() if rec.issue_date else "",
+            (
+                rec.issue_date.date().isoformat()
+                if rec.issue_date
+                else ""
+            ),
             inv_str,
             part.part_number if part else "",
             part.name if part else "",
@@ -6974,65 +7258,109 @@ def download_returns_xlsx():
             float(f"{line_total:.2f}"),
             rec.issued_to or "",
             rec.reference_job or "",
-            rec.location or (part.location if part else ""),
+            (
+                rec.location
+                or (part.location if part else "")
+            ),
             rec.inv_ref or "",
-            (getattr(rec, "return_to", None) or ""),
-            (rec.return_destination.name if getattr(rec, "return_destination", None) else ""),
+            getattr(rec, "return_to", None) or "",
+            (
+                return_destination.name
+                if return_destination
+                else ""
+            ),
         ])
 
         row_idx = ws.max_row
+
         for cell in ws[row_idx]:
             cell.border = thin_border
             cell.fill = return_fill
 
-        # align numeric (Qty E, UnitCost F, Total G)
+        # Qty / Unit Cost / Total
         ws[row_idx][4].alignment = right_align
         ws[row_idx][5].alignment = right_align
         ws[row_idx][6].alignment = right_align
 
+    # ============================================================
+    # TOTAL
+    # ============================================================
+
     if rows:
         ws.append([])
+
         ws.append([
-            "", "", "", "TOTAL RETURNS:",
-            "", "", round(total_sum, 2),
-            "", "", "", "", "", ""
+            "",
+            "",
+            "",
+            "TOTAL RETURNS:",
+            "",
+            "",
+            round(total_sum, 2),
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
         ])
 
-        for cell in ws[ws.max_row]:
+        total_row = ws.max_row
+
+        for cell in ws[total_row]:
             cell.font = bold_font
             cell.border = thin_border
-        ws[ws.max_row][6].alignment = right_align  # G total
 
-    ws.auto_filter.ref = f"A{header_row}:M{ws.max_row}"
+        ws[total_row][6].alignment = right_align
 
-    # widths A..M
+    # ============================================================
+    # FILTER / COLUMN WIDTHS
+    # ============================================================
+
+    ws.auto_filter.ref = (
+        f"A{header_row}:M{ws.max_row}"
+    )
+
     widths = {
-        "A": 12,  # Date
-        "B": 10,  # Invoice #
-        "C": 14,  # Part #
-        "D": 32,  # Name
-        "E": 8,   # Qty
-        "F": 10,  # Unit Cost
-        "G": 12,  # Total
-        "H": 18,  # Issued To
-        "I": 16,  # Job Ref.
-        "J": 14,  # Location
-        "K": 16,  # INV# (vendor)
-        "L": 12,  # Return To
-        "M": 22,  # Return Company
+        "A": 12,
+        "B": 10,
+        "C": 14,
+        "D": 32,
+        "E": 8,
+        "F": 10,
+        "G": 12,
+        "H": 18,
+        "I": 16,
+        "J": 14,
+        "K": 16,
+        "L": 12,
+        "M": 22,
     }
+
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
 
+    # ============================================================
+    # OUTPUT
+    # ============================================================
+
     output = BytesIO()
+
     wb.save(output)
     output.seek(0)
+
+    filename = (
+        f"returns_{start_date_str}_{end_date_str}.xlsx"
+    )
 
     return send_file(
         output,
         as_attachment=True,
-        download_name="returns_report.xlsx",
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        download_name=filename,
+        mimetype=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
     )
 @inventory_bp.get("/reports_grouped/stock_xlsx", endpoint="download_stock_xlsx")
 @login_required
@@ -7650,6 +7978,27 @@ def wo_save():
 
     def _rerender_same_screen(msg_text: str, errors=None):
         db.session.rollback()
+
+        current_app.logger.warning(
+            "WO_SAVE VALIDATION_400 | wo_id=%s | is_new=%s | ajax=%s | "
+            "user=%s | message=%s | errors=%s",
+            getattr(wo, "id", None),
+            is_new,
+            ajax_save,
+            getattr(current_user, "username", None),
+            msg_text,
+            errors,
+        )
+
+        # AJAX save must always receive JSON.
+        # Returning the full HTML edit page here breaks the JS save flow.
+        if ajax_save:
+            return jsonify({
+                "ok": False,
+                "validation_error": True,
+                "message": msg_text,
+                "errors": errors or {},
+            }), 400
 
 
         actor_id = getattr(current_user, "id", None)

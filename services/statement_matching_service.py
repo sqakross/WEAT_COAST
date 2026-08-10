@@ -54,6 +54,43 @@ class StatementMatchResult:
 def _normalize_text(value: object) -> str:
     return str(value or "").strip()
 
+def _supplier_aliases(value: object) -> set[str]:
+    supplier = (
+        str(value or "")
+        .strip()
+        .lower()
+    )
+
+    aliases = {supplier}
+
+    if supplier in {
+        "reliable parts",
+        "reliable parts inc",
+        "reliable",
+        "rel",
+    }:
+        aliases.update({
+            "reliable parts",
+            "reliable parts inc",
+            "reliable",
+            "rel",
+        })
+
+    if supplier in {
+        "marcone",
+        "mar",
+    }:
+        aliases.update({
+            "marcone",
+            "mar",
+        })
+
+    return {
+        alias
+        for alias in aliases
+        if alias
+    }
+
 
 def _normalize_invoice_number(value: object) -> str:
     return _normalize_text(value)
@@ -907,8 +944,8 @@ def build_statement_view(
             2,
         )
 
-        supplier_name_normalized = (
-            supplier_name.lower()
+        supplier_aliases = _supplier_aliases(
+            supplier_name
         )
 
         matches = (
@@ -932,7 +969,7 @@ def build_statement_view(
                     func.trim(
                         ReturnDestination.name
                     )
-                ) == supplier_name_normalized,
+                ).in_(supplier_aliases),
 
                 func.abs(
                     func.abs(
