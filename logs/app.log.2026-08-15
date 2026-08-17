@@ -1,0 +1,6 @@
+2026-08-15 08:09:00 | WARNING  | app:188 | SLOW_REQUEST 2.296s | POST /login | endpoint=auth.login | status=302 | bytes=211
+2026-08-15 08:48:56 | WARNING  | app:188 | SLOW_REQUEST 2.396s | POST /login | endpoint=auth.login | status=302 | bytes=211
+2026-08-15 09:50:47 | WARNING  | app:188 | SLOW_REQUEST 2.358s | GET /work_orders/4874/edit | endpoint=inventory.wo_edit | status=200 | bytes=109228
+2026-08-15 09:52:54 | INFO     | routes:761 | API_JOB_RESERVE EXISTS | token=1009211 | wo_id=4073 | duplicate_check=0.034s
+2026-08-15 09:54:39 | INFO     | routes:761 | API_JOB_RESERVE EXISTS | token=1017599 | wo_id=5008 | duplicate_check=0.033s
+2026-08-15 10:48:28 | INFO     | routes:761 | API_JOB_RESERVE EXISTS | token=1019284 | wo_id=5244 | duplicate_check=0.032s

@@ -102,23 +102,58 @@ class JobReservation(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    # один токен = один job number (например 986238)
-    job_token = db.Column(db.String(64), nullable=False, index=True)
+    job_token = db.Column(
+        db.String(64),
+        nullable=False,
+        index=True
+    )
 
-    # кто держит lock
-    holder_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True, index=True)
-    holder_username = db.Column(db.String(64), nullable=True, index=True)
+    holder_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=True,
+        index=True
+    )
 
-    # когда истекает (TTL)
-    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    holder_username = db.Column(
+        db.String(64),
+        nullable=True,
+        index=True
+    )
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+    expires_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        index=True
+    )
 
-    # если хочешь — можно привязать к созданному WO
-    work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=True, index=True)
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+        index=True
+    )
 
-    holder = db.relationship("User", foreign_keys=[holder_user_id], lazy="joined")
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+        index=True
+    )
+
+    work_order_id = db.Column(
+        db.Integer,
+        db.ForeignKey("work_orders.id"),
+        nullable=True,
+        index=True
+    )
+
+    holder = db.relationship(
+        "User",
+        foreign_keys=[holder_user_id],
+        lazy="select",
+    )
 
 class WorkOrderEditSession(db.Model):
     """

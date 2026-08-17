@@ -779,13 +779,82 @@ def api_job_reserve():
 
     reservations_started = time.perf_counter()
 
-    existing_rows = (
-        JobReservation.query
-        .filter(
-            JobReservation.job_token.in_(tokens)
+    # ============================================================
+    # CONNECTION CHECKOUT
+    # ============================================================
+
+    connection_started = time.perf_counter()
+
+    conn = db.session.connection()
+
+    connection_elapsed = (
+            time.perf_counter()
+            - connection_started
+    )
+
+    # ============================================================
+    # RAW SQL CHECK
+    # ============================================================
+
+    from sqlalchemy import text
+
+    raw_query_started = time.perf_counter()
+
+    placeholders = ", ".join(
+        f":token_{i}"
+        for i in range(len(tokens))
+    )
+
+    params = {
+        f"token_{i}": token
+        for i, token in enumerate(tokens)
+    }
+
+    raw_rows = (
+        conn.execute(
+            text(
+                f"""
+                SELECT
+                    id,
+                    job_token,
+                    holder_user_id,
+                    holder_username,
+                    expires_at
+                FROM job_reservation
+                WHERE job_token IN ({placeholders})
+                """
+            ),
+            params,
         )
         .all()
     )
+
+    raw_query_elapsed = (
+            time.perf_counter()
+            - raw_query_started
+    )
+
+    # ============================================================
+    # ORM QUERY
+    # ============================================================
+
+    reservation_query_started = time.perf_counter()
+
+    with db.session.no_autoflush:
+        existing_rows = (
+            JobReservation.query
+            .filter(
+                JobReservation.job_token.in_(tokens)
+            )
+            .all()
+        )
+
+    reservation_query_elapsed = (
+            time.perf_counter()
+            - reservation_query_started
+    )
+
+    reservation_process_started = time.perf_counter()
 
     rows_by_token = {
         row.job_token: row
@@ -799,9 +868,9 @@ def api_job_reserve():
         row = rows_by_token.get(token)
 
         if (
-            row
-            and row.expires_at
-            and row.expires_at >= now
+                row
+                and row.expires_at
+                and row.expires_at >= now
         ):
             if row.holder_user_id == uid:
                 row.expires_at = exp
@@ -812,8 +881,8 @@ def api_job_reserve():
                 blocked.append({
                     "token": token,
                     "holder": (
-                        row.holder_username
-                        or "unknown"
+                            row.holder_username
+                            or "unknown"
                     ),
                     "expires_at": _iso_utc_z(
                         row.expires_at
@@ -841,6 +910,11 @@ def api_job_reserve():
     # ============================================================
     # COMMIT
     # ============================================================
+
+    reservation_process_elapsed = (
+            time.perf_counter()
+            - reservation_process_started
+    )
 
     commit_started = time.perf_counter()
 
@@ -889,13 +963,24 @@ def api_job_reserve():
             "API_JOB_RESERVE PERF | "
             "total=%.3fs | "
             "duplicate_check=%.3fs | "
-            "reservation_load_update=%.3fs | "
+            "connection_checkout=%.3fs | "
+            "raw_query=%.3fs | "
+            "orm_query=%.3fs | "
+            "reservation_process=%.3fs | "
             "commit=%.3fs | "
-            "tokens=%r | user_id=%r",
+            "raw_rows=%s | "
+            "existing_rows=%s | "
+            "tokens=%r | "
+            "user_id=%r",
             total_elapsed,
             reservations_started - duplicate_started,
-            commit_started - reservations_started,
+            connection_elapsed,
+            raw_query_elapsed,
+            reservation_query_elapsed,
+            reservation_process_elapsed,
             time.perf_counter() - commit_started,
+            len(raw_rows),
+            len(existing_rows),
             tokens,
             uid,
         )
@@ -5555,6 +5640,11 @@ import time
 _ALERTS_COUNT_CACHE = {
     "value": 0,
     "expires_at": 0.0,
+}
+
+_RECEIVING_USER_MAP_CACHE = {
+    "expires_at": 0.0,
+    "value": {},
 }
 
 
@@ -18401,24 +18491,33 @@ def receiving_by_invoice(inv):
 @inventory_bp.get("/receiving", endpoint="receiving_list")
 @login_required
 def receiving_list():
-    from sqlalchemy import func
+    import time
+
+    from sqlalchemy import func, inspect as sa_inspect
+    from sqlalchemy.orm import selectinload
+
     from models import User
+
+    started = time.perf_counter()
 
     current_app.logger.debug(
         "### DEBUG receiving_list USING MODEL %s FROM %s TABLENAME=%s",
-        ReceivingBatch, __file__, getattr(ReceivingBatch, "__tablename__", "?")
+        ReceivingBatch,
+        __file__,
+        getattr(ReceivingBatch, "__tablename__", "?"),
     )
 
-    q = ReceivingBatch.query
     DEFAULT_LIMIT = 200
+    SEARCH_LIMIT = 500
 
     global_q = (request.args.get("q") or "").strip()
     d1 = (request.args.get("date_from") or "").strip()
     d2 = (request.args.get("date_to") or "").strip()
     status = (request.args.get("status") or "").strip()
 
-    if status in ("draft", "posted"):
-        q = q.filter(ReceivingBatch.status == status)
+    # ============================================================
+    # FILTER DATES
+    # ============================================================
 
     def _parse_date(s):
         try:
@@ -18426,58 +18525,204 @@ def receiving_list():
         except Exception:
             return None
 
-    d1p, d2p = _parse_date(d1), _parse_date(d2)
+    d1p = _parse_date(d1)
+    d2p = _parse_date(d2)
+
+    # ============================================================
+    # BASE QUERY
+    # ============================================================
+
+    q = ReceivingBatch.query
+
+    if status in ("draft", "posted"):
+        q = q.filter(
+            ReceivingBatch.status == status
+        )
 
     if d1p:
-        q = q.filter(or_(
-            ReceivingBatch.invoice_date.is_(None),
-            ReceivingBatch.invoice_date >= d1p
-        ))
+        q = q.filter(
+            or_(
+                ReceivingBatch.invoice_date.is_(None),
+                ReceivingBatch.invoice_date >= d1p,
+            )
+        )
 
     if d2p:
-        q = q.filter(or_(
-            ReceivingBatch.invoice_date.is_(None),
-            ReceivingBatch.invoice_date <= d2p
-        ))
+        q = q.filter(
+            or_(
+                ReceivingBatch.invoice_date.is_(None),
+                ReceivingBatch.invoice_date <= d2p,
+            )
+        )
+
+    # ============================================================
+    # EAGER LOAD LINES
+    #
+    # Support both relationship names:
+    # ReceivingBatch.items
+    # ReceivingBatch.lines
+    #
+    # Also preload line.part if that relationship exists.
+    # This removes the N+1 query problem.
+    # ============================================================
+
+    try:
+        batch_mapper = sa_inspect(ReceivingBatch)
+
+        relationship_names = {
+            rel.key
+            for rel in batch_mapper.relationships
+        }
+
+        line_rel_name = None
+
+        if "items" in relationship_names:
+            line_rel_name = "items"
+        elif "lines" in relationship_names:
+            line_rel_name = "lines"
+
+        if line_rel_name:
+            line_rel = batch_mapper.relationships[line_rel_name]
+            line_attr = getattr(
+                ReceivingBatch,
+                line_rel_name,
+            )
+
+            loader = selectinload(line_attr)
+
+            line_model = line_rel.mapper.class_
+            line_mapper = sa_inspect(line_model)
+
+            line_relationship_names = {
+                rel.key
+                for rel in line_mapper.relationships
+            }
+
+            if "part" in line_relationship_names:
+                loader = loader.selectinload(
+                    getattr(line_model, "part")
+                )
+
+            q = q.options(loader)
+
+    except Exception:
+        # Optimization must never break Receiving.
+        current_app.logger.exception(
+            "RECEIVING_LIST eager-load setup failed"
+        )
+
+    # ============================================================
+    # ORDER
+    # ============================================================
 
     qry = q.order_by(
         ReceivingBatch.invoice_date.desc().nullslast(),
-        ReceivingBatch.id.desc()
+        ReceivingBatch.id.desc(),
     )
 
-    if not global_q and not d1p and not d2p and not status:
+    # ============================================================
+    # LIMIT
+    #
+    # Previously search removed ALL limits and could load the
+    # entire receiving history into Python.
+    # ============================================================
+
+    if global_q:
+        qry = qry.limit(SEARCH_LIMIT)
+
+    elif not d1p and not d2p and not status:
         qry = qry.limit(DEFAULT_LIMIT)
 
+    load_started = time.perf_counter()
+
     batches = qry.all()
+
+    load_elapsed = time.perf_counter() - load_started
+
+    # ============================================================
+    # SEARCH
+    # ============================================================
+
+    search_started = time.perf_counter()
 
     if global_q:
         needle = global_q.lower()
         filtered = []
 
         for b in batches:
-            sup = (getattr(b, "supplier_name", "") or "").lower()
-            inv = (getattr(b, "invoice_number", "") or "").lower()
+            sup = (
+                getattr(
+                    b,
+                    "supplier_name",
+                    "",
+                )
+                or ""
+            ).lower()
 
-            match_batch = (needle in sup) or (needle in inv)
+            inv = (
+                getattr(
+                    b,
+                    "invoice_number",
+                    "",
+                )
+                or ""
+            ).lower()
+
+            match_batch = (
+                needle in sup
+                or needle in inv
+            )
 
             if not match_batch:
-                lines = getattr(b, "items", None) or getattr(b, "lines", None) or []
+                lines = (
+                    getattr(b, "items", None)
+                    or getattr(b, "lines", None)
+                    or []
+                )
+
                 for ln in lines:
                     pn = (
-                        getattr(ln, "part_number", None)
-                        or getattr(ln, "pn", None)
+                        getattr(
+                            ln,
+                            "part_number",
+                            None,
+                        )
+                        or getattr(
+                            ln,
+                            "pn",
+                            None,
+                        )
                         or ""
                     )
+
+                    part_obj = getattr(
+                        ln,
+                        "part",
+                        None,
+                    )
+
                     name = (
-                        getattr(ln, "part_name", None)
+                        getattr(
+                            ln,
+                            "part_name",
+                            None,
+                        )
                         or (
-                            getattr(getattr(ln, "part", None), "name", None)
-                            if getattr(ln, "part", None) is not None
+                            getattr(
+                                part_obj,
+                                "name",
+                                None,
+                            )
+                            if part_obj is not None
                             else None
                         )
                         or ""
                     )
-                    if needle in str(pn).lower() or needle in str(name).lower():
+
+                    if (
+                        needle in str(pn).lower()
+                        or needle in str(name).lower()
+                    ):
                         match_batch = True
                         break
 
@@ -18486,30 +18731,105 @@ def receiving_list():
 
         batches = filtered
 
+    search_elapsed = (
+        time.perf_counter()
+        - search_started
+    )
+
+    # ============================================================
+    # TOTALS
+    # ============================================================
+
+    totals_started = time.perf_counter()
+
     totals = {}
+
     for b in batches:
         try:
-            lines = getattr(b, "items", []) or getattr(b, "lines", []) or []
+            lines = (
+                getattr(b, "items", None)
+                or getattr(b, "lines", None)
+                or []
+            )
+
             total = 0.0
+
             for ln in lines:
-                qty = getattr(ln, "qty", None) or getattr(ln, "quantity", 0) or 0
-                cost = getattr(ln, "unit_cost", None) or getattr(ln, "price", None) or 0.0
+                qty = (
+                    getattr(ln, "qty", None)
+                    or getattr(
+                        ln,
+                        "quantity",
+                        0,
+                    )
+                    or 0
+                )
+
+                cost = (
+                    getattr(
+                        ln,
+                        "unit_cost",
+                        None,
+                    )
+                    or getattr(
+                        ln,
+                        "price",
+                        None,
+                    )
+                    or 0.0
+                )
+
                 try:
-                    total += float(cost) * int(qty)
+                    total += (
+                        float(cost)
+                        * int(qty)
+                    )
                 except Exception:
                     pass
+
             totals[b.id] = total
+
         except Exception:
             totals[b.id] = 0.0
 
-    can_admin = bool(
-        getattr(current_user, "is_superadmin", False) or
-        getattr(current_user, "is_super_admin", False) or
-        getattr(current_user, "is_admin", False)
+    totals_elapsed = (
+        time.perf_counter()
+        - totals_started
     )
 
-    # --- user map for audit display ---
+    # ============================================================
+    # PERMISSIONS
+    # ============================================================
+
+    can_admin = bool(
+        getattr(
+            current_user,
+            "is_superadmin",
+            False,
+        )
+        or getattr(
+            current_user,
+            "is_super_admin",
+            False,
+        )
+        or getattr(
+            current_user,
+            "is_admin",
+            False,
+        )
+    )
+
+    # ============================================================
+    # USER MAP
+    #
+    # Usernames change very rarely, so do not hit the DB on every
+    # Receiving page load. Cache the map for 60 seconds.
+    # ============================================================
+
+    users_started = time.perf_counter()
+
     user_ids = set()
+
     for b in batches:
         for uid in (
             getattr(b, "created_by", None),
@@ -18522,10 +18842,76 @@ def receiving_list():
                 except Exception:
                     pass
 
-    user_map = {}
-    if user_ids:
-        rows = User.query.filter(User.id.in_(list(user_ids))).all()
-        user_map = {u.id: u.username for u in rows}
+    now_mono = time.monotonic()
+
+    if now_mono < _RECEIVING_USER_MAP_CACHE["expires_at"]:
+        cached_map = _RECEIVING_USER_MAP_CACHE["value"]
+
+    else:
+        user_query_started = time.perf_counter()
+
+        # Load only two scalar columns instead of full User objects.
+        rows = (
+            db.session.query(
+                User.id,
+                User.username,
+            )
+            .all()
+        )
+
+        cached_map = {
+            int(uid): username
+            for uid, username in rows
+        }
+
+        _RECEIVING_USER_MAP_CACHE["value"] = cached_map
+        _RECEIVING_USER_MAP_CACHE["expires_at"] = now_mono + 60.0
+
+        user_query_elapsed = (
+            time.perf_counter()
+            - user_query_started
+        )
+
+        if user_query_elapsed >= 0.5:
+            current_app.logger.warning(
+                "RECEIVING USER_MAP QUERY SLOW | "
+                "elapsed=%.3fs | users=%s",
+                user_query_elapsed,
+                len(cached_map),
+            )
+
+    user_map = {
+        uid: cached_map.get(uid, str(uid))
+        for uid in user_ids
+    }
+
+    users_elapsed = (
+        time.perf_counter()
+        - users_started
+    )
+    # ============================================================
+    # PERF
+    # ============================================================
+
+    before_render = time.perf_counter()
+
+    current_app.logger.warning(
+        "RECEIVING_LIST PERF | "
+        "rows=%s | "
+        "db_load=%.3fs | "
+        "search=%.3fs | "
+        "totals=%.3fs | "
+        "users=%.3fs | "
+        "before_render=%.3fs | "
+        "q=%r",
+        len(batches),
+        load_elapsed,
+        search_elapsed,
+        totals_elapsed,
+        users_elapsed,
+        before_render - started,
+        global_q or None,
+    )
 
     return render_template(
         "receiving_list.html",
@@ -18539,11 +18925,8 @@ def receiving_list():
             "date_from": d1,
             "date_to": d2,
             "status": status,
-        }
+        },
     )
-
-# --- Receiving: toggle posted/draft (superadmin only) ------------------------
-# --- helper: запрещаем unpost, если уже было списание в IssuedPartRecord -----
 
 def _batch_consumed_forbid_unpost(batch) -> bool:
     """
@@ -19086,98 +19469,175 @@ def receiving_detail(batch_id):
     # ---------- detect "consumed" ----------
     def _batch_has_been_consumed(_batch):
         """
-        consumed = True если мы видим, что хотя бы одна из деталей из этой партии
-        уже фигурирует в IssuedPartRecord (то есть была выдана технику).
+        Проверяет, была ли использована хотя бы одна деталь
+        ПОСЛЕ создания/публикации текущего receiving batch.
 
-        Логика:
-        1. Собираем все part_id напрямую из строк партии (если там есть поле part_id).
-        2. Собираем все part_number из строк партии, находим им Part.id.
-        3. Берём объединение этих Part.id.
-        4. Проверяем IssuedPartRecord по этим Part.id.
+        Важно:
+        - старые выдачи той же Part НЕ считаются использованием нового batch;
+        - возвраты quantity < 0 сами по себе не считаются consumption;
+        - проверяем только реальные выдачи quantity > 0.
+
+        Это безопасный промежуточный вариант до перехода
+        на точную связь IssuedPartRecord -> GoodsReceiptLine.
         """
 
-        status_low_local = (getattr(_batch, "status", "") or "").strip().lower()
+        status_low_local = (
+            getattr(_batch, "status", "") or ""
+        ).strip().lower()
+
         if status_low_local != "posted":
-            # не posted => не считаем как "использовано", ещё черновик
-            log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: not posted -> consumed=False")
-            print(f"[RECV_DETAIL consume-check] batch {batch_id}: not posted -> consumed=False")
+            log.warning(
+                f"[RECV_DETAIL consume-check] batch {batch_id}: "
+                f"not posted -> consumed=False"
+            )
             return False
 
-        # (1) part_ids напрямую из строк, если есть
-        direct_part_ids = []
-        for row in (
+        batch_rows = (
             getattr(_batch, "lines", None)
             or getattr(_batch, "items", None)
             or []
-        ):
-            if hasattr(row, "part_id") and getattr(row, "part_id") is not None:
+        )
+
+        # ---------------------------------------------------------
+        # 1. Part IDs directly from receiving rows
+        # ---------------------------------------------------------
+        direct_part_ids = set()
+
+        for row in batch_rows:
+            part_id = getattr(row, "part_id", None)
+
+            if part_id is not None:
                 try:
-                    direct_part_ids.append(int(row.part_id))
-                except Exception:
+                    direct_part_ids.add(int(part_id))
+                except (TypeError, ValueError):
                     pass
 
-        # (2) part_numbers -> Part.id
-        raw_pns = []
-        for row in (
-            getattr(_batch, "lines", None)
-            or getattr(_batch, "items", None)
-            or []
-        ):
+        # ---------------------------------------------------------
+        # 2. Part numbers from receiving rows
+        # ---------------------------------------------------------
+        raw_pns = set()
+
+        for row in batch_rows:
             pn_val = getattr(row, "part_number", None)
+
             if pn_val:
                 pn_norm = str(pn_val).strip().upper()
+
                 if pn_norm:
-                    raw_pns.append(pn_norm)
+                    raw_pns.add(pn_norm)
 
-        # делаем уникальные
-        raw_pns = list({p for p in raw_pns})
-        direct_part_ids = list({pid for pid in direct_part_ids})
+        raw_pns = list(raw_pns)
 
-        log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: raw_pns={raw_pns}, direct_part_ids(pre)={direct_part_ids}")
-        print(f"[RECV_DETAIL consume-check] batch {batch_id}: raw_pns={raw_pns}, direct_part_ids(pre)={direct_part_ids}")
+        log.warning(
+            f"[RECV_DETAIL consume-check] batch {batch_id}: "
+            f"raw_pns={raw_pns}, "
+            f"direct_part_ids={sorted(direct_part_ids)}"
+        )
 
-        # (2b) достаём ID по PN
-        part_ids_from_pn = []
+        # ---------------------------------------------------------
+        # 3. Resolve Part.id from part numbers
+        # ---------------------------------------------------------
+        part_ids_from_pn = set()
+
         if raw_pns:
             rows_parts = (
-                db.session.query(Part.id, Part.part_number)
-                .filter(func.upper(func.trim(Part.part_number)).in_(raw_pns))
+                db.session.query(
+                    Part.id,
+                    Part.part_number,
+                )
+                .filter(
+                    func.upper(
+                        func.trim(Part.part_number)
+                    ).in_(raw_pns)
+                )
                 .all()
             )
-            part_ids_from_pn = [row[0] for row in rows_parts]
 
-            log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: part_ids_from_pn={part_ids_from_pn}, parts_matched={[p for _, p in rows_parts]}")
-            print(f"[RECV_DETAIL consume-check] batch {batch_id}: part_ids_from_pn={part_ids_from_pn}")
+            part_ids_from_pn = {
+                int(part_id)
+                for part_id, _part_number in rows_parts
+            }
 
-        # (3) объединяем
-        all_part_ids = set(direct_part_ids) | set(part_ids_from_pn)
-        all_part_ids = list(all_part_ids)
+            log.warning(
+                f"[RECV_DETAIL consume-check] batch {batch_id}: "
+                f"part_ids_from_pn={sorted(part_ids_from_pn)}, "
+                f"parts_matched={[pn for _, pn in rows_parts]}"
+            )
 
-        log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: all_part_ids(final)={all_part_ids}")
-        print(f"[RECV_DETAIL consume-check] batch {batch_id}: all_part_ids(final)={all_part_ids}")
+        # ---------------------------------------------------------
+        # 4. Final Part IDs
+        # ---------------------------------------------------------
+        all_part_ids = direct_part_ids | part_ids_from_pn
+
+        log.warning(
+            f"[RECV_DETAIL consume-check] batch {batch_id}: "
+            f"all_part_ids={sorted(all_part_ids)}"
+        )
 
         if not all_part_ids:
-            log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: no part ids -> consumed=False")
-            print(f"[RECV_DETAIL consume-check] batch {batch_id}: no part ids -> consumed=False")
+            log.warning(
+                f"[RECV_DETAIL consume-check] batch {batch_id}: "
+                f"no part ids -> consumed=False"
+            )
             return False
 
-        # (4) проверяем, есть ли выдачи по этим Part.id
+        # ---------------------------------------------------------
+        # 5. Determine when THIS receiving batch entered the system
+        #
+        # Prefer posted_at if model has it.
+        # created_at is the safe fallback.
+        # ---------------------------------------------------------
+        batch_cutoff = (
+            getattr(_batch, "posted_at", None)
+            or getattr(_batch, "created_at", None)
+        )
+
+        if batch_cutoff is None:
+            log.error(
+                f"[RECV_DETAIL consume-check] batch {batch_id}: "
+                f"cannot determine batch cutoff "
+                f"(no posted_at / created_at)"
+            )
+
+            # Fail safe:
+            # do not accidentally lock the batch because of
+            # unrelated historical issues.
+            return False
+
+        log.warning(
+            f"[RECV_DETAIL consume-check] batch {batch_id}: "
+            f"batch_cutoff={batch_cutoff}"
+        )
+
+        # ---------------------------------------------------------
+        # 6. Look only for POSITIVE issues made after THIS batch
+        # ---------------------------------------------------------
         issued_rows = (
             db.session.query(
                 IssuedPartRecord.id,
                 IssuedPartRecord.part_id,
                 IssuedPartRecord.quantity,
-                IssuedPartRecord.issue_date
+                IssuedPartRecord.issue_date,
             )
-            .filter(IssuedPartRecord.part_id.in_(all_part_ids))
+            .filter(
+                IssuedPartRecord.part_id.in_(all_part_ids),
+                IssuedPartRecord.quantity > 0,
+                IssuedPartRecord.issue_date >= batch_cutoff,
+            )
+            .order_by(IssuedPartRecord.issue_date.asc())
             .limit(5)
             .all()
         )
 
-        log.warning(f"[RECV_DETAIL consume-check] batch {batch_id}: issued_rows={issued_rows}")
-        print(f"[RECV_DETAIL consume-check] batch {batch_id}: issued_rows={issued_rows}")
+        consumed = bool(issued_rows)
 
-        return len(issued_rows) > 0
+        log.warning(
+            f"[RECV_DETAIL consume-check] batch {batch_id}: "
+            f"issued_after_batch={issued_rows}, "
+            f"consumed={consumed}"
+        )
+
+        return consumed
 
     consumed = _batch_has_been_consumed(batch)
 
