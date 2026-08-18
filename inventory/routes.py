@@ -16183,6 +16183,7 @@ def users():
             ROLE_USER,
             ROLE_VIEWER,
             ROLE_ACCOUNTING,
+            "manager",
             ROLE_ADMIN,
             ROLE_SUPERADMIN,
         }
@@ -16231,6 +16232,7 @@ def users():
         (ROLE_USER, "User"),
         (ROLE_VIEWER, "Viewer"),
         (ROLE_ACCOUNTING, "Accounting"),
+        ("manager", "Manager"),
         (ROLE_ADMIN, "Admin"),
         (ROLE_SUPERADMIN, "Superadmin"),
     ]
@@ -16242,6 +16244,470 @@ def users():
     )
 
     return response
+
+@inventory_bp.route(
+    "/users/<int:user_id>/access",
+    methods=["GET", "POST"],
+)
+@login_required
+def user_access(user_id):
+    """
+    Appliance / warehouse access management.
+
+    This permission layer currently applies only to the new
+    Appliance Inventory module. Existing ERP role checks remain unchanged.
+    """
+    from models import (
+        Permission,
+        UserPermission,
+        UserPermissionAudit,
+        UserWarehouseAccess,
+        Warehouse,
+    )
+    from services.access_control_service import AccessControlService
+    from services.access_management_service import AccessManagementService
+
+    # ---------------------------------------------------------
+    # Only superadmin may configure access at this stage.
+    # ---------------------------------------------------------
+    if (current_user.role or "").strip().lower() != ROLE_SUPERADMIN:
+        flash("Access denied.", "danger")
+        return redirect(url_for("inventory.users"))
+
+    user = User.query.get_or_404(user_id)
+
+    is_target_superadmin = (
+        (user.role or "").strip().lower() == ROLE_SUPERADMIN
+    )
+
+    # ---------------------------------------------------------
+    # Active warehouses
+    # ---------------------------------------------------------
+    warehouses = (
+        Warehouse.query
+        .filter(Warehouse.is_active.is_(True))
+        .order_by(Warehouse.name.asc())
+        .all()
+    )
+
+    # ---------------------------------------------------------
+    # Active permissions
+    # ---------------------------------------------------------
+    permissions = (
+        Permission.query
+        .filter(Permission.is_active.is_(True))
+        .order_by(
+            Permission.group_name.asc(),
+            Permission.sort_order.asc(),
+            Permission.name.asc(),
+        )
+        .all()
+    )
+
+    # =========================================================
+    # SAVE ACCESS
+    # =========================================================
+    if request.method == "POST":
+
+        # Superadmin always has global bypass.
+        if is_target_superadmin:
+            flash(
+                "Superadmin has global access and cannot be restricted here.",
+                "warning",
+            )
+            return redirect(
+                url_for(
+                    "inventory.user_access",
+                    user_id=user.id,
+                )
+            )
+
+        # -----------------------------------------------------
+        # Requested warehouses
+        # -----------------------------------------------------
+        requested_warehouse_ids = set()
+
+        for raw in request.form.getlist("warehouse_ids"):
+            try:
+                requested_warehouse_ids.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+
+        valid_warehouse_ids = {
+            int(warehouse.id)
+            for warehouse in warehouses
+        }
+
+        requested_warehouse_ids &= valid_warehouse_ids
+
+        # -----------------------------------------------------
+        # Requested default warehouse
+        # -----------------------------------------------------
+        default_warehouse_id = None
+
+        raw_default = (
+            request.form.get("default_warehouse_id")
+            or ""
+        ).strip()
+
+        if raw_default:
+            try:
+                candidate = int(raw_default)
+            except (TypeError, ValueError):
+                candidate = None
+
+            if candidate in requested_warehouse_ids:
+                default_warehouse_id = candidate
+
+        # -----------------------------------------------------
+        # Current warehouse access
+        # -----------------------------------------------------
+        current_accesses = {
+            int(row.warehouse_id): row
+            for row in (
+                UserWarehouseAccess.query
+                .filter_by(user_id=user.id)
+                .all()
+            )
+        }
+
+        # -----------------------------------------------------
+        # Synchronize warehouse scope
+        # -----------------------------------------------------
+        for warehouse in warehouses:
+            warehouse_id = int(warehouse.id)
+
+            if warehouse_id in requested_warehouse_ids:
+
+                AccessManagementService.grant_warehouse_access(
+                    user=user,
+                    warehouse=warehouse,
+                    actor=current_user,
+                    is_default=(
+                        warehouse_id == default_warehouse_id
+                    ),
+                    commit=False,
+                )
+
+            else:
+                existing = current_accesses.get(warehouse_id)
+
+                if (
+                    existing is not None
+                    and existing.is_active
+                ):
+                    AccessManagementService.revoke_warehouse_access(
+                        user=user,
+                        warehouse=warehouse,
+                        actor=current_user,
+                        commit=False,
+                    )
+
+        # If warehouses are selected but user did not explicitly
+        # choose a default, use the first selected warehouse.
+        if (
+            requested_warehouse_ids
+            and default_warehouse_id is None
+        ):
+            first_id = sorted(requested_warehouse_ids)[0]
+
+            first_warehouse = db.session.get(
+                Warehouse,
+                first_id,
+            )
+
+            if first_warehouse is not None:
+                AccessManagementService.grant_warehouse_access(
+                    user=user,
+                    warehouse=first_warehouse,
+                    actor=current_user,
+                    is_default=True,
+                    commit=False,
+                )
+
+        # -----------------------------------------------------
+        # Requested permissions
+        # -----------------------------------------------------
+        requested_codes = {
+            (code or "").strip()
+            for code in request.form.getlist(
+                "permission_codes"
+            )
+            if (code or "").strip()
+        }
+
+        valid_codes = {
+            permission.code
+            for permission in permissions
+        }
+
+        requested_codes &= valid_codes
+
+        # -----------------------------------------------------
+        # Current permissions
+        # -----------------------------------------------------
+        current_codes = {
+            code
+            for (code,) in (
+                UserPermission.query
+                .join(
+                    Permission,
+                    UserPermission.permission_id
+                    == Permission.id,
+                )
+                .with_entities(Permission.code)
+                .filter(
+                    UserPermission.user_id == user.id
+                )
+                .all()
+            )
+        }
+
+        # -----------------------------------------------------
+        # Grant new permissions
+        # -----------------------------------------------------
+        for code in sorted(
+            requested_codes - current_codes
+        ):
+            AccessManagementService.grant_permission(
+                user=user,
+                permission_code=code,
+                actor=current_user,
+                commit=False,
+            )
+
+        # -----------------------------------------------------
+        # Revoke removed permissions
+        # -----------------------------------------------------
+        for code in sorted(
+            current_codes - requested_codes
+        ):
+            AccessManagementService.revoke_permission(
+                user=user,
+                permission_code=code,
+                actor=current_user,
+                commit=False,
+            )
+
+        # One atomic commit for the complete access update.
+        try:
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+
+            flash(
+                f"Failed to update access: {exc}",
+                "danger",
+            )
+
+            return redirect(
+                url_for(
+                    "inventory.user_access",
+                    user_id=user.id,
+                )
+            )
+
+        flash(
+            f"Access updated for {user.username}.",
+            "success",
+        )
+
+        return redirect(
+            url_for(
+                "inventory.user_access",
+                user_id=user.id,
+            )
+        )
+
+    # =========================================================
+    # LOAD CURRENT ACCESS FOR UI
+    # =========================================================
+
+    active_accesses = (
+        UserWarehouseAccess.query
+        .filter(
+            UserWarehouseAccess.user_id == user.id,
+            UserWarehouseAccess.is_active.is_(True),
+        )
+        .all()
+    )
+
+    selected_warehouse_ids = {
+        int(row.warehouse_id)
+        for row in active_accesses
+    }
+
+    default_warehouse_id = next(
+        (
+            int(row.warehouse_id)
+            for row in active_accesses
+            if row.is_default
+        ),
+        None,
+    )
+
+    # ---------------------------------------------------------
+    # Permission selection
+    # ---------------------------------------------------------
+    if is_target_superadmin:
+        selected_permission_codes = {
+            permission.code
+            for permission in permissions
+        }
+    else:
+        selected_permission_codes = (
+            AccessControlService.permission_codes(user)
+        )
+
+    # ---------------------------------------------------------
+    # Group permissions for UI
+    # ---------------------------------------------------------
+    permission_groups = {}
+
+    for permission in permissions:
+        permission_groups.setdefault(
+            permission.group_name or "General",
+            [],
+        ).append(permission)
+
+    # ---------------------------------------------------------
+    # Recent access audit
+    # ---------------------------------------------------------
+    recent_audit_rows = (
+        UserPermissionAudit.query
+        .filter(
+            UserPermissionAudit.target_user_id == user.id
+        )
+        .order_by(
+            UserPermissionAudit.created_at.desc(),
+            UserPermissionAudit.id.desc(),
+        )
+        .limit(100)
+        .all()
+    )
+
+    # ---------------------------------------------------------
+    # Group noisy permission audit rows for UI.
+    #
+    # Detailed rows remain untouched in DB.
+    # UI groups changes made by the same actor within the same
+    # minute into one readable access-update event.
+    # ---------------------------------------------------------
+    audit_groups_map = {}
+
+    for row in recent_audit_rows:
+        created_at = row.created_at
+
+        minute_key = (
+            created_at.replace(
+                second=0,
+                microsecond=0,
+            )
+            if created_at is not None
+            else None
+        )
+
+        key = (
+            minute_key,
+            row.actor_username or "",
+        )
+
+        group = audit_groups_map.get(key)
+
+        if group is None:
+            group = {
+                "created_at": created_at,
+                "created_at_local": row.created_at_local,
+                "actor_username": row.actor_username,
+                "permission_granted": [],
+                "permission_revoked": [],
+                "warehouse_granted": [],
+                "warehouse_revoked": [],
+                "warehouse_updated": [],
+                "other": [],
+            }
+
+            audit_groups_map[key] = group
+
+        action = (row.action or "").strip().upper()
+
+        if action == "PERMISSION_GRANTED":
+            if row.permission_code:
+                group["permission_granted"].append(
+                    row.permission_code
+                )
+
+        elif action == "PERMISSION_REVOKED":
+            if row.permission_code:
+                group["permission_revoked"].append(
+                    row.permission_code
+                )
+
+        elif action == "WAREHOUSE_ACCESS_GRANTED":
+            warehouse_code = (
+                row.warehouse.code
+                if row.warehouse is not None
+                else str(row.warehouse_id or "")
+            )
+
+            if warehouse_code:
+                group["warehouse_granted"].append(
+                    warehouse_code
+                )
+
+        elif action == "WAREHOUSE_ACCESS_REVOKED":
+            warehouse_code = (
+                row.warehouse.code
+                if row.warehouse is not None
+                else str(row.warehouse_id or "")
+            )
+
+            if warehouse_code:
+                group["warehouse_revoked"].append(
+                    warehouse_code
+                )
+
+        elif action == "WAREHOUSE_ACCESS_UPDATED":
+            warehouse_code = (
+                row.warehouse.code
+                if row.warehouse is not None
+                else str(row.warehouse_id or "")
+            )
+
+            if warehouse_code:
+                group["warehouse_updated"].append(
+                    warehouse_code
+                )
+
+        else:
+            group["other"].append(
+                {
+                    "action": row.action,
+                    "permission_code": row.permission_code,
+                    "warehouse": (
+                        row.warehouse.code
+                        if row.warehouse is not None
+                        else None
+                    ),
+                }
+            )
+
+    recent_audit_groups = list(
+        audit_groups_map.values()
+    )[:30]
+
+    return render_template(
+        "user_access.html",
+        user=user,
+        warehouses=warehouses,
+        permissions=permissions,
+        permission_groups=permission_groups,
+        selected_warehouse_ids=selected_warehouse_ids,
+        default_warehouse_id=default_warehouse_id,
+        selected_permission_codes=selected_permission_codes,
+        recent_audit_groups=recent_audit_groups,
+        is_target_superadmin=is_target_superadmin,
+    )
 
 @inventory_bp.route('/users/add', methods=['GET', 'POST'])
 @login_required
@@ -16308,6 +16774,7 @@ def edit_user(user_id):
             (ROLE_USER, "User"),
             (ROLE_VIEWER, "Viewer"),
             (ROLE_ACCOUNTING, "Accounting"),
+            ("manager", "Manager"),
             (ROLE_ADMIN, "Admin"),
             (ROLE_SUPERADMIN, "Superadmin"),
         ]

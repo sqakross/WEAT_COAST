@@ -1,0 +1,662 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid py-4 d-flex justify-content-center">
+  <div style="width:100%; max-width:1180px;">
+
+    <div class="d-flex flex-wrap justify-content-between align-items-start mb-3"
+         style="position:sticky; top:0; z-index:10; background:#f8f9fa; padding:.5rem 0; border-bottom:1px solid #dee2e6;">
+
+      <div class="me-3">
+        <div class="fw-semibold text-uppercase"
+             style="font-size:1rem; letter-spacing:.03em;">
+          Access / Permissions
+        </div>
+
+        <div class="text-muted"
+             style="font-size:.8rem;">
+          {{ user.username }} · {{ (user.role or '')|upper }}
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('inventory.edit_user', user_id=user.id) }}"
+           class="btn btn-outline-primary btn-sm shadow-sm"
+           style="border-radius:.6rem;">
+          ✏️ Edit User
+        </a>
+
+        <a href="{{ url_for('inventory.users') }}"
+           class="btn btn-outline-secondary btn-sm shadow-sm"
+           style="border-radius:.6rem;">
+          ← Users
+        </a>
+      </div>
+    </div>
+
+    {% if is_target_superadmin %}
+      <div class="alert alert-dark shadow-sm"
+           style="border-radius:.8rem;">
+        <div class="fw-semibold">
+          Superadmin has global access
+        </div>
+        <div style="font-size:.85rem;">
+          Warehouse and appliance permission restrictions do not apply to this account.
+        </div>
+      </div>
+    {% endif %}
+
+    <form method="post"
+          action="{{ url_for('inventory.user_access', user_id=user.id) }}"
+          id="accessForm">
+
+      <div class="row g-4">
+
+        <div class="col-lg-4">
+
+          <div class="card shadow-sm border-0 mb-4"
+               style="border-radius:1rem;">
+
+            <div class="card-header bg-white border-0">
+              <div class="fw-semibold text-uppercase"
+                   style="font-size:.8rem; letter-spacing:.05em;">
+                Warehouses
+              </div>
+
+              <div class="text-muted"
+                   style="font-size:.72rem;">
+                Where this user can work
+              </div>
+            </div>
+
+            <div class="card-body pt-2">
+
+              {% if warehouses %}
+
+                {% for warehouse in warehouses %}
+                  <div class="border rounded-3 p-2 mb-2 warehouse-row">
+
+                    <div class="form-check">
+                      <input class="form-check-input warehouse-checkbox"
+                             type="checkbox"
+                             name="warehouse_ids"
+                             value="{{ warehouse.id }}"
+                             id="warehouse_{{ warehouse.id }}"
+                             {% if warehouse.id in selected_warehouse_ids %}checked{% endif %}
+                             {% if is_target_superadmin %}disabled{% endif %}>
+
+                      <label class="form-check-label w-100"
+                             for="warehouse_{{ warehouse.id }}">
+                        <div class="fw-semibold"
+                             style="font-size:.88rem;">
+                          {{ warehouse.name }}
+                        </div>
+
+                        <div class="text-muted"
+                             style="font-size:.7rem;">
+                          {{ warehouse.code }}
+                        </div>
+                      </label>
+                    </div>
+
+                    <div class="mt-2 ms-4">
+                      <label class="d-flex align-items-center gap-2"
+                             style="font-size:.75rem; cursor:pointer;">
+
+                        <input type="radio"
+                               name="default_warehouse_id"
+                               value="{{ warehouse.id }}"
+                               class="default-radio"
+                               data-warehouse-id="{{ warehouse.id }}"
+                               {% if default_warehouse_id == warehouse.id %}checked{% endif %}
+                               {% if warehouse.id not in selected_warehouse_ids %}disabled{% endif %}
+                               {% if is_target_superadmin %}disabled{% endif %}>
+
+                        Default warehouse
+                      </label>
+                    </div>
+
+                  </div>
+                {% endfor %}
+
+              {% else %}
+
+                <div class="text-muted" style="font-size:.82rem;">
+                  No active warehouses.
+                </div>
+
+              {% endif %}
+
+            </div>
+          </div>
+
+          {% if not is_target_superadmin %}
+          <div class="card shadow-sm border-0"
+               style="border-radius:1rem;">
+
+            <div class="card-header bg-white border-0">
+              <div class="fw-semibold text-uppercase"
+                   style="font-size:.8rem; letter-spacing:.05em;">
+                Access Preset
+              </div>
+
+              <div class="text-muted"
+                   style="font-size:.72rem;">
+                Quick permission setup
+              </div>
+            </div>
+
+            <div class="card-body">
+
+              <select id="accessPreset"
+                      class="form-select form-select-sm"
+                      style="border-radius:.6rem;">
+                <option value="custom">Custom</option>
+                <option value="manager">Manager Access</option>
+                <option value="admin_basic">Admin Basic</option>
+                <option value="admin_full">Admin Full</option>
+                <option value="read_only">Read Only</option>
+              </select>
+
+              <div class="form-text mt-2"
+                   style="font-size:.7rem;">
+                Preset changes only the permission checkboxes.
+              </div>
+
+            </div>
+          </div>
+          {% endif %}
+
+        </div>
+
+        <div class="col-lg-8">
+
+          <div class="card shadow-sm border-0"
+               style="border-radius:1rem; overflow:hidden;">
+
+            <div class="card-header bg-white border-0 d-flex justify-content-between align-items-center">
+              <div>
+                <div class="fw-semibold text-uppercase"
+                     style="font-size:.8rem; letter-spacing:.05em;">
+                  Appliance Permissions
+                </div>
+
+                <div class="text-muted"
+                     style="font-size:.72rem;">
+                  What this user can do inside allowed warehouses
+                </div>
+              </div>
+
+              {% if not is_target_superadmin %}
+                <button type="button"
+                        class="btn btn-light btn-sm border"
+                        onclick="clearAllPermissions()"
+                        style="border-radius:.6rem;">
+                  Clear
+                </button>
+              {% endif %}
+            </div>
+
+            <div class="card-body">
+
+              {% for group_name, group_permissions in permission_groups.items() %}
+
+                <div class="permission-group mb-4">
+
+                  <div class="fw-semibold text-uppercase text-muted mb-2 pb-1"
+                       style="font-size:.72rem; letter-spacing:.05em; border-bottom:1px solid #eee;">
+                    {{ group_name }}
+                  </div>
+
+                  <div class="row g-2">
+
+                    {% for permission in group_permissions %}
+                      <div class="col-md-6">
+
+                        <label class="border rounded-3 p-2 d-flex gap-2 h-100 permission-card"
+                               style="cursor:pointer;">
+
+                          <input class="form-check-input permission-checkbox mt-1"
+                                 type="checkbox"
+                                 name="permission_codes"
+                                 value="{{ permission.code }}"
+                                 {% if permission.code in selected_permission_codes %}checked{% endif %}
+                                 {% if is_target_superadmin %}disabled{% endif %}>
+
+                          <span>
+                            <span class="d-block fw-semibold"
+                                  style="font-size:.82rem;">
+                              {{ permission.name }}
+                            </span>
+
+                            {% if permission.description %}
+                              <span class="d-block text-muted"
+                                    style="font-size:.68rem; line-height:1.25;">
+                                {{ permission.description }}
+                              </span>
+                            {% endif %}
+
+                            <code style="font-size:.62rem;">
+                              {{ permission.code }}
+                            </code>
+                          </span>
+
+                        </label>
+
+                      </div>
+                    {% endfor %}
+
+                  </div>
+
+                </div>
+
+              {% endfor %}
+
+            </div>
+
+            {% if not is_target_superadmin %}
+            <div class="card-footer bg-white d-flex justify-content-end">
+              <button type="submit"
+                      class="btn btn-primary shadow-sm"
+                      style="border-radius:.7rem; font-weight:600; min-width:170px;">
+                Save Access
+              </button>
+            </div>
+            {% endif %}
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </form>
+
+    <div class="card shadow-sm border-0 mt-4"
+         style="border-radius:1rem; overflow:hidden;">
+
+      <div class="card-header bg-white border-0">
+        <div class="fw-semibold text-uppercase"
+             style="font-size:.8rem; letter-spacing:.05em;">
+          Recent Access Changes
+        </div>
+
+        <div class="text-muted"
+             style="font-size:.72rem;">
+          Last 30 permission and warehouse access events
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0"
+               style="font-size:.78rem;">
+
+          <thead class="table-light">
+            <tr>
+              <th style="min-width:150px;">Date</th>
+              <th>Summary</th>
+              <th style="min-width:110px;">Changed By</th>
+              <th class="text-end" style="width:90px;">Details</th>
+            </tr>
+          </thead>
+
+          <tbody>
+
+            {% for group in recent_audit_groups %}
+              {% set gid = loop.index %}
+
+              <tr>
+                <td class="text-nowrap">
+                  {% if group.created_at_local %}
+                    {{ group.created_at_local.strftime('%m/%d/%Y %I:%M %p') }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+
+                <td>
+                  <div class="fw-semibold">
+                    Access updated
+                  </div>
+
+                  <div class="text-muted"
+                       style="font-size:.7rem;">
+
+                    {% if group.permission_granted %}
+                      <span class="me-2">
+                        +{{ group.permission_granted|length }} permission{% if group.permission_granted|length != 1 %}s{% endif %}
+                      </span>
+                    {% endif %}
+
+                    {% if group.permission_revoked %}
+                      <span class="me-2">
+                        -{{ group.permission_revoked|length }} permission{% if group.permission_revoked|length != 1 %}s{% endif %}
+                      </span>
+                    {% endif %}
+
+                    {% if group.warehouse_granted %}
+                      <span class="me-2">
+                        +{{ group.warehouse_granted|length }} warehouse
+                      </span>
+                    {% endif %}
+
+                    {% if group.warehouse_revoked %}
+                      <span class="me-2">
+                        -{{ group.warehouse_revoked|length }} warehouse
+                      </span>
+                    {% endif %}
+
+                    {% if group.warehouse_updated %}
+                      <span class="me-2">
+                        {{ group.warehouse_updated|length }} warehouse updated
+                      </span>
+                    {% endif %}
+
+                    {% if group.other %}
+                      <span>
+                        {{ group.other|length }} other change{% if group.other|length != 1 %}s{% endif %}
+                      </span>
+                    {% endif %}
+
+                  </div>
+                </td>
+
+                <td>
+                  {{ group.actor_username or '—' }}
+                </td>
+
+                <td class="text-end">
+                  <button class="btn btn-light btn-sm border"
+                          type="button"
+                          data-bs-toggle="collapse"
+                          data-bs-target="#auditDetails{{ gid }}"
+                          aria-expanded="false"
+                          style="border-radius:.5rem; font-size:.7rem;">
+                    Details
+                  </button>
+                </td>
+              </tr>
+
+              <tr class="collapse"
+                  id="auditDetails{{ gid }}">
+                <td colspan="4"
+                    style="background:#fafafa;">
+
+                  <div class="p-2"
+                       style="font-size:.72rem;">
+
+                    {% if group.permission_granted %}
+                      <div class="mb-2">
+                        <div class="fw-semibold">
+                          Permissions added
+                        </div>
+                        {% for code in group.permission_granted %}
+                          <code class="d-block">{{ code }}</code>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+
+                    {% if group.permission_revoked %}
+                      <div class="mb-2">
+                        <div class="fw-semibold">
+                          Permissions removed
+                        </div>
+                        {% for code in group.permission_revoked %}
+                          <code class="d-block">{{ code }}</code>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+
+                    {% if group.warehouse_granted %}
+                      <div class="mb-2">
+                        <div class="fw-semibold">
+                          Warehouse access added
+                        </div>
+                        {% for code in group.warehouse_granted %}
+                          <code class="d-block">{{ code }}</code>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+
+                    {% if group.warehouse_revoked %}
+                      <div class="mb-2">
+                        <div class="fw-semibold">
+                          Warehouse access removed
+                        </div>
+                        {% for code in group.warehouse_revoked %}
+                          <code class="d-block">{{ code }}</code>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+
+                    {% if group.warehouse_updated %}
+                      <div class="mb-2">
+                        <div class="fw-semibold">
+                          Warehouse access updated
+                        </div>
+                        {% for code in group.warehouse_updated %}
+                          <code class="d-block">{{ code }}</code>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+
+                    {% if group.other %}
+                      <div>
+                        <div class="fw-semibold">
+                          Other changes
+                        </div>
+
+                        {% for item in group.other %}
+                          <div>
+                            {{ item.action }}
+                            {% if item.permission_code %}
+                              · <code>{{ item.permission_code }}</code>
+                            {% endif %}
+                            {% if item.warehouse %}
+                              · {{ item.warehouse }}
+                            {% endif %}
+                          </div>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+
+                  </div>
+
+                </td>
+              </tr>
+
+            {% else %}
+
+              <tr>
+                <td colspan="4"
+                    class="text-center text-muted py-3">
+                  No access changes recorded yet.
+                </td>
+              </tr>
+
+            {% endfor %}
+
+          </tbody>
+        </table>
+      </div>
+
+      </div>
+
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+(function () {
+
+  const permissionBoxes = () =>
+    [...document.querySelectorAll('.permission-checkbox')];
+
+  const presets = {
+
+    manager: new Set([
+      'appliance.view',
+      'appliance.receive',
+      'appliance.post_receiving',
+      'appliance.correct_own',
+      'appliance.issue',
+      'appliance.return',
+      'appliance.transfer',
+      'appliance.vendor_return',
+      'appliance.sell',
+      'appliance.write_off',
+      'appliance.pricing',
+      'appliance.audit',
+      'appliance.audit_full'
+    ]),
+
+    admin_basic: new Set([
+      'appliance.view',
+      'appliance.receive',
+      'appliance.post_receiving',
+      'appliance.correct_own',
+      'appliance.issue',
+      'appliance.return',
+      'appliance.audit'
+    ]),
+
+    admin_full: new Set([
+      'appliance.view',
+      'appliance.receive',
+      'appliance.post_receiving',
+      'appliance.correct_own',
+      'appliance.issue',
+      'appliance.return',
+      'appliance.transfer',
+      'appliance.vendor_return',
+      'appliance.sell',
+      'appliance.write_off',
+      'appliance.audit'
+    ]),
+
+    read_only: new Set([
+      'appliance.view',
+      'appliance.audit'
+    ])
+
+  };
+
+
+  function setPreset(name) {
+
+    if (name === 'custom') {
+      return;
+    }
+
+    const selected = presets[name] || new Set();
+
+    permissionBoxes().forEach(box => {
+      box.checked = selected.has(box.value);
+    });
+  }
+
+
+  window.clearAllPermissions = function () {
+
+    permissionBoxes().forEach(box => {
+      box.checked = false;
+    });
+
+    const select = document.getElementById('accessPreset');
+
+    if (select) {
+      select.value = 'custom';
+    }
+  };
+
+
+  const presetSelect = document.getElementById('accessPreset');
+
+  if (presetSelect) {
+    presetSelect.addEventListener('change', function () {
+      setPreset(this.value);
+    });
+  }
+
+
+  function currentPermissionSet() {
+    return new Set(
+      permissionBoxes()
+        .filter(box => box.checked)
+        .map(box => box.value)
+    );
+  }
+
+
+  function setsEqual(a, b) {
+    if (a.size !== b.size) {
+      return false;
+    }
+
+    for (const value of a) {
+      if (!b.has(value)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+
+  function detectCurrentPreset() {
+    if (!presetSelect) {
+      return;
+    }
+
+    const current = currentPermissionSet();
+
+    for (const [name, permissionSet] of Object.entries(presets)) {
+      if (setsEqual(current, permissionSet)) {
+        presetSelect.value = name;
+        return;
+      }
+    }
+
+    presetSelect.value = 'custom';
+  }
+
+
+  permissionBoxes().forEach(box => {
+    box.addEventListener('change', () => {
+      detectCurrentPreset();
+    });
+  });
+
+
+  detectCurrentPreset();
+
+
+  document.querySelectorAll('.warehouse-checkbox').forEach(box => {
+
+    box.addEventListener('change', () => {
+
+      const radio = document.querySelector(
+        '.default-radio[data-warehouse-id="' + box.value + '"]'
+      );
+
+      if (!radio) {
+        return;
+      }
+
+      radio.disabled = !box.checked;
+
+      if (!box.checked && radio.checked) {
+        radio.checked = false;
+      }
+
+    });
+
+  });
+
+})();
+</script>
+{% endblock %}

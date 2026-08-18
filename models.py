@@ -31,6 +31,7 @@ def utc_to_local(dt: datetime | None) -> datetime | None:
 # User roles
 # --------------------------------
 ROLE_SUPERADMIN = 'superadmin'
+ROLE_MANAGER    = 'manager'
 ROLE_ADMIN      = 'admin'
 ROLE_USER       = 'user'
 ROLE_VIEWER     = 'viewer'
@@ -39,6 +40,7 @@ ROLE_ACCOUNTING = "accounting"
 
 ALLOWED_ROLES = {
     ROLE_SUPERADMIN,
+    ROLE_MANAGER,
     ROLE_ADMIN,
     ROLE_TECHNICIAN,
     ROLE_USER,
@@ -51,6 +53,8 @@ ROLE_ALIASES = {
     'technician': ROLE_TECHNICIAN,
     'super': ROLE_SUPERADMIN,
     'sa': ROLE_SUPERADMIN,
+    'manager': ROLE_MANAGER,
+    'mgr': ROLE_MANAGER,
     'admin': ROLE_ADMIN,
     'administrator': ROLE_ADMIN,
     'viewer': ROLE_VIEWER,
@@ -92,6 +96,456 @@ class User(UserMixin, db.Model):
     @password.setter
     def password(self, password):
         self.set_password(password)
+
+
+# ============================================================
+# Access Control Foundation
+# Warehouse scope + granular permissions
+# ============================================================
+
+class Warehouse(db.Model):
+    __tablename__ = "warehouse"
+    __table_args__ = (
+        db.UniqueConstraint("code", name="uq_warehouse_code"),
+        db.UniqueConstraint("name", name="uq_warehouse_name"),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    code = db.Column(
+        db.String(40),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    name = db.Column(
+        db.String(120),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    description = db.Column(
+        db.String(255),
+        nullable=True,
+    )
+
+    is_active = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    created_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    updated_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    created_by = db.relationship(
+        "User",
+        foreign_keys=[created_by_id],
+        lazy="select",
+    )
+
+    updated_by = db.relationship(
+        "User",
+        foreign_keys=[updated_by_id],
+        lazy="select",
+    )
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def updated_at_local(self):
+        return utc_to_local(self.updated_at)
+
+    def __repr__(self):
+        return (
+            f"<Warehouse id={self.id} "
+            f"code={self.code!r} "
+            f"name={self.name!r} "
+            f"active={self.is_active}>"
+        )
+
+
+class UserWarehouseAccess(db.Model):
+    __tablename__ = "user_warehouse_access"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id",
+            "warehouse_id",
+            name="uq_user_warehouse_access_user_warehouse",
+        ),
+        db.Index(
+            "ix_user_warehouse_access_user_active",
+            "user_id",
+            "is_active",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    warehouse_id = db.Column(
+        db.Integer,
+        db.ForeignKey("warehouse.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    is_default = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    is_active = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    created_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    user = db.relationship(
+        "User",
+        foreign_keys=[user_id],
+        lazy="select",
+        backref=db.backref(
+            "warehouse_accesses",
+            lazy="select",
+            cascade="all, delete-orphan",
+        ),
+    )
+
+    warehouse = db.relationship(
+        "Warehouse",
+        foreign_keys=[warehouse_id],
+        lazy="select",
+        backref=db.backref(
+            "user_accesses",
+            lazy="select",
+        ),
+    )
+
+    created_by = db.relationship(
+        "User",
+        foreign_keys=[created_by_id],
+        lazy="select",
+    )
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    def __repr__(self):
+        return (
+            f"<UserWarehouseAccess "
+            f"user_id={self.user_id} "
+            f"warehouse_id={self.warehouse_id} "
+            f"default={self.is_default} "
+            f"active={self.is_active}>"
+        )
+
+
+class Permission(db.Model):
+    __tablename__ = "permission"
+    __table_args__ = (
+        db.UniqueConstraint("code", name="uq_permission_code"),
+        db.Index(
+            "ix_permission_group_active",
+            "group_name",
+            "is_active",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    code = db.Column(
+        db.String(120),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    name = db.Column(
+        db.String(120),
+        nullable=False,
+    )
+
+    description = db.Column(
+        db.String(500),
+        nullable=True,
+    )
+
+    group_name = db.Column(
+        db.String(80),
+        nullable=False,
+        default="general",
+        index=True,
+    )
+
+    is_active = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+    )
+
+    sort_order = db.Column(
+        db.Integer,
+        nullable=False,
+        default=100,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    def __repr__(self):
+        return (
+            f"<Permission id={self.id} "
+            f"code={self.code!r} "
+            f"group={self.group_name!r}>"
+        )
+
+
+class UserPermission(db.Model):
+    __tablename__ = "user_permission"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id",
+            "permission_id",
+            name="uq_user_permission_user_permission",
+        ),
+        db.Index(
+            "ix_user_permission_user",
+            "user_id",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    permission_id = db.Column(
+        db.Integer,
+        db.ForeignKey("permission.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    granted_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    granted_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    user = db.relationship(
+        "User",
+        foreign_keys=[user_id],
+        lazy="select",
+        backref=db.backref(
+            "permission_grants",
+            lazy="select",
+            cascade="all, delete-orphan",
+        ),
+    )
+
+    permission = db.relationship(
+        "Permission",
+        foreign_keys=[permission_id],
+        lazy="select",
+        backref=db.backref(
+            "user_grants",
+            lazy="select",
+        ),
+    )
+
+    granted_by = db.relationship(
+        "User",
+        foreign_keys=[granted_by_id],
+        lazy="select",
+    )
+
+    @property
+    def granted_at_local(self):
+        return utc_to_local(self.granted_at)
+
+    def __repr__(self):
+        return (
+            f"<UserPermission "
+            f"user_id={self.user_id} "
+            f"permission_id={self.permission_id}>"
+        )
+
+
+class UserPermissionAudit(db.Model):
+    __tablename__ = "user_permission_audit"
+    __table_args__ = (
+        db.Index(
+            "ix_user_permission_audit_target_date",
+            "target_user_id",
+            "created_at",
+        ),
+        db.Index(
+            "ix_user_permission_audit_actor_date",
+            "actor_user_id",
+            "created_at",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    target_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    action = db.Column(
+        db.String(60),
+        nullable=False,
+        index=True,
+    )
+
+    permission_code = db.Column(
+        db.String(120),
+        nullable=True,
+        index=True,
+    )
+
+    warehouse_id = db.Column(
+        db.Integer,
+        db.ForeignKey("warehouse.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    old_value = db.Column(
+        db.String(255),
+        nullable=True,
+    )
+
+    new_value = db.Column(
+        db.String(255),
+        nullable=True,
+    )
+
+    actor_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    actor_username = db.Column(
+        db.String(64),
+        nullable=True,
+        index=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    target_user = db.relationship(
+        "User",
+        foreign_keys=[target_user_id],
+        lazy="select",
+    )
+
+    actor_user = db.relationship(
+        "User",
+        foreign_keys=[actor_user_id],
+        lazy="select",
+    )
+
+    warehouse = db.relationship(
+        "Warehouse",
+        foreign_keys=[warehouse_id],
+        lazy="select",
+    )
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    def __repr__(self):
+        return (
+            f"<UserPermissionAudit id={self.id} "
+            f"target={self.target_user_id} "
+            f"action={self.action!r} "
+            f"by={self.actor_username!r}>"
+        )
+
 
 class JobReservation(db.Model):
     __tablename__ = "job_reservation"
