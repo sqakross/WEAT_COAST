@@ -14,6 +14,7 @@ import os, sys, io, logging, time, ipaddress
 from logging.handlers import TimedRotatingFileHandler
 from extensions import db, login_manager
 from flask_login import current_user
+from flask_migrate import Migrate
 
 # Sentry
 import sentry_sdk
@@ -266,6 +267,9 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 
 db.init_app(app)          # <<< ЭТА СТРОКА ПРОПАЛА
 
+# Alembic / Flask-Migrate uses this same canonical Flask app.
+migrate = Migrate(app, db)
+
 login_manager.init_app(app)
 login_manager.login_view = "auth.login"
 
@@ -334,10 +338,12 @@ def inject_role_flags():
 # -------------------------------------------------------------------
 from auth.routes import auth_bp
 from inventory.routes import inventory_bp
+from appliance import appliance_bp
 from accounting.routes import accounting_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(inventory_bp)
+app.register_blueprint(appliance_bp)
 app.register_blueprint(accounting_bp)
 
 # Supplier Returns — используем один blueprint из routes, префикс задаём здесь
@@ -617,8 +623,9 @@ def cleanup_old_reports(folder: str, days_old: int = 3):
 # -------------------------------------------------------------------
 if __name__ == "__main__":
     with app.app_context():
-        db.create_all()
-        logging.info("DB tables ensured (create_all).")
+        # Database schema is managed by Alembic migrations.
+        # Do NOT call db.create_all() here: it bypasses migration history.
+        logging.info("DB schema management: Alembic migrations.")
 
         _ensure_column("work_order_parts", "unit_label", "TEXT")
         _ensure_column("work_order_parts", "unit_id", "INTEGER")

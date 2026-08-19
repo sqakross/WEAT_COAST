@@ -1,0 +1,550 @@
+﻿{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .appliance-inventory-page {
+    width: calc(100vw - 40px);
+    max-width: 1700px;
+    margin-left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .inventory-toolbar {
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
+    gap:.75rem;
+    margin-bottom:1rem;
+  }
+
+  .inventory-card {
+    background:#fff;
+    border:1px solid #d9dee5;
+    border-radius:.55rem;
+    box-shadow:0 .15rem .45rem rgba(0,0,0,.07);
+  }
+
+  .inventory-table {
+    font-size:.78rem;
+  }
+
+  .inventory-table th {
+    white-space:nowrap;
+    vertical-align:middle;
+  }
+
+  .inventory-table td {
+    vertical-align:middle;
+    white-space:nowrap;
+  }
+
+  .inventory-table tbody tr {
+    cursor:pointer;
+  }
+
+  .inventory-table tbody tr:hover {
+    background:#f4f8fc;
+  }
+
+  .inventory-number {
+    font-weight:700;
+    color:#0d6efd;
+  }
+
+  .serial-number {
+    font-weight:600;
+  }
+
+  .status-badge {
+    font-size:.67rem;
+    letter-spacing:.03em;
+  }
+
+  .filter-label {
+    font-size:.68rem;
+    font-weight:600;
+    color:#6c757d;
+    text-transform:uppercase;
+    margin-bottom:.2rem;
+  }
+
+  .missing-cost {
+    background:#fff3cd;
+  }
+
+  .inventory-category-row td {
+    background:#e9ecef !important;
+    border-top:2px solid #adb5bd !important;
+    border-bottom:1px solid #adb5bd !important;
+    font-size:.76rem;
+    letter-spacing:.02em;
+    font-weight:700;
+  }
+
+  .inventory-category-name {
+    font-size:.78rem;
+    letter-spacing:.04em;
+  }
+
+  .inventory-category-count {
+    font-size:.65rem;
+  }
+</style>
+
+
+<div class="appliance-inventory-page">
+
+  <div class="inventory-toolbar">
+
+    <div>
+      <h3 class="mb-1">
+        Appliance Inventory
+      </h3>
+
+      <div class="small text-muted">
+        Serialized appliance stock
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 align-items-center">
+
+      <span class="badge bg-secondary">
+        {{ total_count }} UNIT{% if total_count != 1 %}S{% endif %}
+      </span>
+
+      <a class="btn btn-outline-primary btn-sm"
+         href="{{ url_for('appliance.receiving_list') }}">
+        Receiving
+      </a>
+
+    </div>
+
+  </div>
+
+
+  <div class="inventory-card mb-3">
+
+    <div class="p-3">
+
+      <form method="get"
+            action="{{ url_for('appliance.inventory_list') }}">
+
+        <div class="row g-2">
+
+          <div class="col-xl-4 col-md-6">
+
+            <div class="filter-label">
+              Search
+            </div>
+
+            <input type="search"
+                   class="form-control form-control-sm"
+                   name="q"
+                   value="{{ q or '' }}"
+                   placeholder="AP # / SERIAL / MODEL / BRAND">
+
+          </div>
+
+
+          <div class="col-xl-2 col-md-3">
+
+            <div class="filter-label">
+              Warehouse
+            </div>
+
+            <select class="form-select form-select-sm"
+                    name="warehouse_id">
+
+              <option value="">
+                ALL
+              </option>
+
+              {% for warehouse in warehouses %}
+
+                <option value="{{ warehouse.id }}"
+                        {% if warehouse_id == warehouse.id %}selected{% endif %}>
+                  {{ warehouse.code|upper }}
+                </option>
+
+              {% endfor %}
+
+            </select>
+
+          </div>
+
+
+          <div class="col-xl-2 col-md-3">
+
+            <div class="filter-label">
+              Appliance
+            </div>
+
+            <select class="form-select form-select-sm"
+                    name="category_id">
+
+              <option value="">
+                ALL
+              </option>
+
+              {% for category in categories %}
+
+                <option value="{{ category.id }}"
+                        {% if category_id == category.id %}selected{% endif %}>
+                  {{ category.name|upper }}
+                </option>
+
+              {% endfor %}
+
+            </select>
+
+          </div>
+
+
+          <div class="col-xl-2 col-md-3">
+
+            <div class="filter-label">
+              Status
+            </div>
+
+            <select class="form-select form-select-sm"
+                    name="status">
+
+              <option value="available"
+                      {% if status == 'available' %}selected{% endif %}>
+                AVAILABLE
+              </option>
+
+              <option value="reserved"
+                      {% if status == 'reserved' %}selected{% endif %}>
+                RESERVED
+              </option>
+
+              <option value="issued"
+                      {% if status == 'issued' %}selected{% endif %}>
+                ISSUED
+              </option>
+
+              <option value="transferred"
+                      {% if status == 'transferred' %}selected{% endif %}>
+                TRANSFERRED
+              </option>
+
+              <option value="vendor_return"
+                      {% if status == 'vendor_return' %}selected{% endif %}>
+                VENDOR RETURN
+              </option>
+
+              <option value="sold"
+                      {% if status == 'sold' %}selected{% endif %}>
+                SOLD
+              </option>
+
+              <option value="written_off"
+                      {% if status == 'written_off' %}selected{% endif %}>
+                WRITTEN OFF
+              </option>
+
+              <option value="all"
+                      {% if status == 'all' %}selected{% endif %}>
+                ALL
+              </option>
+
+            </select>
+
+          </div>
+
+
+          <div class="col-xl-2 col-md-3">
+
+            <div class="filter-label">
+              Condition
+            </div>
+
+            <select class="form-select form-select-sm"
+                    name="condition">
+
+              <option value="">
+                ALL
+              </option>
+
+              <option value="new"
+                      {% if condition == 'new' %}selected{% endif %}>
+                NEW
+              </option>
+
+              <option value="used"
+                      {% if condition == 'used' %}selected{% endif %}>
+                USED
+              </option>
+
+              <option value="open_box"
+                      {% if condition == 'open_box' %}selected{% endif %}>
+                OPEN BOX
+              </option>
+
+              <option value="damaged"
+                      {% if condition == 'damaged' %}selected{% endif %}>
+                DAMAGED
+              </option>
+
+            </select>
+
+          </div>
+
+        </div>
+
+
+        <div class="d-flex gap-2 mt-3">
+
+          <button type="submit"
+                  class="btn btn-primary btn-sm">
+            Search
+          </button>
+
+          <a class="btn btn-outline-secondary btn-sm"
+             href="{{ url_for('appliance.inventory_list') }}">
+            Clear
+          </a>
+
+        </div>
+
+      </form>
+
+    </div>
+
+  </div>
+
+
+  <div class="inventory-card">
+
+    <div class="table-responsive">
+
+      <table class="table table-sm table-hover inventory-table mb-0">
+
+        <thead class="table-light">
+
+          <tr>
+            <th>AP #</th>
+            <th>APPLIANCE</th>
+            <th>BRAND</th>
+            <th>MODEL</th>
+            <th>SERIAL</th>
+            <th>SIZE</th>
+            <th>CONDITION</th>
+            <th>WAREHOUSE</th>
+
+            {% if can_pricing %}
+              <th class="text-end">COST</th>
+              <th class="text-end">SELL</th>
+            {% endif %}
+
+            <th>STATUS</th>
+            <th>RECEIVED</th>
+          </tr>
+
+        </thead>
+
+
+        <tbody>
+
+          {% for group in grouped_units %}
+
+            <tr class="inventory-category-row">
+
+              <td colspan="{{ 12 if can_pricing else 10 }}"
+                  class="py-2">
+
+                <span class="inventory-category-name">
+                  {{ group.category.name|upper }}
+                </span>
+
+                <span class="badge bg-dark ms-2 inventory-category-count">
+                  {{ group.units|length }}
+                  UNIT{% if group.units|length != 1 %}S{% endif %}
+                </span>
+
+              </td>
+
+            </tr>
+
+
+            {% for unit in group.units %}
+
+              <tr onclick="window.location.href='{{ url_for('appliance.inventory_detail', unit_id=unit.id) }}'">
+
+                <td>
+                  <span class="inventory-number">
+                    {{ unit.inventory_number }}
+                  </span>
+                </td>
+
+                <td>
+                  {{ unit.category.name|upper if unit.category else '—' }}
+                </td>
+
+                <td>
+                  {{ unit.brand or '—' }}
+                </td>
+
+                <td>
+                  {{ unit.model_number or '—' }}
+                </td>
+
+                <td>
+                  <span class="serial-number">
+                    {{ unit.serial_number or '—' }}
+                  </span>
+                </td>
+
+                <td>
+                  {% if unit.size_value is not none %}
+                    {{ unit.size_value|round(1) }}
+                    {{ unit.size_unit or '' }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+
+                <td>
+                  {{ (unit.condition or '')|replace('_', ' ')|upper }}
+                </td>
+
+                <td>
+                  {{ unit.warehouse.code|upper if unit.warehouse else '—' }}
+                </td>
+
+
+                {% if can_pricing %}
+
+                  <td class="text-end {% if unit.unit_cost is none %}missing-cost{% endif %}">
+
+                    {% if unit.unit_cost is not none %}
+
+                      ${{ '%.2f'|format(unit.unit_cost) }}
+
+                    {% else %}
+
+                      MISSING
+
+                    {% endif %}
+
+                  </td>
+
+
+                  <td class="text-end">
+
+                    {% if unit.selling_price is not none %}
+
+                      ${{ '%.2f'|format(unit.selling_price) }}
+
+                    {% else %}
+
+                      —
+
+                    {% endif %}
+
+                  </td>
+
+                {% endif %}
+
+
+                <td>
+
+                  {% if unit.status == 'available' %}
+
+                    <span class="badge bg-success status-badge">
+                      AVAILABLE
+                    </span>
+
+                  {% elif unit.status == 'reserved' %}
+
+                    <span class="badge bg-warning text-dark status-badge">
+                      RESERVED
+                    </span>
+
+                  {% elif unit.status == 'issued' %}
+
+                    <span class="badge bg-primary status-badge">
+                      ISSUED
+                    </span>
+
+                  {% elif unit.status == 'sold' %}
+
+                    <span class="badge bg-dark status-badge">
+                      SOLD
+                    </span>
+
+                  {% elif unit.status == 'written_off' %}
+
+                    <span class="badge bg-danger status-badge">
+                      WRITTEN OFF
+                    </span>
+
+                  {% else %}
+
+                    <span class="badge bg-secondary status-badge">
+                      {{ (unit.status or '')|replace('_', ' ')|upper }}
+                    </span>
+
+                  {% endif %}
+
+                </td>
+
+
+                <td class="text-muted small">
+
+                  {% if unit.created_at_local %}
+
+                    {{ unit.created_at_local.strftime('%m/%d/%Y') }}
+
+                  {% else %}
+
+                    —
+
+                  {% endif %}
+
+                </td>
+
+              </tr>
+
+            {% endfor %}
+
+          {% else %}
+
+            <tr>
+
+              <td colspan="{{ 12 if can_pricing else 10 }}"
+                  class="text-center text-muted py-5">
+
+                No appliance units found.
+
+              </td>
+
+            </tr>
+
+          {% endfor %}
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+
+
+  {% if total_count > 500 %}
+
+    <div class="alert alert-warning mt-3 py-2">
+
+      Showing first 500 units.
+      Use Search or filters to narrow the results.
+
+    </div>
+
+  {% endif %}
+
+</div>
+
+{% endblock %}

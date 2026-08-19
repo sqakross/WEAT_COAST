@@ -2888,3 +2888,804 @@ ReceivingItem  = GoodsReceiptLine
 
 
 
+
+
+# ============================================================
+# Appliance Inventory Core
+# Separate serialized appliance inventory.
+# Existing Parts / GoodsReceipt flow remains unchanged.
+# ============================================================
+
+class ApplianceCategory(db.Model):
+    __tablename__ = "appliance_category"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "code",
+            name="uq_appliance_category_code",
+        ),
+        db.UniqueConstraint(
+            "name",
+            name="uq_appliance_category_name",
+        ),
+        db.Index(
+            "ix_appliance_category_active_sort",
+            "is_active",
+            "sort_order",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    code = db.Column(
+        db.String(40),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    name = db.Column(
+        db.String(120),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    description = db.Column(
+        db.String(500),
+        nullable=True,
+    )
+
+    sort_order = db.Column(
+        db.Integer,
+        nullable=False,
+        default=100,
+    )
+
+    is_active = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    created_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    updated_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    created_by = db.relationship(
+        "User",
+        foreign_keys=[created_by_id],
+        lazy="select",
+    )
+
+    updated_by = db.relationship(
+        "User",
+        foreign_keys=[updated_by_id],
+        lazy="select",
+    )
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def updated_at_local(self):
+        return utc_to_local(self.updated_at)
+
+    def __repr__(self):
+        return (
+            f"<ApplianceCategory id={self.id} "
+            f"code={self.code!r} "
+            f"name={self.name!r}>"
+        )
+
+
+class ApplianceReceiving(db.Model):
+    """
+    Header of an appliance receiving document.
+
+    Warehouse staff records only appliances physically received.
+    Manager may later complete missing prices in this same receiving.
+
+    Status:
+        draft  - warehouse is still entering received units
+        posted - receiving is finalized into appliance stock
+
+    Pricing completion is intentionally separate from posting.
+    A posted receiving may still contain units whose cost is NULL.
+    """
+
+    __tablename__ = "appliance_receiving"
+    __table_args__ = (
+        db.Index(
+            "ix_appliance_receiving_warehouse_status",
+            "warehouse_id",
+            "status",
+        ),
+        db.Index(
+            "ix_appliance_receiving_supplier_invoice",
+            "supplier_name",
+            "invoice_number",
+        ),
+        db.Index(
+            "ix_appliance_receiving_received_at",
+            "received_at",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    receiving_number = db.Column(
+        db.String(30),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    warehouse_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "warehouse.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    supplier_name = db.Column(
+        db.String(200),
+        nullable=True,
+        index=True,
+    )
+
+    invoice_number = db.Column(
+        db.String(80),
+        nullable=True,
+        index=True,
+    )
+
+    invoice_date = db.Column(
+        db.Date,
+        nullable=True,
+        index=True,
+    )
+
+    received_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default="draft",
+        index=True,
+    )
+
+    notes = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    attachment_path = db.Column(
+        db.String(512),
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    created_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    updated_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    posted_at = db.Column(
+        db.DateTime,
+        nullable=True,
+        index=True,
+    )
+
+    posted_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    warehouse = db.relationship(
+        "Warehouse",
+        foreign_keys=[warehouse_id],
+        lazy="joined",
+    )
+
+    created_by = db.relationship(
+        "User",
+        foreign_keys=[created_by_id],
+        lazy="select",
+    )
+
+    updated_by = db.relationship(
+        "User",
+        foreign_keys=[updated_by_id],
+        lazy="select",
+    )
+
+    posted_by = db.relationship(
+        "User",
+        foreign_keys=[posted_by_id],
+        lazy="select",
+    )
+
+    lines = db.relationship(
+        "ApplianceReceivingLine",
+        back_populates="receiving",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ApplianceReceivingLine.line_no",
+    )
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def updated_at_local(self):
+        return utc_to_local(self.updated_at)
+
+    @property
+    def received_at_local(self):
+        return utc_to_local(self.received_at)
+
+    @property
+    def posted_at_local(self):
+        return utc_to_local(self.posted_at)
+
+    @property
+    def unit_count(self) -> int:
+        return len(self.lines or [])
+
+    @property
+    def missing_price_count(self) -> int:
+        return sum(
+            1
+            for line in (self.lines or [])
+            if line.unit_cost is None
+        )
+
+    @property
+    def pricing_complete(self) -> bool:
+        return (
+            self.unit_count > 0
+            and self.missing_price_count == 0
+        )
+
+    def __repr__(self):
+        return (
+            f"<ApplianceReceiving id={self.id} "
+            f"number={self.receiving_number!r} "
+            f"status={self.status!r}>"
+        )
+
+
+class ApplianceReceivingLine(db.Model):
+    """
+    One physical appliance actually received.
+
+    Quantity is intentionally NOT stored here.
+    One row = one physical appliance.
+
+    unit_cost is nullable intentionally:
+        NULL = manager still needs to enter price
+        0.00 = real zero cost, if that is ever intentional
+    """
+
+    __tablename__ = "appliance_receiving_line"
+    __table_args__ = (
+        db.UniqueConstraint(
+            "receiving_id",
+            "line_no",
+            name="uq_appliance_receiving_line_number",
+        ),
+        db.Index(
+            "ix_appliance_receiving_line_category",
+            "category_id",
+        ),
+        db.Index(
+            "ix_appliance_receiving_line_model",
+            "model_number",
+        ),
+        db.Index(
+            "ix_appliance_receiving_line_serial",
+            "serial_number",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    receiving_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "appliance_receiving.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    line_no = db.Column(
+        db.Integer,
+        nullable=False,
+    )
+
+    category_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "appliance_category.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    brand = db.Column(
+        db.String(100),
+        nullable=True,
+        index=True,
+    )
+
+    model_number = db.Column(
+        db.String(120),
+        nullable=True,
+        index=True,
+    )
+
+    serial_number = db.Column(
+        db.String(160),
+        nullable=True,
+        index=True,
+    )
+
+    description = db.Column(
+        db.String(500),
+        nullable=True,
+    )
+
+    size_value = db.Column(
+        db.Float,
+        nullable=True,
+        index=True,
+    )
+
+    size_unit = db.Column(
+        db.String(20),
+        nullable=True,
+    )
+
+    condition = db.Column(
+        db.String(40),
+        nullable=False,
+        default="new",
+        index=True,
+    )
+
+    unit_cost = db.Column(
+        db.Float,
+        nullable=True,
+        default=None,
+        index=True,
+    )
+
+    selling_price = db.Column(
+        db.Float,
+        nullable=True,
+        default=None,
+    )
+
+    notes = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    created_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    updated_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    receiving = db.relationship(
+        "ApplianceReceiving",
+        back_populates="lines",
+        lazy="joined",
+    )
+
+    category = db.relationship(
+        "ApplianceCategory",
+        foreign_keys=[category_id],
+        lazy="joined",
+    )
+
+    created_by = db.relationship(
+        "User",
+        foreign_keys=[created_by_id],
+        lazy="select",
+    )
+
+    updated_by = db.relationship(
+        "User",
+        foreign_keys=[updated_by_id],
+        lazy="select",
+    )
+
+    @property
+    def has_price(self) -> bool:
+        return self.unit_cost is not None
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def updated_at_local(self):
+        return utc_to_local(self.updated_at)
+
+    def __repr__(self):
+        return (
+            f"<ApplianceReceivingLine id={self.id} "
+            f"receiving={self.receiving_id} "
+            f"line={self.line_no} "
+            f"serial={self.serial_number!r}>"
+        )
+
+
+class ApplianceUnit(db.Model):
+    """
+    Current physical appliance inventory.
+
+    One row = one physical appliance.
+
+    A unit is created from an ApplianceReceivingLine when receiving
+    is posted. Historical receiving data remains in the receiving tables.
+
+    Status examples:
+        available
+        reserved
+        issued
+        transferred
+        vendor_return
+        sold
+        written_off
+    """
+
+    __tablename__ = "appliance_unit"
+    __table_args__ = (
+        db.Index(
+            "ix_appliance_unit_warehouse_status",
+            "warehouse_id",
+            "status",
+        ),
+        db.Index(
+            "ix_appliance_unit_category_status",
+            "category_id",
+            "status",
+        ),
+        db.Index(
+            "ix_appliance_unit_category_size_status",
+            "category_id",
+            "size_value",
+            "status",
+        ),
+        db.Index(
+            "ix_appliance_unit_brand_model",
+            "brand",
+            "model_number",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    inventory_number = db.Column(
+        db.String(40),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    category_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "appliance_category.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    warehouse_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "warehouse.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    receiving_line_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "appliance_receiving_line.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    brand = db.Column(
+        db.String(100),
+        nullable=True,
+        index=True,
+    )
+
+    model_number = db.Column(
+        db.String(120),
+        nullable=True,
+        index=True,
+    )
+
+    serial_number = db.Column(
+        db.String(160),
+        nullable=True,
+        index=True,
+    )
+
+    description = db.Column(
+        db.String(500),
+        nullable=True,
+    )
+
+    size_value = db.Column(
+        db.Float,
+        nullable=True,
+        index=True,
+    )
+
+    size_unit = db.Column(
+        db.String(20),
+        nullable=True,
+    )
+
+    condition = db.Column(
+        db.String(40),
+        nullable=False,
+        default="new",
+        index=True,
+    )
+
+    status = db.Column(
+        db.String(30),
+        nullable=False,
+        default="available",
+        index=True,
+    )
+
+    unit_cost = db.Column(
+        db.Float,
+        nullable=True,
+        default=None,
+    )
+
+    selling_price = db.Column(
+        db.Float,
+        nullable=True,
+        default=None,
+    )
+
+    current_work_order_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "work_orders.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    notes = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    created_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    updated_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    category = db.relationship(
+        "ApplianceCategory",
+        foreign_keys=[category_id],
+        lazy="joined",
+    )
+
+    warehouse = db.relationship(
+        "Warehouse",
+        foreign_keys=[warehouse_id],
+        lazy="joined",
+    )
+
+    receiving_line = db.relationship(
+        "ApplianceReceivingLine",
+        foreign_keys=[receiving_line_id],
+        lazy="joined",
+    )
+
+    current_work_order = db.relationship(
+        "WorkOrder",
+        foreign_keys=[current_work_order_id],
+        lazy="select",
+    )
+
+    created_by = db.relationship(
+        "User",
+        foreign_keys=[created_by_id],
+        lazy="select",
+    )
+
+    updated_by = db.relationship(
+        "User",
+        foreign_keys=[updated_by_id],
+        lazy="select",
+    )
+
+    @property
+    def created_at_local(self):
+        return utc_to_local(self.created_at)
+
+    @property
+    def updated_at_local(self):
+        return utc_to_local(self.updated_at)
+
+    @property
+    def has_price(self) -> bool:
+        return self.unit_cost is not None
+
+    def __repr__(self):
+        return (
+            f"<ApplianceUnit id={self.id} "
+            f"number={self.inventory_number!r} "
+            f"serial={self.serial_number!r} "
+            f"status={self.status!r}>"
+        )

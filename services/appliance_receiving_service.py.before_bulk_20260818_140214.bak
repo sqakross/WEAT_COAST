@@ -1,0 +1,1130 @@
+﻿from __future__ import annotations
+
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+
+from sqlalchemy import func
+
+from extensions import db
+from models import (
+    ApplianceCategory,
+    ApplianceReceiving,
+    ApplianceReceivingLine,
+    ApplianceUnit,
+    User,
+    Warehouse,
+)
+from services.access_control_service import AccessControlService
+
+
+class ApplianceReceivingError(Exception):
+    """Expected appliance receiving business error."""
+
+
+class ApplianceAccessDenied(ApplianceReceivingError):
+    pass
+
+
+class ApplianceReceivingNotFound(ApplianceReceivingError):
+    pass
+
+
+class ApplianceReceivingService:
+    """
+    Business service for Appliance Inventory Receiving.
+
+    Transaction policy:
+        Public write operations commit once on success and rollback
+        completely on failure.
+
+    Workflow:
+        create draft
+            -> add/edit/delete physical appliance rows
+            -> post receiving
+            -> create one ApplianceUnit per receiving line
+
+    Pricing is intentionally independent from posting:
+        unit_cost=None means manager still needs to enter the cost.
+
+    Existing Parts / GoodsReceipt inventory is not touched.
+    """
+
+    STATUS_DRAFT = "draft"
+    STATUS_POSTED = "posted"
+
+    UNIT_STATUS_AVAILABLE = "available"
+
+    # --------------------------------------------------------
+    # Helpers
+    # --------------------------------------------------------
+
+    @staticmethod
+    def _clean_text(
+        value,
+        *,
+        upper: bool = False,
+        max_length: int | None = None,
+    ) -> str | None:
+        if value is None:
+            return None
+
+        value = str(value).strip()
+
+        if not value:
+            return None
+
+        if upper:
+            value = value.upper()
+
+        if max_length is not None and len(value) > max_length:
+            raise ApplianceReceivingError(
+                f"Value exceeds maximum length of {max_length}."
+            )
+
+        return value
+
+    @staticmethod
+    def _money_or_none(value) -> float | None:
+        """
+        None / blank -> None.
+
+        Zero is a valid explicit price and remains 0.0.
+        Negative prices are rejected.
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, str):
+            value = value.strip()
+
+            if not value:
+                return None
+
+            value = value.replace(",", "")
+
+        try:
+            amount = Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            raise ApplianceReceivingError(
+                f"Invalid monetary value: {value!r}"
+            )
+
+        if amount < 0:
+            raise ApplianceReceivingError(
+                "Price cannot be negative."
+            )
+
+        return float(
+            amount.quantize(Decimal("0.01"))
+        )
+
+    @staticmethod
+    def _float_or_none(value) -> float | None:
+        if value is None:
+            return None
+
+        if isinstance(value, str):
+            value = value.strip()
+
+            if not value:
+                return None
+
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            raise ApplianceReceivingError(
+                f"Invalid numeric value: {value!r}"
+            )
+
+        if result < 0:
+            raise ApplianceReceivingError(
+                "Size cannot be negative."
+            )
+
+        return result
+
+    @staticmethod
+    def _require_user(actor: User | None) -> User:
+        if actor is None or getattr(actor, "id", None) is None:
+            raise ApplianceAccessDenied(
+                "Authenticated user is required."
+            )
+
+        return actor
+
+    @staticmethod
+    def _get_active_warehouse(
+        warehouse_id: int,
+    ) -> Warehouse:
+        warehouse = Warehouse.query.get(warehouse_id)
+
+        if warehouse is None or not warehouse.is_active:
+            raise ApplianceReceivingError(
+                "Warehouse not found or inactive."
+            )
+
+        return warehouse
+
+    @staticmethod
+    def _require_permission(
+        *,
+        actor: User,
+        permission_code: str,
+        warehouse_id: int,
+    ) -> None:
+        if not AccessControlService.can(
+            actor,
+            permission_code,
+            warehouse_id=warehouse_id,
+        ):
+            raise ApplianceAccessDenied(
+                f"Access denied: {permission_code}"
+            )
+
+    @staticmethod
+    def _get_receiving(
+        receiving_id: int,
+    ) -> ApplianceReceiving:
+        receiving = db.session.get(
+            ApplianceReceiving,
+            receiving_id,
+        )
+
+        if receiving is None:
+            raise ApplianceReceivingNotFound(
+                f"Receiving {receiving_id} not found."
+            )
+
+        return receiving
+
+    @staticmethod
+    def _require_draft(
+        receiving: ApplianceReceiving,
+    ) -> None:
+        if receiving.status != ApplianceReceivingService.STATUS_DRAFT:
+            raise ApplianceReceivingError(
+                "Only Draft Receiving can be modified."
+            )
+
+    @staticmethod
+    def _get_active_category(
+        category_id: int,
+    ) -> ApplianceCategory:
+        category = db.session.get(
+            ApplianceCategory,
+            category_id,
+        )
+
+        if category is None or not category.is_active:
+            raise ApplianceReceivingError(
+                "Appliance category not found or inactive."
+            )
+
+        return category
+
+    @staticmethod
+    def _next_receiving_number() -> str:
+        """
+        Human-readable receiving number.
+
+        The unique constraint remains the final duplicate protection.
+
+        For the current single SQLite writer this is sufficient.
+        """
+        max_id = (
+            db.session.query(
+                func.coalesce(
+                    func.max(ApplianceReceiving.id),
+                    0,
+                )
+            )
+            .scalar()
+            or 0
+        )
+
+        return f"ARCV-{int(max_id) + 1:06d}"
+
+    @staticmethod
+    def _next_inventory_number() -> str:
+        max_id = (
+            db.session.query(
+                func.coalesce(
+                    func.max(ApplianceUnit.id),
+                    0,
+                )
+            )
+            .scalar()
+            or 0
+        )
+
+        return f"AP-{int(max_id) + 1:07d}"
+
+    @staticmethod
+    def _next_line_number(
+        receiving: ApplianceReceiving,
+    ) -> int:
+        max_line = (
+            db.session.query(
+                func.coalesce(
+                    func.max(ApplianceReceivingLine.line_no),
+                    0,
+                )
+            )
+            .filter(
+                ApplianceReceivingLine.receiving_id
+                == receiving.id
+            )
+            .scalar()
+            or 0
+        )
+
+        return int(max_line) + 1
+
+    @staticmethod
+    def _check_serial_duplicate(
+        *,
+        serial_number: str | None,
+        exclude_line_id: int | None = None,
+    ) -> None:
+        """
+        Serial is optional because warehouse staff may receive a unit
+        whose serial cannot yet be read.
+
+        If supplied, however, it must not already exist in another
+        active receiving row or ApplianceUnit.
+        """
+        if not serial_number:
+            return
+
+        serial_key = serial_number.strip().upper()
+
+        unit_exists = (
+            ApplianceUnit.query
+            .filter(
+                func.upper(ApplianceUnit.serial_number)
+                == serial_key
+            )
+            .first()
+        )
+
+        if unit_exists is not None:
+            raise ApplianceReceivingError(
+                f"Serial number already exists in stock: "
+                f"{serial_number}"
+            )
+
+        line_query = (
+            ApplianceReceivingLine.query
+            .filter(
+                func.upper(
+                    ApplianceReceivingLine.serial_number
+                )
+                == serial_key
+            )
+        )
+
+        if exclude_line_id is not None:
+            line_query = line_query.filter(
+                ApplianceReceivingLine.id
+                != exclude_line_id
+            )
+
+        line_exists = line_query.first()
+
+        if line_exists is not None:
+            raise ApplianceReceivingError(
+                f"Serial number already exists in Receiving: "
+                f"{serial_number}"
+            )
+
+    # --------------------------------------------------------
+    # Read operations
+    # --------------------------------------------------------
+
+    @staticmethod
+    def get_receiving(
+        *,
+        receiving_id: int,
+        actor: User,
+        permission_code: str = "appliance.view",
+    ) -> ApplianceReceiving:
+        actor = ApplianceReceivingService._require_user(actor)
+
+        receiving = ApplianceReceivingService._get_receiving(
+            receiving_id
+        )
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code=permission_code,
+            warehouse_id=receiving.warehouse_id,
+        )
+
+        return receiving
+
+    @staticmethod
+    def list_missing_price_receivings(
+        *,
+        actor: User,
+        warehouse_id: int | None = None,
+    ) -> list[ApplianceReceiving]:
+        """
+        Manager queue.
+
+        Returns POSTED receivings containing at least one line where
+        unit_cost IS NULL.
+
+        This is the queue that will drive the Missing Prices alert/UI.
+        """
+        actor = ApplianceReceivingService._require_user(actor)
+
+        query = (
+            ApplianceReceiving.query
+            .join(
+                ApplianceReceivingLine,
+                ApplianceReceivingLine.receiving_id
+                == ApplianceReceiving.id,
+            )
+            .filter(
+                ApplianceReceiving.status
+                == ApplianceReceivingService.STATUS_POSTED,
+                ApplianceReceivingLine.unit_cost.is_(None),
+            )
+            .distinct()
+            .order_by(
+                ApplianceReceiving.received_at.asc(),
+                ApplianceReceiving.id.asc(),
+            )
+        )
+
+        if warehouse_id is not None:
+            ApplianceReceivingService._get_active_warehouse(
+                warehouse_id
+            )
+
+            ApplianceReceivingService._require_permission(
+                actor=actor,
+                permission_code="appliance.pricing",
+                warehouse_id=warehouse_id,
+            )
+
+            query = query.filter(
+                ApplianceReceiving.warehouse_id
+                == warehouse_id
+            )
+
+            return query.all()
+
+        allowed_ids = [
+            warehouse.id
+            for warehouse in AccessControlService.accessible_warehouses(
+                actor
+            )
+            if AccessControlService.can(
+                actor,
+                "appliance.pricing",
+                warehouse_id=warehouse.id,
+            )
+        ]
+
+        if not allowed_ids:
+            return []
+
+        return (
+            query
+            .filter(
+                ApplianceReceiving.warehouse_id.in_(
+                    allowed_ids
+                )
+            )
+            .all()
+        )
+
+    # --------------------------------------------------------
+    # Draft Receiving
+    # --------------------------------------------------------
+
+    @staticmethod
+    def create_draft(
+        *,
+        actor: User,
+        warehouse_id: int,
+        supplier_name: str | None = None,
+        invoice_number: str | None = None,
+        invoice_date: date | None = None,
+        received_at: datetime | None = None,
+        notes: str | None = None,
+        attachment_path: str | None = None,
+    ) -> ApplianceReceiving:
+        actor = ApplianceReceivingService._require_user(actor)
+
+        warehouse = (
+            ApplianceReceivingService._get_active_warehouse(
+                warehouse_id
+            )
+        )
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code="appliance.receive",
+            warehouse_id=warehouse.id,
+        )
+
+        receiving = ApplianceReceiving(
+            receiving_number=(
+                ApplianceReceivingService
+                ._next_receiving_number()
+            ),
+            warehouse_id=warehouse.id,
+            supplier_name=(
+                ApplianceReceivingService._clean_text(
+                    supplier_name,
+                    max_length=200,
+                )
+            ),
+            invoice_number=(
+                ApplianceReceivingService._clean_text(
+                    invoice_number,
+                    upper=True,
+                    max_length=80,
+                )
+            ),
+            invoice_date=invoice_date,
+            received_at=received_at or datetime.utcnow(),
+            status=ApplianceReceivingService.STATUS_DRAFT,
+            notes=(
+                ApplianceReceivingService._clean_text(
+                    notes
+                )
+            ),
+            attachment_path=(
+                ApplianceReceivingService._clean_text(
+                    attachment_path,
+                    max_length=512,
+                )
+            ),
+            created_by_id=actor.id,
+            updated_by_id=actor.id,
+        )
+
+        try:
+            db.session.add(receiving)
+            db.session.commit()
+            db.session.refresh(receiving)
+            return receiving
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+    @staticmethod
+    def update_draft_header(
+        *,
+        receiving_id: int,
+        actor: User,
+        supplier_name: str | None = None,
+        invoice_number: str | None = None,
+        invoice_date: date | None = None,
+        received_at: datetime | None = None,
+        notes: str | None = None,
+        attachment_path: str | None = None,
+    ) -> ApplianceReceiving:
+        actor = ApplianceReceivingService._require_user(actor)
+
+        receiving = (
+            ApplianceReceivingService._get_receiving(
+                receiving_id
+            )
+        )
+
+        ApplianceReceivingService._require_draft(receiving)
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code="appliance.receive",
+            warehouse_id=receiving.warehouse_id,
+        )
+
+        receiving.supplier_name = (
+            ApplianceReceivingService._clean_text(
+                supplier_name,
+                max_length=200,
+            )
+        )
+
+        receiving.invoice_number = (
+            ApplianceReceivingService._clean_text(
+                invoice_number,
+                upper=True,
+                max_length=80,
+            )
+        )
+
+        receiving.invoice_date = invoice_date
+
+        if received_at is not None:
+            receiving.received_at = received_at
+
+        receiving.notes = (
+            ApplianceReceivingService._clean_text(notes)
+        )
+
+        receiving.attachment_path = (
+            ApplianceReceivingService._clean_text(
+                attachment_path,
+                max_length=512,
+            )
+        )
+
+        receiving.updated_by_id = actor.id
+        receiving.updated_at = datetime.utcnow()
+
+        try:
+            db.session.commit()
+            db.session.refresh(receiving)
+            return receiving
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+    @staticmethod
+    def add_line(
+        *,
+        receiving_id: int,
+        actor: User,
+        category_id: int,
+        brand: str | None = None,
+        model_number: str | None = None,
+        serial_number: str | None = None,
+        description: str | None = None,
+        size_value=None,
+        size_unit: str | None = None,
+        condition: str = "new",
+        unit_cost=None,
+        selling_price=None,
+        notes: str | None = None,
+    ) -> ApplianceReceivingLine:
+        actor = ApplianceReceivingService._require_user(actor)
+
+        receiving = (
+            ApplianceReceivingService._get_receiving(
+                receiving_id
+            )
+        )
+
+        ApplianceReceivingService._require_draft(receiving)
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code="appliance.receive",
+            warehouse_id=receiving.warehouse_id,
+        )
+
+        ApplianceReceivingService._get_active_category(
+            category_id
+        )
+
+        serial_clean = (
+            ApplianceReceivingService._clean_text(
+                serial_number,
+                upper=True,
+                max_length=160,
+            )
+        )
+
+        ApplianceReceivingService._check_serial_duplicate(
+            serial_number=serial_clean
+        )
+
+        cost = ApplianceReceivingService._money_or_none(
+            unit_cost
+        )
+
+        price = ApplianceReceivingService._money_or_none(
+            selling_price
+        )
+
+        # Entering financial values requires pricing permission.
+        if cost is not None or price is not None:
+            ApplianceReceivingService._require_permission(
+                actor=actor,
+                permission_code="appliance.pricing",
+                warehouse_id=receiving.warehouse_id,
+            )
+
+        condition_clean = (
+            ApplianceReceivingService._clean_text(
+                condition,
+                max_length=40,
+            )
+            or "new"
+        ).lower()
+
+        line = ApplianceReceivingLine(
+            receiving_id=receiving.id,
+            line_no=(
+                ApplianceReceivingService._next_line_number(
+                    receiving
+                )
+            ),
+            category_id=category_id,
+            brand=(
+                ApplianceReceivingService._clean_text(
+                    brand,
+                    upper=True,
+                    max_length=100,
+                )
+            ),
+            model_number=(
+                ApplianceReceivingService._clean_text(
+                    model_number,
+                    upper=True,
+                    max_length=120,
+                )
+            ),
+            serial_number=serial_clean,
+            description=(
+                ApplianceReceivingService._clean_text(
+                    description,
+                    max_length=500,
+                )
+            ),
+            size_value=(
+                ApplianceReceivingService._float_or_none(
+                    size_value
+                )
+            ),
+            size_unit=(
+                ApplianceReceivingService._clean_text(
+                    size_unit,
+                    max_length=20,
+                )
+            ),
+            condition=condition_clean,
+            unit_cost=cost,
+            selling_price=price,
+            notes=(
+                ApplianceReceivingService._clean_text(notes)
+            ),
+            created_by_id=actor.id,
+            updated_by_id=actor.id,
+        )
+
+        receiving.updated_by_id = actor.id
+        receiving.updated_at = datetime.utcnow()
+
+        try:
+            db.session.add(line)
+            db.session.commit()
+            db.session.refresh(line)
+            return line
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+    @staticmethod
+    def update_line(
+        *,
+        line_id: int,
+        actor: User,
+        category_id: int,
+        brand: str | None = None,
+        model_number: str | None = None,
+        serial_number: str | None = None,
+        description: str | None = None,
+        size_value=None,
+        size_unit: str | None = None,
+        condition: str = "new",
+        unit_cost=None,
+        selling_price=None,
+        notes: str | None = None,
+    ) -> ApplianceReceivingLine:
+        actor = ApplianceReceivingService._require_user(actor)
+
+        line = db.session.get(
+            ApplianceReceivingLine,
+            line_id,
+        )
+
+        if line is None:
+            raise ApplianceReceivingError(
+                "Receiving line not found."
+            )
+
+        receiving = line.receiving
+
+        ApplianceReceivingService._require_draft(receiving)
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code="appliance.receive",
+            warehouse_id=receiving.warehouse_id,
+        )
+
+        ApplianceReceivingService._get_active_category(
+            category_id
+        )
+
+        serial_clean = (
+            ApplianceReceivingService._clean_text(
+                serial_number,
+                upper=True,
+                max_length=160,
+            )
+        )
+
+        ApplianceReceivingService._check_serial_duplicate(
+            serial_number=serial_clean,
+            exclude_line_id=line.id,
+        )
+
+        new_cost = ApplianceReceivingService._money_or_none(
+            unit_cost
+        )
+
+        new_price = ApplianceReceivingService._money_or_none(
+            selling_price
+        )
+
+        financial_changed = (
+            new_cost != line.unit_cost
+            or new_price != line.selling_price
+        )
+
+        if financial_changed:
+            ApplianceReceivingService._require_permission(
+                actor=actor,
+                permission_code="appliance.pricing",
+                warehouse_id=receiving.warehouse_id,
+            )
+
+        line.category_id = category_id
+
+        line.brand = ApplianceReceivingService._clean_text(
+            brand,
+            upper=True,
+            max_length=100,
+        )
+
+        line.model_number = (
+            ApplianceReceivingService._clean_text(
+                model_number,
+                upper=True,
+                max_length=120,
+            )
+        )
+
+        line.serial_number = serial_clean
+
+        line.description = (
+            ApplianceReceivingService._clean_text(
+                description,
+                max_length=500,
+            )
+        )
+
+        line.size_value = (
+            ApplianceReceivingService._float_or_none(
+                size_value
+            )
+        )
+
+        line.size_unit = (
+            ApplianceReceivingService._clean_text(
+                size_unit,
+                max_length=20,
+            )
+        )
+
+        line.condition = (
+            ApplianceReceivingService._clean_text(
+                condition,
+                max_length=40,
+            )
+            or "new"
+        ).lower()
+
+        line.unit_cost = new_cost
+        line.selling_price = new_price
+
+        line.notes = (
+            ApplianceReceivingService._clean_text(notes)
+        )
+
+        line.updated_by_id = actor.id
+        line.updated_at = datetime.utcnow()
+
+        receiving.updated_by_id = actor.id
+        receiving.updated_at = datetime.utcnow()
+
+        try:
+            db.session.commit()
+            db.session.refresh(line)
+            return line
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+    @staticmethod
+    def delete_line(
+        *,
+        line_id: int,
+        actor: User,
+    ) -> None:
+        actor = ApplianceReceivingService._require_user(actor)
+
+        line = db.session.get(
+            ApplianceReceivingLine,
+            line_id,
+        )
+
+        if line is None:
+            raise ApplianceReceivingError(
+                "Receiving line not found."
+            )
+
+        receiving = line.receiving
+
+        ApplianceReceivingService._require_draft(receiving)
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code="appliance.receive",
+            warehouse_id=receiving.warehouse_id,
+        )
+
+        receiving.updated_by_id = actor.id
+        receiving.updated_at = datetime.utcnow()
+
+        try:
+            db.session.delete(line)
+            db.session.commit()
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+    # --------------------------------------------------------
+    # Posting
+    # --------------------------------------------------------
+
+    @staticmethod
+    def post_receiving(
+        *,
+        receiving_id: int,
+        actor: User,
+    ) -> ApplianceReceiving:
+        """
+        Finalize receiving and create serialized ApplianceUnit rows.
+
+        IMPORTANT:
+        Missing unit_cost does NOT block posting.
+        Those rows appear in the Manager Missing Prices queue.
+        """
+        actor = ApplianceReceivingService._require_user(actor)
+
+        receiving = (
+            ApplianceReceivingService._get_receiving(
+                receiving_id
+            )
+        )
+
+        ApplianceReceivingService._require_draft(receiving)
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code="appliance.post_receiving",
+            warehouse_id=receiving.warehouse_id,
+        )
+
+        lines = (
+            ApplianceReceivingLine.query
+            .filter_by(receiving_id=receiving.id)
+            .order_by(
+                ApplianceReceivingLine.line_no.asc()
+            )
+            .all()
+        )
+
+        if not lines:
+            raise ApplianceReceivingError(
+                "Cannot post an empty Receiving."
+            )
+
+        try:
+            for line in lines:
+                existing_unit = (
+                    ApplianceUnit.query
+                    .filter_by(
+                        receiving_line_id=line.id
+                    )
+                    .first()
+                )
+
+                if existing_unit is not None:
+                    raise ApplianceReceivingError(
+                        f"Receiving line {line.line_no} "
+                        f"already created ApplianceUnit "
+                        f"{existing_unit.inventory_number}."
+                    )
+
+                if line.serial_number:
+                    serial_exists = (
+                        ApplianceUnit.query
+                        .filter(
+                            func.upper(
+                                ApplianceUnit.serial_number
+                            )
+                            == line.serial_number.upper()
+                        )
+                        .first()
+                    )
+
+                    if serial_exists is not None:
+                        raise ApplianceReceivingError(
+                            f"Duplicate serial number: "
+                            f"{line.serial_number}"
+                        )
+
+                unit = ApplianceUnit(
+                    inventory_number=(
+                        ApplianceReceivingService
+                        ._next_inventory_number()
+                    ),
+                    category_id=line.category_id,
+                    warehouse_id=receiving.warehouse_id,
+                    receiving_line_id=line.id,
+                    brand=line.brand,
+                    model_number=line.model_number,
+                    serial_number=line.serial_number,
+                    description=line.description,
+                    size_value=line.size_value,
+                    size_unit=line.size_unit,
+                    condition=line.condition,
+                    status=(
+                        ApplianceReceivingService
+                        .UNIT_STATUS_AVAILABLE
+                    ),
+                    unit_cost=line.unit_cost,
+                    selling_price=line.selling_price,
+                    notes=line.notes,
+                    created_by_id=actor.id,
+                    updated_by_id=actor.id,
+                )
+
+                db.session.add(unit)
+
+                # Flush is required so the next inventory number
+                # sees the ID generated for this unit.
+                db.session.flush()
+
+            receiving.status = (
+                ApplianceReceivingService.STATUS_POSTED
+            )
+
+            receiving.posted_at = datetime.utcnow()
+            receiving.posted_by_id = actor.id
+            receiving.updated_at = datetime.utcnow()
+            receiving.updated_by_id = actor.id
+
+            db.session.commit()
+            db.session.refresh(receiving)
+
+            return receiving
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+    # --------------------------------------------------------
+    # Manager Pricing
+    # --------------------------------------------------------
+
+    @staticmethod
+    def update_posted_line_price(
+        *,
+        line_id: int,
+        actor: User,
+        unit_cost=None,
+        selling_price=None,
+    ) -> ApplianceReceivingLine:
+        """
+        Manager may fill/correct prices after Receiving is posted.
+
+        Receiving history and current ApplianceUnit are updated together
+        in one transaction.
+        """
+        actor = ApplianceReceivingService._require_user(actor)
+
+        line = db.session.get(
+            ApplianceReceivingLine,
+            line_id,
+        )
+
+        if line is None:
+            raise ApplianceReceivingError(
+                "Receiving line not found."
+            )
+
+        receiving = line.receiving
+
+        if receiving.status != (
+            ApplianceReceivingService.STATUS_POSTED
+        ):
+            raise ApplianceReceivingError(
+                "Use Draft editing before Receiving is posted."
+            )
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code="appliance.pricing",
+            warehouse_id=receiving.warehouse_id,
+        )
+
+        new_cost = ApplianceReceivingService._money_or_none(
+            unit_cost
+        )
+
+        new_price = ApplianceReceivingService._money_or_none(
+            selling_price
+        )
+
+        unit = (
+            ApplianceUnit.query
+            .filter_by(
+                receiving_line_id=line.id
+            )
+            .first()
+        )
+
+        if unit is None:
+            raise ApplianceReceivingError(
+                "ApplianceUnit for this Receiving line "
+                "was not found."
+            )
+
+        try:
+            line.unit_cost = new_cost
+            line.selling_price = new_price
+            line.updated_at = datetime.utcnow()
+            line.updated_by_id = actor.id
+
+            unit.unit_cost = new_cost
+            unit.selling_price = new_price
+            unit.updated_at = datetime.utcnow()
+            unit.updated_by_id = actor.id
+
+            receiving.updated_at = datetime.utcnow()
+            receiving.updated_by_id = actor.id
+
+            db.session.commit()
+            db.session.refresh(line)
+
+            return line
+
+        except Exception:
+            db.session.rollback()
+            raise

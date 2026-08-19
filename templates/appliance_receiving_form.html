@@ -1,0 +1,1484 @@
+﻿{% extends "base.html" %}
+{% block content %}
+
+{% set is_new = receiving is none %}
+{% set is_draft = receiving and receiving.status == 'draft' %}
+{% set is_posted = receiving and receiving.status == 'posted' %}
+
+<style>
+  .appliance-sheet {
+    background:#fff;
+    border:1px solid #d9dee5;
+    box-shadow:0 .2rem .7rem rgba(0,0,0,.09);
+    border-radius:.55rem;
+  }
+
+  .appliance-sheet-header {
+    background:#f6f7f9;
+    border-bottom:1px solid #d9dee5;
+  }
+
+  .appliance-grid {
+    font-size:.75rem;
+  }
+
+  .appliance-grid th {
+    position:sticky;
+    top:0;
+    z-index:5;
+    background:#eef1f4;
+    white-space:nowrap;
+  }
+
+  .appliance-grid td {
+    padding:.2rem;
+    min-width:80px;
+  }
+
+  .appliance-grid .form-control,
+  .appliance-grid .form-select {
+    min-width:90px;
+    font-size:.75rem;
+    padding:.25rem .35rem;
+  }
+
+  .price-missing {
+    background:#fff3cd !important;
+    border-color:#ffc107 !important;
+  }
+
+  .sheet-status {
+    font-size:.7rem;
+    letter-spacing:.03em;
+  }
+
+  .quick-add {
+    background:#f8fafc;
+    border-top:2px solid #ced4da;
+  }
+
+  .field-label {
+    font-size:.7rem;
+    text-transform:uppercase;
+    color:#6c757d;
+    font-weight:600;
+    margin-bottom:.2rem;
+  }
+
+  .appliance-receiving-page {
+    width: calc(100vw - 40px);
+    max-width: 1600px;
+    margin-left: 50%;
+    transform: translateX(-50%);
+  }
+
+  #batchEntryTable {
+    width:100%;
+    table-layout:fixed;
+    min-width:0;
+  }
+
+  #batchEntryTable th:nth-child(1)  { width:3%; }
+  #batchEntryTable th:nth-child(2)  { width:11%; }
+  #batchEntryTable th:nth-child(3)  { width:10%; }
+  #batchEntryTable th:nth-child(4)  { width:11%; }
+  #batchEntryTable th:nth-child(5)  { width:14%; }
+  #batchEntryTable th:nth-child(6)  { width:6%; }
+  #batchEntryTable th:nth-child(7)  { width:6%; }
+  #batchEntryTable th:nth-child(8)  { width:8%; }
+  #batchEntryTable th:nth-child(9)  { width:7%; }
+  #batchEntryTable th:nth-child(10) { width:7%; }
+  #batchEntryTable th:nth-child(11) { width:12%; }
+  #batchEntryTable th:nth-child(12) { width:5%; }
+
+  #batchEntryTable th,
+  #batchEntryTable td {
+    padding:.22rem .25rem;
+  }
+
+  #batchEntryTable input,
+  #batchEntryTable select {
+    width:100%;
+    min-width:0;
+    font-size:.72rem;
+    padding-left:.3rem;
+    padding-right:.3rem;
+  }
+
+  .batch-entry-wrapper {
+    overflow-x:auto;
+    width:100%;
+  }
+
+  .batch-entry-toolbar {
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:.35rem;
+  }
+
+  .batch-entry-toolbar .batch-save {
+    margin-left:auto;
+  }
+
+  .appliance-receiving-page input[type="text"],
+  .appliance-receiving-page input:not([type]),
+  .appliance-receiving-page textarea {
+    text-transform: uppercase;
+  }
+
+  .appliance-receiving-page select,
+  .appliance-receiving-page select option {
+    text-transform: uppercase;
+  }
+</style>
+
+<div class="appliance-receiving-page">
+
+<div class="d-flex flex-wrap justify-content-between align-items-start mb-3">
+
+  <div>
+    <h3 class="mb-1">
+      {% if is_new %}
+        New Appliance Receiving
+      {% else %}
+        {{ receiving.receiving_number }}
+      {% endif %}
+    </h3>
+
+    {% if receiving %}
+      <div class="d-flex flex-wrap gap-2 align-items-center small">
+
+        {% if is_posted %}
+          <span class="badge bg-success sheet-status">
+            POSTED
+          </span>
+        {% else %}
+          <span class="badge bg-secondary sheet-status">
+            DRAFT
+          </span>
+        {% endif %}
+
+        <span class="text-muted">
+          Warehouse:
+          <strong>{{ receiving.warehouse.code }}</strong>
+        </span>
+
+        <span class="text-muted">
+          Units:
+          <strong>{{ receiving.unit_count }}</strong>
+        </span>
+
+        {% if receiving.missing_price_count %}
+          <span class="badge bg-warning text-dark">
+            {{ receiving.missing_price_count }}
+            Missing Price
+          </span>
+        {% elif receiving.unit_count %}
+          <span class="badge bg-success">
+            Pricing Complete
+          </span>
+        {% endif %}
+
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="d-flex flex-wrap gap-2">
+
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('appliance.receiving_list') }}">
+      ← Back
+    </a>
+
+    {% if is_draft and can_post %}
+      <form method="post"
+            action="{{ url_for('appliance.receiving_post', receiving_id=receiving.id) }}"
+            onsubmit="return confirm('Post {{ receiving.receiving_number }} and create Appliance Stock units?');">
+
+        <button class="btn btn-success btn-sm"
+                type="submit"
+                {% if receiving.unit_count == 0 %}disabled{% endif %}>
+          Post Receiving
+        </button>
+
+      </form>
+    {% endif %}
+
+  </div>
+
+</div>
+
+
+<div class="appliance-sheet">
+
+  <div class="appliance-sheet-header p-3">
+
+    {% if is_new %}
+
+      <form method="post"
+            action="{{ url_for('appliance.receiving_new') }}">
+
+        <div class="row g-2">
+
+          <div class="col-md-2">
+            <div class="field-label">Warehouse *</div>
+
+            <select class="form-select form-select-sm"
+                    name="warehouse_id"
+                    required>
+              {% for warehouse in warehouses %}
+                <option value="{{ warehouse.id }}">
+                  {{ warehouse.code }} — {{ warehouse.name }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-md-3">
+            <div class="field-label">Supplier</div>
+            <input class="form-control form-control-sm"
+                   name="supplier_name">
+          </div>
+
+          <div class="col-md-2">
+            <div class="field-label">Invoice #</div>
+            <input class="form-control form-control-sm"
+                   name="invoice_number">
+          </div>
+
+          <div class="col-md-2">
+            <div class="field-label">Invoice Date</div>
+            <input class="form-control form-control-sm"
+                   type="date"
+                   name="invoice_date">
+          </div>
+
+          <div class="col-md-3">
+            <div class="field-label">Notes</div>
+            <input class="form-control form-control-sm"
+                   name="notes">
+          </div>
+
+        </div>
+
+        <div class="mt-3">
+          <button class="btn btn-primary btn-sm"
+                  type="submit">
+            Create Draft
+          </button>
+        </div>
+
+      </form>
+
+    {% else %}
+
+      {% if is_draft and can_receive %}
+
+        <form method="post"
+              action="{{ url_for('appliance.receiving_update_header', receiving_id=receiving.id) }}">
+
+          <div class="row g-2">
+
+            <div class="col-md-2">
+              <div class="field-label">Warehouse</div>
+              <input class="form-control form-control-sm"
+                     value="{{ receiving.warehouse.code }} — {{ receiving.warehouse.name }}"
+                     readonly>
+            </div>
+
+            <div class="col-md-3">
+              <div class="field-label">Supplier</div>
+              <input class="form-control form-control-sm"
+                     name="supplier_name"
+                     value="{{ receiving.supplier_name or '' }}">
+            </div>
+
+            <div class="col-md-2">
+              <div class="field-label">Invoice #</div>
+              <input class="form-control form-control-sm"
+                     name="invoice_number"
+                     value="{{ receiving.invoice_number or '' }}">
+            </div>
+
+            <div class="col-md-2">
+              <div class="field-label">Invoice Date</div>
+              <input class="form-control form-control-sm"
+                     type="date"
+                     name="invoice_date"
+                     value="{{ receiving.invoice_date.strftime('%Y-%m-%d') if receiving.invoice_date else '' }}">
+            </div>
+
+            <div class="col-md-3">
+              <div class="field-label">Notes</div>
+              <input class="form-control form-control-sm"
+                     name="notes"
+                     value="{{ receiving.notes or '' }}">
+            </div>
+
+          </div>
+
+          <div class="mt-2">
+            <button class="btn btn-outline-primary btn-sm"
+                    type="submit">
+              Save Header
+            </button>
+          </div>
+
+        </form>
+
+      {% else %}
+
+        <div class="row g-2 small">
+
+          <div class="col-md-2">
+            <div class="field-label">Warehouse</div>
+            <strong>{{ receiving.warehouse.code }}</strong>
+          </div>
+
+          <div class="col-md-3">
+            <div class="field-label">Supplier</div>
+            {{ receiving.supplier_name or '—' }}
+          </div>
+
+          <div class="col-md-2">
+            <div class="field-label">Invoice #</div>
+            {{ receiving.invoice_number or '—' }}
+          </div>
+
+          <div class="col-md-2">
+            <div class="field-label">Invoice Date</div>
+            {{ receiving.invoice_date or '—' }}
+          </div>
+
+          <div class="col-md-3">
+            <div class="field-label">Notes</div>
+            {{ receiving.notes or '—' }}
+          </div>
+
+        </div>
+
+      {% endif %}
+
+    {% endif %}
+
+  </div>
+
+
+  {% if receiving %}
+
+    <div class="table-responsive"
+         style="max-height:62vh; overflow-y:auto; overflow-x:hidden;">
+
+      <table class="table table-bordered table-sm appliance-grid mb-0">
+
+        <thead>
+          <tr>
+            <th style="width:45px;">#</th>
+            <th style="min-width:140px;">Appliance</th>
+            <th style="min-width:100px;">Brand</th>
+            <th style="min-width:135px;">Model</th>
+            <th style="min-width:155px;">Serial</th>
+            <th style="width:90px;">Size</th>
+            <th style="width:85px;">Unit</th>
+            <th style="width:90px;">Condition</th>
+
+            {% if can_pricing %}
+              <th style="width:105px;">Cost</th>
+              <th style="width:105px;">Sell Price</th>
+            {% endif %}
+
+            <th style="min-width:150px;">Notes</th>
+
+            {% if is_draft and can_receive %}
+              <th style="width:130px;">Action</th>
+            {% elif is_posted and can_pricing %}
+              <th style="width:90px;">Action</th>
+            {% endif %}
+          </tr>
+        </thead>
+
+        <tbody>
+
+          {% for line in receiving.lines %}
+
+            {% if is_draft and can_receive %}
+
+              <tr>
+                <form method="post"
+                      action="{{ url_for('appliance.receiving_update_line', line_id=line.id) }}">
+
+                  <td class="text-center text-muted">
+                    {{ line.line_no }}
+                  </td>
+
+                  <td>
+                    <select name="category_id"
+                            class="form-select form-select-sm"
+                            required>
+                      {% for category in categories %}
+                        <option value="{{ category.id }}"
+                                {% if category.id == line.category_id %}selected{% endif %}>
+                          {{ category.name|upper }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </td>
+
+                  <td>
+                    <input name="brand"
+                           class="form-control form-control-sm"
+                           value="{{ line.brand or '' }}">
+                  </td>
+
+                  <td>
+                    <input name="model_number"
+                           class="form-control form-control-sm"
+                           value="{{ line.model_number or '' }}">
+                  </td>
+
+                  <td>
+                    <input name="serial_number"
+                           class="form-control form-control-sm"
+                           value="{{ line.serial_number or '' }}">
+                  </td>
+
+                  <td>
+                    <input name="size_value"
+                           type="number"
+                           step="0.1"
+                           min="0"
+                           class="form-control form-control-sm"
+                           value="{{ line.size_value if line.size_value is not none else '' }}">
+                  </td>
+
+                  <td>
+                    <input name="size_unit"
+                           class="form-control form-control-sm"
+                           value="{{ line.size_unit or '' }}"
+                           placeholder="cu.ft.">
+                  </td>
+
+                  <td>
+                    <select name="condition"
+                            class="form-select form-select-sm">
+                      {% for value, caption in [
+                        ('new', 'NEW'),
+                        ('used', 'USED'),
+                        ('open_box', 'OPEN BOX'),
+                        ('damaged', 'DAMAGED')
+                      ] %}
+                        <option value="{{ value }}"
+                                {% if line.condition == value %}selected{% endif %}>
+                          {{ caption }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                  </td>
+
+                  {% if can_pricing %}
+                    <td>
+                      <input name="unit_cost"
+                             type="number"
+                             min="0"
+                             step="0.01"
+                             class="form-control form-control-sm {% if line.unit_cost is none %}price-missing{% endif %}"
+                             value="{{ line.unit_cost if line.unit_cost is not none else '' }}">
+                    </td>
+
+                    <td>
+                      <input name="selling_price"
+                             type="number"
+                             min="0"
+                             step="0.01"
+                             class="form-control form-control-sm"
+                             value="{{ line.selling_price if line.selling_price is not none else '' }}">
+                    </td>
+                  {% else %}
+                    <input type="hidden" name="unit_cost" value="">
+                    <input type="hidden" name="selling_price" value="">
+                  {% endif %}
+
+                  <td>
+                    <input name="notes"
+                           class="form-control form-control-sm"
+                           value="{{ line.notes or '' }}">
+                  </td>
+
+                  <td>
+                    <div class="d-flex gap-1">
+                      <button class="btn btn-outline-primary btn-sm"
+                              type="submit">
+                        Save
+                      </button>
+                </form>
+
+                      <form method="post"
+                            action="{{ url_for('appliance.receiving_delete_line', line_id=line.id) }}"
+                            onsubmit="return confirm('Delete line #{{ line.line_no }}?');">
+                        <button class="btn btn-outline-danger btn-sm"
+                                type="submit">
+                          Delete
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+
+              </tr>
+
+            {% else %}
+
+              <tr {% if line.unit_cost is none %}class="table-warning"{% endif %}>
+
+                {% if is_posted and can_pricing %}
+                  <form method="post"
+                        action="{{ url_for('appliance.receiving_price_line', line_id=line.id) }}">
+                {% endif %}
+
+                <td class="text-center text-muted">
+                  {{ line.line_no }}
+                </td>
+
+                <td>{{ line.category.name }}</td>
+                <td>{{ line.brand or '—' }}</td>
+                <td>{{ line.model_number or '—' }}</td>
+                <td class="fw-semibold">
+                  {{ line.serial_number or '—' }}
+                </td>
+
+                <td>
+                  {{ line.size_value if line.size_value is not none else '—' }}
+                </td>
+
+                <td>{{ line.size_unit or '—' }}</td>
+                <td>{{ (line.condition or '')|replace('_', ' ')|upper }}</td>
+
+                {% if can_pricing %}
+
+                  <td>
+                    {% if is_posted %}
+                      <input name="unit_cost"
+                             type="number"
+                             min="0"
+                             step="0.01"
+                             class="form-control form-control-sm {% if line.unit_cost is none %}price-missing{% endif %}"
+                             placeholder="Missing"
+                             value="{{ line.unit_cost if line.unit_cost is not none else '' }}">
+                    {% else %}
+                      {{ '%.2f' % line.unit_cost if line.unit_cost is not none else '—' }}
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if is_posted %}
+                      <input name="selling_price"
+                             type="number"
+                             min="0"
+                             step="0.01"
+                             class="form-control form-control-sm"
+                             value="{{ line.selling_price if line.selling_price is not none else '' }}">
+                    {% else %}
+                      {{ '%.2f' % line.selling_price if line.selling_price is not none else '—' }}
+                    {% endif %}
+                  </td>
+
+                {% endif %}
+
+                <td>{{ line.notes or '' }}</td>
+
+                {% if is_posted and can_pricing %}
+                  <td>
+                    <button class="btn btn-warning btn-sm"
+                            type="submit">
+                      Save Price
+                    </button>
+                  </td>
+                  </form>
+                {% endif %}
+
+              </tr>
+
+            {% endif %}
+
+          {% endfor %}
+
+
+          {% if is_draft and can_receive %}
+
+            <tr class="quick-add">
+              <td colspan="20" class="p-2">
+
+                <div class="batch-entry-toolbar mb-2">
+
+                  <strong>Batch Entry</strong>
+
+                  <button type="button"
+                          class="btn btn-outline-primary btn-sm"
+                          id="batchAddRow">
+                    + Add Row
+                  </button>
+
+                  <button type="button"
+                          class="btn btn-outline-secondary btn-sm"
+                          id="batchDuplicate">
+                    Duplicate
+                  </button>
+
+                  <button type="button"
+                          class="btn btn-outline-secondary btn-sm"
+                          id="batchDuplicateSerial">
+                    Duplicate + Serial
+                  </button>
+
+                  <button type="button"
+                          class="btn btn-outline-secondary btn-sm"
+                          id="batchDuplicate5">
+                    Duplicate 5
+                  </button>
+
+                  <button type="button"
+                          class="btn btn-outline-secondary btn-sm"
+                          id="batchDuplicate10">
+                    Duplicate 10
+                  </button>
+
+                  <button type="button"
+                          class="btn btn-outline-danger btn-sm"
+                          id="batchClear">
+                    Clear
+                  </button>
+
+                  <button type="button"
+                          class="btn btn-success btn-sm batch-save"
+                          id="batchSaveAll">
+                    Save All Rows
+                  </button>
+
+                </div>
+
+                <div class="small text-muted mb-2">
+                  Excel paste supported. Copy rows or a serial-number column
+                  from Excel and paste directly into the grid.
+                  Duplicate keeps appliance / brand / model / size /
+                  condition. "Duplicate + Serial" also increments a numeric
+                  serial suffix when possible.
+                </div>
+
+                <div id="batchError"
+                     class="alert alert-danger py-2 d-none">
+                </div>
+
+                <div id="batchStatus"
+                     class="alert alert-info py-2 d-none">
+                </div>
+
+                <div class="batch-entry-wrapper border rounded"
+                     style="max-height:42vh;">
+
+                  <table class="table table-bordered table-sm mb-0"
+                         id="batchEntryTable"
+                         style="font-size:.75rem;">
+
+                    <thead class="table-light">
+                      <tr>
+                        <th>#</th>
+                        <th>Appliance</th>
+                        <th>Brand</th>
+                        <th>Model</th>
+                        <th>Serial</th>
+                        <th>Size</th>
+                        <th>Unit</th>
+                        <th>Condition</th>
+
+                        {% if can_pricing %}
+                          <th>Cost</th>
+                          <th>Sell</th>
+                        {% endif %}
+
+                        <th>Notes</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+
+                    <tbody id="batchEntryBody">
+                    </tbody>
+
+                  </table>
+
+                </div>
+
+              </td>
+            </tr>
+
+          {% endif %}
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  {% endif %}
+
+</div>
+
+
+{% if is_posted and receiving.missing_price_count and can_pricing %}
+  <div class="alert alert-warning mt-3 mb-0">
+    <strong>{{ receiving.missing_price_count }}</strong>
+    appliance unit(s) still have no cost.
+    Enter the missing prices directly in the yellow cells.
+  </div>
+{% endif %}
+
+
+{% if is_draft and can_receive %}
+
+<script>
+(() => {
+  "use strict";
+
+  const body = document.getElementById("batchEntryBody");
+  const btnAdd = document.getElementById("batchAddRow");
+  const btnDuplicate = document.getElementById("batchDuplicate");
+  const btnDuplicateSerial = document.getElementById("batchDuplicateSerial");
+  const btnDuplicate5 = document.getElementById("batchDuplicate5");
+  const btnDuplicate10 = document.getElementById("batchDuplicate10");
+  const btnClear = document.getElementById("batchClear");
+  const btnSave = document.getElementById("batchSaveAll");
+  const errorBox = document.getElementById("batchError");
+  const statusBox = document.getElementById("batchStatus");
+
+  const canPricing = {{ 'true' if can_pricing else 'false' }};
+
+  const categories = [
+    {% for category in categories %}
+      {
+        id: {{ category.id }},
+        name: {{ category.name|tojson }}
+      }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
+
+  let lastFocusedRow = null;
+
+
+  function categoryOptions(selectedValue = "") {
+    let html = '<option value="">Select...</option>';
+
+    for (const category of categories) {
+      const selected =
+        String(category.id) === String(selectedValue)
+          ? " selected"
+          : "";
+
+      html +=
+        `<option value="${category.id}"${selected}>` +
+        `${escapeHtml(category.name.toUpperCase())}</option>`;
+    }
+
+    return html;
+  }
+
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+
+  function renumberRows() {
+    [...body.querySelectorAll("tr")].forEach(
+      (row, index) => {
+        const cell = row.querySelector(
+          ".batch-row-number"
+        );
+
+        if (cell) {
+          cell.textContent = index + 1;
+        }
+      }
+    );
+  }
+
+
+  function incrementSerial(serial) {
+    const value = String(serial || "").trim();
+
+    if (!value) {
+      return "";
+    }
+
+    const match = value.match(/^(.*?)(\d+)$/);
+
+    if (!match) {
+      return "";
+    }
+
+    const prefix = match[1];
+    const digits = match[2];
+
+    const next = String(
+      Number(digits) + 1
+    ).padStart(
+      digits.length,
+      "0"
+    );
+
+    return prefix + next;
+  }
+
+
+  function rowData(row) {
+    const get = name => {
+      const el = row.querySelector(
+        `[data-field="${name}"]`
+      );
+
+      return el ? el.value : "";
+    };
+
+    return {
+      category_id: get("category_id"),
+      brand: get("brand"),
+      model_number: get("model_number"),
+      serial_number: get("serial_number"),
+      size_value: get("size_value"),
+      size_unit: get("size_unit"),
+      condition: get("condition") || "new",
+      unit_cost: get("unit_cost"),
+      selling_price: get("selling_price"),
+      notes: get("notes")
+    };
+  }
+
+
+  function addRow(data = {}, options = {}) {
+    const row = document.createElement("tr");
+
+    row.className = "batch-entry-row";
+
+    const priceCells = canPricing
+      ? `
+        <td>
+          <input type="number"
+                 min="0"
+                 step="0.01"
+                 class="form-control form-control-sm"
+                 data-field="unit_cost"
+                 value="${escapeHtml(data.unit_cost || "")}">
+        </td>
+
+        <td>
+          <input type="number"
+                 min="0"
+                 step="0.01"
+                 class="form-control form-control-sm"
+                 data-field="selling_price"
+                 value="${escapeHtml(data.selling_price || "")}">
+        </td>
+      `
+      : "";
+
+    row.innerHTML = `
+      <td class="text-center text-muted batch-row-number"></td>
+
+      <td>
+        <select class="form-select form-select-sm"
+                data-field="category_id">
+          ${categoryOptions(data.category_id || "")}
+        </select>
+      </td>
+
+      <td>
+        <input class="form-control form-control-sm"
+               data-field="brand"
+               value="${escapeHtml(data.brand || "")}">
+      </td>
+
+      <td>
+        <input class="form-control form-control-sm"
+               data-field="model_number"
+               value="${escapeHtml(data.model_number || "")}">
+      </td>
+
+      <td>
+        <input class="form-control form-control-sm batch-serial"
+               data-field="serial_number"
+               value="${escapeHtml(data.serial_number || "")}">
+      </td>
+
+      <td>
+        <input type="number"
+               min="0"
+               step="0.1"
+               class="form-control form-control-sm"
+               data-field="size_value"
+               value="${escapeHtml(data.size_value || "")}">
+      </td>
+
+      <td>
+        <input class="form-control form-control-sm"
+               data-field="size_unit"
+               value="${escapeHtml(data.size_unit || "")}"
+               placeholder="cu.ft.">
+      </td>
+
+      <td>
+        <select class="form-select form-select-sm"
+                data-field="condition">
+          <option value="new">NEW</option>
+          <option value="used">USED</option>
+          <option value="open_box">OPEN BOX</option>
+          <option value="damaged">DAMAGED</option>
+        </select>
+      </td>
+
+      ${priceCells}
+
+      <td>
+        <input class="form-control form-control-sm"
+               data-field="notes"
+               value="${escapeHtml(data.notes || "")}">
+      </td>
+
+      <td class="text-center">
+        <button type="button"
+                class="btn btn-outline-danger btn-sm batch-remove">
+          ×
+        </button>
+      </td>
+    `;
+
+    const condition = row.querySelector(
+      '[data-field="condition"]'
+    );
+
+    condition.value = data.condition || "new";
+
+    row.addEventListener(
+      "focusin",
+      () => {
+        lastFocusedRow = row;
+      }
+    );
+
+    row.querySelector(
+      ".batch-remove"
+    ).addEventListener(
+      "click",
+      () => {
+        row.remove();
+        renumberRows();
+
+        if (!body.children.length) {
+          addRow();
+        }
+      }
+    );
+
+    body.appendChild(row);
+    renumberRows();
+
+    if (options.focusSerial) {
+      row.querySelector(
+        '[data-field="serial_number"]'
+      ).focus();
+    }
+
+    return row;
+  }
+
+
+  function sourceRow() {
+    if (
+      lastFocusedRow
+      && document.body.contains(lastFocusedRow)
+    ) {
+      return lastFocusedRow;
+    }
+
+    const rows = [
+      ...body.querySelectorAll("tr")
+    ];
+
+    return rows.length
+      ? rows[rows.length - 1]
+      : null;
+  }
+
+
+  function duplicateRows(
+    count,
+    incrementSerials = false
+  ) {
+    const source = sourceRow();
+
+    if (!source) {
+      addRow();
+      return;
+    }
+
+    let data = rowData(source);
+
+    for (let i = 0; i < count; i++) {
+      const clone = {
+        ...data
+      };
+
+      if (incrementSerials) {
+        clone.serial_number = incrementSerial(
+          data.serial_number
+        );
+      } else {
+        clone.serial_number = "";
+      }
+
+      const row = addRow(
+        clone,
+        {
+          focusSerial: i === count - 1
+        }
+      );
+
+      data = rowData(row);
+    }
+  }
+
+
+  function clearMessages() {
+    errorBox.classList.add("d-none");
+    errorBox.textContent = "";
+
+    statusBox.classList.add("d-none");
+    statusBox.textContent = "";
+  }
+
+
+  function showError(message) {
+    statusBox.classList.add("d-none");
+    errorBox.textContent = message;
+    errorBox.classList.remove("d-none");
+  }
+
+
+  function showStatus(message) {
+    errorBox.classList.add("d-none");
+    statusBox.textContent = message;
+    statusBox.classList.remove("d-none");
+  }
+
+
+  function isRowEmpty(data) {
+    return !(
+      data.category_id
+      || data.brand
+      || data.model_number
+      || data.serial_number
+      || data.size_value
+      || data.unit_cost
+      || data.selling_price
+      || data.notes
+    );
+  }
+
+
+  function payloadRows() {
+    return [
+      ...body.querySelectorAll("tr")
+    ]
+      .map(rowData)
+      .filter(data => !isRowEmpty(data));
+  }
+
+
+  async function saveAll() {
+    clearMessages();
+
+    const rows = payloadRows();
+
+    if (!rows.length) {
+      showError(
+        "Add at least one appliance row."
+      );
+      return;
+    }
+
+    for (let i = 0; i < rows.length; i++) {
+      if (!rows[i].category_id) {
+        showError(
+          `Row ${i + 1}: Appliance is required.`
+        );
+        return;
+      }
+    }
+
+    btnSave.disabled = true;
+
+    showStatus(
+      `Saving ${rows.length} appliance row(s)...`
+    );
+
+    try {
+      const response = await fetch(
+        {{ url_for(
+          'appliance.receiving_add_lines_bulk',
+          receiving_id=receiving.id
+        )|tojson }},
+        {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json",
+            "Accept":"application/json"
+          },
+          body:JSON.stringify({
+            rows:rows
+          })
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        throw new Error(
+          result.error || "Unable to save rows."
+        );
+      }
+
+      showStatus(
+        `${result.created} appliance row(s) saved.`
+      );
+
+      window.location.reload();
+
+    } catch (error) {
+      showError(
+        error.message || String(error)
+      );
+
+      btnSave.disabled = false;
+    }
+  }
+
+
+  function pasteMatrixIntoGrid(
+    startInput,
+    text
+  ) {
+    const matrix = text
+      .replace(/\r/g, "")
+      .split("\n")
+      .filter(row => row.length > 0)
+      .map(row => row.split("\t"));
+
+    if (!matrix.length) {
+      return;
+    }
+
+    const fields = [
+      "category_id",
+      "brand",
+      "model_number",
+      "serial_number",
+      "size_value",
+      "size_unit",
+      "condition"
+    ];
+
+    if (canPricing) {
+      fields.push(
+        "unit_cost",
+        "selling_price"
+      );
+    }
+
+    fields.push("notes");
+
+    const startField =
+      startInput.dataset.field;
+
+    const startColumn = fields.indexOf(
+      startField
+    );
+
+    if (startColumn < 0) {
+      return;
+    }
+
+    let allRows = [
+      ...body.querySelectorAll("tr")
+    ];
+
+    let startRow = allRows.indexOf(
+      startInput.closest("tr")
+    );
+
+    while (
+      allRows.length
+      < startRow + matrix.length
+    ) {
+      const previous =
+        allRows.length
+          ? rowData(
+              allRows[allRows.length - 1]
+            )
+          : {};
+
+      addRow({
+        category_id:
+          previous.category_id || "",
+        brand:
+          previous.brand || "",
+        model_number:
+          previous.model_number || "",
+        size_value:
+          previous.size_value || "",
+        size_unit:
+          previous.size_unit || "",
+        condition:
+          previous.condition || "new"
+      });
+
+      allRows = [
+        ...body.querySelectorAll("tr")
+      ];
+    }
+
+    matrix.forEach(
+      (cells, rowOffset) => {
+        const row =
+          allRows[startRow + rowOffset];
+
+        cells.forEach(
+          (value, colOffset) => {
+            const field =
+              fields[
+                startColumn + colOffset
+              ];
+
+            if (!field) {
+              return;
+            }
+
+            const target = row.querySelector(
+              `[data-field="${field}"]`
+            );
+
+            if (!target) {
+              return;
+            }
+
+            if (field === "category_id") {
+              const raw = value.trim();
+
+              let category = categories.find(
+                item =>
+                  String(item.id) === raw
+              );
+
+              if (!category) {
+                category = categories.find(
+                  item =>
+                    item.name.toLowerCase()
+                    === raw.toLowerCase()
+                );
+              }
+
+              if (category) {
+                target.value = category.id;
+              }
+
+              return;
+            }
+
+            target.value = value.trim();
+          }
+        );
+      }
+    );
+
+    renumberRows();
+  }
+
+
+  body.addEventListener(
+    "paste",
+    event => {
+      const target = event.target;
+
+      if (
+        !target
+        || !target.dataset
+        || !target.dataset.field
+      ) {
+        return;
+      }
+
+      const text =
+        event.clipboardData
+        ?.getData("text/plain");
+
+      if (
+        !text
+        || (
+          !text.includes("\t")
+          && !text.includes("\n")
+        )
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+
+      pasteMatrixIntoGrid(
+        target,
+        text
+      );
+    }
+  );
+
+
+  body.addEventListener(
+    "keydown",
+    event => {
+      const target = event.target;
+
+      if (
+        event.key !== "Enter"
+        || target?.dataset?.field !== "serial_number"
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const currentRow =
+        target.closest("tr");
+
+      const data =
+        rowData(currentRow);
+
+      data.serial_number = "";
+
+      addRow(
+        data,
+        {
+          focusSerial:true
+        }
+      );
+    }
+  );
+
+
+  btnAdd.addEventListener(
+    "click",
+    () => {
+      const source = sourceRow();
+
+      if (!source) {
+        addRow(
+          {},
+          {
+            focusSerial:true
+          }
+        );
+        return;
+      }
+
+      const data = rowData(source);
+
+      addRow(
+        {
+          category_id:data.category_id,
+          brand:data.brand,
+          model_number:data.model_number,
+          size_value:data.size_value,
+          size_unit:data.size_unit,
+          condition:data.condition
+        },
+        {
+          focusSerial:true
+        }
+      );
+    }
+  );
+
+
+  btnDuplicate.addEventListener(
+    "click",
+    () => duplicateRows(1, false)
+  );
+
+  btnDuplicateSerial.addEventListener(
+    "click",
+    () => duplicateRows(1, true)
+  );
+
+  btnDuplicate5.addEventListener(
+    "click",
+    () => duplicateRows(5, false)
+  );
+
+  btnDuplicate10.addEventListener(
+    "click",
+    () => duplicateRows(10, false)
+  );
+
+  btnClear.addEventListener(
+    "click",
+    () => {
+      body.innerHTML = "";
+      lastFocusedRow = null;
+      addRow();
+      clearMessages();
+    }
+  );
+
+  btnSave.addEventListener(
+    "click",
+    saveAll
+  );
+
+  addRow();
+
+})();
+</script>
+
+{% endif %}
+
+</div>
+
+<script>
+document.addEventListener("input", function (event) {
+  const el = event.target;
+
+  if (
+    !el.matches(
+      '.appliance-receiving-page input[type="text"], ' +
+      '.appliance-receiving-page input:not([type]), ' +
+      '.appliance-receiving-page textarea'
+    )
+  ) {
+    return;
+  }
+
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+
+  el.value = el.value.toUpperCase();
+
+  if (
+    start !== null &&
+    end !== null &&
+    typeof el.setSelectionRange === "function"
+  ) {
+    el.setSelectionRange(start, end);
+  }
+});
+</script>
+
+{% endblock %}

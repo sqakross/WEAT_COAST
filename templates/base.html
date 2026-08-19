@@ -330,6 +330,45 @@
                  href="{{ url_for('inventory.receiving_list') }}">RECEIVING</a>
             </li>
 
+            <li class="nav-item dropdown">
+
+              <a class="nav-link dropdown-toggle{% if request.endpoint and request.endpoint.startswith('appliance.') %} active{% endif %}"
+                 href="#"
+                 id="appliancesDropdown"
+                 role="button"
+                 data-bs-toggle="dropdown"
+                 aria-expanded="false">
+                APPLIANCES
+              </a>
+
+              <ul class="dropdown-menu"
+                  aria-labelledby="appliancesDropdown">
+
+                <li>
+                  <a class="dropdown-item{% if request.endpoint == 'appliance.inventory_list' or request.endpoint == 'appliance.inventory_detail' %} active{% endif %}"
+                     href="{{ url_for('appliance.inventory_list') }}">
+                    INVENTORY
+                  </a>
+                </li>
+
+                <li>
+                  <a class="dropdown-item{% if request.endpoint and request.endpoint.startswith('appliance.receiving') and request.endpoint != 'appliance.receiving_missing_prices' %} active{% endif %}"
+                     href="{{ url_for('appliance.receiving_list') }}">
+                    RECEIVING
+                  </a>
+                </li>
+
+                <li>
+                  <a class="dropdown-item{% if request.endpoint == 'appliance.receiving_missing_prices' %} active{% endif %}"
+                     href="{{ url_for('appliance.receiving_missing_prices') }}">
+                    MISSING PRICES
+                  </a>
+                </li>
+
+              </ul>
+
+            </li>
+
           {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('supplier_returns.') %} active{% endif %}"

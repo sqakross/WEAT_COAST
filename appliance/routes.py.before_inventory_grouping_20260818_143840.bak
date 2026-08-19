@@ -1,0 +1,1040 @@
+﻿from __future__ import annotations
+
+from datetime import datetime
+
+from flask import (
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+    jsonify,
+)
+from flask_login import current_user, login_required
+from sqlalchemy import or_
+
+from extensions import db
+from models import (
+    ApplianceCategory,
+    ApplianceReceiving,
+    ApplianceReceivingLine,
+    ApplianceUnit,
+)
+from appliance import appliance_bp
+from services.access_control_service import AccessControlService
+from services.appliance_receiving_service import (
+    ApplianceAccessDenied,
+    ApplianceReceivingError,
+    ApplianceReceivingService,
+)
+
+
+def _parse_date(value: str | None):
+    value = (value or "").strip()
+
+    if not value:
+        return None
+
+    try:
+        return datetime.strptime(
+            value,
+            "%Y-%m-%d",
+        ).date()
+    except ValueError:
+        raise ApplianceReceivingError(
+            "Invalid date format."
+        )
+
+
+def _active_categories():
+    return (
+        ApplianceCategory.query
+        .filter(ApplianceCategory.is_active.is_(True))
+        .order_by(
+            ApplianceCategory.sort_order.asc(),
+            ApplianceCategory.name.asc(),
+        )
+        .all()
+    )
+
+
+def _warehouse_ids_for(permission_code: str):
+    return [
+        warehouse.id
+        for warehouse in AccessControlService.accessible_warehouses(
+            current_user
+        )
+        if AccessControlService.can(
+            current_user,
+            permission_code,
+            warehouse_id=warehouse.id,
+        )
+    ]
+
+
+def _form_line_kwargs():
+    return {
+        "category_id": int(
+            request.form.get("category_id") or 0
+        ),
+        "brand": request.form.get("brand"),
+        "model_number": request.form.get("model_number"),
+        "serial_number": request.form.get("serial_number"),
+        "description": request.form.get("description"),
+        "size_value": request.form.get("size_value"),
+        "size_unit": request.form.get("size_unit"),
+        "condition": (
+            request.form.get("condition")
+            or "new"
+        ),
+        "unit_cost": request.form.get("unit_cost"),
+        "selling_price": request.form.get("selling_price"),
+        "notes": request.form.get("notes"),
+    }
+
+
+# ============================================================
+# Receiving list
+# ============================================================
+
+@appliance_bp.get("/receiving")
+@login_required
+def receiving_list():
+    allowed_ids = _warehouse_ids_for(
+        "appliance.view"
+    )
+
+    q = (request.args.get("q") or "").strip()
+    status = (
+        request.args.get("status") or ""
+    ).strip().lower()
+
+    if not allowed_ids:
+        receivings = []
+    else:
+        query = (
+            ApplianceReceiving.query
+            .filter(
+                ApplianceReceiving.warehouse_id.in_(
+                    allowed_ids
+                )
+            )
+        )
+
+        if status in {"draft", "posted"}:
+            query = query.filter(
+                ApplianceReceiving.status == status
+            )
+
+        if q:
+            like = f"%{q}%"
+
+            query = query.filter(
+                or_(
+                    ApplianceReceiving.receiving_number.ilike(
+                        like
+                    ),
+                    ApplianceReceiving.supplier_name.ilike(
+                        like
+                    ),
+                    ApplianceReceiving.invoice_number.ilike(
+                        like
+                    ),
+                )
+            )
+
+        receivings = (
+            query
+            .order_by(
+                ApplianceReceiving.received_at.desc(),
+                ApplianceReceiving.id.desc(),
+            )
+            .limit(300)
+            .all()
+        )
+
+    missing_ids = set()
+
+    pricing_warehouse_ids = _warehouse_ids_for(
+        "appliance.pricing"
+    )
+
+    if pricing_warehouse_ids:
+        missing_ids = {
+            row.id
+            for row in (
+                ApplianceReceiving.query
+                .join(
+                    ApplianceReceivingLine,
+                    ApplianceReceivingLine.receiving_id
+                    == ApplianceReceiving.id,
+                )
+                .filter(
+                    ApplianceReceiving.warehouse_id.in_(
+                        pricing_warehouse_ids
+                    ),
+                    ApplianceReceiving.status == "posted",
+                    ApplianceReceivingLine.unit_cost.is_(None),
+                )
+                .distinct()
+                .all()
+            )
+        }
+
+    can_receive = bool(
+        _warehouse_ids_for(
+            "appliance.receive"
+        )
+    )
+
+    return render_template(
+        "appliance_receiving_list.html",
+        receivings=receivings,
+        missing_ids=missing_ids,
+        missing_count=len(missing_ids),
+        q=q,
+        status=status,
+        can_receive=can_receive,
+        missing_only=False,
+    )
+
+
+# ============================================================
+# Missing Prices queue
+# ============================================================
+
+@appliance_bp.get("/receiving/missing-prices")
+@login_required
+def receiving_missing_prices():
+    receivings = (
+        ApplianceReceivingService
+        .list_missing_price_receivings(
+            actor=current_user,
+        )
+    )
+
+    missing_ids = {
+        row.id
+        for row in receivings
+    }
+
+    return render_template(
+        "appliance_receiving_list.html",
+        receivings=receivings,
+        missing_ids=missing_ids,
+        missing_count=len(missing_ids),
+        q="",
+        status="posted",
+        can_receive=bool(
+            _warehouse_ids_for(
+                "appliance.receive"
+            )
+        ),
+        missing_only=True,
+    )
+
+
+# ============================================================
+# New Receiving
+# ============================================================
+
+@appliance_bp.route(
+    "/receiving/new",
+    methods=["GET", "POST"],
+)
+@login_required
+def receiving_new():
+    warehouses = [
+        warehouse
+        for warehouse in AccessControlService.accessible_warehouses(
+            current_user
+        )
+        if AccessControlService.can(
+            current_user,
+            "appliance.receive",
+            warehouse_id=warehouse.id,
+        )
+    ]
+
+    if not warehouses:
+        flash(
+            "You do not have Appliance Receiving access.",
+            "danger",
+        )
+        return redirect(
+            url_for("appliance.receiving_list")
+        )
+
+    if request.method == "POST":
+        try:
+            warehouse_id = int(
+                request.form.get("warehouse_id") or 0
+            )
+
+            receiving = (
+                ApplianceReceivingService.create_draft(
+                    actor=current_user,
+                    warehouse_id=warehouse_id,
+                    supplier_name=request.form.get(
+                        "supplier_name"
+                    ),
+                    invoice_number=request.form.get(
+                        "invoice_number"
+                    ),
+                    invoice_date=_parse_date(
+                        request.form.get(
+                            "invoice_date"
+                        )
+                    ),
+                    notes=request.form.get("notes"),
+                )
+            )
+
+            flash(
+                f"Receiving "
+                f"{receiving.receiving_number} created.",
+                "success",
+            )
+
+            return redirect(
+                url_for(
+                    "appliance.receiving_detail",
+                    receiving_id=receiving.id,
+                )
+            )
+
+        except (
+            ApplianceReceivingError,
+            ValueError,
+        ) as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+
+    return render_template(
+        "appliance_receiving_form.html",
+        receiving=None,
+        warehouses=warehouses,
+        categories=_active_categories(),
+        can_receive=True,
+        can_post=False,
+        can_pricing=False,
+    )
+
+
+# ============================================================
+# Receiving detail / edit
+# ============================================================
+
+@appliance_bp.get(
+    "/receiving/<int:receiving_id>"
+)
+@login_required
+def receiving_detail(receiving_id):
+    try:
+        receiving = (
+            ApplianceReceivingService.get_receiving(
+                receiving_id=receiving_id,
+                actor=current_user,
+                permission_code="appliance.view",
+            )
+        )
+
+    except ApplianceReceivingError as exc:
+        flash(str(exc), "danger")
+        return redirect(
+            url_for("appliance.receiving_list")
+        )
+
+    warehouse_id = receiving.warehouse_id
+
+    can_receive = AccessControlService.can(
+        current_user,
+        "appliance.receive",
+        warehouse_id=warehouse_id,
+    )
+
+    can_post = AccessControlService.can(
+        current_user,
+        "appliance.post_receiving",
+        warehouse_id=warehouse_id,
+    )
+
+    can_pricing = AccessControlService.can(
+        current_user,
+        "appliance.pricing",
+        warehouse_id=warehouse_id,
+    )
+
+    warehouses = (
+        AccessControlService.accessible_warehouses(
+            current_user
+        )
+    )
+
+    return render_template(
+        "appliance_receiving_form.html",
+        receiving=receiving,
+        warehouses=warehouses,
+        categories=_active_categories(),
+        can_receive=can_receive,
+        can_post=can_post,
+        can_pricing=can_pricing,
+    )
+
+
+# ============================================================
+# Draft header
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/<int:receiving_id>/header"
+)
+@login_required
+def receiving_update_header(receiving_id):
+    try:
+        ApplianceReceivingService.update_draft_header(
+            receiving_id=receiving_id,
+            actor=current_user,
+            supplier_name=request.form.get(
+                "supplier_name"
+            ),
+            invoice_number=request.form.get(
+                "invoice_number"
+            ),
+            invoice_date=_parse_date(
+                request.form.get("invoice_date")
+            ),
+            notes=request.form.get("notes"),
+        )
+
+        flash(
+            "Receiving header saved.",
+            "success",
+        )
+
+    except ApplianceReceivingError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+
+    return redirect(
+        url_for(
+            "appliance.receiving_detail",
+            receiving_id=receiving_id,
+        )
+    )
+
+
+# ============================================================
+# Add physical appliance
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/<int:receiving_id>/lines/add"
+)
+@login_required
+def receiving_add_line(receiving_id):
+    try:
+        kwargs = _form_line_kwargs()
+
+        if not kwargs["category_id"]:
+            raise ApplianceReceivingError(
+                "Appliance category is required."
+            )
+
+        line = ApplianceReceivingService.add_line(
+            receiving_id=receiving_id,
+            actor=current_user,
+            **kwargs,
+        )
+
+        flash(
+            f"Unit line #{line.line_no} added.",
+            "success",
+        )
+
+    except (
+        ApplianceReceivingError,
+        ValueError,
+    ) as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+
+    return redirect(
+        url_for(
+            "appliance.receiving_detail",
+            receiving_id=receiving_id,
+        )
+    )
+
+
+# ============================================================
+# Bulk Add physical appliances
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/<int:receiving_id>/lines/bulk"
+)
+@login_required
+def receiving_add_lines_bulk(receiving_id):
+    """
+    Excel-like Batch Entry endpoint.
+
+    Entire payload is validated and committed atomically.
+    """
+
+    try:
+        payload = request.get_json(
+            silent=True
+        )
+
+        if not isinstance(payload, dict):
+            raise ApplianceReceivingError(
+                "Invalid request payload."
+            )
+
+        rows = payload.get("rows")
+
+        created = (
+            ApplianceReceivingService.add_lines_bulk(
+                receiving_id=receiving_id,
+                actor=current_user,
+                rows=rows,
+            )
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "created": len(created),
+                "line_ids": [
+                    line.id
+                    for line in created
+                ],
+            }
+        )
+
+    except ApplianceAccessDenied as exc:
+        db.session.rollback()
+
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+            }
+        ), 403
+
+    except (
+        ApplianceReceivingError,
+        ValueError,
+        TypeError,
+    ) as exc:
+        db.session.rollback()
+
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+            }
+        ), 400
+
+    except Exception:
+        db.session.rollback()
+        raise
+
+
+# ============================================================
+# Update Draft line
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/lines/<int:line_id>/update"
+)
+@login_required
+def receiving_update_line(line_id):
+    line = db.session.get(
+        ApplianceReceivingLine,
+        line_id,
+    )
+
+    if line is None:
+        flash(
+            "Receiving line not found.",
+            "danger",
+        )
+        return redirect(
+            url_for("appliance.receiving_list")
+        )
+
+    receiving_id = line.receiving_id
+
+    try:
+        kwargs = _form_line_kwargs()
+
+        if not kwargs["category_id"]:
+            raise ApplianceReceivingError(
+                "Appliance category is required."
+            )
+
+        ApplianceReceivingService.update_line(
+            line_id=line_id,
+            actor=current_user,
+            **kwargs,
+        )
+
+        flash(
+            f"Line #{line.line_no} saved.",
+            "success",
+        )
+
+    except (
+        ApplianceReceivingError,
+        ValueError,
+    ) as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+
+    return redirect(
+        url_for(
+            "appliance.receiving_detail",
+            receiving_id=receiving_id,
+        )
+    )
+
+
+# ============================================================
+# Delete Draft line
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/lines/<int:line_id>/delete"
+)
+@login_required
+def receiving_delete_line(line_id):
+    line = db.session.get(
+        ApplianceReceivingLine,
+        line_id,
+    )
+
+    if line is None:
+        flash(
+            "Receiving line not found.",
+            "danger",
+        )
+        return redirect(
+            url_for("appliance.receiving_list")
+        )
+
+    receiving_id = line.receiving_id
+
+    try:
+        ApplianceReceivingService.delete_line(
+            line_id=line_id,
+            actor=current_user,
+        )
+
+        flash(
+            "Appliance line deleted.",
+            "success",
+        )
+
+    except ApplianceReceivingError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+
+    return redirect(
+        url_for(
+            "appliance.receiving_detail",
+            receiving_id=receiving_id,
+        )
+    )
+
+
+# ============================================================
+# Post Receiving
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/<int:receiving_id>/post"
+)
+@login_required
+def receiving_post(receiving_id):
+    try:
+        receiving = (
+            ApplianceReceivingService.post_receiving(
+                receiving_id=receiving_id,
+                actor=current_user,
+            )
+        )
+
+        if receiving.missing_price_count:
+            flash(
+                f"{receiving.receiving_number} posted. "
+                f"{receiving.missing_price_count} "
+                f"unit(s) still need pricing.",
+                "warning",
+            )
+        else:
+            flash(
+                f"{receiving.receiving_number} posted.",
+                "success",
+            )
+
+    except ApplianceReceivingError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+
+    return redirect(
+        url_for(
+            "appliance.receiving_detail",
+            receiving_id=receiving_id,
+        )
+    )
+
+
+# ============================================================
+# Manager pricing after Posting
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/lines/<int:line_id>/price"
+)
+@login_required
+def receiving_price_line(line_id):
+    line = db.session.get(
+        ApplianceReceivingLine,
+        line_id,
+    )
+
+    if line is None:
+        flash(
+            "Receiving line not found.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.receiving_missing_prices"
+            )
+        )
+
+    receiving_id = line.receiving_id
+
+    try:
+        ApplianceReceivingService.update_posted_line_price(
+            line_id=line_id,
+            actor=current_user,
+            unit_cost=request.form.get("unit_cost"),
+            selling_price=request.form.get(
+                "selling_price"
+            ),
+        )
+
+        flash(
+            f"Price saved for line #{line.line_no}.",
+            "success",
+        )
+
+    except ApplianceReceivingError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+
+    return redirect(
+        url_for(
+            "appliance.receiving_detail",
+            receiving_id=receiving_id,
+        )
+    )
+
+
+# ============================================================
+# Appliance Inventory
+# ============================================================
+
+@appliance_bp.get("/inventory")
+@login_required
+def inventory_list():
+    allowed_warehouse_ids = _warehouse_ids_for(
+        "appliance.view"
+    )
+
+    if not allowed_warehouse_ids:
+        return render_template(
+            "appliance_inventory.html",
+            units=[],
+            warehouses=[],
+            categories=_active_categories(),
+            q="",
+            warehouse_id=None,
+            category_id=None,
+            status="available",
+            condition="",
+            can_pricing=False,
+            total_count=0,
+        )
+
+    # --------------------------------------------------------
+    # Filters
+    # --------------------------------------------------------
+
+    q = (
+        request.args.get("q")
+        or ""
+    ).strip()
+
+    status = (
+        request.args.get("status")
+        or "available"
+    ).strip().lower()
+
+    condition = (
+        request.args.get("condition")
+        or ""
+    ).strip().lower()
+
+    raw_warehouse_id = (
+        request.args.get("warehouse_id")
+        or ""
+    ).strip()
+
+    raw_category_id = (
+        request.args.get("category_id")
+        or ""
+    ).strip()
+
+    warehouse_id = None
+    category_id = None
+
+    try:
+        if raw_warehouse_id:
+            warehouse_id = int(
+                raw_warehouse_id
+            )
+    except (TypeError, ValueError):
+        warehouse_id = None
+
+    try:
+        if raw_category_id:
+            category_id = int(
+                raw_category_id
+            )
+    except (TypeError, ValueError):
+        category_id = None
+
+    # Never allow URL filter to escape user's warehouse access.
+    if (
+        warehouse_id is not None
+        and warehouse_id not in allowed_warehouse_ids
+    ):
+        warehouse_id = None
+
+    query = (
+        ApplianceUnit.query
+        .filter(
+            ApplianceUnit.warehouse_id.in_(
+                allowed_warehouse_ids
+            )
+        )
+    )
+
+    # --------------------------------------------------------
+    # Search
+    # --------------------------------------------------------
+
+    if q:
+        like = f"%{q}%"
+
+        query = query.filter(
+            or_(
+                ApplianceUnit.inventory_number.ilike(
+                    like
+                ),
+                ApplianceUnit.serial_number.ilike(
+                    like
+                ),
+                ApplianceUnit.model_number.ilike(
+                    like
+                ),
+                ApplianceUnit.brand.ilike(
+                    like
+                ),
+                ApplianceUnit.description.ilike(
+                    like
+                ),
+            )
+        )
+
+    # --------------------------------------------------------
+    # Warehouse
+    # --------------------------------------------------------
+
+    if warehouse_id is not None:
+        query = query.filter(
+            ApplianceUnit.warehouse_id
+            == warehouse_id
+        )
+
+    # --------------------------------------------------------
+    # Category
+    # --------------------------------------------------------
+
+    if category_id is not None:
+        query = query.filter(
+            ApplianceUnit.category_id
+            == category_id
+        )
+
+    # --------------------------------------------------------
+    # Status
+    # --------------------------------------------------------
+
+    valid_statuses = {
+        "available",
+        "reserved",
+        "issued",
+        "transferred",
+        "vendor_return",
+        "sold",
+        "written_off",
+    }
+
+    if status in valid_statuses:
+        query = query.filter(
+            ApplianceUnit.status == status
+        )
+    elif status == "all":
+        pass
+    else:
+        status = "available"
+
+        query = query.filter(
+            ApplianceUnit.status == "available"
+        )
+
+    # --------------------------------------------------------
+    # Condition
+    # --------------------------------------------------------
+
+    valid_conditions = {
+        "new",
+        "used",
+        "open_box",
+        "damaged",
+    }
+
+    if condition in valid_conditions:
+        query = query.filter(
+            ApplianceUnit.condition == condition
+        )
+    else:
+        condition = ""
+
+    # --------------------------------------------------------
+    # Count before limit
+    # --------------------------------------------------------
+
+    total_count = query.count()
+
+    units = (
+        query
+        .order_by(
+            ApplianceUnit.inventory_number.desc()
+        )
+        .limit(500)
+        .all()
+    )
+
+    # --------------------------------------------------------
+    # Warehouses shown in filter must also respect access.
+    # --------------------------------------------------------
+
+    warehouses = [
+        warehouse
+        for warehouse in (
+            AccessControlService
+            .accessible_warehouses(
+                current_user
+            )
+        )
+        if warehouse.id
+        in allowed_warehouse_ids
+    ]
+
+    # Financial columns are shown only when user has pricing
+    # permission for at least one warehouse currently visible.
+    pricing_scope_ids = (
+        [warehouse_id]
+        if warehouse_id is not None
+        else allowed_warehouse_ids
+    )
+
+    can_pricing = any(
+        AccessControlService.can(
+            current_user,
+            "appliance.pricing",
+            warehouse_id=wid,
+        )
+        for wid in pricing_scope_ids
+    )
+
+    return render_template(
+        "appliance_inventory.html",
+        units=units,
+        warehouses=warehouses,
+        categories=_active_categories(),
+        q=q,
+        warehouse_id=warehouse_id,
+        category_id=category_id,
+        status=status,
+        condition=condition,
+        can_pricing=can_pricing,
+        total_count=total_count,
+    )
+
+
+# ============================================================
+# Appliance Inventory Detail
+# ============================================================
+
+@appliance_bp.get(
+    "/inventory/<int:unit_id>"
+)
+@login_required
+def inventory_detail(unit_id):
+    unit = db.session.get(
+        ApplianceUnit,
+        unit_id,
+    )
+
+    if unit is None:
+        flash(
+            "Appliance unit not found.",
+            "danger",
+        )
+        return redirect(
+            url_for("appliance.inventory_list")
+        )
+
+    if not AccessControlService.can(
+        current_user,
+        "appliance.view",
+        warehouse_id=unit.warehouse_id,
+    ):
+        flash(
+            "Access denied.",
+            "danger",
+        )
+        return redirect(
+            url_for("appliance.inventory_list")
+        )
+
+    can_pricing = AccessControlService.can(
+        current_user,
+        "appliance.pricing",
+        warehouse_id=unit.warehouse_id,
+    )
+
+    return render_template(
+        "appliance_inventory_detail.html",
+        unit=unit,
+        can_pricing=can_pricing,
+    )
+
