@@ -266,6 +266,17 @@
   margin: 0;
 }
 
+.action-trace {
+  background-color: #0f766e;
+  color: #fff;
+  border: none;
+}
+
+.action-trace:hover {
+  background-color: #115e59;
+  color: #fff;
+}
+
 .action-btn {
   font-size: clamp(10px, 0.68vw, 12px);
   font-weight: 600;
@@ -439,6 +450,13 @@
 
           <td class="action-cell">
             <div class="row-actions">
+              <a
+                  href="{{ url_for('inventory.stock_trace', part_id=part.id) }}"
+                  class="action-btn action-trace"
+                  title="Show receiving source and stock history"
+                >
+                  Trace
+                </a>
               <form method="GET" action="{{ url_for('inventory.issue_part') }}" onsubmit="return confirm('Issue part {{ part.part_number }}?');">
                 <input type="hidden" name="part" value="{{ part.part_number }}">
                 <button type="submit" class="action-btn action-issue">Issue</button>

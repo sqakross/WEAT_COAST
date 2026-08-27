@@ -751,12 +751,6 @@
 
   const canPricing = {{ 'true' if can_pricing else 'false' }};
 
-  const serialCheckUrl = {{ url_for(
-    'appliance.receiving_check_serial'
-  )|tojson }};
-
-  const currentReceivingId = {{ receiving.id }};
-
   const autocompleteUrl = {{ url_for(
     'appliance.receiving_autocomplete'
   )|tojson }};
@@ -1517,227 +1511,6 @@
   }
 
 
-  function normalizeSerial(value) {
-    return String(
-      value
-      || ""
-    )
-      .trim()
-      .toUpperCase();
-  }
-
-
-  function clearSerialError(input) {
-
-    input.classList.remove(
-      "is-invalid"
-    );
-
-    input.removeAttribute(
-      "title"
-    );
-  }
-
-
-  function setSerialError(
-    input,
-    message
-  ) {
-
-    input.classList.add(
-      "is-invalid"
-    );
-
-    input.setAttribute(
-      "title",
-      message
-    );
-
-    showError(
-      message
-    );
-
-    input.focus();
-
-    input.select();
-  }
-
-
-  function duplicateSerialInBatch(
-    input,
-    serial
-  ) {
-
-    const normalized =
-      normalizeSerial(serial);
-
-    if (!normalized) {
-      return null;
-    }
-
-    const serialInputs = [
-      ...body.querySelectorAll(
-        '[data-field="serial_number"]'
-      )
-    ];
-
-    for (
-      const other
-      of serialInputs
-    ) {
-
-      if (other === input) {
-        continue;
-      }
-
-      if (
-        normalizeSerial(
-          other.value
-        ) === normalized
-      ) {
-        return other;
-      }
-    }
-
-    return null;
-  }
-
-
-  async function validateScannedSerial(
-    input
-  ) {
-
-    clearMessages();
-    clearSerialError(input);
-
-    const serial =
-      normalizeSerial(
-        input.value
-      );
-
-    input.value =
-      serial;
-
-    if (!serial) {
-
-      setSerialError(
-        input,
-        "SERIAL IS REQUIRED BEFORE MOVING TO THE NEXT ROW."
-      );
-
-      return false;
-    }
-
-    // --------------------------------------------------------
-    // NOTE:
-    // '#' cannot be used for JS comments.
-    // Serial is checked locally before server validation.
-    // --------------------------------------------------------
-
-    const duplicateInput =
-      duplicateSerialInBatch(
-        input,
-        serial
-      );
-
-    if (duplicateInput) {
-
-      const rows = [
-        ...body.querySelectorAll("tr")
-      ];
-
-      const duplicateRow =
-        rows.indexOf(
-          duplicateInput.closest("tr")
-        ) + 1;
-
-      setSerialError(
-        input,
-        `SERIAL ${serial} IS ALREADY ENTERED IN BATCH ROW ${duplicateRow}.`
-      );
-
-      return false;
-    }
-
-    try {
-
-      const params =
-        new URLSearchParams();
-
-      params.set(
-        "serial",
-        serial
-      );
-
-      params.set(
-        "receiving_id",
-        String(
-          currentReceivingId
-        )
-      );
-
-      const response =
-        await fetch(
-          `${serialCheckUrl}?${params.toString()}`,
-          {
-            headers: {
-              "Accept":
-                "application/json"
-            }
-          }
-        );
-
-      const result =
-        await response.json();
-
-      if (
-        !response.ok
-        || !result.ok
-      ) {
-
-        setSerialError(
-          input,
-          result.error
-          || "UNABLE TO VERIFY SERIAL."
-        );
-
-        return false;
-      }
-
-      if (result.exists) {
-
-        setSerialError(
-          input,
-          result.message
-          || `SERIAL ${serial} ALREADY EXISTS.`
-        );
-
-        return false;
-      }
-
-      clearSerialError(
-        input
-      );
-
-      return true;
-
-    } catch (error) {
-
-      console.error(
-        "Serial validation error:",
-        error
-      );
-
-      setSerialError(
-        input,
-        "UNABLE TO VERIFY SERIAL. CHECK CONNECTION AND TRY AGAIN."
-      );
-
-      return false;
-    }
-  }
-
-
   async function saveAll() {
     clearMessages();
 
@@ -1985,106 +1758,33 @@
 
 
   body.addEventListener(
-    "input",
-    event => {
-
-      if (
-        event.target?.dataset?.field
-        === "serial_number"
-      ) {
-
-        clearSerialError(
-          event.target
-        );
-      }
-    }
-  );
-
-
-  body.addEventListener(
     "keydown",
-    async event => {
-
-      const target =
-        event.target;
+    event => {
+      const target = event.target;
 
       if (
         event.key !== "Enter"
-        || target?.dataset?.field
-           !== "serial_number"
+        || target?.dataset?.field !== "serial_number"
       ) {
         return;
       }
-
-      /*
-        Barcode scanners normally send:
-
-            SERIAL VALUE
-            ENTER
-
-        Stop normal form behavior and validate the
-        scanned Serial before creating the next row.
-      */
 
       event.preventDefault();
-      event.stopPropagation();
 
-      if (
-        target.dataset.serialChecking
-        === "1"
-      ) {
-        return;
-      }
+      const currentRow =
+        target.closest("tr");
 
-      target.dataset.serialChecking =
-        "1";
+      const data =
+        rowData(currentRow);
 
-      try {
+      data.serial_number = "";
 
-        const valid =
-          await validateScannedSerial(
-            target
-          );
-
-        if (!valid) {
-          return;
+      addRow(
+        data,
+        {
+          focusSerial:true
         }
-
-        const currentRow =
-          target.closest("tr");
-
-        if (!currentRow) {
-          return;
-        }
-
-        const data =
-          rowData(
-            currentRow
-          );
-
-        /*
-          Preserve all current appliance information.
-          Only Serial is cleared for the next physical unit.
-        */
-
-        data.serial_number = "";
-
-        addRow(
-          data,
-          {
-            focusSerial:true
-          }
-        );
-
-        showStatus(
-          "SERIAL ACCEPTED — READY FOR NEXT SCAN."
-        );
-
-      } finally {
-
-        target.dataset.serialChecking =
-          "0";
-      }
+      );
     }
   );
 

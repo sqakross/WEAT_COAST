@@ -1,12 +1,12 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 
 <style>
   .appliance-inventory-page {
-    width:calc(100vw - 40px);
-    max-width:1800px;
-    margin-left:50%;
-    transform:translateX(-50%);
+    width: calc(100vw - 40px);
+    max-width: 1700px;
+    margin-left: 50%;
+    transform: translateX(-50%);
   }
 
   .inventory-toolbar {
@@ -26,20 +26,24 @@
   }
 
   .inventory-table {
-    font-size:.76rem;
+    font-size:.78rem;
   }
 
-  .inventory-table th,
+  .inventory-table th {
+    white-space:nowrap;
+    vertical-align:middle;
+  }
+
   .inventory-table td {
     vertical-align:middle;
     white-space:nowrap;
   }
 
-  .inventory-table tbody tr.unit-row {
+  .inventory-table tbody tr {
     cursor:pointer;
   }
 
-  .inventory-table tbody tr.unit-row:hover {
+  .inventory-table tbody tr:hover {
     background:#f4f8fc;
   }
 
@@ -53,7 +57,7 @@
   }
 
   .status-badge {
-    font-size:.66rem;
+    font-size:.67rem;
     letter-spacing:.03em;
   }
 
@@ -74,6 +78,7 @@
     border-top:2px solid #adb5bd !important;
     border-bottom:1px solid #adb5bd !important;
     font-size:.76rem;
+    letter-spacing:.02em;
     font-weight:700;
   }
 
@@ -85,38 +90,6 @@
   .inventory-category-count {
     font-size:.65rem;
   }
-
-  .inventory-stat {
-    display:inline-flex;
-    align-items:center;
-    gap:.3rem;
-    padding:.28rem .5rem;
-    border:1px solid #d7dce2;
-    border-radius:.35rem;
-    background:#fff;
-    font-size:.72rem;
-  }
-
-  .inventory-stat strong {
-    font-size:.8rem;
-  }
-
-  .issue-link {
-    font-weight:700;
-    text-decoration:none;
-  }
-
-  .issue-link:hover {
-    text-decoration:underline;
-  }
-
-  .issued-row {
-    background:#f5f9ff;
-  }
-
-  .wo-value {
-    font-weight:700;
-  }
 </style>
 
 
@@ -125,45 +98,20 @@
   <div class="inventory-toolbar">
 
     <div>
-
       <h3 class="mb-1">
         Appliance Inventory
       </h3>
 
       <div class="small text-muted">
-        Complete serialized appliance registry
+        Serialized appliance stock
       </div>
-
     </div>
 
+    <div class="d-flex gap-2 align-items-center">
 
-    <div class="d-flex flex-wrap gap-2 align-items-center">
-
-      <span class="inventory-stat">
-        TOTAL
-        <strong>
-          {{ total_count }}
-        </strong>
+      <span class="badge bg-secondary">
+        {{ total_count }} UNIT{% if total_count != 1 %}S{% endif %}
       </span>
-
-      <span class="inventory-stat">
-        AVAILABLE
-        <strong class="text-success">
-          {{ available_count }}
-        </strong>
-      </span>
-
-      <span class="inventory-stat">
-        ISSUED
-        <strong class="text-primary">
-          {{ issued_count }}
-        </strong>
-      </span>
-
-      <a class="btn btn-primary btn-sm"
-         href="{{ url_for('appliance.issue_new') }}">
-        + New Issue
-      </a>
 
       <a class="btn btn-outline-primary btn-sm"
          href="{{ url_for('appliance.receiving_list') }}">
@@ -175,10 +123,6 @@
   </div>
 
 
-  <!-- ======================================================
-       FILTERS
-       ====================================================== -->
-
   <div class="inventory-card mb-3">
 
     <div class="p-3">
@@ -187,7 +131,6 @@
             action="{{ url_for('appliance.inventory_list') }}">
 
         <div class="row g-2">
-
 
           <div class="col-xl-4 col-md-6">
 
@@ -199,7 +142,7 @@
                    class="form-control form-control-sm"
                    name="q"
                    value="{{ q or '' }}"
-                   placeholder="AP # / SERIAL / MODEL / BRAND / AIS # / TECH / W/O">
+                   placeholder="AP # / SERIAL / MODEL / BRAND">
 
           </div>
 
@@ -267,24 +210,19 @@
             <select class="form-select form-select-sm"
                     name="status">
 
-              <option value="all"
-                      {% if status == 'all' %}selected{% endif %}>
-                ALL
-              </option>
-
               <option value="available"
                       {% if status == 'available' %}selected{% endif %}>
                 AVAILABLE
               </option>
 
-              <option value="issued"
-                      {% if status == 'issued' %}selected{% endif %}>
-                ISSUED
-              </option>
-
               <option value="reserved"
                       {% if status == 'reserved' %}selected{% endif %}>
                 RESERVED
+              </option>
+
+              <option value="issued"
+                      {% if status == 'issued' %}selected{% endif %}>
+                ISSUED
               </option>
 
               <option value="transferred"
@@ -305,6 +243,11 @@
               <option value="written_off"
                       {% if status == 'written_off' %}selected{% endif %}>
                 WRITTEN OFF
+              </option>
+
+              <option value="all"
+                      {% if status == 'all' %}selected{% endif %}>
+                ALL
               </option>
 
             </select>
@@ -373,10 +316,6 @@
   </div>
 
 
-  <!-- ======================================================
-       REGISTRY
-       ====================================================== -->
-
   <div class="inventory-card">
 
     <div class="table-responsive">
@@ -386,12 +325,13 @@
         <thead class="table-light">
 
           <tr>
-
             <th>AP #</th>
             <th>APPLIANCE</th>
             <th>BRAND</th>
             <th>MODEL</th>
             <th>SERIAL</th>
+            <th>SIZE</th>
+            <th>CONDITION</th>
             <th>WAREHOUSE</th>
 
             {% if can_pricing %}
@@ -400,14 +340,7 @@
             {% endif %}
 
             <th>STATUS</th>
-
-            <th>ISSUE #</th>
-            <th>TECHNICIAN</th>
-            <th>W/O #</th>
-            <th>ISSUED</th>
-
             <th>RECEIVED</th>
-
           </tr>
 
         </thead>
@@ -417,23 +350,18 @@
 
           {% for group in grouped_units %}
 
-            {% set column_count = 14 if can_pricing else 12 %}
-
             <tr class="inventory-category-row">
 
-              <td colspan="{{ column_count }}"
+              <td colspan="{{ 12 if can_pricing else 10 }}"
                   class="py-2">
 
                 <span class="inventory-category-name">
-                  {{ group.category.name|upper if group.category else 'OTHER' }}
+                  {{ group.category.name|upper }}
                 </span>
 
                 <span class="badge bg-dark ms-2 inventory-category-count">
-
                   {{ group.units|length }}
-
                   UNIT{% if group.units|length != 1 %}S{% endif %}
-
                 </span>
 
               </td>
@@ -443,46 +371,44 @@
 
             {% for unit in group.units %}
 
-              {% set issued = issue_info.get(unit.id) %}
-
-              <tr class="unit-row {% if unit.status == 'issued' %}issued-row{% endif %}"
-                  onclick="window.location.href='{{ url_for('appliance.inventory_detail', unit_id=unit.id) }}'">
-
+              <tr onclick="window.location.href='{{ url_for('appliance.inventory_detail', unit_id=unit.id) }}'">
 
                 <td>
-
                   <span class="inventory-number">
                     {{ unit.inventory_number }}
                   </span>
-
                 </td>
 
-
-                <td class="fw-semibold">
-
+                <td>
                   {{ unit.category.name|upper if unit.category else '—' }}
-
                 </td>
 
-
                 <td>
-                  {{ (unit.brand or '—')|upper }}
+                  {{ unit.brand or '—' }}
                 </td>
 
-
                 <td>
-                  {{ (unit.model_number or '—')|upper }}
+                  {{ unit.model_number or '—' }}
                 </td>
 
-
                 <td>
-
                   <span class="serial-number">
-                    {{ (unit.serial_number or '—')|upper }}
+                    {{ unit.serial_number or '—' }}
                   </span>
-
                 </td>
 
+                <td>
+                  {% if unit.size_value is not none %}
+                    {{ unit.size_value|round(1) }}
+                    {{ unit.size_unit or '' }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+
+                <td>
+                  {{ (unit.condition or '')|replace('_', ' ')|upper }}
+                </td>
 
                 <td>
                   {{ unit.warehouse.code|upper if unit.warehouse else '—' }}
@@ -531,16 +457,16 @@
                       AVAILABLE
                     </span>
 
-                  {% elif unit.status == 'issued' %}
-
-                    <span class="badge bg-primary status-badge">
-                      ISSUED
-                    </span>
-
                   {% elif unit.status == 'reserved' %}
 
                     <span class="badge bg-warning text-dark status-badge">
                       RESERVED
+                    </span>
+
+                  {% elif unit.status == 'issued' %}
+
+                    <span class="badge bg-primary status-badge">
+                      ISSUED
                     </span>
 
                   {% elif unit.status == 'sold' %}
@@ -558,98 +484,13 @@
                   {% else %}
 
                     <span class="badge bg-secondary status-badge">
-
                       {{ (unit.status or '')|replace('_', ' ')|upper }}
-
                     </span>
 
                   {% endif %}
 
                 </td>
 
-
-                <!-- ISSUE # -->
-
-                <td>
-
-                  {% if issued %}
-
-                    <a class="issue-link"
-                       href="{{ url_for(
-                           'appliance.issue_detail',
-                           issue_id=issued.issue_id
-                       ) }}"
-                       onclick="event.stopPropagation();">
-
-                      {{ issued.issue_number }}
-
-                    </a>
-
-                  {% else %}
-
-                    —
-
-                  {% endif %}
-
-                </td>
-
-
-                <!-- TECHNICIAN -->
-
-                <td>
-
-                  {% if issued and issued.technician %}
-
-                    {{ issued.technician|upper }}
-
-                  {% else %}
-
-                    —
-
-                  {% endif %}
-
-                </td>
-
-
-                <!-- W/O -->
-
-                <td class="wo-value">
-
-                  {% if issued and issued.work_order_number %}
-
-                    {{ issued.work_order_number|upper }}
-
-                  {% elif unit.current_work_order_number %}
-
-                    {{ unit.current_work_order_number|upper }}
-
-                  {% else %}
-
-                    —
-
-                  {% endif %}
-
-                </td>
-
-
-                <!-- ISSUED DATE -->
-
-                <td class="text-muted small">
-
-                  {% if issued and issued.issued_at %}
-
-                    {{ issued.issued_at.strftime('%m/%d/%Y') }}
-
-                  {% else %}
-
-                    —
-
-                  {% endif %}
-
-                </td>
-
-
-                <!-- RECEIVED -->
 
                 <td class="text-muted small">
 
@@ -669,12 +510,11 @@
 
             {% endfor %}
 
-
           {% else %}
 
             <tr>
 
-              <td colspan="{{ 14 if can_pricing else 12 }}"
+              <td colspan="{{ 12 if can_pricing else 10 }}"
                   class="text-center text-muted py-5">
 
                 No appliance units found.
@@ -694,12 +534,12 @@
   </div>
 
 
-  {% if units|length >= 500 %}
+  {% if total_count > 500 %}
 
     <div class="alert alert-warning mt-3 py-2">
 
-      Showing first 500 matching units.
-      Use Search or filters to narrow the registry.
+      Showing first 500 units.
+      Use Search or filters to narrow the results.
 
     </div>
 

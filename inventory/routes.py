@@ -3101,83 +3101,93 @@ def _issue_records_bulk(
             normalized_inv = inv_ref.lstrip("0") or "0"
             invoice_key = (pn, normalized_inv)
 
-            received_qty = (
-                db.session.query(
-                    func.coalesce(
-                        func.sum(
-                            GoodsReceiptLine.quantity
-                        ),
-                        0,
-                    )
-                )
-                .join(
-                    GoodsReceipt,
-                    GoodsReceiptLine.goods_receipt_id
-                    == GoodsReceipt.id,
-                )
-                .filter(
-                    func.upper(
-                        GoodsReceiptLine.part_number
-                    )
-                    == pn
-                )
-                .filter(
-                    func.upper(
-                        GoodsReceipt.status
-                    )
-                    == "POSTED"
-                )
-                .filter(
-                    func.ltrim(
-                        func.upper(
-                            func.coalesce(
-                                GoodsReceipt.invoice_number,
-                                "",
-                            )
-                        ),
-                        "0",
-                    )
-                    == normalized_inv
-                )
-                .scalar()
-                or 0
-            )
+            # IMPORTANT:
+            # Do not allow SELECT statements below to autoflush
+            # IssuedPartRecord rows created earlier in THIS SAME
+            # bulk issue operation.
+            #
+            # Historical issued qty is read from DB.
+            # Current-operation qty is tracked separately in
+            # invoice_reserved_qty.
+            with db.session.no_autoflush:
 
-            already_issued_qty = (
-                db.session.query(
-                    func.coalesce(
-                        func.sum(
-                            IssuedPartRecord.quantity
-                        ),
-                        0,
+                received_qty = (
+                    db.session.query(
+                        func.coalesce(
+                            func.sum(
+                                GoodsReceiptLine.quantity
+                            ),
+                            0,
+                        )
                     )
-                )
-                .join(
-                    Part,
-                    Part.id
-                    == IssuedPartRecord.part_id,
-                )
-                .filter(
-                    func.upper(
-                        Part.part_number
+                    .join(
+                        GoodsReceipt,
+                        GoodsReceiptLine.goods_receipt_id
+                        == GoodsReceipt.id,
                     )
-                    == pn
-                )
-                .filter(
-                    func.ltrim(
+                    .filter(
                         func.upper(
-                            func.coalesce(
-                                IssuedPartRecord.inv_ref,
-                                "",
-                            )
-                        ),
-                        "0",
+                            GoodsReceiptLine.part_number
+                        )
+                        == pn
                     )
-                    == normalized_inv
+                    .filter(
+                        func.upper(
+                            GoodsReceipt.status
+                        )
+                        == "POSTED"
+                    )
+                    .filter(
+                        func.ltrim(
+                            func.upper(
+                                func.coalesce(
+                                    GoodsReceipt.invoice_number,
+                                    "",
+                                )
+                            ),
+                            "0",
+                        )
+                        == normalized_inv
+                    )
+                    .scalar()
+                    or 0
                 )
-                .scalar()
-                or 0
-            )
+
+                already_issued_qty = (
+                    db.session.query(
+                        func.coalesce(
+                            func.sum(
+                                IssuedPartRecord.quantity
+                            ),
+                            0,
+                        )
+                    )
+                    .join(
+                        Part,
+                        Part.id
+                        == IssuedPartRecord.part_id,
+                    )
+                    .filter(
+                        func.upper(
+                            Part.part_number
+                        )
+                        == pn
+                    )
+                    .filter(
+                        func.ltrim(
+                            func.upper(
+                                func.coalesce(
+                                    IssuedPartRecord.inv_ref,
+                                    "",
+                                )
+                            ),
+                            "0",
+                        )
+                        == normalized_inv
+                    )
+                    .scalar()
+                    or 0
+                )
 
             reserved_now = (
                 invoice_reserved_qty.get(
@@ -4156,6 +4166,240 @@ def unconsume_invoice():
     db.session.commit()
     flash(f"Unconsumed {changed} row(s).", "success")
     return redirect(url_for("inventory.reports_grouped"))
+
+@inventory_bp.get("/stock_trace/<int:part_id>", endpoint="stock_trace")
+@login_required
+def stock_trace(part_id):
+    from sqlalchemy import func, case
+    from models import Part, GoodsReceipt, GoodsReceiptLine, IssuedPartRecord
+
+    part = db.session.get(Part, part_id)
+    if not part:
+        flash("Part not found.", "warning")
+        return redirect(url_for("inventory.dashboard"))
+
+    pn = (part.part_number or "").strip().upper()
+
+    # ============================================================
+    # 1. ALL POSTED RECEIVING LINES FOR THIS PART
+    # ============================================================
+    receipt_lines = (
+        db.session.query(GoodsReceiptLine, GoodsReceipt)
+        .join(
+            GoodsReceipt,
+            GoodsReceipt.id == GoodsReceiptLine.goods_receipt_id,
+        )
+        .filter(
+            func.upper(func.trim(GoodsReceiptLine.part_number)) == pn,
+            GoodsReceipt.status == "posted",
+        )
+        .order_by(
+            GoodsReceipt.invoice_date.asc().nullsfirst(),
+            GoodsReceipt.id.asc(),
+            GoodsReceiptLine.id.asc(),
+        )
+        .all()
+    )
+
+    receipt_line_ids = [
+        line.id
+        for line, receipt in receipt_lines
+        if line.id is not None
+    ]
+
+    # ============================================================
+    # 2. LINKED ISSUES / RETURNS BY RECEIPT LINE
+    #
+    # positive quantity = issued out
+    # negative quantity = returned
+    # ============================================================
+    movement_by_line = {}
+
+    if receipt_line_ids:
+        movement_rows = (
+            db.session.query(
+                IssuedPartRecord.source_receipt_line_id,
+
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                IssuedPartRecord.quantity > 0,
+                                IssuedPartRecord.quantity,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("issued_qty"),
+
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                IssuedPartRecord.quantity < 0,
+                                -IssuedPartRecord.quantity,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("returned_qty"),
+            )
+            .filter(
+                IssuedPartRecord.part_id == part.id,
+                IssuedPartRecord.source_receipt_line_id.in_(
+                    receipt_line_ids
+                ),
+            )
+            .group_by(
+                IssuedPartRecord.source_receipt_line_id
+            )
+            .all()
+        )
+
+        for row in movement_rows:
+            movement_by_line[row.source_receipt_line_id] = {
+                "issued_qty": int(row.issued_qty or 0),
+                "returned_qty": int(row.returned_qty or 0),
+            }
+
+    # ============================================================
+    # 3. BUILD LOT TRACE
+    # ============================================================
+    lots = []
+
+    total_received = 0
+    total_linked_issued = 0
+    total_linked_returned = 0
+    total_lot_remaining = 0
+
+    for line, receipt in receipt_lines:
+        received_qty = int(
+            getattr(line, "applied_qty", 0)
+            or getattr(line, "quantity", 0)
+            or 0
+        )
+
+        mv = movement_by_line.get(
+            line.id,
+            {
+                "issued_qty": 0,
+                "returned_qty": 0,
+            },
+        )
+
+        issued_qty = int(mv["issued_qty"])
+        returned_qty = int(mv["returned_qty"])
+
+        remaining_qty = (
+            received_qty
+            - issued_qty
+            + returned_qty
+        )
+
+        total_received += received_qty
+        total_linked_issued += issued_qty
+        total_linked_returned += returned_qty
+        total_lot_remaining += remaining_qty
+
+        lots.append(
+            {
+                "line_id": line.id,
+                "receipt_id": receipt.id,
+                "invoice_number": (
+                    receipt.invoice_number or ""
+                ).strip(),
+                "invoice_date": receipt.invoice_date,
+                "supplier": (
+                    receipt.supplier_name or ""
+                ).strip(),
+                "location": (
+                    line.location or ""
+                ).strip(),
+                "received_qty": received_qty,
+                "issued_qty": issued_qty,
+                "returned_qty": returned_qty,
+                "remaining_qty": remaining_qty,
+                "unit_cost": float(
+                    getattr(
+                        line,
+                        "actual_unit_cost",
+                        None,
+                    )
+                    or getattr(
+                        line,
+                        "unit_cost",
+                        0.0,
+                    )
+                    or 0.0
+                ),
+            }
+        )
+
+    # ============================================================
+    # 4. UNLINKED MOVEMENTS
+    #
+    # This is important because STOCK issue currently may have
+    # source_receipt_line_id = NULL.
+    # ============================================================
+    unlinked_records = (
+        IssuedPartRecord.query
+        .filter(
+            IssuedPartRecord.part_id == part.id,
+            IssuedPartRecord.source_receipt_line_id.is_(None),
+        )
+        .order_by(
+            IssuedPartRecord.issue_date.desc(),
+            IssuedPartRecord.id.desc(),
+        )
+        .all()
+    )
+
+    unlinked_issued_qty = 0
+    unlinked_returned_qty = 0
+
+    for rec in unlinked_records:
+        qty = int(rec.quantity or 0)
+
+        if qty > 0:
+            unlinked_issued_qty += qty
+        elif qty < 0:
+            unlinked_returned_qty += abs(qty)
+
+    # ============================================================
+    # 5. DIFFERENCE / AUDIT STATUS
+    # ============================================================
+    actual_on_hand = int(part.quantity or 0)
+
+    calculated_from_all_known_movements = (
+        total_received
+        - total_linked_issued
+        - unlinked_issued_qty
+        + total_linked_returned
+        + unlinked_returned_qty
+    )
+
+    difference = (
+        actual_on_hand
+        - calculated_from_all_known_movements
+    )
+
+    return render_template(
+        "stock_trace.html",
+        part=part,
+        lots=lots,
+        unlinked_records=unlinked_records,
+        total_received=total_received,
+        total_linked_issued=total_linked_issued,
+        total_linked_returned=total_linked_returned,
+        total_lot_remaining=total_lot_remaining,
+        unlinked_issued_qty=unlinked_issued_qty,
+        unlinked_returned_qty=unlinked_returned_qty,
+        calculated_on_hand=calculated_from_all_known_movements,
+        actual_on_hand=actual_on_hand,
+        difference=difference,
+    )
 
 @inventory_bp.post("/reports/consume/log/<int:log_id>/undo")
 @login_required

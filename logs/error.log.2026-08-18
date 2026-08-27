@@ -1,0 +1,22 @@
+2026-08-18 13:52:24 | CRITICAL | app:142 | UNHANDLED EXCEPTION
+Traceback (most recent call last):
+  File "<console>", line 8, in <module>
+AttributeError: 'ApplianceReceivingLine' object has no attribute 'sell_price'. Did you mean: 'selling_price'?
+2026-08-18 13:52:26 | CRITICAL | app:142 | UNHANDLED EXCEPTION
+Traceback (most recent call last):
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\sql\base.py", line 2193, in _entity_namespace_key
+    return getattr(ns, key)  # type: ignore
+AttributeError: type object 'ApplianceUnit' has no attribute 'receiving_id'. Did you mean: 'receiving_line'?
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<console>", line 1, in <module>
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\orm\query.py", line 1992, in filter_by
+    _entity_namespace_key(from_entity, key) == value
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\.venv\Lib\site-packages\sqlalchemy\sql\base.py", line 2195, in _entity_namespace_key
+    raise exc.InvalidRequestError(
+        'Entity namespace for "%s" has no property "%s"' % (entity, key)
+    ) from err
+sqlalchemy.exc.InvalidRequestError: Entity namespace for "appliance_unit" has no property "receiving_id"

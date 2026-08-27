@@ -1,4 +1,573 @@
-{% extends "base.html" %}
+﻿from pathlib import Path
+from datetime import datetime
+
+routes_path = Path("appliance/routes.py")
+template_path = Path("templates/appliance_inventory.html")
+
+if not routes_path.exists():
+    raise SystemExit("ERROR: appliance/routes.py not found")
+
+if not template_path.exists():
+    raise SystemExit("ERROR: appliance_inventory.html not found")
+
+stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+routes_backup = Path(
+    f"appliance/routes.py.before_inventory_history_{stamp}.bak"
+)
+
+template_backup = Path(
+    f"templates/appliance_inventory.html.before_history_{stamp}.bak"
+)
+
+routes_text = routes_path.read_text(encoding="utf-8")
+template_text = template_path.read_text(encoding="utf-8")
+
+routes_backup.write_text(routes_text, encoding="utf-8")
+template_backup.write_text(template_text, encoding="utf-8")
+
+
+# ============================================================
+# REPLACE inventory_list()
+# ============================================================
+
+start_marker = '''@appliance_bp.get("/inventory")
+@login_required
+def inventory_list():'''
+
+start = routes_text.find(start_marker)
+
+if start < 0:
+    raise SystemExit(
+        "ERROR: inventory_list() not found"
+    )
+
+# Find next route after inventory_list.
+next_route = routes_text.find(
+    "\n@appliance_bp.",
+    start + len(start_marker),
+)
+
+if next_route < 0:
+    raise SystemExit(
+        "ERROR: could not find route after inventory_list()"
+    )
+
+
+new_inventory_route = r'''@appliance_bp.get("/inventory")
+@login_required
+def inventory_list():
+
+    from collections import defaultdict
+
+    from sqlalchemy import func, or_
+
+    from models import (
+        ApplianceCategory,
+        ApplianceIssue,
+        ApplianceIssueLine,
+        ApplianceUnit,
+        Warehouse,
+    )
+
+    allowed_warehouse_ids = _warehouse_ids_for(
+        "appliance.view"
+    )
+
+    # --------------------------------------------------------
+    # Filters
+    # --------------------------------------------------------
+
+    q = (
+        request.args.get("q")
+        or ""
+    ).strip()
+
+    # IMPORTANT:
+    # Inventory is a complete physical registry.
+    # Default is ALL, not AVAILABLE.
+    status = (
+        request.args.get("status")
+        or "all"
+    ).strip().lower()
+
+    condition = (
+        request.args.get("condition")
+        or ""
+    ).strip().lower()
+
+    raw_warehouse_id = (
+        request.args.get("warehouse_id")
+        or ""
+    ).strip()
+
+    raw_category_id = (
+        request.args.get("category_id")
+        or ""
+    ).strip()
+
+    warehouse_id = None
+    category_id = None
+
+    try:
+        if raw_warehouse_id:
+            warehouse_id = int(
+                raw_warehouse_id
+            )
+    except (TypeError, ValueError):
+        warehouse_id = None
+
+    try:
+        if raw_category_id:
+            category_id = int(
+                raw_category_id
+            )
+    except (TypeError, ValueError):
+        category_id = None
+
+    if (
+        warehouse_id is not None
+        and warehouse_id not in allowed_warehouse_ids
+    ):
+        warehouse_id = None
+
+    # --------------------------------------------------------
+    # Empty access
+    # --------------------------------------------------------
+
+    if not allowed_warehouse_ids:
+
+        return render_template(
+            "appliance_inventory.html",
+            units=[],
+            grouped_units=[],
+            warehouses=[],
+            categories=_active_categories(),
+            q=q,
+            warehouse_id=None,
+            category_id=None,
+            status="all",
+            condition=condition,
+            can_pricing=False,
+            total_count=0,
+            available_count=0,
+            issued_count=0,
+            issue_info={},
+        )
+
+    # --------------------------------------------------------
+    # Base registry query
+    # --------------------------------------------------------
+
+    query = (
+        ApplianceUnit.query
+        .filter(
+            ApplianceUnit.warehouse_id.in_(
+                allowed_warehouse_ids
+            )
+        )
+    )
+
+    if warehouse_id is not None:
+        query = query.filter(
+            ApplianceUnit.warehouse_id
+            == warehouse_id
+        )
+
+    if category_id is not None:
+        query = query.filter(
+            ApplianceUnit.category_id
+            == category_id
+        )
+
+    if condition:
+        query = query.filter(
+            ApplianceUnit.condition
+            == condition
+        )
+
+    if (
+        status
+        and status != "all"
+    ):
+        query = query.filter(
+            ApplianceUnit.status
+            == status
+        )
+
+    # --------------------------------------------------------
+    # Search
+    #
+    # Physical fields + warehouse Issue history.
+    # --------------------------------------------------------
+
+    if q:
+
+        like = f"%{q}%"
+
+        issue_unit_ids = (
+            db.session.query(
+                ApplianceIssueLine.appliance_unit_id
+            )
+            .join(
+                ApplianceIssue,
+                ApplianceIssue.id
+                == ApplianceIssueLine.issue_id,
+            )
+            .filter(
+                or_(
+                    ApplianceIssue.issue_number.ilike(
+                        like
+                    ),
+                    ApplianceIssue.work_order_number.ilike(
+                        like
+                    ),
+                )
+            )
+        )
+
+        # Technician username needs User.
+        from models import User
+
+        issue_unit_ids_by_tech = (
+            db.session.query(
+                ApplianceIssueLine.appliance_unit_id
+            )
+            .join(
+                ApplianceIssue,
+                ApplianceIssue.id
+                == ApplianceIssueLine.issue_id,
+            )
+            .outerjoin(
+                User,
+                User.id
+                == ApplianceIssue.technician_id,
+            )
+            .filter(
+                User.username.ilike(
+                    like
+                )
+            )
+        )
+
+        query = query.filter(
+            or_(
+                ApplianceUnit.inventory_number.ilike(
+                    like
+                ),
+                ApplianceUnit.serial_number.ilike(
+                    like
+                ),
+                ApplianceUnit.model_number.ilike(
+                    like
+                ),
+                ApplianceUnit.brand.ilike(
+                    like
+                ),
+                ApplianceUnit.description.ilike(
+                    like
+                ),
+                ApplianceUnit.current_work_order_number.ilike(
+                    like
+                ),
+                ApplianceUnit.id.in_(
+                    issue_unit_ids
+                ),
+                ApplianceUnit.id.in_(
+                    issue_unit_ids_by_tech
+                ),
+            )
+        )
+
+    # --------------------------------------------------------
+    # Counts across complete accessible registry.
+    #
+    # Counts intentionally ignore Status filter so user always
+    # knows total / available / issued inventory.
+    # Warehouse/category/condition filters are respected.
+    # --------------------------------------------------------
+
+    count_query = (
+        db.session.query(
+            ApplianceUnit.status,
+            func.count(
+                ApplianceUnit.id
+            ),
+        )
+        .filter(
+            ApplianceUnit.warehouse_id.in_(
+                allowed_warehouse_ids
+            )
+        )
+    )
+
+    if warehouse_id is not None:
+        count_query = count_query.filter(
+            ApplianceUnit.warehouse_id
+            == warehouse_id
+        )
+
+    if category_id is not None:
+        count_query = count_query.filter(
+            ApplianceUnit.category_id
+            == category_id
+        )
+
+    if condition:
+        count_query = count_query.filter(
+            ApplianceUnit.condition
+            == condition
+        )
+
+    count_rows = (
+        count_query
+        .group_by(
+            ApplianceUnit.status
+        )
+        .all()
+    )
+
+    status_counts = {
+        (row[0] or "").lower():
+            int(row[1] or 0)
+        for row in count_rows
+    }
+
+    registry_total_count = sum(
+        status_counts.values()
+    )
+
+    available_count = status_counts.get(
+        "available",
+        0,
+    )
+
+    issued_count = status_counts.get(
+        "issued",
+        0,
+    )
+
+    # --------------------------------------------------------
+    # Load visible rows
+    # --------------------------------------------------------
+
+    units = (
+        query
+        .order_by(
+            ApplianceUnit.category_id.asc(),
+            ApplianceUnit.brand.asc(),
+            ApplianceUnit.model_number.asc(),
+            ApplianceUnit.inventory_number.asc(),
+        )
+        .limit(500)
+        .all()
+    )
+
+    visible_unit_ids = [
+        unit.id
+        for unit in units
+    ]
+
+    # --------------------------------------------------------
+    # Latest Issue info for each physical unit
+    #
+    # We do NOT store this directly on ApplianceUnit because
+    # Issue/Movement history is authoritative.
+    # --------------------------------------------------------
+
+    issue_info = {}
+
+    if visible_unit_ids:
+
+        issue_rows = (
+            db.session.query(
+                ApplianceIssueLine,
+                ApplianceIssue,
+            )
+            .join(
+                ApplianceIssue,
+                ApplianceIssue.id
+                == ApplianceIssueLine.issue_id,
+            )
+            .filter(
+                ApplianceIssueLine.appliance_unit_id.in_(
+                    visible_unit_ids
+                )
+            )
+            .order_by(
+                ApplianceIssueLine.appliance_unit_id.asc(),
+                ApplianceIssue.issued_at.desc(),
+                ApplianceIssue.id.desc(),
+            )
+            .all()
+        )
+
+        for line, issue in issue_rows:
+
+            unit_id = int(
+                line.appliance_unit_id
+            )
+
+            # First row is newest because of ORDER BY.
+            if unit_id in issue_info:
+                continue
+
+            issue_info[unit_id] = {
+                "issue_id":
+                    issue.id,
+
+                "issue_number":
+                    issue.issue_number,
+
+                "technician":
+                    (
+                        issue.technician.username
+                        if issue.technician
+                        else ""
+                    ),
+
+                "work_order_number":
+                    (
+                        line.current_work_order_number
+                        or issue.work_order_number
+                        or ""
+                    ),
+
+                "issued_at":
+                    issue.issued_at_local,
+            }
+
+    # --------------------------------------------------------
+    # Group visible units by category.
+    # Keep existing UI grouping.
+    # --------------------------------------------------------
+
+    grouped_map = defaultdict(list)
+
+    for unit in units:
+
+        grouped_map[
+            unit.category_id
+        ].append(
+            unit
+        )
+
+    grouped_units = []
+
+    categories_by_id = {
+        category.id: category
+        for category in _active_categories()
+    }
+
+    for category_id_key, rows in grouped_map.items():
+
+        category = categories_by_id.get(
+            category_id_key
+        )
+
+        if category is None and rows:
+            category = rows[0].category
+
+        grouped_units.append(
+            {
+                "category": category,
+                "units": rows,
+            }
+        )
+
+    grouped_units.sort(
+        key=lambda group: (
+            (
+                group["category"].sort_order
+                if group["category"] is not None
+                else 999999
+            ),
+            (
+                group["category"].name
+                if group["category"] is not None
+                else ""
+            ),
+        )
+    )
+
+    # --------------------------------------------------------
+    # Visible warehouses
+    # --------------------------------------------------------
+
+    warehouses = (
+        Warehouse.query
+        .filter(
+            Warehouse.id.in_(
+                allowed_warehouse_ids
+            ),
+            Warehouse.is_active.is_(True),
+        )
+        .order_by(
+            Warehouse.code.asc()
+        )
+        .all()
+    )
+
+    # --------------------------------------------------------
+    # Pricing permission
+    # --------------------------------------------------------
+
+    can_pricing = any(
+        AccessControlService.can(
+            current_user,
+            "appliance.pricing",
+            warehouse_id=warehouse_id_value,
+        )
+        for warehouse_id_value
+        in allowed_warehouse_ids
+    )
+
+    return render_template(
+        "appliance_inventory.html",
+
+        units=units,
+        grouped_units=grouped_units,
+
+        warehouses=warehouses,
+        categories=_active_categories(),
+
+        q=q,
+        warehouse_id=warehouse_id,
+        category_id=category_id,
+        status=status,
+        condition=condition,
+
+        can_pricing=can_pricing,
+
+        # total_count = complete filtered registry,
+        # NOT only currently visible status.
+        total_count=registry_total_count,
+        available_count=available_count,
+        issued_count=issued_count,
+
+        issue_info=issue_info,
+    )
+
+
+'''
+
+routes_text = (
+    routes_text[:start]
+    + new_inventory_route
+    + routes_text[next_route:]
+)
+
+routes_path.write_text(
+    routes_text,
+    encoding="utf-8",
+)
+
+
+# ============================================================
+# FULL TEMPLATE REPLACEMENT
+# ============================================================
+
+new_template = r'''{% extends "base.html" %}
 {% block content %}
 
 <style>
@@ -708,3 +1277,31 @@
 </div>
 
 {% endblock %}
+'''
+
+template_path.write_text(
+    new_template,
+    encoding="utf-8",
+)
+
+
+print("=" * 70)
+print("APPLIANCE INVENTORY HISTORY PATCH")
+print("=" * 70)
+print("OK: appliance/routes.py updated")
+print("OK: appliance_inventory.html replaced")
+print()
+print("Default status: ALL")
+print("Added:")
+print("  TOTAL / AVAILABLE / ISSUED counters")
+print("  ISSUE #")
+print("  TECHNICIAN")
+print("  W/O #")
+print("  ISSUED DATE")
+print("  AIS hyperlink")
+print("  AIS / TECH / W/O search")
+print()
+print("Backups:")
+print(" ", routes_backup)
+print(" ", template_backup)
+print("=" * 70)

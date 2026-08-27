@@ -3595,14 +3595,6 @@ class ApplianceUnit(db.Model):
         index=True,
     )
 
-    # Warehouse-side W/O reference.
-    # Independent from the main WorkOrder module.
-    current_work_order_number = db.Column(
-        db.String(120),
-        nullable=True,
-        index=True,
-    )
-
     notes = db.Column(
         db.Text,
         nullable=True,
@@ -3787,14 +3779,6 @@ class ApplianceIssue(db.Model):
         index=True,
     )
 
-    # Warehouse W/O number entered manually by warehouse staff.
-    # This is the authoritative W/O reference for Appliance Issue.
-    work_order_number = db.Column(
-        db.String(120),
-        nullable=False,
-        index=True,
-    )
-
     # Document status.
     #
     # issued = normal posted warehouse issue
@@ -3896,6 +3880,17 @@ class ApplianceIssue(db.Model):
 
         return ""
 
+    @property
+    def work_order_number(self) -> str:
+        if self.work_order is None:
+            return ""
+
+        return (
+            self.work_order.canonical_job
+            or self.work_order.job_numbers
+            or ""
+        )
+
     def __repr__(self):
         return (
             f"<ApplianceIssue id={self.id} "
@@ -3983,12 +3978,6 @@ class ApplianceIssueLine(db.Model):
             "work_orders.id",
             ondelete="SET NULL",
         ),
-        nullable=True,
-        index=True,
-    )
-
-    current_work_order_number = db.Column(
-        db.String(120),
         nullable=True,
         index=True,
     )
@@ -4112,6 +4101,17 @@ class ApplianceIssueLine(db.Model):
     @property
     def updated_at_local(self):
         return utc_to_local(self.updated_at)
+
+    @property
+    def current_work_order_number(self) -> str:
+        if self.current_work_order is None:
+            return ""
+
+        return (
+            self.current_work_order.canonical_job
+            or self.current_work_order.job_numbers
+            or ""
+        )
 
     def __repr__(self):
         return (
@@ -4246,18 +4246,6 @@ class ApplianceMovement(db.Model):
             "work_orders.id",
             ondelete="SET NULL",
         ),
-        nullable=True,
-        index=True,
-    )
-
-    from_work_order_number = db.Column(
-        db.String(120),
-        nullable=True,
-        index=True,
-    )
-
-    to_work_order_number = db.Column(
-        db.String(120),
         nullable=True,
         index=True,
     )

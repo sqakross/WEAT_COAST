@@ -1,0 +1,483 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<style>
+.stock-trace-wrap {
+    max-width: 1450px;
+    margin: 30px auto;
+    padding: 0 20px;
+}
+
+.trace-card {
+    background: #fff;
+    border: 1px solid #dfe3e8;
+    border-radius: 10px;
+    margin-bottom: 18px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.05);
+    overflow: hidden;
+}
+
+.trace-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 18px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.trace-title {
+    margin: 0;
+    font-size: 21px;
+}
+
+.trace-subtitle {
+    font-size: 13px;
+    color: #667085;
+    margin-top: 5px;
+}
+
+.trace-back {
+    display: inline-block;
+    padding: 8px 14px;
+    border-radius: 6px;
+    background: #e5e7eb;
+    color: #111827;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(130px, 1fr));
+    gap: 10px;
+    padding: 16px;
+}
+
+.summary-box {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.summary-label {
+    font-size: 11px;
+    color: #667085;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+}
+
+.summary-value {
+    font-size: 21px;
+    font-weight: 700;
+}
+
+.summary-ok {
+    background: #ecfdf3;
+}
+
+.summary-warning {
+    background: #fff7ed;
+}
+
+.summary-danger {
+    background: #fef2f2;
+}
+
+.trace-table-wrap {
+    overflow-x: auto;
+}
+
+.trace-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.trace-table th {
+    background: #f7f8fa;
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #dfe3e8;
+    white-space: nowrap;
+}
+
+.trace-table td {
+    padding: 10px;
+    border-bottom: 1px solid #edf0f2;
+    vertical-align: middle;
+}
+
+.qty-positive {
+    font-weight: 700;
+    color: #067647;
+}
+
+.qty-zero {
+    color: #98a2b3;
+}
+
+.qty-warning {
+    font-weight: 700;
+    color: #b54708;
+}
+
+.invoice-link {
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.invoice-link:hover {
+    text-decoration: underline;
+}
+
+.badge-linked {
+    display: inline-block;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #ecfdf3;
+    color: #067647;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.badge-unlinked {
+    display: inline-block;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #fff7ed;
+    color: #b54708;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.audit-message {
+    padding: 14px 18px;
+    font-size: 13px;
+}
+
+.audit-ok {
+    background: #ecfdf3;
+    color: #067647;
+}
+
+.audit-warning {
+    background: #fff7ed;
+    color: #92400e;
+}
+
+.section-title {
+    padding: 14px 18px 8px 18px;
+    margin: 0;
+    font-size: 16px;
+}
+
+@media (max-width: 900px) {
+    .summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+</style>
+
+
+<div class="stock-trace-wrap">
+
+    <div class="trace-card">
+
+        <div class="trace-header">
+            <div>
+                <h2 class="trace-title">
+                    Stock Trace — {{ part.part_number }}
+                </h2>
+
+                <div class="trace-subtitle">
+                    {{ part.name or '' }}
+                    &nbsp; | &nbsp;
+                    Location: {{ part.location or '—' }}
+                </div>
+            </div>
+
+            <a
+                class="trace-back"
+                href="{{ url_for('inventory.dashboard', search=part.part_number) }}"
+            >
+                ← Back
+            </a>
+        </div>
+
+
+        <div class="summary-grid">
+
+            <div class="summary-box">
+                <div class="summary-label">
+                    Current Inventory
+                </div>
+                <div class="summary-value">
+                    {{ actual_on_hand }}
+                </div>
+            </div>
+
+            <div class="summary-box">
+                <div class="summary-label">
+                    Total Received
+                </div>
+                <div class="summary-value">
+                    {{ total_received }}
+                </div>
+            </div>
+
+            <div class="summary-box">
+                <div class="summary-label">
+                    Linked Issued
+                </div>
+                <div class="summary-value">
+                    {{ total_linked_issued }}
+                </div>
+            </div>
+
+            <div class="summary-box">
+                <div class="summary-label">
+                    Unlinked Issued
+                </div>
+                <div class="summary-value">
+                    {{ unlinked_issued_qty }}
+                </div>
+            </div>
+
+            <div class="summary-box
+                {% if difference == 0 %}
+                    summary-ok
+                {% else %}
+                    summary-danger
+                {% endif %}
+            ">
+                <div class="summary-label">
+                    Audit Difference
+                </div>
+
+                <div class="summary-value">
+                    {{ difference }}
+                </div>
+            </div>
+
+        </div>
+
+
+        {% if difference == 0 %}
+            <div class="audit-message audit-ok">
+                ✓ Current inventory matches known receiving and issue history.
+            </div>
+        {% else %}
+            <div class="audit-message audit-warning">
+                ⚠ Inventory difference detected.
+                Current inventory is {{ actual_on_hand }},
+                while known movements calculate to {{ calculated_on_hand }}.
+                Difference: {{ difference }}.
+            </div>
+        {% endif %}
+
+    </div>
+
+
+    <div class="trace-card">
+
+        <h3 class="section-title">
+            Receiving Lots
+        </h3>
+
+        <div class="trace-table-wrap">
+            <table class="trace-table">
+
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Receiving INV</th>
+                        <th>Supplier</th>
+                        <th>Location</th>
+                        <th>Received</th>
+                        <th>Linked Issued</th>
+                        <th>Linked Returned</th>
+                        <th>Lot Balance</th>
+                        <th>Unit Cost</th>
+                        <th>Trace</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                {% for lot in lots %}
+                    <tr>
+
+                        <td>
+                            {{ lot.invoice_date.strftime('%m/%d/%Y')
+                               if lot.invoice_date else '—' }}
+                        </td>
+
+                        <td>
+                            <a
+                                class="invoice-link"
+                                target="_blank"
+                                href="{{ url_for(
+                                    'inventory.receiving_detail',
+                                    batch_id=lot.receipt_id
+                                ) }}"
+                            >
+                                {{ lot.invoice_number or ('Receiving #' ~ lot.receipt_id) }}
+                            </a>
+                        </td>
+
+                        <td>
+                            {{ lot.supplier or '—' }}
+                        </td>
+
+                        <td>
+                            {{ lot.location or '—' }}
+                        </td>
+
+                        <td>
+                            {{ lot.received_qty }}
+                        </td>
+
+                        <td>
+                            {{ lot.issued_qty }}
+                        </td>
+
+                        <td>
+                            {{ lot.returned_qty }}
+                        </td>
+
+                        <td>
+                            {% if lot.remaining_qty > 0 %}
+                                <span class="qty-positive">
+                                    {{ lot.remaining_qty }}
+                                </span>
+                            {% elif lot.remaining_qty == 0 %}
+                                <span class="qty-zero">
+                                    0
+                                </span>
+                            {% else %}
+                                <span class="qty-warning">
+                                    {{ lot.remaining_qty }}
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            ${{ '%.2f'|format(lot.unit_cost) }}
+                        </td>
+
+                        <td>
+                            <span class="badge-linked">
+                                LOT
+                            </span>
+                        </td>
+
+                    </tr>
+                {% else %}
+
+                    <tr>
+                        <td colspan="10">
+                            No posted receiving lines found for this part.
+                        </td>
+                    </tr>
+
+                {% endfor %}
+
+                </tbody>
+
+            </table>
+        </div>
+
+    </div>
+
+
+    {% if unlinked_records %}
+
+    <div class="trace-card">
+
+        <h3 class="section-title">
+            ⚠ Unlinked / Historical Stock Movements
+        </h3>
+
+        <div class="audit-message audit-warning">
+            These records changed inventory but are not tied to a specific
+            receiving line. They cannot be safely assigned to a particular
+            supplier invoice automatically.
+        </div>
+
+        <div class="trace-table-wrap">
+            <table class="trace-table">
+
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Qty</th>
+                        <th>Issued To</th>
+                        <th>Job / Reference</th>
+                        <th>INV Ref</th>
+                        <th>Inventory Invoice</th>
+                        <th>Location</th>
+                        <th>Cost Source</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                {% for rec in unlinked_records %}
+                    <tr>
+
+                        <td>
+                            {{ rec.issue_date.strftime('%m/%d/%Y %I:%M %p')
+                               if rec.issue_date else '—' }}
+                        </td>
+
+                        <td>
+                            {% if rec.quantity > 0 %}
+                                -{{ rec.quantity }}
+                            {% else %}
+                                +{{ rec.quantity|abs }}
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {{ rec.issued_to or '—' }}
+                        </td>
+
+                        <td>
+                            {{ rec.reference_job or '—' }}
+                        </td>
+
+                        <td>
+                            {{ rec.inv_ref or 'STOCK' }}
+                        </td>
+
+                        <td>
+                            {{ rec.invoice_number or '—' }}
+                        </td>
+
+                        <td>
+                            {{ rec.location or '—' }}
+                        </td>
+
+                        <td>
+                            <span class="badge-unlinked">
+                                {{ rec.cost_source or 'UNLINKED' }}
+                            </span>
+                        </td>
+
+                    </tr>
+                {% endfor %}
+
+                </tbody>
+
+            </table>
+        </div>
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+{% endblock %}

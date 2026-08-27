@@ -51,6 +51,11 @@ ALEMBIC_MANAGED_TABLES = {
     "appliance_receiving",
     "appliance_receiving_line",
     "appliance_unit",
+
+    # Appliance Issue / Movement
+    "appliance_issue",
+    "appliance_issue_line",
+    "appliance_movement",
 }
 
 

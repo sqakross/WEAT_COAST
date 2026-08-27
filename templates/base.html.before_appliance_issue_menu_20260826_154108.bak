@@ -359,21 +359,6 @@
                 </li>
 
                 <li>
-                  <hr class="dropdown-divider">
-                </li>
-
-                <li>
-                  <a class="dropdown-item fw-semibold{% if request.endpoint and request.endpoint.startswith('appliance.issue') %} active{% endif %}"
-                     href="{{ url_for('appliance.issue_new') }}">
-                    NEW APPLIANCE ISSUE
-                  </a>
-                </li>
-
-                <li>
-                  <hr class="dropdown-divider">
-                </li>
-
-                <li>
                   <a class="dropdown-item{% if request.endpoint == 'appliance.receiving_missing_prices' %} active{% endif %}"
                      href="{{ url_for('appliance.receiving_missing_prices') }}">
                     MISSING PRICES
