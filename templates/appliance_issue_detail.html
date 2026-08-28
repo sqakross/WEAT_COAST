@@ -71,6 +71,37 @@
     font-weight:600;
   }
 
+  .appliance-line-status {
+    margin-top:.35rem;
+    font-size:.72rem;
+  }
+
+  .appliance-line-actions {
+    display:flex;
+    flex-wrap:wrap;
+    gap:.35rem;
+    margin-top:.45rem;
+  }
+
+  .print-only {
+    display:none;
+  }
+
+  @media print {
+
+    .screen-only {
+      display:none !important;
+    }
+
+    .print-only {
+      display:block !important;
+    }
+    .appliance-line-actions,
+    .appliance-line-status {
+      display:none !important;
+    }
+  }
+
   @media print {
 
     body {
@@ -123,6 +154,22 @@
     }
   }
 </style>
+
+
+{% set ais_counts = namespace(
+  issued=0,
+  returned=0
+) %}
+
+{% for count_line in issue.lines %}
+
+  {% if count_line.status == 'issued' %}
+    {% set ais_counts.issued = ais_counts.issued + 1 %}
+  {% elif count_line.status == 'returned' %}
+    {% set ais_counts.returned = ais_counts.returned + 1 %}
+  {% endif %}
+
+{% endfor %}
 
 
 <div class="issue-slip-page">
@@ -270,12 +317,43 @@
 
       <div class="col-6 col-md-4">
 
-        <div class="slip-label">
-          Units
+        <div class="screen-only">
+
+          <div class="slip-label">
+            Original Units
+          </div>
+
+          <div class="slip-value">
+            {{ issue.appliance_count }}
+          </div>
+
+          <div class="mt-2">
+
+            <span class="badge bg-primary">
+              CURRENTLY ISSUED:
+              {{ ais_counts.issued }}
+            </span>
+
+            <span class="badge bg-success ms-1">
+              RETURNED:
+              {{ ais_counts.returned }}
+            </span>
+
+          </div>
+
         </div>
 
-        <div class="slip-value">
-          {{ issue.appliance_count }}
+
+        <div class="print-only">
+
+          <div class="slip-label">
+            Units
+          </div>
+
+          <div class="slip-value">
+            {{ ais_counts.issued }}
+          </div>
+
         </div>
 
       </div>
@@ -283,7 +361,78 @@
     </div>
 
 
-    <div class="mb-4">
+    <!-- ==================================================
+         PRINT ACTIVE APPLIANCES ONLY
+         Returned/removed historical lines are not printed.
+         ================================================== -->
+
+    <div class="mb-4 print-only">
+
+      {% set print_rows = namespace(number=0) %}
+
+      {% for line in issue.lines %}
+
+        {% if line.status == 'issued' %}
+
+          {% set print_rows.number = print_rows.number + 1 %}
+
+          <div class="appliance-line">
+
+            <div class="d-flex align-items-start gap-3">
+
+              <div class="appliance-line-number">
+                {{ print_rows.number }}
+              </div>
+
+              <div class="flex-grow-1">
+
+                <div class="appliance-line-type">
+                  {{ (line.appliance_type_snapshot or '—')|upper }}
+                </div>
+
+                <div class="appliance-line-details">
+
+                  <span>
+                    {{ (line.brand_snapshot or '—')|upper }}
+                  </span>
+
+                  <span class="mx-1">|</span>
+
+                  <span>
+                    {{ (line.model_number_snapshot or '—')|upper }}
+                  </span>
+
+                  <span class="mx-1">|</span>
+
+                  <span>
+                    {{ (line.serial_number_snapshot or '—')|upper }}
+                  </span>
+
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        {% endif %}
+
+      {% endfor %}
+
+
+      {% if ais_counts.issued == 0 %}
+
+        <div class="text-center fw-bold py-3">
+          NO APPLIANCES CURRENTLY ISSUED
+        </div>
+
+      {% endif %}
+
+    </div>
+
+
+    <div class="mb-4 screen-only">
 
       {% for line in issue.lines %}
 
@@ -318,6 +467,167 @@
                 <span>
                   {{ (line.serial_number_snapshot or '—')|upper }}
                 </span>
+
+              </div>
+
+
+              <div class="appliance-line-status no-print">
+
+                {% if line.status == 'issued' %}
+
+                  <span class="badge bg-primary">
+                    ISSUED
+                  </span>
+
+                {% elif line.status == 'returned' %}
+
+                  <span class="badge bg-success">
+                    RETURNED TO STOCK
+                  </span>
+
+                  {% if line.resolved_at %}
+                    <span class="text-muted ms-1">
+                      {{ line.resolved_at.strftime('%m/%d/%Y') }}
+                    </span>
+                  {% endif %}
+
+                {% elif line.status == 'replaced' %}
+
+                  <span class="badge bg-warning text-dark">
+                    REPLACED
+                  </span>
+
+                  {% if line.resolved_at %}
+                    <span class="text-muted ms-1">
+                      {{ line.resolved_at.strftime('%m/%d/%Y') }}
+                    </span>
+                  {% endif %}
+
+                {% else %}
+
+                  <span class="badge bg-secondary">
+                    {{ (line.status or '')|replace('_', ' ')|upper }}
+                  </span>
+
+                {% endif %}
+
+              </div>
+
+
+              <div class="appliance-line-actions no-print">
+
+                {% if line.status == 'issued' %}
+
+                  <form method="post"
+                        action="{{ url_for(
+                            'appliance.issue_return_line',
+                            line_id=line.id
+                        ) }}"
+                        onsubmit="return confirm(
+                          'RETURN THIS APPLIANCE TO STOCK?\n\n' +
+                          '{{ (line.appliance_type_snapshot or '')|upper }}\n' +
+                          '{{ (line.brand_snapshot or '')|upper }} | ' +
+                          '{{ (line.model_number_snapshot or '')|upper }} | ' +
+                          '{{ (line.serial_number_snapshot or '')|upper }}'
+                        );">
+
+                    <button type="submit"
+                            class="btn btn-sm btn-outline-success">
+                      RETURN TO STOCK
+                    </button>
+
+                  </form>
+
+
+                  {% set replacements = replacement_choices.get(line.id, []) %}
+
+                  {% if replacements %}
+
+                    <form method="post"
+                          action="{{ url_for(
+                              'appliance.issue_replace_line',
+                              line_id=line.id
+                          ) }}"
+                          class="d-flex flex-wrap gap-2 align-items-center"
+                          onsubmit="return confirm(
+                            'REPLACE THIS APPLIANCE?\n\n' +
+                            '{{ (line.appliance_type_snapshot or '')|upper }}\n' +
+                            '{{ (line.brand_snapshot or '')|upper }} | ' +
+                            '{{ (line.model_number_snapshot or '')|upper }} | ' +
+                            '{{ (line.serial_number_snapshot or '')|upper }}\n\n' +
+                            'The current appliance will return to AVAILABLE.'
+                          );">
+
+                      <select name="new_appliance_unit_id"
+                              class="form-select form-select-sm"
+                              style="width:auto; min-width:320px;"
+                              required>
+
+                        <option value="">
+                          SELECT REPLACEMENT
+                        </option>
+
+                        {% for replacement in replacements %}
+
+                          <option value="{{ replacement.id }}">
+
+                            {{ (replacement.brand or '—')|upper }}
+                            |
+                            {{ (replacement.model_number or '—')|upper }}
+                            |
+                            {{ (replacement.serial_number or '—')|upper }}
+
+                          </option>
+
+                        {% endfor %}
+
+                      </select>
+
+                      <button type="submit"
+                              class="btn btn-sm btn-outline-warning">
+                        REPLACE APPLIANCE
+                      </button>
+
+                    </form>
+
+                  {% else %}
+
+                    <button type="button"
+                            class="btn btn-sm btn-outline-secondary"
+                            disabled
+                            title="No available replacement of the same appliance type.">
+                      REPLACE APPLIANCE
+                    </button>
+
+                  {% endif %}
+
+                {% endif %}
+
+
+                {% if current_user.role == 'superadmin' %}
+
+                  <form method="post"
+                        action="{{ url_for(
+                            'appliance.issue_remove_line',
+                            line_id=line.id
+                        ) }}"
+                        onsubmit="return confirm(
+                          'REMOVE THIS APPLIANCE FROM {{ issue.issue_number }}?\n\n' +
+                          'This is a correction, not a warehouse return.\n' +
+                          '{{ (line.appliance_type_snapshot or '')|upper }}\n' +
+                          '{{ (line.brand_snapshot or '')|upper }} | ' +
+                          '{{ (line.model_number_snapshot or '')|upper }} | ' +
+                          '{{ (line.serial_number_snapshot or '')|upper }}'
+                        );">
+
+                    <button type="submit"
+                            class="btn btn-sm btn-outline-danger">
+                      REMOVE FROM ISSUE
+                    </button>
+
+                  </form>
+
+                {% endif %}
 
               </div>
 

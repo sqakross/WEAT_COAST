@@ -1,0 +1,927 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+
+  .vr-page {
+    max-width:1500px;
+    margin:0 auto;
+  }
+
+
+  /* ======================================================
+     PAGE HEADER
+     ====================================================== */
+
+  .vr-page-title {
+    font-weight:700;
+    letter-spacing:-.015em;
+  }
+
+  .vr-page-subtitle {
+    color:#6c757d;
+    font-size:.88rem;
+  }
+
+
+  /* ======================================================
+     SUMMARY
+     ====================================================== */
+
+  .vr-summary {
+    display:flex;
+    flex-wrap:wrap;
+    gap:.75rem;
+    margin-bottom:1rem;
+  }
+
+  .vr-stat-card {
+    position:relative;
+    min-width:220px;
+    padding:1rem 1.1rem;
+    border-radius:.65rem;
+    background:#fff;
+    border:1px solid #d9dee5;
+    box-shadow:0 .12rem .35rem rgba(0,0,0,.045);
+  }
+
+  .vr-stat-card.action {
+    border-left:5px solid #f0ad00;
+    background:#fffaf0;
+  }
+
+  .vr-stat-card.history {
+    border-left:5px solid #6c757d;
+  }
+
+  .vr-stat-label {
+    font-size:.68rem;
+    font-weight:800;
+    color:#5f6871;
+    text-transform:uppercase;
+    letter-spacing:.055em;
+  }
+
+  .vr-stat-number {
+    margin-top:.18rem;
+    font-size:1.7rem;
+    line-height:1;
+    font-weight:800;
+    color:#212529;
+  }
+
+  .vr-stat-help {
+    margin-top:.3rem;
+    font-size:.77rem;
+    color:#6c757d;
+  }
+
+
+  /* ======================================================
+     PANELS
+     ====================================================== */
+
+  .vr-panel {
+    overflow:hidden;
+    background:#fff;
+    border:1px solid #d9dee5;
+    border-radius:.7rem;
+    box-shadow:0 .15rem .48rem rgba(0,0,0,.055);
+  }
+
+  .vr-panel + .vr-panel {
+    margin-top:1rem;
+  }
+
+  .vr-panel-header {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:1rem;
+    padding:1rem 1.1rem;
+    border-bottom:1px solid #d9dee5;
+  }
+
+  .vr-panel-header.action {
+    background:#fff7df;
+    border-bottom-color:#eed895;
+  }
+
+  .vr-panel-header.history {
+    background:#f8f9fa;
+  }
+
+  .vr-panel-title {
+    margin:0;
+    font-size:1rem;
+    font-weight:800;
+    color:#212529;
+  }
+
+  .vr-panel-help {
+    margin-top:.18rem;
+    color:#66707a;
+    font-size:.79rem;
+  }
+
+  .vr-pending-badge {
+    display:inline-flex;
+    align-items:center;
+    gap:.35rem;
+    background:#ffc107;
+    color:#212529;
+    border:1px solid #dfa800;
+    border-radius:.35rem;
+    padding:.33rem .55rem;
+    font-size:.72rem;
+    font-weight:900;
+    white-space:nowrap;
+  }
+
+  .vr-clear-badge {
+    display:inline-flex;
+    align-items:center;
+    background:#198754;
+    color:#fff;
+    border-radius:.35rem;
+    padding:.33rem .55rem;
+    font-size:.72rem;
+    font-weight:800;
+  }
+
+
+  /* ======================================================
+     TABLES
+     ====================================================== */
+
+  .vr-table {
+    margin:0;
+    font-size:.87rem;
+  }
+
+  .vr-table thead th {
+    background:#f4f6f8;
+    color:#3f4851;
+    border-bottom:1px solid #cfd5db;
+    font-size:.69rem;
+    font-weight:800;
+    letter-spacing:.045em;
+    text-transform:uppercase;
+    white-space:nowrap;
+    padding:.58rem .58rem;
+  }
+
+  .vr-table tbody td {
+    padding:.58rem .58rem;
+    vertical-align:middle;
+    border-color:#e7eaed;
+  }
+
+  .vr-table tbody tr:hover {
+    background:#f8fbff;
+  }
+
+  .vr-table-action tbody tr {
+    border-left:3px solid transparent;
+  }
+
+  .vr-table-action tbody tr:hover {
+    border-left-color:#0d6efd;
+  }
+
+
+  /* ======================================================
+     DATA HIERARCHY
+     ====================================================== */
+
+  .vr-ap {
+    color:#0d6efd;
+    font-weight:800;
+    white-space:nowrap;
+    text-decoration:none;
+  }
+
+  .vr-ap:hover {
+    text-decoration:underline;
+  }
+
+  .vr-primary {
+    font-weight:700;
+    color:#212529;
+  }
+
+  .vr-secondary {
+    margin-top:.06rem;
+    font-size:.75rem;
+    color:#6c757d;
+  }
+
+  .vr-serial {
+    font-weight:700;
+    color:#212529;
+  }
+
+  .vr-vendor {
+    font-weight:800;
+    color:#343a40;
+  }
+
+  .vr-date {
+    white-space:nowrap;
+    font-weight:600;
+  }
+
+  .vr-time {
+    margin-top:.05rem;
+    font-size:.71rem;
+    color:#6c757d;
+  }
+
+
+  /* ======================================================
+     BADGES
+     ====================================================== */
+
+  .vr-class-new {
+    display:inline-block;
+    padding:.22rem .42rem;
+    border-radius:.3rem;
+    background:#e9ecef;
+    color:#343a40;
+    border:1px solid #ced4da;
+    font-size:.68rem;
+    font-weight:800;
+  }
+
+  .vr-class-loaner {
+    display:inline-block;
+    padding:.22rem .42rem;
+    border-radius:.3rem;
+    background:#0dcaf0;
+    color:#102a30;
+    border:1px solid #0aa2c0;
+    font-size:.68rem;
+    font-weight:900;
+  }
+
+  .vr-reason {
+    display:inline-block;
+    max-width:210px;
+    padding:.25rem .43rem;
+    border-radius:.3rem;
+    background:#f1f3f5;
+    border:1px solid #d6dbe0;
+    color:#343a40;
+    font-size:.68rem;
+    font-weight:700;
+    line-height:1.25;
+    white-space:normal;
+  }
+
+
+  /* ======================================================
+     CTA
+     ====================================================== */
+
+  .vr-review-btn {
+    font-weight:800;
+    white-space:nowrap;
+    box-shadow:0 .08rem .18rem rgba(13,110,253,.18);
+  }
+
+  .vr-empty {
+    padding:2rem 1rem !important;
+    text-align:center;
+  }
+
+  .vr-empty-title {
+    font-weight:800;
+    color:#198754;
+  }
+
+  .vr-empty-help {
+    margin-top:.2rem;
+    color:#6c757d;
+    font-size:.8rem;
+  }
+
+
+  @media (max-width: 992px) {
+
+    .vr-stat-card {
+      min-width:180px;
+      flex:1 1 180px;
+    }
+
+    .vr-table {
+      font-size:.82rem;
+    }
+  }
+
+</style>
+
+
+<div class="vr-page">
+
+
+  <!-- ====================================================
+       HEADER
+       ==================================================== -->
+
+  <div class="d-flex justify-content-between align-items-start mb-3">
+
+    <div>
+
+      <h3 class="vr-page-title mb-1">
+        Appliance Vendor Returns
+      </h3>
+
+      <div class="vr-page-subtitle">
+        Manager control center for pending supplier returns
+        and confirmed return history.
+      </div>
+
+    </div>
+
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('appliance.inventory_list') }}">
+      ← Inventory
+    </a>
+
+  </div>
+
+
+  <!-- ====================================================
+       SUMMARY
+       ==================================================== -->
+
+  <div class="vr-summary">
+
+    <div class="vr-stat-card action">
+
+      <div class="vr-stat-label">
+        Action Required
+      </div>
+
+      <div class="vr-stat-number">
+        {{ pending_count }}
+      </div>
+
+      <div class="vr-stat-help">
+        Waiting for manager decision
+      </div>
+
+    </div>
+
+
+    <div class="vr-stat-card history">
+
+      <div class="vr-stat-label">
+        Returned to Vendor
+      </div>
+
+      <div class="vr-stat-number">
+        {{ history_count }}
+      </div>
+
+      <div class="vr-stat-help">
+        Confirmed return history
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <!-- ====================================================
+       ACTION REQUIRED
+       ==================================================== -->
+
+  <section class="vr-panel">
+
+    <div class="vr-panel-header action">
+
+      <div>
+
+        <h5 class="vr-panel-title">
+          Action Required
+        </h5>
+
+        <div class="vr-panel-help">
+          Appliances are blocked from Issue and still require
+          a final warehouse disposition.
+        </div>
+
+      </div>
+
+
+      {% if pending_count %}
+
+        <span class="vr-pending-badge">
+          ACTION REQUIRED · {{ pending_count }}
+        </span>
+
+      {% else %}
+
+        <span class="vr-clear-badge">
+          QUEUE CLEAR
+        </span>
+
+      {% endif %}
+
+    </div>
+
+
+    <div class="table-responsive">
+
+      <table class="table table-hover vr-table vr-table-action">
+
+        <thead>
+
+          <tr>
+            <th>AP #</th>
+            <th>Appliance</th>
+            <th>Model / Serial</th>
+            <th>Class</th>
+            <th>Vendor</th>
+            <th>Purchase Inv</th>
+            <th style="min-width:130px;">
+              Reason
+            </th>
+            <th>Marked</th>
+            <th>By</th>
+            <th>Decision</th>
+          </tr>
+
+        </thead>
+
+
+        <tbody>
+
+          {% for row in pending_rows %}
+
+            {% set unit = row.unit %}
+            {% set movement = row.movement %}
+
+            <tr>
+
+
+              <!-- AP -->
+
+              <td>
+
+                <a class="vr-ap"
+                   href="{{ url_for(
+                       'appliance.inventory_detail',
+                       unit_id=unit.id
+                   ) }}"
+                   title="Open complete appliance history">
+
+                  {{ unit.inventory_number }}
+
+                </a>
+
+              </td>
+
+
+              <!-- APPLIANCE -->
+
+              <td>
+
+                <div class="vr-primary">
+                  {{ unit.category.name|upper
+                     if unit.category
+                     else '—' }}
+                </div>
+
+                <div class="vr-secondary">
+                  {{ (unit.brand or '—')|upper }}
+                </div>
+
+              </td>
+
+
+              <!-- MODEL SERIAL -->
+
+              <td>
+
+                <div>
+                  {{ (unit.model_number or '—')|upper }}
+                </div>
+
+                <div class="vr-serial">
+                  {{ (unit.serial_number or '—')|upper }}
+                </div>
+
+              </td>
+
+
+              <!-- CLASS -->
+
+              <td>
+
+                {% if unit.stock_class == 'loaner' %}
+
+                  <span class="vr-class-loaner">
+                    LOANER
+                  </span>
+
+                {% else %}
+
+                  <span class="vr-class-new">
+                    {{ (unit.stock_class or 'new')|upper }}
+                  </span>
+
+                {% endif %}
+
+              </td>
+
+
+              <!-- VENDOR -->
+
+              <td class="vr-vendor">
+                {{ (row.vendor_name or '—')|upper }}
+              </td>
+
+
+              <!-- PURCHASE INVOICE -->
+
+              <td class="vr-primary">
+                {{ (row.purchase_invoice or '—')|upper }}
+              </td>
+
+
+              <!-- REASON -->
+
+              <td>
+
+                {% if movement and movement.reason_code %}
+
+                  <span class="vr-reason">
+
+                    {{ movement.reason_code
+                       |replace('_', ' ')
+                       |upper }}
+
+                  </span>
+
+                {% else %}
+                  —
+                {% endif %}
+
+              </td>
+
+
+              <!-- MARKED -->
+
+              <td>
+
+                {% if movement and movement.created_at_local %}
+
+                  <div class="vr-date">
+
+                    {{ movement.created_at_local.strftime(
+                        '%m/%d/%Y'
+                    ) }}
+
+                  </div>
+
+                  <div class="vr-time">
+
+                    {{ movement.created_at_local.strftime(
+                        '%I:%M %p'
+                    ) }}
+
+                  </div>
+
+                {% else %}
+                  —
+                {% endif %}
+
+              </td>
+
+
+              <!-- BY -->
+
+              <td class="vr-primary">
+
+                {{ movement.actor.username|upper
+                   if movement and movement.actor
+                   else '—' }}
+
+              </td>
+
+
+              <!-- ACTION -->
+
+              <td>
+
+                <a class="btn btn-primary btn-sm vr-review-btn"
+                   href="{{ url_for(
+                       'appliance.vendor_return_action',
+                       unit_id=unit.id
+                   ) }}">
+
+                  REVIEW / ACTION
+
+                </a>
+
+              </td>
+
+            </tr>
+
+
+          {% else %}
+
+            <tr>
+
+              <td colspan="10"
+                  class="vr-empty">
+
+                <div class="vr-empty-title">
+                  No Vendor Returns require action
+                </div>
+
+                <div class="vr-empty-help">
+                  The pending queue is clear.
+                </div>
+
+              </td>
+
+            </tr>
+
+          {% endfor %}
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  </section>
+
+
+  <!-- ====================================================
+       HISTORY
+       ==================================================== -->
+
+  <section class="vr-panel">
+
+    <div class="vr-panel-header history">
+
+      <div>
+
+        <h5 class="vr-panel-title">
+          Return History
+        </h5>
+
+        <div class="vr-panel-help">
+          Confirmed physical Vendor Returns.
+          Latest 500 records.
+        </div>
+
+      </div>
+
+      <span class="badge bg-secondary">
+        {{ history_count }} RETURNED
+      </span>
+
+    </div>
+
+
+    <div class="table-responsive">
+
+      <table class="table table-hover vr-table">
+
+        <thead>
+
+          <tr>
+            <th>Returned</th>
+            <th>AP #</th>
+            <th>Appliance</th>
+            <th>Model / Serial</th>
+            <th>Class</th>
+            <th>Vendor</th>
+            <th>Purchase Inv</th>
+            <th>RMA / Ref</th>
+            <th style="min-width:130px;">
+              Reason
+            </th>
+            <th>Confirmed By</th>
+          </tr>
+
+        </thead>
+
+
+        <tbody>
+
+          {% for row in history_rows %}
+
+            {% set unit = row.unit %}
+            {% set movement = row.movement %}
+
+            <tr>
+
+
+              <!-- RETURNED -->
+
+              <td>
+
+                {% if movement.created_at_local %}
+
+                  <div class="vr-date">
+
+                    {{ movement.created_at_local.strftime(
+                        '%m/%d/%Y'
+                    ) }}
+
+                  </div>
+
+                  <div class="vr-time">
+
+                    {{ movement.created_at_local.strftime(
+                        '%I:%M %p'
+                    ) }}
+
+                  </div>
+
+                {% else %}
+                  —
+                {% endif %}
+
+              </td>
+
+
+              <!-- AP -->
+
+              <td>
+
+                {% if unit %}
+
+                  <a class="vr-ap"
+                     href="{{ url_for(
+                         'appliance.inventory_detail',
+                         unit_id=unit.id
+                     ) }}">
+
+                    {{ unit.inventory_number }}
+
+                  </a>
+
+                {% else %}
+                  —
+                {% endif %}
+
+              </td>
+
+
+              <!-- APPLIANCE -->
+
+              <td>
+
+                {% if unit %}
+
+                  <div class="vr-primary">
+
+                    {{ unit.category.name|upper
+                       if unit.category
+                       else '—' }}
+
+                  </div>
+
+                  <div class="vr-secondary">
+                    {{ (unit.brand or '—')|upper }}
+                  </div>
+
+                {% else %}
+                  —
+                {% endif %}
+
+              </td>
+
+
+              <!-- MODEL SERIAL -->
+
+              <td>
+
+                {% if unit %}
+
+                  <div>
+                    {{ (unit.model_number or '—')|upper }}
+                  </div>
+
+                  <div class="vr-serial">
+                    {{ (unit.serial_number or '—')|upper }}
+                  </div>
+
+                {% else %}
+                  —
+                {% endif %}
+
+              </td>
+
+
+              <!-- CLASS -->
+
+              <td>
+
+                {% if unit %}
+
+                  {% if unit.stock_class == 'loaner' %}
+
+                    <span class="vr-class-loaner">
+                      LOANER
+                    </span>
+
+                  {% else %}
+
+                    <span class="vr-class-new">
+                      {{ (unit.stock_class or 'new')|upper }}
+                    </span>
+
+                  {% endif %}
+
+                {% else %}
+                  —
+                {% endif %}
+
+              </td>
+
+
+              <!-- VENDOR -->
+
+              <td class="vr-vendor">
+                {{ (row.vendor_name or '—')|upper }}
+              </td>
+
+
+              <!-- INVOICE -->
+
+              <td class="vr-primary">
+                {{ (row.purchase_invoice or '—')|upper }}
+              </td>
+
+
+              <!-- RMA -->
+
+              <td class="vr-primary">
+                {{ row.rma_reference or '—' }}
+              </td>
+
+
+              <!-- REASON -->
+
+              <td>
+
+                <span class="vr-reason">
+
+                  {{ (movement.reason_code or '—')
+                     |replace('_', ' ')
+                     |upper }}
+
+                </span>
+
+              </td>
+
+
+              <!-- BY -->
+
+              <td class="vr-primary">
+
+                {{ movement.actor.username|upper
+                   if movement.actor
+                   else '—' }}
+
+              </td>
+
+            </tr>
+
+
+          {% else %}
+
+            <tr>
+
+              <td colspan="10"
+                  class="vr-empty">
+
+                <div class="text-muted">
+                  No confirmed Vendor Returns yet.
+                </div>
+
+              </td>
+
+            </tr>
+
+          {% endfor %}
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  </section>
+
+</div>
+
+{% endblock %}

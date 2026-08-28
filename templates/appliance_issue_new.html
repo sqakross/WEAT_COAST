@@ -403,6 +403,7 @@
               <th>MODEL</th>
               <th>SERIAL</th>
               <th>SIZE</th>
+              <th>CLASS</th>
               <th>CONDITION</th>
               <th>AP #</th>
               <th style="width:75px;"></th>
@@ -412,7 +413,7 @@
           <tbody id="availableBody">
 
             <tr>
-              <td colspan="8"
+              <td colspan="9"
                   class="loading-row">
                 Loading available inventory...
               </td>
@@ -480,6 +481,7 @@
               <th>MODEL</th>
               <th>SERIAL</th>
               <th>SIZE</th>
+              <th>CLASS</th>
               <th>CONDITION</th>
               <th>AP #</th>
               <th style="width:80px;"></th>
@@ -489,7 +491,7 @@
           <tbody id="selectedBody">
 
             <tr>
-              <td colspan="9"
+              <td colspan="10"
                   class="inventory-empty">
                 No appliances selected.
               </td>
@@ -626,6 +628,46 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
+  }
+
+
+  function stockClassBadge(value) {
+
+    const stockClass = String(
+      value || "NEW"
+    )
+      .trim()
+      .toUpperCase();
+
+    if (stockClass === "LOANER") {
+      return `
+        <span class="badge bg-info text-dark">
+          LOANER
+        </span>
+      `;
+    }
+
+    if (stockClass === "NEW") {
+      return `
+        <span class="badge bg-light text-dark border">
+          NEW
+        </span>
+      `;
+    }
+
+    if (stockClass === "RETAIL") {
+      return `
+        <span class="badge bg-warning text-dark">
+          RETAIL
+        </span>
+      `;
+    }
+
+    return `
+      <span class="badge bg-secondary">
+        ${esc(stockClass)}
+      </span>
+    `;
   }
 
 
@@ -775,7 +817,7 @@
 
       availableBody.innerHTML = `
         <tr>
-          <td colspan="8"
+          <td colspan="9"
               class="inventory-empty">
             No matching AVAILABLE appliances.
           </td>
@@ -808,6 +850,10 @@
 
             <td>
               ${esc(item.size || "—")}
+            </td>
+
+            <td>
+              ${stockClassBadge(item.stock_class)}
             </td>
 
             <td>
@@ -876,7 +922,7 @@
 
     availableBody.innerHTML = `
       <tr>
-        <td colspan="8"
+        <td colspan="9"
             class="loading-row">
           Loading...
         </td>
@@ -928,7 +974,7 @@
 
         availableBody.innerHTML = `
           <tr>
-            <td colspan="8"
+            <td colspan="9"
                 class="inventory-empty text-danger">
               Unable to load inventory.
             </td>
@@ -962,7 +1008,7 @@
 
       availableBody.innerHTML = `
         <tr>
-          <td colspan="8"
+          <td colspan="9"
               class="inventory-empty text-danger">
             Unable to load inventory.
           </td>
@@ -1013,7 +1059,7 @@
 
       selectedBody.innerHTML = `
         <tr>
-          <td colspan="9"
+          <td colspan="10"
               class="inventory-empty">
             No appliances selected.
           </td>
@@ -1058,6 +1104,10 @@
 
           <td>
             ${esc(item.size || "—")}
+          </td>
+
+          <td>
+            ${stockClassBadge(item.stock_class)}
           </td>
 
           <td>

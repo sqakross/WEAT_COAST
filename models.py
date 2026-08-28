@@ -3479,6 +3479,11 @@ class ApplianceUnit(db.Model):
             "brand",
             "model_number",
         ),
+        db.Index(
+            "ix_appliance_unit_stock_class_status",
+            "stock_class",
+            "status",
+        ),
         {"extend_existing": True},
     )
 
@@ -3563,6 +3568,23 @@ class ApplianceUnit(db.Model):
         db.String(40),
         nullable=False,
         default="new",
+        index=True,
+    )
+
+    # Inventory purpose/classification:
+    #
+    # new     - normal new-stock inventory
+    # loaner  - replacement / temporary-use pool
+    # retail  - inventory approved for retail sale
+    #
+    # This is intentionally separate from:
+    #   condition -> physical condition
+    #   status    -> current operational state
+    stock_class = db.Column(
+        db.String(30),
+        nullable=False,
+        default="new",
+        server_default="new",
         index=True,
     )
 

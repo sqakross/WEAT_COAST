@@ -2238,129 +2238,7 @@ class ApplianceIssueService:
                     "NEEDS_REPAIR",
             },
 
-                        "LOANER_RETURN_TO_STOCK_USED": {
-                "from":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "LOANER_RETURNED_TO_STOCK",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "used",
-            },
-
-            "LOANER_RETURN_TO_STOCK_REPAIRED": {
-                "from":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "LOANER_RETURNED_TO_STOCK",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "repaired",
-            },
-
-            "LOANER_RETURN_TO_STOCK_OPEN_BOX": {
-                "from":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "LOANER_RETURNED_TO_STOCK",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "open_box",
-            },
-
-            "LOANER_RETURN_TO_STOCK_NEW": {
-                "from":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "LOANER_RETURNED_TO_STOCK",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "new",
-            },
-
-            "LOANER_RETURN_TO_STOCK_DAMAGED": {
-                "from":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "LOANER_RETURNED_TO_STOCK",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "damaged",
-            },
-
-
-
-            "RETURN_FROM_REPAIR_TO_NEW": {
-                "from":
-                    ApplianceIssueService.STATUS_REPAIR,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_RETURN_FROM_REPAIR,
-
-                "default_reason":
-                    "NO_REPAIR_REQUIRED",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "new",
-            },
-
-            "RETURN_FROM_REPAIR_TO_LOANER": {
+            "RETURN_FROM_REPAIR": {
                 "from":
                     ApplianceIssueService.STATUS_REPAIR,
 
@@ -2372,40 +2250,6 @@ class ApplianceIssueService:
 
                 "default_reason":
                     "REPAIR_COMPLETED",
-
-                "stock_class":
-                    "loaner",
-
-                "condition":
-                    "repaired",
-            },
-
-            "REPAIR_TO_VENDOR_RETURN": {
-                "from":
-                    ApplianceIssueService.STATUS_REPAIR,
-
-                "to":
-                    ApplianceIssueService.STATUS_VENDOR_RETURN_PENDING,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_PENDING,
-
-                "default_reason":
-                    "REPAIR_FAILED_VENDOR_RETURN",
-            },
-
-            "REPAIR_TO_SCRAP": {
-                "from":
-                    ApplianceIssueService.STATUS_REPAIR,
-
-                "to":
-                    ApplianceIssueService.STATUS_WRITTEN_OFF,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_SCRAP,
-
-                "default_reason":
-                    "UNREPAIRABLE",
             },
 
             "MARK_VENDOR_RETURN": {
@@ -2448,40 +2292,6 @@ class ApplianceIssueService:
 
                 "default_reason":
                     "RETURN_CANCELLED",
-            },
-
-            "VENDOR_RETURN_TO_LOANER": {
-                "from":
-                    ApplianceIssueService.STATUS_VENDOR_RETURN_PENDING,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "RETURNED_TO_STOCK_AS_LOANER",
-
-                "stock_class":
-                    "loaner",
-
-                "condition":
-                    "used",
-            },
-
-            "VENDOR_RETURN_TO_SCRAP": {
-                "from":
-                    ApplianceIssueService.STATUS_VENDOR_RETURN_PENDING,
-
-                "to":
-                    ApplianceIssueService.STATUS_WRITTEN_OFF,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_SCRAP,
-
-                "default_reason":
-                    "VENDOR_RETURN_REJECTED_WRITE_OFF",
             },
 
             "SCRAP": {
@@ -2533,53 +2343,6 @@ class ApplianceIssueService:
 
         now = datetime.utcnow()
 
-        # ----------------------------------------------------
-        # Atomic physical inventory update.
-        #
-        # Most transitions change STATUS only.
-        # Repair outcomes may also intentionally change:
-        #
-        #   stock_class
-        #   condition
-        # ----------------------------------------------------
-
-        update_values = {
-            ApplianceUnit.status:
-                new_status,
-
-            ApplianceUnit.current_work_order_id:
-                None,
-
-            ApplianceUnit.current_work_order_number:
-                None,
-
-            ApplianceUnit.updated_at:
-                now,
-
-            ApplianceUnit.updated_by_id:
-                actor.id,
-        }
-
-        if rule.get(
-            "stock_class"
-        ) is not None:
-
-            update_values[
-                ApplianceUnit.stock_class
-            ] = rule[
-                "stock_class"
-            ]
-
-        if rule.get(
-            "condition"
-        ) is not None:
-
-            update_values[
-                ApplianceUnit.condition
-            ] = rule[
-                "condition"
-            ]
-
         try:
 
             updated = (
@@ -2594,7 +2357,22 @@ class ApplianceIssueService:
                     == current_status,
                 )
                 .update(
-                    update_values,
+                    {
+                        ApplianceUnit.status:
+                            new_status,
+
+                        ApplianceUnit.current_work_order_id:
+                            None,
+
+                        ApplianceUnit.current_work_order_number:
+                            None,
+
+                        ApplianceUnit.updated_at:
+                            now,
+
+                        ApplianceUnit.updated_by_id:
+                            actor.id,
+                    },
                     synchronize_session=False,
                 )
             )
@@ -2657,30 +2435,6 @@ class ApplianceIssueService:
 
                         "to_status":
                             new_status,
-
-                        "old_stock_class":
-                            getattr(
-                                unit,
-                                "stock_class",
-                                None,
-                            ),
-
-                        "new_stock_class":
-                            rule.get(
-                                "stock_class"
-                            ),
-
-                        "old_condition":
-                            getattr(
-                                unit,
-                                "condition",
-                                None,
-                            ),
-
-                        "new_condition":
-                            rule.get(
-                                "condition"
-                            ),
 
                         "warehouse_id":
                             warehouse.id,

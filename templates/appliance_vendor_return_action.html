@@ -1,0 +1,621 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+
+  .vr-action-page {
+    max-width:1180px;
+    margin:0 auto;
+  }
+
+  .vr-panel {
+    background:#fff;
+    border:1px solid #d9dee5;
+    border-radius:.65rem;
+    box-shadow:0 .15rem .5rem rgba(0,0,0,.06);
+  }
+
+  .vr-label {
+    font-size:.67rem;
+    color:#6c757d;
+    font-weight:800;
+    text-transform:uppercase;
+    letter-spacing:.03em;
+    margin-bottom:.15rem;
+  }
+
+  .vr-value {
+    font-weight:700;
+  }
+
+  .decision-card {
+    height:100%;
+    border:1px solid #d9dee5;
+    border-radius:.55rem;
+    background:#fff;
+    padding:1rem;
+  }
+
+  .decision-title {
+    font-size:.95rem;
+    font-weight:800;
+    margin-bottom:.3rem;
+  }
+
+  .decision-help {
+    font-size:.76rem;
+    color:#6c757d;
+    min-height:3.1rem;
+    margin-bottom:.8rem;
+  }
+
+</style>
+
+
+<div class="vr-action-page">
+
+  <div class="d-flex justify-content-between align-items-start mb-3">
+
+    <div>
+
+      <div class="small text-muted mb-1">
+        VENDOR RETURN REVIEW
+      </div>
+
+      <h3 class="mb-1">
+        {{ unit.inventory_number }}
+      </h3>
+
+      <div>
+        {{ unit.category.name|upper if unit.category else '—' }}
+        ·
+        {{ (unit.brand or '—')|upper }}
+        ·
+        {{ (unit.model_number or '—')|upper }}
+      </div>
+
+    </div>
+
+
+    <div class="d-flex gap-2">
+
+      <a class="btn btn-outline-secondary btn-sm"
+         href="{{ url_for(
+             'appliance.vendor_returns_queue'
+         ) }}">
+        ← Vendor Returns
+      </a>
+
+      <a class="btn btn-outline-secondary btn-sm"
+         href="{{ url_for(
+             'appliance.inventory_detail',
+             unit_id=unit.id
+         ) }}">
+        Full History
+      </a>
+
+    </div>
+
+  </div>
+
+
+  <div class="vr-panel mb-3">
+
+    <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
+
+      <div>
+
+        <div class="fw-bold">
+          Return Request
+        </div>
+
+        <div class="small text-muted">
+          Review the appliance and choose one final warehouse decision.
+        </div>
+
+      </div>
+
+      <span class="badge bg-warning text-dark">
+        ACTION REQUIRED
+      </span>
+
+    </div>
+
+
+    <div class="p-4">
+
+      <div class="row g-4">
+
+        <div class="col-md-3">
+
+          <div class="vr-label">
+            Status
+          </div>
+
+          <div>
+            <span class="badge bg-warning text-dark">
+              VENDOR RETURN PENDING
+            </span>
+          </div>
+
+        </div>
+
+
+        <div class="col-md-3">
+
+          <div class="vr-label">
+            Stock Class
+          </div>
+
+          <div class="vr-value">
+
+            {% if unit.stock_class == 'loaner' %}
+
+              <span class="badge bg-info text-dark">
+                LOANER
+              </span>
+
+            {% else %}
+
+              {{ (unit.stock_class or 'new')|upper }}
+
+            {% endif %}
+
+          </div>
+
+        </div>
+
+
+        <div class="col-md-3">
+
+          <div class="vr-label">
+            Condition
+          </div>
+
+          <div class="vr-value">
+            {{ (unit.condition or '—')
+               |replace('_', ' ')
+               |upper }}
+          </div>
+
+        </div>
+
+
+        <div class="col-md-3">
+
+          <div class="vr-label">
+            Warehouse
+          </div>
+
+          <div class="vr-value">
+            {{ unit.warehouse.code|upper if unit.warehouse else '—' }}
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="vr-label">
+            Serial
+          </div>
+
+          <div class="vr-value">
+            {{ (unit.serial_number or '—')|upper }}
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="vr-label">
+            Vendor
+          </div>
+
+          <div class="vr-value">
+            {{ (vendor_name or '—')|upper }}
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="vr-label">
+            Purchase Invoice
+          </div>
+
+          <div class="vr-value">
+            {{ (purchase_invoice or '—')|upper }}
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="vr-label">
+            Receiving
+          </div>
+
+          <div class="vr-value">
+            {{ (receiving_number or '—')|upper }}
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="vr-label">
+            Return Reason
+          </div>
+
+          <div class="vr-value">
+
+            {% if pending_movement and pending_movement.reason_code %}
+
+              {{ pending_movement.reason_code
+                 |replace('_', ' ')
+                 |upper }}
+
+            {% else %}
+              —
+            {% endif %}
+
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="vr-label">
+            Marked By / Date
+          </div>
+
+          <div class="vr-value">
+
+            {% if pending_movement %}
+
+              {% if pending_movement.actor %}
+                {{ pending_movement.actor.username|upper }}
+              {% endif %}
+
+              {% if pending_movement.created_at_local %}
+                ·
+                {{ pending_movement.created_at_local.strftime(
+                    '%m/%d/%Y %I:%M %p'
+                ) }}
+              {% endif %}
+
+            {% else %}
+              —
+            {% endif %}
+
+          </div>
+
+        </div>
+
+
+        {% if pending_movement and pending_movement.notes %}
+
+          <div class="col-12">
+
+            <div class="vr-label">
+              Request Notes
+            </div>
+
+            <div class="vr-value">
+              {{ pending_movement.notes }}
+            </div>
+
+          </div>
+
+        {% endif %}
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+  {% if can_decide %}
+
+    <div class="mb-2">
+
+      <h5 class="mb-1">
+        Manager Decision
+      </h5>
+
+      <div class="small text-muted">
+        Select where this physical appliance goes next.
+      </div>
+
+    </div>
+
+
+    <div class="row g-3">
+
+
+      <!-- =================================================
+           CONFIRM VENDOR RETURN
+           ================================================= -->
+
+      <div class="col-lg-6">
+
+        <div class="decision-card">
+
+          <div class="decision-title">
+            Confirm Return to Vendor
+          </div>
+
+          <div class="decision-help">
+            Appliance physically left the warehouse and
+            was returned to the supplier.
+          </div>
+
+          <form method="post"
+                action="{{ url_for(
+                    'appliance.vendor_return_queue_confirm',
+                    unit_id=unit.id
+                ) }}"
+                onsubmit="return confirm(
+                  'CONFIRM THIS APPLIANCE WAS PHYSICALLY RETURNED TO THE VENDOR?'
+                );">
+
+            <div class="mb-2">
+
+              <label class="vr-label">
+                RMA / Return Authorization / Reference
+              </label>
+
+              <input class="form-control form-control-sm"
+                     name="rma_reference"
+                     maxlength="120"
+                     placeholder="Optional">
+
+            </div>
+
+            <div class="mb-2">
+
+              <label class="vr-label">
+                Tracking / Pickup / Notes
+              </label>
+
+              <input class="form-control form-control-sm"
+                     name="return_notes"
+                     maxlength="500"
+                     placeholder="Optional">
+
+            </div>
+
+            <button class="btn btn-dark">
+              CONFIRM RETURN TO VENDOR
+            </button>
+
+          </form>
+
+        </div>
+
+      </div>
+
+
+      <!-- =================================================
+           RETURN TO STOCK
+           ================================================= -->
+
+      <div class="col-lg-6">
+
+        <div class="decision-card">
+
+          <div class="decision-title">
+            Return to Stock
+          </div>
+
+          <div class="decision-help">
+
+            Vendor Return was cancelled or refused.
+
+            Appliance becomes AVAILABLE again and keeps
+            its current stock class:
+
+            <strong>
+              {{ (unit.stock_class or 'new')|upper }}
+            </strong>.
+
+          </div>
+
+          <form method="post"
+                action="{{ url_for(
+                    'appliance.vendor_return_queue_cancel',
+                    unit_id=unit.id
+                ) }}"
+                onsubmit="return confirm(
+                  'RETURN THIS APPLIANCE TO AVAILABLE STOCK?'
+                );">
+
+            <div class="mb-2">
+
+              <label class="vr-label">
+                Decision Notes
+              </label>
+
+              <input class="form-control form-control-sm"
+                     name="cancel_notes"
+                     maxlength="500"
+                     placeholder="Why was Vendor Return cancelled?">
+
+            </div>
+
+            <button class="btn btn-success">
+              RETURN TO STOCK
+            </button>
+
+          </form>
+
+        </div>
+
+      </div>
+
+
+      <!-- =================================================
+           RETURN AS LOANER
+           ================================================= -->
+
+      <div class="col-lg-6">
+
+        <div class="decision-card">
+
+          <div class="decision-title">
+            Return to Stock as Loaner
+          </div>
+
+          <div class="decision-help">
+
+            Use when the appliance should no longer remain
+            NEW stock but is usable as replacement /
+            loaner inventory.
+
+            Result:
+            <strong>AVAILABLE · LOANER · USED</strong>.
+
+          </div>
+
+          <form method="post"
+                action="{{ url_for(
+                    'appliance.vendor_return_as_loaner',
+                    unit_id=unit.id
+                ) }}"
+                onsubmit="return confirm(
+                  'RETURN THIS APPLIANCE AS AVAILABLE LOANER STOCK?'
+                );">
+
+            <div class="mb-2">
+
+              <label class="vr-label">
+                Decision Notes
+              </label>
+
+              <input class="form-control form-control-sm"
+                     name="notes"
+                     maxlength="500"
+                     placeholder="Why is this moving to Loaner stock?">
+
+            </div>
+
+            <button class="btn btn-info">
+              RETURN AS LOANER
+            </button>
+
+          </form>
+
+        </div>
+
+      </div>
+
+
+      <!-- =================================================
+           WRITE OFF
+           ================================================= -->
+
+      <div class="col-lg-6">
+
+        <div class="decision-card border-danger">
+
+          <div class="decision-title text-danger">
+            Write Off / Scrap
+          </div>
+
+          <div class="decision-help">
+
+            Use when the appliance will not be returned to
+            vendor and should permanently leave usable
+            inventory.
+
+          </div>
+
+          <form method="post"
+                action="{{ url_for(
+                    'appliance.vendor_return_write_off',
+                    unit_id=unit.id
+                ) }}"
+                onsubmit="return confirm(
+                  'WRITE OFF THIS APPLIANCE?\\n\\n' +
+                  'This will permanently remove it from usable inventory.'
+                );">
+
+            <div class="mb-2">
+
+              <label class="vr-label">
+                Reason
+              </label>
+
+              <select class="form-select form-select-sm"
+                      name="reason_code">
+
+                <option value="VENDOR_RETURN_REJECTED_WRITE_OFF">
+                  VENDOR RETURN REJECTED
+                </option>
+
+                <option value="UNREPAIRABLE">
+                  UNREPAIRABLE
+                </option>
+
+                <option value="DAMAGED">
+                  DAMAGED
+                </option>
+
+                <option value="REPAIR_TOO_EXPENSIVE">
+                  REPAIR TOO EXPENSIVE
+                </option>
+
+                <option value="OTHER">
+                  OTHER
+                </option>
+
+              </select>
+
+            </div>
+
+            <div class="mb-2">
+
+              <label class="vr-label">
+                Write-Off Notes
+              </label>
+
+              <input class="form-control form-control-sm"
+                     name="notes"
+                     maxlength="500"
+                     placeholder="Required business explanation">
+
+            </div>
+
+            <button class="btn btn-outline-danger">
+              WRITE OFF / SCRAP
+            </button>
+
+          </form>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  {% else %}
+
+    <div class="alert alert-secondary">
+
+      You may review this Vendor Return, but you do not
+      have permission to make the final decision.
+
+    </div>
+
+  {% endif %}
+
+</div>
+
+{% endblock %}

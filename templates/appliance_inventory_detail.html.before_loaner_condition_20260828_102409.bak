@@ -328,91 +328,52 @@
 
           {% if unit.stock_class == 'loaner' %}
 
-            <div class="alert alert-info mb-3">
+            <div class="alert alert-info d-flex justify-content-between align-items-center gap-3">
 
-              <div class="row align-items-end g-3">
+              <div>
 
-                <div class="col-lg-5">
-
-                  <div class="fw-bold">
-                    LOANER STOCK
-                  </div>
-
-                  <div class="small">
-                    Return this appliance from the Loaner fund
-                    to regular stock.
-                  </div>
-
+                <div class="fw-bold">
+                  LOANER STOCK
                 </div>
 
-                <div class="col-lg-7">
-
-                  <form method="post"
-                        action="{{ url_for(
-                            'appliance.inventory_disposition',
-                            unit_id=unit.id
-                        ) }}"
-                        class="row align-items-end g-2"
-                        onsubmit="return confirm(
-                          'RETURN THIS LOANER TO REGULAR STOCK?'
-                        );">
-
-                    <div class="col-md-7">
-
-                      <label class="form-label small fw-bold mb-1">
-                        Condition after return
-                      </label>
-
-                      <select name="action"
-                              class="form-select form-select-sm">
-
-                        <option value="LOANER_RETURN_TO_STOCK_USED"
-                                selected>
-                          USED
-                        </option>
-
-                        <option value="LOANER_RETURN_TO_STOCK_REPAIRED">
-                          REPAIRED
-                        </option>
-
-                        <option value="LOANER_RETURN_TO_STOCK_OPEN_BOX">
-                          OPEN BOX
-                        </option>
-
-                        <option value="LOANER_RETURN_TO_STOCK_NEW">
-                          NEW
-                        </option>
-
-                        <option value="LOANER_RETURN_TO_STOCK_DAMAGED">
-                          DAMAGED
-                        </option>
-
-                      </select>
-
-                    </div>
-
-                    <div class="col-md-5">
-
-                      <input type="hidden"
-                             name="reason_code"
-                             value="LOANER_RETURNED_TO_STOCK">
-
-                      <input type="hidden"
-                             name="notes"
-                             value="Returned from Loaner fund to regular stock.">
-
-                      <button type="submit"
-                              class="btn btn-dark btn-sm w-100">
-                        RETURN TO STOCK
-                      </button>
-
-                    </div>
-
-                  </form>
-
+                <div class="small">
+                  This appliance is currently in the Loaner fund.
+                  Return it to regular stock when it is no longer
+                  needed as a Loaner.
                 </div>
 
               </div>
+
+              <form method="post"
+                    action="{{ url_for(
+                        'appliance.inventory_disposition',
+                        unit_id=unit.id
+                    ) }}"
+                    class="m-0"
+                    onsubmit="return confirm(
+                      'RETURN THIS LOANER TO REGULAR STOCK?\n\n' +
+                      'Stock Class: LOANER → NEW\n' +
+                      'Condition: → USED\n' +
+                      'Status remains AVAILABLE.'
+                    );">
+
+                <input type="hidden"
+                       name="action"
+                       value="LOANER_RETURN_TO_STOCK">
+
+                <input type="hidden"
+                       name="reason_code"
+                       value="LOANER_RETURNED_TO_STOCK">
+
+                <input type="hidden"
+                       name="notes"
+                       value="Returned from Loaner fund to regular stock.">
+
+                <button class="btn btn-dark btn-sm">
+                  RETURN TO STOCK
+                </button>
+
+              </form>
 
             </div>
 

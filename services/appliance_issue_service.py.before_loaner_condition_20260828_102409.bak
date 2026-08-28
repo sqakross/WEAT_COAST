@@ -2238,7 +2238,7 @@ class ApplianceIssueService:
                     "NEEDS_REPAIR",
             },
 
-                        "LOANER_RETURN_TO_STOCK_USED": {
+            "LOANER_RETURN_TO_STOCK": {
                 "from":
                     ApplianceIssueService.STATUS_AVAILABLE,
 
@@ -2257,87 +2257,6 @@ class ApplianceIssueService:
                 "condition":
                     "used",
             },
-
-            "LOANER_RETURN_TO_STOCK_REPAIRED": {
-                "from":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "LOANER_RETURNED_TO_STOCK",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "repaired",
-            },
-
-            "LOANER_RETURN_TO_STOCK_OPEN_BOX": {
-                "from":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "LOANER_RETURNED_TO_STOCK",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "open_box",
-            },
-
-            "LOANER_RETURN_TO_STOCK_NEW": {
-                "from":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "LOANER_RETURNED_TO_STOCK",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "new",
-            },
-
-            "LOANER_RETURN_TO_STOCK_DAMAGED": {
-                "from":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "to":
-                    ApplianceIssueService.STATUS_AVAILABLE,
-
-                "movement":
-                    ApplianceIssueService.MOVEMENT_VENDOR_RETURN_CANCEL,
-
-                "default_reason":
-                    "LOANER_RETURNED_TO_STOCK",
-
-                "stock_class":
-                    "new",
-
-                "condition":
-                    "damaged",
-            },
-
 
 
             "RETURN_FROM_REPAIR_TO_NEW": {

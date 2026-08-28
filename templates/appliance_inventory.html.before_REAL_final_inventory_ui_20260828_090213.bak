@@ -461,125 +461,6 @@
   }
 
 
-
-
-  /* INVENTORY FILTER — SINGLE DESKTOP ROW */
-
-  .inventory-filter-row {
-    /*
-      Desktop:
-      Search is intentionally wider.
-      All remaining filters + actions stay on ONE line.
-    */
-    display:grid;
-
-    grid-template-columns:
-      minmax(270px, 2.35fr)
-      minmax(115px, 1fr)
-      minmax(115px, 1fr)
-      minmax(115px, 1fr)
-      minmax(120px, 1fr)
-      minmax(115px, 1fr)
-      auto;
-
-    gap:.55rem;
-
-    align-items:end;
-
-    width:100%;
-    max-width:none !important;
-
-    margin:0;
-  }
-
-
-  .inventory-filter-item {
-    min-width:0;
-  }
-
-
-  .inventory-filter-item .form-control,
-  .inventory-filter-item .form-select {
-    width:100%;
-    max-width:none !important;
-
-    min-height:32px;
-
-    font-size:.80rem;
-  }
-
-
-  .inventory-filter-search {
-    min-width:0;
-  }
-
-
-  .inventory-filter-actions {
-    display:flex;
-    align-items:flex-end;
-    gap:.35rem;
-
-    white-space:nowrap;
-  }
-
-
-  .inventory-filter-actions .btn {
-    min-height:32px;
-
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-
-    padding-left:.65rem;
-    padding-right:.65rem;
-
-    font-size:.76rem;
-    font-weight:600;
-  }
-
-
-  .inventory-filter-row .filter-label {
-    margin-bottom:.22rem;
-
-    color:#5d6670;
-
-    font-size:.66rem;
-    font-weight:700;
-
-    line-height:1.1;
-    letter-spacing:.025em;
-  }
-
-
-  /*
-    Medium screens:
-    allow a clean multi-column layout rather than
-    squeezing controls until they are unusable.
-  */
-
-  @media (max-width:1199px) {
-
-    .inventory-filter-row {
-      grid-template-columns:
-        repeat(3, minmax(180px, 1fr));
-    }
-
-    .inventory-filter-actions {
-      align-self:end;
-    }
-
-  }
-
-
-  @media (max-width:767px) {
-
-    .inventory-filter-row {
-      grid-template-columns:1fr;
-    }
-
-  }
-
-
 </style>
 
 
@@ -687,10 +568,10 @@
       <form method="get"
             action="{{ url_for('appliance.inventory_list') }}">
 
-        <div class="inventory-filter-row">
+        <div class="row g-2 inventory-filter-row">
 
 
-          <div class="inventory-filter-item inventory-filter-search">
+          <div class="col-xl-4 col-md-6">
 
             <div class="filter-label">
               Search
@@ -705,7 +586,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Warehouse
@@ -732,7 +613,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Appliance
@@ -759,7 +640,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Status
@@ -823,7 +704,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Stock Class
@@ -857,7 +738,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Condition
@@ -899,19 +780,20 @@
 
           </div>
 
-          <div class="inventory-filter-actions">
+        </div>
 
-            <button type="submit"
-                    class="btn btn-primary btn-sm">
-              Search
-            </button>
 
-            <a class="btn btn-outline-secondary btn-sm"
-               href="{{ url_for('appliance.inventory_list') }}">
-              Clear
-            </a>
+        <div class="d-flex gap-2 mt-3">
 
-          </div>
+          <button type="submit"
+                  class="btn btn-primary btn-sm">
+            Search
+          </button>
+
+          <a class="btn btn-outline-secondary btn-sm"
+             href="{{ url_for('appliance.inventory_list') }}">
+            Clear
+          </a>
 
         </div>
 

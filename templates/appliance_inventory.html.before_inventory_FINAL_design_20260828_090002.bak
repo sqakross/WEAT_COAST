@@ -171,410 +171,594 @@
 
 
 
+  /* SAFE INVENTORY FINAL POLISH */
 
 
   /* ======================================================
-     APPLIANCE INVENTORY — FINAL UI
+     TOP OPERATIONAL TOOLBAR
      ====================================================== */
 
-
-  /* ------------------------------------------------------
-     FILTERS
-     ------------------------------------------------------ */
-
-  .inventory-filter-row {
-    /*
-      This is the REAL Bootstrap row used by the filter.
-      920px gives it a compact manager/warehouse feel
-      without squeezing the controls.
-    */
-    max-width:920px;
-  }
-
-  .inventory-filter-row .filter-label {
-    margin-bottom:.22rem;
-
-    color:#5e6871;
-
-    font-size:.68rem;
-    font-weight:700;
-
-    line-height:1.1;
-    letter-spacing:.025em;
-
-    text-transform:uppercase;
-  }
-
-  .inventory-filter-row .form-control-sm,
-  .inventory-filter-row .form-select-sm {
-    min-height:32px;
-
-    font-size:.82rem;
-
-    border-color:#cfd5db;
-  }
-
-  .inventory-filter-row .form-control-sm:focus,
-  .inventory-filter-row .form-select-sm:focus {
-    border-color:#86b7fe;
-  }
-
-
-  /* ------------------------------------------------------
-     TOP COUNTERS / ACTIONS
-     ------------------------------------------------------ */
-
-  .inventory-stat {
-    min-height:30px;
-
-    padding:.31rem .52rem;
-
-    font-size:.74rem;
-    font-weight:600;
-
-    color:#495057;
-  }
-
-  .inventory-stat strong {
-    font-size:.82rem;
-    font-weight:800;
-  }
-
-  .inventory-toolbar .btn,
-  .inventory-toolbar + .btn,
   .vendor-return-top-btn {
     min-height:30px;
-  }
+    padding:.32rem .58rem !important;
 
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:.3rem;
 
-  /* ------------------------------------------------------
-     VENDOR RETURNS
-     ------------------------------------------------------ */
-
-  .vendor-return-top-btn {
-    padding:.31rem .58rem !important;
-
-    font-size:.74rem;
+    font-size:.73rem;
     font-weight:800;
+    letter-spacing:.01em;
+    white-space:nowrap;
 
-    border-radius:.34rem;
+    border-radius:.32rem;
   }
 
   .vendor-return-top-btn.has-pending {
     background:#ffc107;
-    border-color:#d7a600;
-    color:#1d2125;
+    border-color:#dba900;
+    color:#212529;
+
+    box-shadow:
+      0 .08rem .18rem rgba(0,0,0,.11);
+  }
+
+  .vendor-return-top-btn.has-pending:hover {
+    background:#eeb500;
+    border-color:#c99a00;
+    color:#111;
+  }
+
+  .vendor-return-top-btn.no-pending {
+    background:#fff;
+    border-color:#adb5bd;
+    color:#495057;
   }
 
   .vendor-return-count {
-    min-width:1.18rem;
-    height:1.18rem;
+    min-width:1.22rem;
+    height:1.22rem;
 
-    padding:0 .26rem;
-
-    background:#343a40 !important;
-    color:#fff !important;
-
-    font-size:.64rem;
-    font-weight:900;
-  }
-
-
-  /* ------------------------------------------------------
-     REAL INVENTORY TABLE
-     
-     IMPORTANT:
-     use .inventory-table, NOT generic .table.
-     ------------------------------------------------------ */
-
-  .inventory-table {
-    font-size:.84rem;
-    color:#242a30;
-  }
-
-  .inventory-table thead th {
-    padding:.48rem .43rem;
-
-    color:#3b444d;
-
-    font-size:.69rem;
-    font-weight:800;
-
-    line-height:1.15;
-    letter-spacing:.018em;
-
-    vertical-align:middle;
-  }
-
-  .inventory-table tbody td {
-    padding:.43rem .43rem;
-
-    line-height:1.28;
-    vertical-align:middle;
-  }
-
-  .inventory-table tbody tr.unit-row:hover td {
-    background:#f6f9fc;
-  }
-
-
-  /* ------------------------------------------------------
-     PRIMARY FIELDS
-     ------------------------------------------------------ */
-
-  .inventory-number {
-    font-size:.83rem;
-    font-weight:700;
-
-    color:#0d6efd;
-  }
-
-  .serial-number {
-    font-weight:700;
-    color:#252a2f;
-  }
-
-  .wo-value {
-    font-weight:700;
-  }
-
-  .issue-link {
-    font-weight:700;
-  }
-
-
-  /* ------------------------------------------------------
-     STATUS
-     ------------------------------------------------------ */
-
-  .inventory-table .status-badge {
-    padding:.21rem .39rem;
-
-    font-size:.67rem;
-    font-weight:800;
-
-    line-height:1;
-    letter-spacing:.015em;
-  }
-
-
-  /* ------------------------------------------------------
-     STOCK CLASS
-     ------------------------------------------------------ */
-
-  .inventory-stock-class {
-    display:inline-flex;
-    align-items:center;
-
-    margin-left:.42rem;
-  }
-
-  /*
-    NEW is intentionally quiet.
-    The warehouse STATUS has greater importance.
-  */
-
-  .inventory-stock-class > span:not(.badge) {
-    color:#818991 !important;
-
-    font-size:.64rem !important;
-    font-weight:600 !important;
-
-    letter-spacing:.01em;
-  }
-
-  /*
-    LOANER is operationally important, therefore
-    it remains a visible badge.
-  */
-
-  .inventory-stock-class .badge {
-    padding:.19rem .38rem;
-
-    font-size:.65rem;
-    font-weight:800;
-
-    line-height:1;
-  }
-
-
-  /* ------------------------------------------------------
-     CATEGORY SEPARATORS
-     ------------------------------------------------------ */
-
-  .inventory-category-row td {
-    padding-top:.42rem !important;
-    padding-bottom:.42rem !important;
-
-    background:#e7ebef !important;
-
-    border-top:1px solid #aeb6be !important;
-    border-bottom:1px solid #c5cbd1 !important;
-  }
-
-  .inventory-category-name {
-    color:#303840;
-
-    font-size:.76rem;
-    font-weight:800;
-
-    letter-spacing:.035em;
-  }
-
-  .inventory-category-count {
-    font-size:.64rem;
-  }
-
-
-  /* ------------------------------------------------------
-     SECONDARY INFORMATION
-     ------------------------------------------------------ */
-
-  .inventory-table td:nth-child(6) {
-    color:#65707a;
-  }
-
-  .inventory-table td:last-child {
-    color:#6c757d;
-    font-size:.77rem;
-  }
-
-
-  /* ------------------------------------------------------
-     RESPONSIVE
-     ------------------------------------------------------ */
-
-  @media (max-width:1199px) {
-
-    .inventory-filter-row {
-      max-width:100%;
-    }
-
-    .inventory-table {
-      font-size:.80rem;
-    }
-
-    .inventory-table thead th {
-      font-size:.66rem;
-    }
-
-  }
-
-
-
-
-  /* INVENTORY FILTER — SINGLE DESKTOP ROW */
-
-  .inventory-filter-row {
-    /*
-      Desktop:
-      Search is intentionally wider.
-      All remaining filters + actions stay on ONE line.
-    */
-    display:grid;
-
-    grid-template-columns:
-      minmax(270px, 2.35fr)
-      minmax(115px, 1fr)
-      minmax(115px, 1fr)
-      minmax(115px, 1fr)
-      minmax(120px, 1fr)
-      minmax(115px, 1fr)
-      auto;
-
-    gap:.55rem;
-
-    align-items:end;
-
-    width:100%;
-    max-width:none !important;
-
-    margin:0;
-  }
-
-
-  .inventory-filter-item {
-    min-width:0;
-  }
-
-
-  .inventory-filter-item .form-control,
-  .inventory-filter-item .form-select {
-    width:100%;
-    max-width:none !important;
-
-    min-height:32px;
-
-    font-size:.80rem;
-  }
-
-
-  .inventory-filter-search {
-    min-width:0;
-  }
-
-
-  .inventory-filter-actions {
-    display:flex;
-    align-items:flex-end;
-    gap:.35rem;
-
-    white-space:nowrap;
-  }
-
-
-  .inventory-filter-actions .btn {
-    min-height:32px;
+    padding:0 .28rem;
 
     display:inline-flex;
     align-items:center;
     justify-content:center;
 
-    padding-left:.65rem;
-    padding-right:.65rem;
+    border-radius:999px;
+
+    /*
+      Pending itself is already communicated by the
+      yellow button. Dark counter is cleaner than a
+      second competing red alert.
+    */
+    background:#343a40 !important;
+    color:#fff !important;
+
+    font-size:.65rem;
+    font-weight:900;
+    line-height:1;
+  }
+
+
+  /* ======================================================
+     FILTER PANEL
+     
+     NO LAYOUT CHANGES.
+     Only typography / controls.
+     ====================================================== */
+
+  .filter-label {
+    color:#68717a;
+
+    font-size:.64rem;
+    font-weight:800;
+
+    letter-spacing:.035em;
+  }
+
+  .form-control-sm,
+  .form-select-sm {
+    min-height:31px;
+  }
+
+
+  /* ======================================================
+     INVENTORY REGISTRY
+     ====================================================== */
+
+  .table {
+    /*
+      Existing structure stays unchanged.
+      Slightly improve reading rhythm.
+    */
+    font-size:.80rem;
+  }
+
+  .table thead th {
+    padding-top:.46rem;
+    padding-bottom:.46rem;
+
+    color:#3e474f;
+
+    font-size:.66rem;
+    font-weight:800;
+
+    letter-spacing:.025em;
+
+    vertical-align:middle;
+  }
+
+  .table tbody td {
+    padding-top:.40rem;
+    padding-bottom:.40rem;
+
+    line-height:1.25;
+    vertical-align:middle;
+  }
+
+  .table tbody tr:not(.table-secondary):hover td {
+    background:#f7faff;
+  }
+
+
+  /* ======================================================
+     CATEGORY GROUP ROWS
+     ====================================================== */
+
+  .table-secondary td,
+  tr.table-secondary td {
+
+    /*
+      Slightly stronger separation between
+      REFRIGERATOR / WASHER / DRYER / ...
+    */
+
+    background:#e9edf1 !important;
+
+    color:#283038;
+
+    font-weight:800;
+
+    border-top-color:#cbd2d9 !important;
+    border-bottom-color:#cbd2d9 !important;
+  }
+
+
+  /* ======================================================
+     AP NUMBER
+     ====================================================== */
+
+  .table a {
+    text-underline-offset:2px;
+  }
+
+
+  /* ======================================================
+     STATUS + STOCK CLASS
+     
+     Existing HTML already contains:
+       .status-badge
+       .inventory-stock-class
+     
+     No template modification required.
+     ====================================================== */
+
+  .status-badge {
+    display:inline-flex;
+    align-items:center;
+
+    font-weight:800;
+
+    line-height:1.1;
+
+    white-space:nowrap;
+  }
+
+
+  .inventory-stock-class {
+    display:inline-flex;
+    align-items:center;
+
+    /*
+      Give visible separation from STATUS.
+    */
+    margin-left:.34rem;
+
+    vertical-align:middle;
+  }
+
+
+  /*
+    NEW should be secondary information.
+    Status is more important.
+  */
+
+  .inventory-stock-class > span:not(.badge) {
+    color:#7a838b !important;
+
+    font-size:.62rem !important;
+    font-weight:700 !important;
+
+    letter-spacing:.015em;
+
+    white-space:nowrap;
+  }
+
+
+  /*
+    LOANER remains deliberately more visible because
+    warehouse staff must identify loaner inventory quickly.
+  */
+
+  .inventory-stock-class .badge {
+    padding:.18rem .38rem;
+
+    font-size:.64rem;
+    font-weight:800;
+
+    line-height:1;
+
+    border-radius:.28rem;
+  }
+
+
+  /* ======================================================
+     VENDOR RETURN STATES
+     ====================================================== */
+
+  /*
+    PENDING should be noticeable but readable.
+    We do not change business status or markup.
+  */
+
+  .status-badge.bg-secondary {
+    border:1px solid rgba(0,0,0,.08);
+  }
+
+
+  /* ======================================================
+     SECONDARY TABLE INFORMATION
+     ====================================================== */
+
+  /*
+    Date columns and placeholder dashes should not compete
+    visually with AP#, status, vendor-return state, etc.
+  */
+
+  .table td {
+    color:#252b31;
+  }
+
+  .table td.text-muted,
+  .table .text-muted {
+    color:#747d85 !important;
+  }
+
+
+  /* ======================================================
+     SMALL SCREEN SAFETY
+     ====================================================== */
+
+  @media (max-width: 1100px) {
+
+    .table {
+      font-size:.76rem;
+    }
+
+    .table thead th {
+      font-size:.63rem;
+    }
+
+    .inventory-stock-class {
+      margin-left:.22rem;
+    }
+
+  }
+
+
+
+
+  /* INVENTORY TYPOGRAPHY + FILTER PROPORTIONS */
+
+
+  /* ======================================================
+     FILTER PANEL PROPORTIONS
+     ====================================================== */
+
+  /*
+    Keep existing Bootstrap structure.
+    Only limit how wide individual controls may become.
+  */
+
+  .issue-card form,
+  form[method="get"] {
+    max-width:100%;
+  }
+
+
+  /*
+    Inventory filter card itself remains full-width,
+    but the actual control area becomes visually compact.
+  */
+
+  .inventory-page .row.g-2,
+  .unit-page .row.g-2,
+  form[method="get"] .row.g-2 {
+
+    max-width:980px;
+  }
+
+
+  /*
+    Search field remains the dominant control.
+  */
+
+  form[method="get"] input[type="text"].form-control,
+  form[method="get"] input[type="search"].form-control {
+
+    max-width:420px;
+  }
+
+
+  /*
+    Dropdowns do not need to stretch excessively.
+  */
+
+  form[method="get"] select.form-select {
+
+    max-width:230px;
+  }
+
+
+  /*
+    Condition on the second line also stays compact.
+  */
+
+  form[method="get"] .form-select,
+  form[method="get"] .form-control {
+
+    min-height:32px;
+
+    font-size:.82rem;
+  }
+
+
+  /*
+    Labels become easier to scan without looking oversized.
+  */
+
+  form[method="get"] label,
+  form[method="get"] .filter-label {
+
+    color:#606972;
+
+    font-size:.66rem;
+    font-weight:800;
+
+    letter-spacing:.035em;
+
+    text-transform:uppercase;
+  }
+
+
+  /*
+    Search / Clear stay visually connected to filters.
+  */
+
+  form[method="get"] .btn-sm {
+
+    min-height:31px;
+
+    padding-left:.7rem;
+    padding-right:.7rem;
 
     font-size:.76rem;
     font-weight:600;
   }
 
 
-  .inventory-filter-row .filter-label {
-    margin-bottom:.22rem;
+  /* ======================================================
+     TABLE TYPOGRAPHY
+     ====================================================== */
 
-    color:#5d6670;
+  /*
+    Main registry text:
+    slightly larger than current version.
+  */
 
-    font-size:.66rem;
-    font-weight:700;
+  .table {
 
-    line-height:1.1;
-    letter-spacing:.025em;
+    font-size:.85rem;
+
+    color:#22282e;
   }
 
 
   /*
-    Medium screens:
-    allow a clean multi-column layout rather than
-    squeezing controls until they are unusable.
+    Headers stay compact but become more legible.
   */
 
-  @media (max-width:1199px) {
+  .table thead th {
 
-    .inventory-filter-row {
-      grid-template-columns:
-        repeat(3, minmax(180px, 1fr));
-    }
+    color:#343c44;
 
-    .inventory-filter-actions {
-      align-self:end;
+    font-size:.69rem;
+    font-weight:800;
+
+    letter-spacing:.025em;
+
+    line-height:1.15;
+  }
+
+
+  /*
+    More breathing room without making rows bulky.
+  */
+
+  .table tbody td {
+
+    padding-top:.44rem;
+    padding-bottom:.44rem;
+
+    line-height:1.28;
+  }
+
+
+  /* ======================================================
+     PRIMARY INFORMATION
+     ====================================================== */
+
+  /*
+    AP numbers are primary navigation.
+  */
+
+  .table tbody td:first-child a {
+
+    font-weight:700;
+  }
+
+
+  /*
+    Appliance / Model / Serial values should be easy to scan.
+  */
+
+  .table tbody td:nth-child(2),
+  .table tbody td:nth-child(4),
+  .table tbody td:nth-child(5) {
+
+    font-weight:600;
+  }
+
+
+  /*
+    Serial gets a little extra contrast because warehouse
+    staff relies on it heavily.
+  */
+
+  .table tbody td:nth-child(5) {
+
+    color:#20252a;
+  }
+
+
+  /* ======================================================
+     SECONDARY INFORMATION
+     ====================================================== */
+
+  /*
+    Warehouse/date/history fields should not compete
+    with AP / model / serial / status.
+  */
+
+  .table tbody td:nth-child(6),
+  .table tbody td:nth-last-child(1),
+  .table tbody td:nth-last-child(2) {
+
+    color:#68717a;
+  }
+
+
+  /* ======================================================
+     STATUS / CLASS
+     ====================================================== */
+
+  .status-badge {
+
+    font-size:.67rem;
+    font-weight:800;
+
+    padding:.2rem .38rem;
+  }
+
+
+  .inventory-stock-class {
+
+    margin-left:.38rem;
+  }
+
+
+  /*
+    NEW is contextual / secondary.
+  */
+
+  .inventory-stock-class > span:not(.badge) {
+
+    color:#818990 !important;
+
+    font-size:.64rem !important;
+    font-weight:700 !important;
+  }
+
+
+  /*
+    LOANER remains more visible.
+  */
+
+  .inventory-stock-class .badge {
+
+    font-size:.65rem;
+
+    padding:.18rem .38rem;
+  }
+
+
+  /* ======================================================
+     CATEGORY ROWS
+     ====================================================== */
+
+  tr.table-secondary td,
+  .table-secondary td {
+
+    font-size:.74rem;
+
+    letter-spacing:.025em;
+
+    padding-top:.38rem;
+    padding-bottom:.38rem;
+  }
+
+
+  /* ======================================================
+     LARGE DESKTOP
+     ====================================================== */
+
+  @media (min-width:1400px) {
+
+    /*
+      Prevent the filter controls from feeling lost in a
+      very wide screen.
+    */
+
+    form[method="get"] .row.g-2 {
+
+      max-width:980px;
     }
 
   }
 
 
-  @media (max-width:767px) {
+  /* ======================================================
+     SMALLER DESKTOP / TABLET
+     ====================================================== */
 
-    .inventory-filter-row {
-      grid-template-columns:1fr;
+  @media (max-width:1100px) {
+
+    .table {
+
+      font-size:.80rem;
+    }
+
+    .table thead th {
+
+      font-size:.66rem;
+    }
+
+    form[method="get"] select.form-select,
+    form[method="get"] input.form-control {
+
+      max-width:none;
     }
 
   }
@@ -687,10 +871,10 @@
       <form method="get"
             action="{{ url_for('appliance.inventory_list') }}">
 
-        <div class="inventory-filter-row">
+        <div class="row g-2">
 
 
-          <div class="inventory-filter-item inventory-filter-search">
+          <div class="col-xl-4 col-md-6">
 
             <div class="filter-label">
               Search
@@ -705,7 +889,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Warehouse
@@ -732,7 +916,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Appliance
@@ -759,7 +943,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Status
@@ -823,7 +1007,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Stock Class
@@ -857,7 +1041,7 @@
           </div>
 
 
-          <div class="inventory-filter-item">
+          <div class="col-xl-2 col-md-3">
 
             <div class="filter-label">
               Condition
@@ -899,19 +1083,20 @@
 
           </div>
 
-          <div class="inventory-filter-actions">
+        </div>
 
-            <button type="submit"
-                    class="btn btn-primary btn-sm">
-              Search
-            </button>
 
-            <a class="btn btn-outline-secondary btn-sm"
-               href="{{ url_for('appliance.inventory_list') }}">
-              Clear
-            </a>
+        <div class="d-flex gap-2 mt-3">
 
-          </div>
+          <button type="submit"
+                  class="btn btn-primary btn-sm">
+            Search
+          </button>
+
+          <a class="btn btn-outline-secondary btn-sm"
+             href="{{ url_for('appliance.inventory_list') }}">
+            Clear
+          </a>
 
         </div>
 
