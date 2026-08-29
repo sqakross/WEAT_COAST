@@ -108,6 +108,11 @@
                   {% if status == 'posted' %}selected{% endif %}>
             Posted
           </option>
+
+          <option value="voided"
+                  {% if status == 'voided' %}selected{% endif %}>
+            Voided
+          </option>
         </select>
       </div>
 
@@ -146,6 +151,7 @@
         <th class="text-end">Units</th>
         <th class="text-end">Missing Price</th>
         <th>Updated</th>
+        <th class="text-end">Actions</th>
       </tr>
     </thead>
 
@@ -188,6 +194,10 @@
               <span class="badge bg-success">
                 POSTED
               </span>
+            {% elif receiving.status == 'voided' %}
+              <span class="badge bg-danger">
+                VOIDED
+              </span>
             {% else %}
               <span class="badge bg-secondary">
                 DRAFT
@@ -217,6 +227,29 @@
             {% else %}
               —
             {% endif %}
+          </td>
+
+          <td class="text-end"
+              onclick="event.stopPropagation();">
+
+            {% if receiving.id in can_delete_draft_ids %}
+              <form method="post"
+                    action="{{ url_for(
+                        'appliance.receiving_delete_draft',
+                        receiving_id=receiving.id
+                    ) }}"
+                    class="d-inline"
+                    onsubmit="event.stopPropagation(); return confirm('Delete Draft Receiving {{ receiving.receiving_number }}? This cannot be undone.');">
+
+                <button type="submit"
+                        class="btn btn-sm btn-outline-danger"
+                        onclick="event.stopPropagation();">
+                  Delete
+                </button>
+
+              </form>
+            {% endif %}
+
           </td>
 
         </tr>

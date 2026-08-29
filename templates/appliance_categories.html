@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="container-fluid">
+
+  <div class="d-flex flex-wrap
+              justify-content-between
+              align-items-start
+              gap-2
+              mb-3">
+
+    <div>
+
+      <h3 class="mb-1">
+        Appliance Categories
+      </h3>
+
+      <div class="text-muted small">
+        Global appliance type management.
+        Categories are never physically deleted.
+      </div>
+
+    </div>
+
+    <div class="d-flex gap-2">
+
+      <a
+        href="{{ url_for('appliance.receiving_list') }}"
+        class="btn btn-outline-primary btn-sm"
+      >
+        Receiving
+      </a>
+
+      <a
+        href="{{ url_for('appliance.inventory_list') }}"
+        class="btn btn-outline-secondary btn-sm"
+      >
+        ← Inventory
+      </a>
+
+    </div>
+
+  </div>
+
+
+  <div class="alert alert-light border py-2 small">
+
+    <strong>ACTIVE</strong>
+    types are available for new Receiving.
+
+    <strong>INACTIVE</strong>
+    types remain attached to historical
+    Receiving and Inventory records,
+    but cannot be selected for new stock.
+
+    New appliance types can still be created
+    directly from Receiving.
+
+  </div>
+
+
+  <div class="card shadow-sm">
+
+    <div class="table-responsive">
+
+      <table
+        class="table table-sm
+               table-hover
+               align-middle
+               mb-0"
+      >
+
+        <thead class="table-light">
+
+          <tr>
+
+            <th style="width:80px;">
+              ID
+            </th>
+
+            <th>
+              APPLIANCE TYPE
+            </th>
+
+            <th style="width:220px;">
+              CODE
+            </th>
+
+            <th
+              class="text-center"
+              style="width:140px;"
+            >
+              STATUS
+            </th>
+
+            <th
+              class="text-center"
+              style="width:180px;"
+            >
+              ACTION
+            </th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          {% for category in categories %}
+
+            <tr>
+
+              <td class="text-muted">
+                {{ category.id }}
+              </td>
+
+              <td class="fw-semibold">
+                {{ category.name|upper }}
+              </td>
+
+              <td>
+                <code>
+                  {{ category.code }}
+                </code>
+              </td>
+
+              <td class="text-center">
+
+                {% if category.is_active %}
+
+                  <span class="badge bg-success">
+                    ACTIVE
+                  </span>
+
+                {% else %}
+
+                  <span class="badge bg-secondary">
+                    INACTIVE
+                  </span>
+
+                {% endif %}
+
+              </td>
+
+              <td class="text-center">
+
+                <form
+                  method="post"
+                  action="{{ url_for(
+                    'appliance.categories_toggle',
+                    category_id=category.id
+                  ) }}"
+                  class="d-inline"
+                  onsubmit="return confirm(
+                    {% if category.is_active %}
+                      'Deactivate {{ category.name|upper }}? It will disappear from new Receiving, but historical records will remain unchanged.'
+                    {% else %}
+                      'Activate {{ category.name|upper }}? It will become available in Receiving again.'
+                    {% endif %}
+                  );"
+                >
+
+                  {% if category.is_active %}
+
+                    <button
+                      type="submit"
+                      class="btn
+                             btn-outline-danger
+                             btn-sm"
+                    >
+                      DEACTIVATE
+                    </button>
+
+                  {% else %}
+
+                    <button
+                      type="submit"
+                      class="btn
+                             btn-outline-success
+                             btn-sm"
+                    >
+                      ACTIVATE
+                    </button>
+
+                  {% endif %}
+
+                </form>
+
+              </td>
+
+            </tr>
+
+          {% else %}
+
+            <tr>
+
+              <td
+                colspan="5"
+                class="text-center
+                       text-muted
+                       py-4"
+              >
+                No appliance categories found.
+              </td>
+
+            </tr>
+
+          {% endfor %}
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+
+</div>
+
+{% endblock %}

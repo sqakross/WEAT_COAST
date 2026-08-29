@@ -380,6 +380,28 @@
                   </a>
                 </li>
 
+                {% if current_user.is_authenticated
+                      and current_user.role in [
+                        'superadmin',
+                        'admin',
+                        'manager'
+                      ] %}
+
+                <li>
+                  <hr class="dropdown-divider">
+                </li>
+
+                <li>
+                  <a
+                    class="dropdown-item{% if request.endpoint and request.endpoint.startswith('appliance.categories_') %} active{% endif %}"
+                    href="{{ url_for('appliance.categories_list') }}"
+                  >
+                    CATEGORIES
+                  </a>
+                </li>
+
+                {% endif %}
+
               </ul>
 
             </li>

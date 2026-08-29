@@ -72,6 +72,67 @@
     font-size:.82rem;
     margin-top:.3rem;
   }
+
+  /* ========================================================
+     INVENTORY EDIT DETAILS
+     ======================================================== */
+
+  .inventory-details-editor {
+    border:1px solid #cfd6de;
+    border-radius:.5rem;
+    background:#f8f9fa;
+    margin-bottom:1rem;
+  }
+
+  .inventory-details-editor-header {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    padding:.75rem 1rem;
+    cursor:pointer;
+    user-select:none;
+  }
+
+  .inventory-details-editor-header:hover {
+    background:#f1f3f5;
+  }
+
+  .inventory-details-editor-title {
+    font-size:.82rem;
+    font-weight:800;
+  }
+
+  .inventory-details-editor-subtitle {
+    font-size:.68rem;
+    color:#6c757d;
+  }
+
+  .inventory-details-editor-body {
+    display:none;
+    padding:0 1rem 1rem;
+    border-top:1px solid #dde2e7;
+  }
+
+  .inventory-details-editor.open
+  .inventory-details-editor-body {
+    display:block;
+  }
+
+  .inventory-edit-field label {
+    display:block;
+    margin-bottom:.2rem;
+    font-size:.65rem;
+    font-weight:700;
+    color:#6c757d;
+    text-transform:uppercase;
+  }
+
+  .inventory-edit-notes {
+    min-height:74px;
+    resize:vertical;
+  }
+
 </style>
 
 
@@ -311,6 +372,273 @@
         </div>
 
       </div>
+
+
+      {% if can_receive %}
+
+        <!-- ================================================
+             EDIT DESCRIPTIVE DETAILS
+             ================================================ -->
+
+        <div class="inventory-details-editor"
+             id="inventoryDetailsEditor">
+
+          <div class="inventory-details-editor-header"
+               id="inventoryDetailsToggle">
+
+            <div>
+
+              <div class="inventory-details-editor-title">
+                EDIT DETAILS
+              </div>
+
+              <div class="inventory-details-editor-subtitle">
+                Appliance · Brand · Model · Serial · Size · Unit · Color · Condition · Notes
+              </div>
+
+            </div>
+
+            <button type="button"
+                    class="btn btn-outline-primary btn-sm"
+                    id="inventoryDetailsButton">
+              EDIT
+            </button>
+
+          </div>
+
+
+          <div class="inventory-details-editor-body">
+
+            <form method="post"
+                  action="{{ url_for(
+                      'appliance.inventory_update_details',
+                      unit_id=unit.id
+                  ) }}">
+
+              <div class="row g-3 mt-0">
+
+
+                <!-- APPLIANCE CATEGORY -->
+                <div class="col-md-3 inventory-edit-field">
+
+                  <label>
+                    Appliance
+                  </label>
+
+                  <select name="category_id"
+                          class="form-select form-select-sm"
+                          required>
+
+                    {% for category in categories %}
+                      <option value="{{ category.id }}"
+                              {% if unit.category_id == category.id %}selected{% endif %}>
+                        {{ category.name|upper }}
+                        {% if not category.is_active %}
+                          (INACTIVE)
+                        {% endif %}
+                      </option>
+                    {% endfor %}
+
+                  </select>
+
+                </div>
+
+
+                <!-- BRAND -->
+                <div class="col-md-3 inventory-edit-field">
+
+                  <label>
+                    Brand
+                  </label>
+
+                  <input type="text"
+                         name="brand"
+                         maxlength="100"
+                         class="form-control form-control-sm text-uppercase"
+                         placeholder="BRAND"
+                         value="{{ unit.brand or '' }}">
+
+                </div>
+
+
+                <!-- MODEL -->
+                <div class="col-md-3 inventory-edit-field">
+
+                  <label>
+                    Model
+                  </label>
+
+                  <input type="text"
+                         name="model_number"
+                         maxlength="120"
+                         class="form-control form-control-sm text-uppercase"
+                         placeholder="MODEL"
+                         value="{{ unit.model_number or '' }}">
+
+                </div>
+
+
+                <!-- SERIAL -->
+                <div class="col-md-3 inventory-edit-field">
+
+                  <label>
+                    Serial
+                  </label>
+
+                  <input type="text"
+                         name="serial_number"
+                         maxlength="160"
+                         class="form-control form-control-sm text-uppercase"
+                         placeholder="SERIAL"
+                         value="{{ unit.serial_number or '' }}">
+
+                </div>
+
+
+                <!-- SIZE -->
+
+                <div class="col-md-2 inventory-edit-field">
+
+                  <label>
+                    Size
+                  </label>
+
+                  <input type="number"
+                         name="size_value"
+                         step="0.1"
+                         min="0"
+                         class="form-control form-control-sm"
+                         value="{{ unit.size_value if unit.size_value is not none else '' }}">
+
+                </div>
+
+
+                <!-- UNIT -->
+
+                <div class="col-md-2 inventory-edit-field">
+
+                  <label>
+                    Unit
+                  </label>
+
+                  <input type="text"
+                         name="size_unit"
+                         maxlength="20"
+                         class="form-control form-control-sm text-uppercase"
+                         placeholder="CU.FT."
+                         value="{{ unit.size_unit or '' }}">
+
+                </div>
+
+
+                <!-- COLOR -->
+
+                <div class="col-md-3 inventory-edit-field">
+
+                  <label>
+                    Color
+                  </label>
+
+                  <input type="text"
+                         name="color"
+                         maxlength="80"
+                         class="form-control form-control-sm text-uppercase"
+                         placeholder="WHITE"
+                         value="{{ unit.color or '' }}">
+
+                </div>
+
+
+                <!-- CONDITION -->
+                <div class="col-md-2 inventory-edit-field">
+
+                  <label>
+                    Condition
+                  </label>
+
+                  <select name="condition"
+                          class="form-select form-select-sm">
+
+                    {% for value, caption in [
+                      ('new', 'NEW'),
+                      ('used', 'USED'),
+                      ('open_box', 'OPEN BOX'),
+                      ('damaged', 'DAMAGED'),
+                      ('repaired', 'REPAIRED')
+                    ] %}
+
+                      <option value="{{ value }}"
+                              {% if unit.condition == value %}selected{% endif %}>
+                        {{ caption }}
+                      </option>
+
+                    {% endfor %}
+
+                  </select>
+
+                </div>
+
+
+                <!-- READ ONLY STOCK CLASS -->
+
+                <div class="col-md-3 inventory-edit-field">
+
+                  <label>
+                    Stock Class
+                  </label>
+
+                  <input type="text"
+                         class="form-control form-control-sm"
+                         value="{{ (unit.stock_class or 'new')|replace('_', ' ')|upper }}"
+                         readonly>
+
+                </div>
+
+
+                <!-- NOTES -->
+
+                <div class="col-12 inventory-edit-field">
+
+                  <label>
+                    Notes
+                  </label>
+
+                  <textarea name="notes"
+                            maxlength="5000"
+                            class="form-control form-control-sm inventory-edit-notes"
+                            placeholder="Notes">{{ unit.notes or '' }}</textarea>
+
+                </div>
+
+
+                <div class="col-12">
+
+                  <div class="d-flex gap-2">
+
+                    <button type="submit"
+                            class="btn btn-primary btn-sm">
+                      SAVE DETAILS
+                    </button>
+
+                    <button type="button"
+                            class="btn btn-outline-secondary btn-sm"
+                            id="inventoryDetailsCancel">
+                      CANCEL
+                    </button>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            </form>
+
+          </div>
+
+        </div>
+
+      {% endif %}
 
 
       <!-- ==================================================
@@ -1278,5 +1606,720 @@
   </div>
 
 </div>
+
+
+<script>
+(() => {
+  "use strict";
+
+  const editor =
+    document.getElementById(
+      "inventoryDetailsEditor"
+    );
+
+  if (!editor) {
+    return;
+  }
+
+  const toggle =
+    document.getElementById(
+      "inventoryDetailsToggle"
+    );
+
+  const button =
+    document.getElementById(
+      "inventoryDetailsButton"
+    );
+
+  const cancel =
+    document.getElementById(
+      "inventoryDetailsCancel"
+    );
+
+
+  function openEditor() {
+
+    editor.classList.add(
+      "open"
+    );
+
+    if (button) {
+      button.textContent =
+        "CLOSE";
+    }
+  }
+
+
+  function closeEditor() {
+
+    editor.classList.remove(
+      "open"
+    );
+
+    if (button) {
+      button.textContent =
+        "EDIT";
+    }
+  }
+
+
+  if (toggle) {
+
+    toggle.addEventListener(
+      "click",
+      event => {
+
+        if (
+          event.target.closest(
+            "button"
+          )
+        ) {
+          event.preventDefault();
+        }
+
+        if (
+          editor.classList.contains(
+            "open"
+          )
+        ) {
+          closeEditor();
+        } else {
+          openEditor();
+        }
+      }
+    );
+  }
+
+
+  if (cancel) {
+
+    cancel.addEventListener(
+      "click",
+      closeEditor
+    );
+  }
+
+})();
+</script>
+
+
+
+
+<script>
+(() => {
+  "use strict";
+
+  const editor =
+    document.getElementById(
+      "inventoryDetailsEditor"
+    );
+
+  if (!editor) {
+    return;
+  }
+
+  const form =
+    editor.querySelector(
+      "form"
+    );
+
+  if (!form) {
+    return;
+  }
+
+  const sizeInput =
+    form.querySelector(
+      '[name="size_value"]'
+    );
+
+  const unitInput =
+    form.querySelector(
+      '[name="size_unit"]'
+    );
+
+  const colorInput =
+    form.querySelector(
+      '[name="color"]'
+    );
+
+  const notesInput =
+    form.querySelector(
+      '[name="notes"]'
+    );
+
+  if (
+    !sizeInput ||
+    !unitInput ||
+    !colorInput ||
+    !notesInput
+  ) {
+    console.error(
+      "FIND SPECS: Edit Details fields not found."
+    );
+    return;
+  }
+
+
+  // ----------------------------------------------------------
+  // FIND SPECS button
+  // ----------------------------------------------------------
+
+  const toolbar =
+    document.createElement(
+      "div"
+    );
+
+  toolbar.className =
+    "d-flex align-items-center gap-2 mt-3 mb-2";
+
+
+  const findButton =
+    document.createElement(
+      "button"
+    );
+
+  findButton.type =
+    "button";
+
+  findButton.className =
+    "btn btn-outline-info btn-sm";
+
+  findButton.innerHTML =
+    "✨ FIND SPECS";
+
+
+  const status =
+    document.createElement(
+      "span"
+    );
+
+  status.className =
+    "small text-muted";
+
+
+  toolbar.appendChild(
+    findButton
+  );
+
+  toolbar.appendChild(
+    status
+  );
+
+
+  // Put it before the form's existing buttons.
+  const submitButton =
+    form.querySelector(
+      'button[type="submit"]'
+    );
+
+  if (submitButton) {
+
+    const buttonArea =
+      submitButton.parentElement;
+
+    if (buttonArea) {
+      buttonArea.parentElement.insertBefore(
+        toolbar,
+        buttonArea
+      );
+    } else {
+      form.appendChild(
+        toolbar
+      );
+    }
+
+  } else {
+
+    form.appendChild(
+      toolbar
+    );
+  }
+
+
+  // ----------------------------------------------------------
+  // Preview panel
+  // ----------------------------------------------------------
+
+  const preview =
+    document.createElement(
+      "div"
+    );
+
+  preview.className =
+    "card border-info mt-2 mb-3 d-none";
+
+  preview.innerHTML = `
+    <div class="card-header py-2">
+      <strong>MODEL SPECS PREVIEW</strong>
+    </div>
+
+    <div class="card-body">
+
+      <div
+        id="modelSpecsMatch"
+        class="small mb-3">
+      </div>
+
+      <div class="row g-2 mb-3">
+
+        <div class="col-md-3">
+          <div class="text-muted small">
+            Size
+          </div>
+          <strong id="modelSpecsSize">—</strong>
+        </div>
+
+        <div class="col-md-3">
+          <div class="text-muted small">
+            Unit
+          </div>
+          <strong id="modelSpecsUnit">—</strong>
+        </div>
+
+        <div class="col-md-6">
+          <div class="text-muted small">
+            Color
+          </div>
+          <strong id="modelSpecsColor">—</strong>
+        </div>
+
+      </div>
+
+      <div class="mb-3">
+        <div class="text-muted small mb-1">
+          Notes block
+        </div>
+
+        <pre
+          id="modelSpecsNotes"
+          class="border rounded bg-light p-2 mb-0"
+          style="white-space:pre-wrap; font-size:.76rem;"></pre>
+      </div>
+
+      <div
+        id="modelSpecsSources"
+        class="small mb-3">
+      </div>
+
+      <div class="d-flex gap-2">
+
+        <button
+          type="button"
+          class="btn btn-success btn-sm"
+          id="modelSpecsApply">
+          APPLY TO FORM
+        </button>
+
+        <button
+          type="button"
+          class="btn btn-outline-secondary btn-sm"
+          id="modelSpecsCancel">
+          CANCEL
+        </button>
+
+      </div>
+
+      <div class="small text-muted mt-2">
+        APPLY does not save the database.
+        Review the fields, then press SAVE.
+      </div>
+
+    </div>
+  `;
+
+
+  toolbar.insertAdjacentElement(
+    "afterend",
+    preview
+  );
+
+
+  const matchBox =
+    preview.querySelector(
+      "#modelSpecsMatch"
+    );
+
+  const sizeBox =
+    preview.querySelector(
+      "#modelSpecsSize"
+    );
+
+  const unitBox =
+    preview.querySelector(
+      "#modelSpecsUnit"
+    );
+
+  const colorBox =
+    preview.querySelector(
+      "#modelSpecsColor"
+    );
+
+  const notesBox =
+    preview.querySelector(
+      "#modelSpecsNotes"
+    );
+
+  const sourcesBox =
+    preview.querySelector(
+      "#modelSpecsSources"
+    );
+
+  const applyButton =
+    preview.querySelector(
+      "#modelSpecsApply"
+    );
+
+  const cancelButton =
+    preview.querySelector(
+      "#modelSpecsCancel"
+    );
+
+
+  let currentResult = null;
+
+
+  // ----------------------------------------------------------
+  // Replace ONLY [MODEL SPECS] block.
+  // Human warehouse notes stay untouched.
+  // ----------------------------------------------------------
+
+  function mergeModelSpecs(
+    currentNotes,
+    specsBlock
+  ) {
+
+    const current =
+      (currentNotes || "")
+      .trim();
+
+    const block =
+      (specsBlock || "")
+      .trim();
+
+    if (!block) {
+      return current;
+    }
+
+    const regex =
+      /\[MODEL SPECS\][\s\S]*?\[\/MODEL SPECS\]/i;
+
+    if (regex.test(current)) {
+
+      return current
+        .replace(
+          regex,
+          block
+        )
+        .trim();
+    }
+
+    if (!current) {
+      return block;
+    }
+
+    return (
+      current +
+      "\n\n" +
+      block
+    );
+  }
+
+
+  function hidePreview() {
+
+    preview.classList.add(
+      "d-none"
+    );
+
+    currentResult =
+      null;
+  }
+
+
+  function renderPreview(
+    result
+  ) {
+
+    currentResult =
+      result;
+
+    preview.classList.remove(
+      "d-none"
+    );
+
+    const exact =
+      result.exact_model_confirmed
+        ? "YES"
+        : "NO";
+
+    const confidence =
+      (
+        result.confidence ||
+        "low"
+      ).toUpperCase();
+
+    const model =
+      result.confirmed_model ||
+      result.suggested_model ||
+      result.input_model ||
+      "—";
+
+    matchBox.innerHTML =
+      "<strong>Model:</strong> " +
+      escapeHtml(model) +
+      " &nbsp; | &nbsp; " +
+      "<strong>Exact:</strong> " +
+      exact +
+      " &nbsp; | &nbsp; " +
+      "<strong>Confidence:</strong> " +
+      escapeHtml(confidence);
+
+    sizeBox.textContent =
+      result.size_value ?? "—";
+
+    unitBox.textContent =
+      result.size_unit || "—";
+
+    colorBox.textContent =
+      result.color || "—";
+
+    notesBox.textContent =
+      result.notes_block || "";
+
+    const sources =
+      Array.isArray(result.sources)
+        ? result.sources.slice(0, 5)
+        : [];
+
+    if (!sources.length) {
+
+      sourcesBox.textContent =
+        "Sources: —";
+
+    } else {
+
+      const links =
+        sources.map(
+          source => {
+
+            const name =
+              source.name ||
+              source.url ||
+              "Source";
+
+            const url =
+              source.url ||
+              "";
+
+            if (!url) {
+              return escapeHtml(name);
+            }
+
+            return (
+              '<a target="_blank" ' +
+              'rel="noopener noreferrer" ' +
+              'href="' +
+              escapeAttribute(url) +
+              '">' +
+              escapeHtml(name) +
+              "</a>"
+            );
+          }
+        );
+
+      sourcesBox.innerHTML =
+        "<strong>Sources:</strong> " +
+        links.join(" · ");
+    }
+  }
+
+
+  function escapeHtml(
+    value
+  ) {
+
+    const div =
+      document.createElement(
+        "div"
+      );
+
+    div.textContent =
+      String(value ?? "");
+
+    return div.innerHTML;
+  }
+
+
+  function escapeAttribute(
+    value
+  ) {
+
+    return String(
+      value ?? ""
+    )
+      .replaceAll("&", "&amp;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  }
+
+
+  // ----------------------------------------------------------
+  // FIND
+  // ----------------------------------------------------------
+
+  findButton.addEventListener(
+    "click",
+    async () => {
+
+      findButton.disabled =
+        true;
+
+      findButton.textContent =
+        "SEARCHING...";
+
+      status.textContent =
+        "Searching manufacturer specifications...";
+
+      hidePreview();
+
+      try {
+
+        const response =
+          await fetch(
+            {{ url_for(
+                'appliance.inventory_find_specs',
+                unit_id=unit.id
+            ) | tojson }},
+            {
+              method: "POST",
+              headers: {
+                "Accept":
+                  "application/json"
+              }
+            }
+          );
+
+        const payload =
+          await response.json();
+
+        if (
+          !response.ok ||
+          !payload.ok
+        ) {
+
+          throw new Error(
+            payload.error ||
+            "Lookup failed."
+          );
+        }
+
+        renderPreview(
+          payload.result
+        );
+
+        status.textContent =
+          "Specs found. Review before applying.";
+
+      } catch (error) {
+
+        console.error(
+          error
+        );
+
+        status.textContent =
+          "ERROR: " +
+          (
+            error.message ||
+            "Lookup failed."
+          );
+
+      } finally {
+
+        findButton.disabled =
+          false;
+
+        findButton.innerHTML =
+          "✨ FIND SPECS";
+      }
+    }
+  );
+
+
+  // ----------------------------------------------------------
+  // APPLY TO FORM ONLY
+  // ----------------------------------------------------------
+
+  applyButton.addEventListener(
+    "click",
+    () => {
+
+      if (!currentResult) {
+        return;
+      }
+
+      if (
+        currentResult.size_value !== null &&
+        currentResult.size_value !== undefined
+      ) {
+        sizeInput.value =
+          currentResult.size_value;
+      }
+
+      if (
+        currentResult.size_unit
+      ) {
+        unitInput.value =
+          currentResult.size_unit;
+      }
+
+      if (
+        currentResult.color
+      ) {
+        colorInput.value =
+          currentResult.color;
+      }
+
+      if (
+        currentResult.notes_block
+      ) {
+
+        notesInput.value =
+          mergeModelSpecs(
+            notesInput.value,
+            currentResult.notes_block
+          );
+      }
+
+      status.textContent =
+        "Applied to form. Review and press SAVE.";
+
+      hidePreview();
+
+      sizeInput.dispatchEvent(
+        new Event(
+          "change",
+          {
+            bubbles: true
+          }
+        )
+      );
+    }
+  );
+
+
+  cancelButton.addEventListener(
+    "click",
+    () => {
+
+      hidePreview();
+
+      status.textContent =
+        "";
+    }
+  );
+
+})();
+</script>
 
 {% endblock %}

@@ -83,6 +83,7 @@ def _form_line_kwargs():
         "description": request.form.get("description"),
         "size_value": request.form.get("size_value"),
         "size_unit": request.form.get("size_unit"),
+        "color": request.form.get("color"),
         "condition": (
             request.form.get("condition")
             or "new"
@@ -187,10 +188,27 @@ def receiving_list():
         )
     )
 
+    delete_draft_warehouse_ids = set(
+        _warehouse_ids_for(
+            "appliance.receiving.delete_draft"
+        )
+    )
+
+    can_delete_draft_ids = {
+        receiving.id
+        for receiving in receivings
+        if (
+            receiving.status == "draft"
+            and receiving.warehouse_id
+            in delete_draft_warehouse_ids
+        )
+    }
+
     return render_template(
         "appliance_receiving_list.html",
         receivings=receivings,
         missing_ids=missing_ids,
+        can_delete_draft_ids=can_delete_draft_ids,
         missing_count=len(missing_ids),
         q=q,
         status=status,
@@ -359,6 +377,12 @@ def receiving_detail(receiving_id):
         warehouse_id=warehouse_id,
     )
 
+    can_void = AccessControlService.can(
+        current_user,
+        "appliance.receiving.void",
+        warehouse_id=warehouse_id,
+    )
+
     can_pricing = AccessControlService.can(
         current_user,
         "appliance.pricing",
@@ -378,6 +402,7 @@ def receiving_detail(receiving_id):
         categories=_active_categories(),
         can_receive=can_receive,
         can_post=can_post,
+        can_void=can_void,
         can_pricing=can_pricing,
     )
 
@@ -463,6 +488,281 @@ def receiving_add_line(receiving_id):
         url_for(
             "appliance.receiving_detail",
             receiving_id=receiving_id,
+        )
+    )
+
+
+# ============================================================
+# Receiving - Add Appliance Type
+#
+# Operational master-data action.
+#
+# Any warehouse user who has appliance.receive may create
+# a new ApplianceCategory directly during Receiving.
+#
+# No schema change is required.
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/categories/add"
+)
+@login_required
+def receiving_add_category():
+
+    import re
+    from datetime import datetime
+
+    # --------------------------------------------------------
+    # Permission
+    #
+    # Category is global master data, but creation is an
+    # operational Receiving action. User must have
+    # appliance.receive in at least one accessible warehouse.
+    # --------------------------------------------------------
+
+    allowed_warehouse_ids = _warehouse_ids_for(
+        "appliance.receive"
+    )
+
+    if not allowed_warehouse_ids:
+        flash(
+            "Access denied.",
+            "danger",
+        )
+
+        return redirect(
+            url_for(
+                "appliance.receiving_list"
+            )
+        )
+
+    # --------------------------------------------------------
+    # Normalize NAME
+    # --------------------------------------------------------
+
+    raw_name = (
+        request.form.get("name")
+        or ""
+    )
+
+    name = " ".join(
+        raw_name.strip().upper().split()
+    )
+
+    if not name:
+        flash(
+            "Appliance Type name is required.",
+            "danger",
+        )
+
+        return redirect(
+            request.referrer
+            or url_for(
+                "appliance.receiving_list"
+            )
+        )
+
+    if len(name) > 120:
+        flash(
+            "Appliance Type name cannot exceed "
+            "120 characters.",
+            "danger",
+        )
+
+        return redirect(
+            request.referrer
+            or url_for(
+                "appliance.receiving_list"
+            )
+        )
+
+    # --------------------------------------------------------
+    # Build stable CODE automatically
+    #
+    # Example:
+    #   Ice Maker      -> ICE_MAKER
+    #   Mini Split A/C -> MINI_SPLIT_A_C
+    #
+    # code max length = 40
+    # --------------------------------------------------------
+
+    code = re.sub(
+        r"[^A-Z0-9]+",
+        "_",
+        name,
+    ).strip("_")
+
+    if not code:
+        flash(
+            "Unable to generate Appliance Type code.",
+            "danger",
+        )
+
+        return redirect(
+            request.referrer
+            or url_for(
+                "appliance.receiving_list"
+            )
+        )
+
+    code = code[:40].rstrip("_")
+
+    # --------------------------------------------------------
+    # Duplicate NAME check - case insensitive
+    # --------------------------------------------------------
+
+    from sqlalchemy import func
+
+    existing_by_name = (
+        ApplianceCategory.query
+        .filter(
+            func.upper(
+                func.trim(
+                    ApplianceCategory.name
+                )
+            ) == name
+        )
+        .first()
+    )
+
+    now = datetime.utcnow()
+
+    if existing_by_name is not None:
+
+        # Existing active category -> simply tell the user.
+        if existing_by_name.is_active:
+
+            flash(
+                f"Appliance Type "
+                f"'{existing_by_name.name}' "
+                f"already exists.",
+                "info",
+            )
+
+            return redirect(
+                request.referrer
+                or url_for(
+                    "appliance.receiving_list"
+                )
+            )
+
+        # Existing but inactive category:
+        # reactivate instead of creating duplicate master data.
+        try:
+            existing_by_name.is_active = True
+            existing_by_name.updated_at = now
+            existing_by_name.updated_by_id = (
+                current_user.id
+            )
+
+            db.session.commit()
+
+            flash(
+                f"Appliance Type "
+                f"'{existing_by_name.name}' "
+                f"was reactivated.",
+                "success",
+            )
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+        return redirect(
+            request.referrer
+            or url_for(
+                "appliance.receiving_list"
+            )
+        )
+
+    # --------------------------------------------------------
+    # CODE collision
+    #
+    # Different names can normalize to same first 40 chars.
+    # Generate suffix _2, _3, ...
+    # --------------------------------------------------------
+
+    base_code = code
+    suffix = 2
+
+    while (
+        ApplianceCategory.query
+        .filter(
+            func.upper(
+                ApplianceCategory.code
+            ) == code
+        )
+        .first()
+        is not None
+    ):
+
+        suffix_text = f"_{suffix}"
+
+        max_base_length = (
+            40 - len(suffix_text)
+        )
+
+        code = (
+            base_code[:max_base_length]
+            .rstrip("_")
+            + suffix_text
+        )
+
+        suffix += 1
+
+        if suffix > 9999:
+            flash(
+                "Unable to generate unique "
+                "Appliance Type code.",
+                "danger",
+            )
+
+            return redirect(
+                request.referrer
+                or url_for(
+                    "appliance.receiving_list"
+                )
+            )
+
+    # --------------------------------------------------------
+    # Create active category
+    # --------------------------------------------------------
+
+    category = ApplianceCategory(
+        code=code,
+        name=name,
+        description=None,
+        sort_order=100,
+        is_active=True,
+        created_at=now,
+        created_by_id=current_user.id,
+        updated_at=now,
+        updated_by_id=current_user.id,
+    )
+
+    try:
+        db.session.add(
+            category
+        )
+
+        db.session.commit()
+
+        flash(
+            f"Appliance Type '{name}' added.",
+            "success",
+        )
+
+    except Exception:
+        db.session.rollback()
+        raise
+
+    # Reload the exact Receiving page the warehouse worker
+    # came from. _active_categories() will now include the
+    # newly created category in every dropdown.
+    return redirect(
+        request.referrer
+        or url_for(
+            "appliance.receiving_list"
         )
     )
 
@@ -795,6 +1095,139 @@ def receiving_check_serial():
     )
 
 
+
+# ============================================================
+# Receiving Model Specs Cache
+#
+# Exact Brand + Model lookup in the persistent local
+# ApplianceModelSpec catalog.
+#
+# IMPORTANT:
+# - LOCAL DB ONLY;
+# - no OpenAI;
+# - no Web Search;
+# - read-only;
+# - only confirmed model specs are returned.
+# ============================================================
+
+@appliance_bp.get(
+    "/receiving/model-specs-cache"
+)
+@login_required
+def receiving_model_specs_cache():
+
+    from flask import current_app
+    from models import ApplianceModelSpec
+
+    # --------------------------------------------------------
+    # Access
+    # --------------------------------------------------------
+
+    allowed_warehouse_ids = _warehouse_ids_for(
+        "appliance.receive"
+    )
+
+    if not allowed_warehouse_ids:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Access denied.",
+            }
+        ), 403
+
+    # --------------------------------------------------------
+    # Exact normalized Brand + Model
+    #
+    # Must use exactly the same normalization rule as the
+    # persistent model catalog.
+    # --------------------------------------------------------
+
+    brand = (
+        request.args.get("brand")
+        or ""
+    )
+
+    model_number = (
+        request.args.get("model_number")
+        or ""
+    )
+
+    normalized_brand = " ".join(
+        brand.strip().upper().split()
+    )
+
+    normalized_model = " ".join(
+        model_number.strip().upper().split()
+    )
+
+    if (
+        not normalized_brand
+        or not normalized_model
+    ):
+        return jsonify(
+            {
+                "ok": True,
+                "hit": False,
+            }
+        )
+
+    # --------------------------------------------------------
+    # Confirmed local catalog only
+    # --------------------------------------------------------
+
+    spec = (
+        ApplianceModelSpec.query
+        .filter(
+            ApplianceModelSpec.normalized_brand
+            == normalized_brand,
+
+            ApplianceModelSpec.normalized_model
+            == normalized_model,
+
+            ApplianceModelSpec.exact_model_confirmed
+            .is_(True),
+        )
+        .first()
+    )
+
+    if spec is None:
+        return jsonify(
+            {
+                "ok": True,
+                "hit": False,
+            }
+        )
+
+    current_app.logger.info(
+        "RECEIVING_MODEL_SPECS_CACHE_HIT "
+        "brand=%s model=%s cache_id=%s",
+        normalized_brand,
+        normalized_model,
+        spec.id,
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "hit": True,
+            "result": {
+                "id": spec.id,
+                "brand": spec.brand,
+                "model_number":
+                    spec.model_number,
+                "size_value":
+                    spec.size_value,
+                "size_unit":
+                    spec.size_unit,
+                "color":
+                    spec.color,
+                "notes_block":
+                    spec.notes_block,
+            },
+        }
+    )
+
+
 # ============================================================
 # Bulk Add physical appliances
 # ============================================================
@@ -978,6 +1411,155 @@ def receiving_delete_line(line_id):
 
 
 # ============================================================
+# Delete Draft Receiving
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/<int:receiving_id>/delete"
+)
+@login_required
+def receiving_delete_draft(receiving_id):
+    try:
+        ApplianceReceivingService.delete_draft(
+            receiving_id=receiving_id,
+            actor=current_user,
+        )
+
+        flash(
+            "Draft Appliance Receiving deleted.",
+            "success",
+        )
+
+        return redirect(
+            url_for("appliance.receiving_list")
+        )
+
+    except ApplianceReceivingError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+
+        return redirect(
+            url_for(
+                "appliance.receiving_detail",
+                receiving_id=receiving_id,
+            )
+        )
+
+
+# ============================================================
+# Emergency Purge Receiving
+#
+# BREAK-GLASS operation.
+# SUPERADMIN only.
+# Not controlled by assignable Permission catalog.
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/<int:receiving_id>/emergency-purge"
+)
+@login_required
+def receiving_emergency_purge(receiving_id):
+    # --------------------------------------------------------
+    # Defense in depth:
+    # route itself is SUPERADMIN-only.
+    #
+    # The service repeats this check and performs the full
+    # dependency / state / confirmation validation.
+    # --------------------------------------------------------
+
+    role = (
+        getattr(current_user, "role", "")
+        or ""
+    ).strip().lower()
+
+    if role != "superadmin":
+        flash(
+            "Emergency Purge is restricted to SUPERADMIN.",
+            "danger",
+        )
+
+        return redirect(
+            url_for(
+                "appliance.receiving_detail",
+                receiving_id=receiving_id,
+            )
+        )
+
+    try:
+        result = (
+            ApplianceReceivingService.emergency_purge(
+                receiving_id=receiving_id,
+                actor=current_user,
+                confirmation=request.form.get(
+                    "confirmation"
+                ),
+            )
+        )
+
+        flash(
+            (
+                f'{result["receiving_number"]} permanently '
+                f'purged. '
+                f'{result["deleted_units"]} appliance unit(s) '
+                f'and {result["deleted_movements"]} technical '
+                f'movement(s) removed.'
+            ),
+            "warning",
+        )
+
+        # Receiving no longer exists after successful purge.
+        return redirect(
+            url_for("appliance.receiving_list")
+        )
+
+    except ApplianceReceivingError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+
+        return redirect(
+            url_for(
+                "appliance.receiving_detail",
+                receiving_id=receiving_id,
+            )
+        )
+
+
+# ============================================================
+# Void Posted Receiving
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/<int:receiving_id>/void"
+)
+@login_required
+def receiving_void(receiving_id):
+    try:
+        receiving = (
+            ApplianceReceivingService.void_receiving(
+                receiving_id=receiving_id,
+                actor=current_user,
+                reason=request.form.get("reason"),
+            )
+        )
+
+        flash(
+            f"{receiving.receiving_number} voided.",
+            "success",
+        )
+
+    except ApplianceReceivingError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+
+    return redirect(
+        url_for(
+            "appliance.receiving_detail",
+            receiving_id=receiving_id,
+        )
+    )
+
+
+# ============================================================
 # Post Receiving
 # ============================================================
 
@@ -1010,6 +1592,130 @@ def receiving_post(receiving_id):
     except ApplianceReceivingError as exc:
         db.session.rollback()
         flash(str(exc), "danger")
+
+    return redirect(
+        url_for(
+            "appliance.receiving_detail",
+            receiving_id=receiving_id,
+        )
+    )
+
+
+# ============================================================
+# Posted Receiving line editing
+#
+# appliance.receive  -> Size / Unit / Color / Notes
+# appliance.pricing  -> Cost / Sell
+# ============================================================
+
+@appliance_bp.post(
+    "/receiving/lines/<int:line_id>/posted-update"
+)
+@login_required
+def receiving_posted_line_update(line_id):
+
+    line = db.session.get(
+        ApplianceReceivingLine,
+        line_id,
+    )
+
+    if line is None:
+        flash(
+            "Receiving line not found.",
+            "danger",
+        )
+
+        return redirect(
+            url_for(
+                "appliance.receiving_list"
+            )
+        )
+
+    receiving_id = line.receiving_id
+
+    # Presence of these fields tells the service which
+    # permission must be enforced.
+    detail_fields = {
+        "size_value",
+        "size_unit",
+        "color",
+        "notes",
+    }
+
+    pricing_fields = {
+        "unit_cost",
+        "selling_price",
+    }
+
+    update_details = any(
+        field in request.form
+        for field in detail_fields
+    )
+
+    update_pricing = any(
+        field in request.form
+        for field in pricing_fields
+    )
+
+    try:
+
+        ApplianceReceivingService.update_posted_line_fields(
+            line_id=line_id,
+            actor=current_user,
+
+            update_details=update_details,
+            update_pricing=update_pricing,
+
+            size_value=request.form.get(
+                "size_value"
+            ),
+            size_unit=request.form.get(
+                "size_unit"
+            ),
+            color=request.form.get(
+                "color"
+            ),
+            notes=request.form.get(
+                "notes"
+            ),
+
+            unit_cost=request.form.get(
+                "unit_cost"
+            ),
+            selling_price=request.form.get(
+                "selling_price"
+            ),
+        )
+
+        if update_details and update_pricing:
+            message = (
+                f"Details and price saved "
+                f"for line #{line.line_no}."
+            )
+
+        elif update_details:
+            message = (
+                f"Details saved "
+                f"for line #{line.line_no}."
+            )
+
+        else:
+            message = (
+                f"Price saved "
+                f"for line #{line.line_no}."
+            )
+
+        flash(
+            message,
+            "success",
+        )
+
+    except ApplianceReceivingError as exc:
+        db.session.rollback()
+        flash(
+            str(exc),
+            "danger",
+        )
 
     return redirect(
         url_for(
@@ -1069,6 +1775,146 @@ def receiving_price_line(line_id):
         url_for(
             "appliance.receiving_detail",
             receiving_id=receiving_id,
+        )
+    )
+
+
+
+# ============================================================
+# Appliance Categories Management
+# ============================================================
+
+def _can_manage_appliance_categories():
+    """
+    Global ApplianceCategory master-data management.
+
+    Warehouse Receiving staff may CREATE missing categories
+    from Receiving through appliance.receive.
+
+    Activation / deactivation is intentionally restricted to
+    management roles because ApplianceCategory is global data.
+    """
+    return (
+        current_user.is_authenticated
+        and current_user.role in (
+            "superadmin",
+            "admin",
+            "manager",
+        )
+    )
+
+
+@appliance_bp.get("/categories")
+@login_required
+def categories_list():
+
+    if not _can_manage_appliance_categories():
+        flash(
+            "Access denied.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.inventory_list"
+            )
+        )
+
+    categories = (
+        ApplianceCategory.query
+        .order_by(
+            ApplianceCategory.is_active.desc(),
+            ApplianceCategory.sort_order.asc(),
+            ApplianceCategory.name.asc(),
+        )
+        .all()
+    )
+
+    return render_template(
+        "appliance_categories.html",
+        categories=categories,
+    )
+
+
+@appliance_bp.post(
+    "/categories/<int:category_id>/toggle"
+)
+@login_required
+def categories_toggle(category_id):
+
+    if not _can_manage_appliance_categories():
+        flash(
+            "Access denied.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.inventory_list"
+            )
+        )
+
+    category = (
+        ApplianceCategory.query
+        .filter(
+            ApplianceCategory.id == category_id
+        )
+        .first()
+    )
+
+    if category is None:
+        flash(
+            "Appliance type not found.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.categories_list"
+            )
+        )
+
+    old_status = bool(
+        category.is_active
+    )
+
+    category.is_active = not old_status
+
+    now = datetime.utcnow()
+
+    if hasattr(
+        category,
+        "updated_at",
+    ):
+        category.updated_at = now
+
+    if hasattr(
+        category,
+        "updated_by_id",
+    ):
+        category.updated_by_id = (
+            current_user.id
+        )
+
+    try:
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        raise
+
+    if category.is_active:
+        flash(
+            f"{category.name} activated.",
+            "success",
+        )
+    else:
+        flash(
+            f"{category.name} deactivated. "
+            "Historical Receiving and Inventory records were not changed.",
+            "warning",
+        )
+
+    return redirect(
+        url_for(
+            "appliance.categories_list"
         )
     )
 
@@ -1693,6 +2539,14 @@ def inventory_detail(unit_id):
         warehouse_id=unit.warehouse_id,
     )
 
+    # Warehouse descriptive data may be corrected from the
+    # physical Appliance Inventory record.
+    can_receive = AccessControlService.can(
+        current_user,
+        "appliance.receive",
+        warehouse_id=unit.warehouse_id,
+    )
+
     # --------------------------------------------------------
     # Complete movement history for this physical appliance.
     # Newest first for operational review.
@@ -1711,12 +2565,1673 @@ def inventory_detail(unit_id):
         .all()
     )
 
+    # Categories available for descriptive correction.
+    #
+    # Normally only active categories are offered. If a legacy
+    # appliance currently belongs to an inactive category, keep
+    # that category visible so the form can still be opened and
+    # corrected without silently changing it.
+    categories = list(_active_categories())
+
+    if (
+        unit.category is not None
+        and all(
+            category.id != unit.category.id
+            for category in categories
+        )
+    ):
+        categories.append(unit.category)
+
+        categories.sort(
+            key=lambda category: (
+                category.sort_order or 100,
+                (category.name or "").upper(),
+            )
+        )
+
     return render_template(
         "appliance_inventory_detail.html",
         unit=unit,
         can_pricing=can_pricing,
+        can_receive=can_receive,
         movements=movements,
+        categories=categories,
     )
+
+
+# ============================================================
+# Appliance Inventory - Correct descriptive / identity details
+#
+# Warehouse staff with appliance.receive may correct:
+#   Appliance Category
+#   Brand
+#   Model
+#   Serial
+#   Size
+#   Unit
+#   Color
+#   Condition
+#   Notes
+#
+# Protected here:
+#   AP #
+#   Warehouse
+#   Stock Class
+#   Status
+#   Pricing
+#
+# Operational state changes must continue through their
+# dedicated Issue / Return / Repair / Disposition workflows.
+#
+# Every correction:
+#   - updates ApplianceUnit
+#   - synchronizes original ApplianceReceivingLine
+#   - writes immutable ApplianceMovement audit
+#   - commits once
+# ============================================================
+
+@appliance_bp.post(
+    "/inventory/<int:unit_id>/details"
+)
+@login_required
+def inventory_update_details(unit_id):
+
+    import json
+    from datetime import datetime
+
+    from sqlalchemy import func
+
+    from models import (
+        ApplianceCategory,
+        ApplianceModelSpec,
+        ApplianceMovement,
+        ApplianceReceivingLine,
+        ApplianceUnit,
+    )
+
+    unit = db.session.get(
+        ApplianceUnit,
+        unit_id,
+    )
+
+    if unit is None:
+        flash(
+            "Appliance unit not found.",
+            "danger",
+        )
+
+        return redirect(
+            url_for(
+                "appliance.inventory_list"
+            )
+        )
+
+    # --------------------------------------------------------
+    # Permission
+    # --------------------------------------------------------
+
+    if not AccessControlService.can(
+        current_user,
+        "appliance.receive",
+        warehouse_id=unit.warehouse_id,
+    ):
+        flash(
+            "Access denied.",
+            "danger",
+        )
+
+        return redirect(
+            url_for(
+                "appliance.inventory_detail",
+                unit_id=unit.id,
+            )
+        )
+
+    detail_url = url_for(
+        "appliance.inventory_detail",
+        unit_id=unit.id,
+    )
+
+    # ========================================================
+    # Helpers
+    # ========================================================
+
+    MODEL_SPECS_START = "[MODEL SPECS]"
+    MODEL_SPECS_END = "[/MODEL SPECS]"
+
+    def _upper_text(
+        field_name,
+        max_length,
+    ):
+        value = (
+            request.form.get(field_name)
+            or ""
+        ).strip().upper()
+
+        if len(value) > max_length:
+            raise ValueError(
+                f"{field_name} cannot exceed "
+                f"{max_length} characters."
+            )
+
+        return value or None
+
+    def _extract_model_specs_block(value):
+        value = value or ""
+
+        start_pos = value.find(
+            MODEL_SPECS_START
+        )
+
+        if start_pos == -1:
+            return None
+
+        end_pos = value.find(
+            MODEL_SPECS_END,
+            start_pos,
+        )
+
+        if end_pos == -1:
+            return None
+
+        end_pos += len(
+            MODEL_SPECS_END
+        )
+
+        block = value[
+            start_pos:end_pos
+        ].strip()
+
+        return block or None
+
+    def _remove_model_specs_block(value):
+        original = (
+            value
+            or ""
+        ).strip()
+
+        start_pos = original.find(
+            MODEL_SPECS_START
+        )
+
+        if start_pos == -1:
+            return original or None
+
+        end_pos = original.find(
+            MODEL_SPECS_END,
+            start_pos,
+        )
+
+        if end_pos == -1:
+            return original or None
+
+        end_pos += len(
+            MODEL_SPECS_END
+        )
+
+        before = original[
+            :start_pos
+        ].rstrip()
+
+        after = original[
+            end_pos:
+        ].lstrip()
+
+        pieces = [
+            item
+            for item in (
+                before,
+                after,
+            )
+            if item
+        ]
+
+        cleaned = "\n\n".join(
+            pieces
+        ).strip()
+
+        return cleaned or None
+
+    def _merge_model_specs_block(
+        original_notes,
+        model_specs_block,
+    ):
+        """
+        Preserve human/unit-specific notes.
+
+        Replace only existing [MODEL SPECS].
+        If one does not exist, append the confirmed block.
+        """
+
+        original = (
+            original_notes
+            or ""
+        ).strip()
+
+        block = (
+            model_specs_block
+            or ""
+        ).strip()
+
+        if not block:
+            return original or None
+
+        start_pos = original.find(
+            MODEL_SPECS_START
+        )
+
+        if start_pos != -1:
+            end_pos = original.find(
+                MODEL_SPECS_END,
+                start_pos,
+            )
+
+            if end_pos != -1:
+                end_pos += len(
+                    MODEL_SPECS_END
+                )
+
+                before = original[
+                    :start_pos
+                ].rstrip()
+
+                after = original[
+                    end_pos:
+                ].lstrip()
+
+                pieces = [
+                    item
+                    for item in (
+                        before,
+                        block,
+                        after,
+                    )
+                    if item
+                ]
+
+                merged = "\n\n".join(
+                    pieces
+                ).strip()
+
+                return merged or None
+
+        if original:
+            return (
+                original
+                + "\n\n"
+                + block
+            ).strip()
+
+        return block
+
+    # ========================================================
+    # Appliance Category
+    # ========================================================
+
+    raw_category_id = (
+        request.form.get("category_id")
+        or ""
+    ).strip()
+
+    try:
+        new_category_id = int(
+            raw_category_id
+        )
+    except (TypeError, ValueError):
+        flash(
+            "Please select a valid Appliance type.",
+            "danger",
+        )
+        return redirect(detail_url)
+
+    new_category = db.session.get(
+        ApplianceCategory,
+        new_category_id,
+    )
+
+    if new_category is None:
+        flash(
+            "Selected Appliance type does not exist.",
+            "danger",
+        )
+        return redirect(detail_url)
+
+    # An inactive legacy category may remain unchanged, but
+    # users cannot newly assign an inactive category.
+    if (
+        not new_category.is_active
+        and new_category.id != unit.category_id
+    ):
+        flash(
+            "Selected Appliance type is inactive.",
+            "danger",
+        )
+        return redirect(detail_url)
+
+    # ========================================================
+    # Brand / Model / Serial
+    # ========================================================
+
+    try:
+        new_brand = _upper_text(
+            "brand",
+            100,
+        )
+
+        new_model_number = _upper_text(
+            "model_number",
+            120,
+        )
+
+        new_serial_number = _upper_text(
+            "serial_number",
+            160,
+        )
+
+    except ValueError as exc:
+        flash(
+            str(exc),
+            "danger",
+        )
+        return redirect(detail_url)
+
+    # --------------------------------------------------------
+    # Duplicate serial protection
+    #
+    # 1. another physical ApplianceUnit
+    # 2. another Receiving line, including Draft receiving
+    # --------------------------------------------------------
+
+    if new_serial_number:
+
+        duplicate_unit = (
+            ApplianceUnit.query
+            .filter(
+                ApplianceUnit.id != unit.id,
+                func.upper(
+                    func.trim(
+                        ApplianceUnit.serial_number
+                    )
+                ) == new_serial_number,
+            )
+            .first()
+        )
+
+        if duplicate_unit is not None:
+            flash(
+                "Duplicate Serial Number. "
+                f"{new_serial_number} already belongs to "
+                f"{duplicate_unit.inventory_number}.",
+                "danger",
+            )
+            return redirect(detail_url)
+
+        duplicate_line_query = (
+            ApplianceReceivingLine.query
+            .filter(
+                func.upper(
+                    func.trim(
+                        ApplianceReceivingLine.serial_number
+                    )
+                ) == new_serial_number
+            )
+        )
+
+        if unit.receiving_line_id:
+            duplicate_line_query = (
+                duplicate_line_query
+                .filter(
+                    ApplianceReceivingLine.id
+                    != unit.receiving_line_id
+                )
+            )
+
+        duplicate_line = (
+            duplicate_line_query.first()
+        )
+
+        if duplicate_line is not None:
+            duplicate_line_unit = (
+                ApplianceUnit.query
+                .filter(
+                    ApplianceUnit.receiving_line_id
+                    == duplicate_line.id
+                )
+                .first()
+            )
+
+            if (
+                duplicate_line_unit is None
+                or duplicate_line_unit.id != unit.id
+            ):
+                flash(
+                    "Duplicate Serial Number. "
+                    f"{new_serial_number} already exists "
+                    "in Appliance Receiving.",
+                    "danger",
+                )
+                return redirect(detail_url)
+
+    # ========================================================
+    # Size
+    # ========================================================
+
+    raw_size = (
+        request.form.get("size_value")
+        or ""
+    ).strip()
+
+    new_size_value = None
+
+    if raw_size:
+        try:
+            new_size_value = float(
+                raw_size
+            )
+        except (TypeError, ValueError):
+            flash(
+                "Size must be a valid number.",
+                "danger",
+            )
+            return redirect(detail_url)
+
+        if new_size_value < 0:
+            flash(
+                "Size cannot be negative.",
+                "danger",
+            )
+            return redirect(detail_url)
+
+    # ========================================================
+    # Unit / Color
+    # ========================================================
+
+    new_size_unit = (
+        request.form.get("size_unit")
+        or ""
+    ).strip().upper()
+
+    if len(new_size_unit) > 20:
+        flash(
+            "Unit cannot exceed 20 characters.",
+            "danger",
+        )
+        return redirect(detail_url)
+
+    new_size_unit = (
+        new_size_unit or None
+    )
+
+    new_color = (
+        request.form.get("color")
+        or ""
+    ).strip().upper()
+
+    if len(new_color) > 80:
+        flash(
+            "Color cannot exceed 80 characters.",
+            "danger",
+        )
+        return redirect(detail_url)
+
+    new_color = (
+        new_color or None
+    )
+
+    # ========================================================
+    # Condition
+    #
+    # Keep the same warehouse values already used by Receiving,
+    # plus REPAIRED for the repair lifecycle.
+    # ========================================================
+
+    new_condition = (
+        request.form.get("condition")
+        or "new"
+    ).strip().lower()
+
+    allowed_conditions = {
+        "new",
+        "used",
+        "open_box",
+        "damaged",
+        "repaired",
+    }
+
+    if new_condition not in allowed_conditions:
+        flash(
+            "Invalid appliance Condition.",
+            "danger",
+        )
+        return redirect(detail_url)
+
+    # ========================================================
+    # Notes
+    # ========================================================
+
+    new_notes = (
+        request.form.get("notes")
+        or ""
+    ).strip()
+
+    if len(new_notes) > 5000:
+        flash(
+            "Notes cannot exceed 5000 characters.",
+            "danger",
+        )
+        return redirect(detail_url)
+
+    new_notes = (
+        new_notes or None
+    )
+
+    # ========================================================
+    # Snapshot OLD identity first
+    # ========================================================
+
+    old_category_id = unit.category_id
+    old_brand = unit.brand
+    old_model_number = unit.model_number
+    old_serial_number = unit.serial_number
+
+    identity_changed = any(
+        (
+            old_category_id
+            != new_category_id,
+
+            (old_brand or "")
+            != (new_brand or ""),
+
+            (old_model_number or "")
+            != (new_model_number or ""),
+
+            (old_serial_number or "")
+            != (new_serial_number or ""),
+        )
+    )
+
+    model_identity_changed = any(
+        (
+            (old_brand or "")
+            != (new_brand or ""),
+
+            (old_model_number or "")
+            != (new_model_number or ""),
+        )
+    )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    #
+    # If Brand or Model was corrected, old MODEL SPECS may
+    # belong to the old model. Never silently attach those
+    # specifications to a different Brand+Model.
+    #
+    # Human notes are preserved; only the structured specs
+    # block is removed. User may SAVE identity, then run
+    # FIND SPECS for the corrected model.
+    # --------------------------------------------------------
+
+    removed_stale_specs = False
+
+    if (
+        model_identity_changed
+        and _extract_model_specs_block(
+            new_notes
+        )
+    ):
+        new_notes = (
+            _remove_model_specs_block(
+                new_notes
+            )
+        )
+
+        removed_stale_specs = True
+
+    # ========================================================
+    # OLD / NEW audit snapshots
+    # ========================================================
+
+    old_values = {
+        "category_id":
+            unit.category_id,
+
+        "category":
+            (
+                unit.category.name
+                if unit.category is not None
+                else None
+            ),
+
+        "brand":
+            unit.brand,
+
+        "model_number":
+            unit.model_number,
+
+        "serial_number":
+            unit.serial_number,
+
+        "size_value":
+            unit.size_value,
+
+        "size_unit":
+            unit.size_unit,
+
+        "color":
+            unit.color,
+
+        "condition":
+            unit.condition,
+
+        "notes":
+            unit.notes,
+    }
+
+    new_values = {
+        "category_id":
+            new_category.id,
+
+        "category":
+            new_category.name,
+
+        "brand":
+            new_brand,
+
+        "model_number":
+            new_model_number,
+
+        "serial_number":
+            new_serial_number,
+
+        "size_value":
+            new_size_value,
+
+        "size_unit":
+            new_size_unit,
+
+        "color":
+            new_color,
+
+        "condition":
+            new_condition,
+
+        "notes":
+            new_notes,
+    }
+
+    if old_values == new_values:
+        flash(
+            "No changes were made.",
+            "info",
+        )
+        return redirect(detail_url)
+
+    now = datetime.utcnow()
+
+    try:
+
+        # ====================================================
+        # 1. Physical ApplianceUnit = current source of truth
+        # ====================================================
+
+        unit.category_id = (
+            new_category.id
+        )
+
+        unit.brand = (
+            new_brand
+        )
+
+        unit.model_number = (
+            new_model_number
+        )
+
+        unit.serial_number = (
+            new_serial_number
+        )
+
+        unit.size_value = (
+            new_size_value
+        )
+
+        unit.size_unit = (
+            new_size_unit
+        )
+
+        unit.color = (
+            new_color
+        )
+
+        unit.condition = (
+            new_condition
+        )
+
+        unit.notes = (
+            new_notes
+        )
+
+        unit.updated_at = now
+        unit.updated_by_id = (
+            current_user.id
+        )
+
+        # ====================================================
+        # 2. Keep original Receiving lineage synchronized
+        # ====================================================
+
+        receiving_line = None
+
+        if unit.receiving_line_id:
+            receiving_line = db.session.get(
+                ApplianceReceivingLine,
+                unit.receiving_line_id,
+            )
+
+        if receiving_line is not None:
+
+            receiving_line.category_id = (
+                new_category.id
+            )
+
+            receiving_line.brand = (
+                new_brand
+            )
+
+            receiving_line.model_number = (
+                new_model_number
+            )
+
+            receiving_line.serial_number = (
+                new_serial_number
+            )
+
+            receiving_line.size_value = (
+                new_size_value
+            )
+
+            receiving_line.size_unit = (
+                new_size_unit
+            )
+
+            receiving_line.color = (
+                new_color
+            )
+
+            receiving_line.condition = (
+                new_condition
+            )
+
+            receiving_line.notes = (
+                new_notes
+            )
+
+            receiving_line.updated_at = now
+            receiving_line.updated_by_id = (
+                current_user.id
+            )
+
+            receiving = (
+                receiving_line.receiving
+            )
+
+            if receiving is not None:
+                receiving.updated_at = now
+                receiving.updated_by_id = (
+                    current_user.id
+                )
+
+        # ====================================================
+        # 3. Immutable audit entry
+        # ====================================================
+
+        movement_type = (
+            "IDENTITY_CORRECTION"
+            if identity_changed
+            else "DETAILS_UPDATE"
+        )
+
+        reason_code = (
+            "IDENTITY_CORRECTED"
+            if identity_changed
+            else "DETAILS_UPDATED"
+        )
+
+        movement_notes = (
+            "Appliance identity/descriptive data corrected "
+            "from Inventory."
+            if identity_changed
+            else
+            "Appliance descriptive details updated "
+            "from Inventory."
+        )
+
+        movement = ApplianceMovement(
+            appliance_unit_id=unit.id,
+
+            movement_type=movement_type,
+
+            from_warehouse_id=(
+                unit.warehouse_id
+            ),
+
+            to_warehouse_id=(
+                unit.warehouse_id
+            ),
+
+            reason_code=reason_code,
+
+            notes=movement_notes,
+
+            meta_json=json.dumps(
+                {
+                    "inventory_number":
+                        unit.inventory_number,
+
+                    "source":
+                        "inventory_detail",
+
+                    "identity_changed":
+                        identity_changed,
+
+                    "model_identity_changed":
+                        model_identity_changed,
+
+                    "stale_model_specs_removed":
+                        removed_stale_specs,
+
+                    "old":
+                        old_values,
+
+                    "new":
+                        new_values,
+
+                    "receiving_line_id":
+                        unit.receiving_line_id,
+                },
+                ensure_ascii=False,
+            ),
+
+            actor_id=current_user.id,
+            created_at=now,
+        )
+
+        db.session.add(
+            movement
+        )
+
+        # ====================================================
+        # 4. MODEL SPECS CATALOG + PROPAGATION
+        #
+        # Only use a confirmed [MODEL SPECS] block when Brand
+        # and Model themselves were NOT changed in this SAVE.
+        #
+        # If Brand/Model was corrected:
+        #   SAVE identity first
+        #   then FIND SPECS
+        #   then APPLY + SAVE
+        # ====================================================
+
+        specs_block = (
+            _extract_model_specs_block(
+                new_notes
+            )
+        )
+
+        brand_key = " ".join(
+            (
+                unit.brand
+                or ""
+            ).strip().upper().split()
+        )
+
+        model_key = " ".join(
+            (
+                unit.model_number
+                or ""
+            ).strip().upper().split()
+        )
+
+        propagated_count = 0
+
+        if (
+            specs_block
+            and brand_key
+            and model_key
+            and not model_identity_changed
+        ):
+
+            # ----------------------------------------------
+            # UPSERT confirmed Model Specs Catalog
+            # ----------------------------------------------
+
+            model_spec = (
+                ApplianceModelSpec.query
+                .filter(
+                    ApplianceModelSpec.normalized_brand
+                    == brand_key,
+
+                    ApplianceModelSpec.normalized_model
+                    == model_key,
+                )
+                .first()
+            )
+
+            if model_spec is None:
+                model_spec = (
+                    ApplianceModelSpec(
+                        brand=(
+                            unit.brand
+                            or brand_key
+                        ).strip(),
+
+                        model_number=(
+                            unit.model_number
+                            or model_key
+                        ).strip(),
+
+                        normalized_brand=
+                            brand_key,
+
+                        normalized_model=
+                            model_key,
+
+                        created_at=now,
+                    )
+                )
+
+                db.session.add(
+                    model_spec
+                )
+
+            model_spec.brand = (
+                unit.brand
+                or brand_key
+            ).strip()
+
+            model_spec.model_number = (
+                unit.model_number
+                or model_key
+            ).strip()
+
+            model_spec.normalized_brand = (
+                brand_key
+            )
+
+            model_spec.normalized_model = (
+                model_key
+            )
+
+            model_spec.size_value = (
+                new_size_value
+            )
+
+            model_spec.size_unit = (
+                new_size_unit
+            )
+
+            model_spec.color = (
+                new_color
+            )
+
+            model_spec.notes_block = (
+                specs_block
+            )
+
+            model_spec.exact_model_confirmed = (
+                True
+            )
+
+            model_spec.confirmed_model = (
+                unit.model_number
+            )
+
+            model_spec.confidence = (
+                "confirmed"
+            )
+
+            if not model_spec.source_name:
+                model_spec.source_name = (
+                    "LOCAL MODEL CATALOG"
+                )
+
+            model_spec.confirmed_by_id = (
+                current_user.id
+            )
+
+            model_spec.confirmed_at = (
+                now
+            )
+
+            model_spec.updated_at = (
+                now
+            )
+
+            # ----------------------------------------------
+            # Find existing physical units with same
+            # normalized Brand + Model.
+            # ----------------------------------------------
+
+            matching_units = (
+                ApplianceUnit.query
+                .filter(
+                    func.upper(
+                        func.trim(
+                            ApplianceUnit.brand
+                        )
+                    ) == brand_key,
+
+                    func.upper(
+                        func.trim(
+                            ApplianceUnit.model_number
+                        )
+                    ) == model_key,
+                )
+                .all()
+            )
+
+            for other_unit in matching_units:
+
+                if other_unit.id == unit.id:
+                    continue
+
+                old_other = {
+                    "size_value":
+                        other_unit.size_value,
+
+                    "size_unit":
+                        other_unit.size_unit,
+
+                    "color":
+                        other_unit.color,
+
+                    "notes":
+                        other_unit.notes,
+                }
+
+                merged_notes = (
+                    _merge_model_specs_block(
+                        other_unit.notes,
+                        specs_block,
+                    )
+                )
+
+                other_unit.size_value = (
+                    new_size_value
+                )
+
+                other_unit.size_unit = (
+                    new_size_unit
+                )
+
+                other_unit.color = (
+                    new_color
+                )
+
+                other_unit.notes = (
+                    merged_notes
+                )
+
+                other_unit.updated_at = now
+                other_unit.updated_by_id = (
+                    current_user.id
+                )
+
+                other_receiving_line = None
+
+                if other_unit.receiving_line_id:
+                    other_receiving_line = (
+                        db.session.get(
+                            ApplianceReceivingLine,
+                            other_unit.receiving_line_id,
+                        )
+                    )
+
+                if other_receiving_line is not None:
+
+                    other_receiving_line.size_value = (
+                        new_size_value
+                    )
+
+                    other_receiving_line.size_unit = (
+                        new_size_unit
+                    )
+
+                    other_receiving_line.color = (
+                        new_color
+                    )
+
+                    other_receiving_line.notes = (
+                        merged_notes
+                    )
+
+                    other_receiving_line.updated_at = (
+                        now
+                    )
+
+                    other_receiving_line.updated_by_id = (
+                        current_user.id
+                    )
+
+                    if (
+                        other_receiving_line.receiving
+                        is not None
+                    ):
+                        other_receiving_line.receiving.updated_at = (
+                            now
+                        )
+
+                        other_receiving_line.receiving.updated_by_id = (
+                            current_user.id
+                        )
+
+                new_other = {
+                    "size_value":
+                        other_unit.size_value,
+
+                    "size_unit":
+                        other_unit.size_unit,
+
+                    "color":
+                        other_unit.color,
+
+                    "notes":
+                        other_unit.notes,
+                }
+
+                if old_other != new_other:
+
+                    propagation_movement = (
+                        ApplianceMovement(
+                            appliance_unit_id=
+                                other_unit.id,
+
+                            movement_type=
+                                "MODEL_SPECS_SYNC",
+
+                            from_warehouse_id=
+                                other_unit.warehouse_id,
+
+                            to_warehouse_id=
+                                other_unit.warehouse_id,
+
+                            reason_code=
+                                "MODEL_SPECS_PROPAGATED",
+
+                            notes=(
+                                "Confirmed model specifications "
+                                "propagated from local Model "
+                                "Specs Catalog."
+                            ),
+
+                            meta_json=json.dumps(
+                                {
+                                    "source":
+                                        "appliance_model_spec",
+
+                                    "normalized_brand":
+                                        brand_key,
+
+                                    "normalized_model":
+                                        model_key,
+
+                                    "old":
+                                        old_other,
+
+                                    "new":
+                                        new_other,
+
+                                    "confirmed_from_unit_id":
+                                        unit.id,
+
+                                    "confirmed_from_inventory_number":
+                                        unit.inventory_number,
+                                },
+                                ensure_ascii=False,
+                            ),
+
+                            actor_id=
+                                current_user.id,
+
+                            created_at=
+                                now,
+                        )
+                    )
+
+                    db.session.add(
+                        propagation_movement
+                    )
+
+                    propagated_count += 1
+
+        # ====================================================
+        # ONE COMMIT
+        # ====================================================
+
+        db.session.commit()
+
+        message = (
+            f"Details saved for "
+            f"{unit.inventory_number}."
+        )
+
+        if removed_stale_specs:
+            message += (
+                " Brand/Model changed, so the old Model Specs "
+                "block was removed. Run FIND SPECS for the "
+                "corrected model."
+            )
+
+        flash(
+            message,
+            "success",
+        )
+
+    except Exception:
+        db.session.rollback()
+        raise
+
+    return redirect(
+        url_for(
+            "appliance.inventory_detail",
+            unit_id=unit.id,
+        )
+    )
+
+
+# ============================================================
+# Appliance Inventory - AI Model Specs Preview
+#
+# IMPORTANT:
+#   Research only.
+#   NO database writes.
+#   NO commit.
+#   User must explicitly SAVE the normal Edit Details form.
+# ============================================================
+
+@appliance_bp.post(
+    "/inventory/<int:unit_id>/find-specs"
+)
+@login_required
+def inventory_find_specs(unit_id):
+
+    from flask import current_app, jsonify
+
+    from appliance.services.model_specs_service import (
+        ModelSpecsService,
+    )
+
+    unit = db.session.get(
+        ApplianceUnit,
+        unit_id,
+    )
+
+    if unit is None:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Appliance unit not found.",
+            }
+        ), 404
+
+    if not AccessControlService.can(
+        current_user,
+        "appliance.receive",
+        warehouse_id=unit.warehouse_id,
+    ):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Access denied.",
+            }
+        ), 403
+
+    brand = (
+        unit.brand
+        or ""
+    ).strip()
+
+    model = (
+        unit.model_number
+        or ""
+    ).strip()
+
+    serial = (
+        unit.serial_number
+        or ""
+    ).strip() or None
+
+    if not brand:
+        return jsonify(
+            {
+                "ok": False,
+                "error": (
+                    "Brand is missing. "
+                    "FIND SPECS requires Brand + Model."
+                ),
+            }
+        ), 400
+
+    if not model:
+        return jsonify(
+            {
+                "ok": False,
+                "error": (
+                    "Model is missing. "
+                    "FIND SPECS requires Brand + Model."
+                ),
+            }
+        ), 400
+
+    # ========================================================
+    # LOCAL MODEL SPECS CACHE LOOKUP
+    #
+    # Confirmed Brand + Model?
+    #   YES -> return local result immediately.
+    #          NO OpenAI call.
+    #          NO web search.
+    #
+    #   NO  -> continue to ModelSpecsService below.
+    # ========================================================
+
+    import json
+
+    from models import ApplianceModelSpec
+
+
+    brand_key = " ".join(
+        brand.upper().split()
+    )
+
+    model_key = " ".join(
+        model.upper().split()
+    )
+
+
+    cached = (
+        ApplianceModelSpec.query
+        .filter(
+            ApplianceModelSpec.normalized_brand
+            == brand_key,
+
+            ApplianceModelSpec.normalized_model
+            == model_key,
+
+            ApplianceModelSpec.confirmed_at
+            .isnot(None),
+        )
+        .first()
+    )
+
+
+    if cached is not None:
+
+        sources = []
+
+        if cached.sources_json:
+
+            try:
+                parsed_sources = json.loads(
+                    cached.sources_json
+                )
+
+                if isinstance(
+                    parsed_sources,
+                    list,
+                ):
+                    sources = (
+                        parsed_sources
+                    )
+
+            except Exception:
+                sources = []
+
+
+        data = {
+            "exact_model_confirmed":
+                bool(
+                    cached.exact_model_confirmed
+                ),
+
+            "confirmed_model":
+                cached.confirmed_model
+                or cached.model_number,
+
+            "suggested_model":
+                cached.suggested_model,
+
+            "match_notes":
+                cached.match_notes
+                or (
+                    "Loaded from confirmed "
+                    "local Model Specs Catalog."
+                ),
+
+            "appliance_type":
+                cached.appliance_type,
+
+            "size_value":
+                cached.size_value,
+
+            "size_unit":
+                cached.size_unit,
+
+            "color":
+                cached.color,
+
+            "notes_block":
+                cached.notes_block,
+
+            "source_name":
+                cached.source_name
+                or "LOCAL MODEL CATALOG",
+
+            "source_url":
+                cached.source_url,
+
+            "confidence":
+                cached.confidence
+                or "confirmed",
+
+            "sources":
+                sources,
+
+            # Extra fields are safe if current JS ignores them.
+            "cache_hit":
+                True,
+
+            "lookup_source":
+                "LOCAL_CACHE",
+        }
+
+
+        current_app.logger.info(
+            "MODEL_SPECS_CACHE_HIT "
+            "unit_id=%s brand=%s model=%s cache_id=%s",
+            unit.id,
+            brand,
+            model,
+            cached.id,
+        )
+
+
+        return jsonify(
+            {
+                "ok": True,
+                "result": data,
+            }
+        )
+
+
+    try:
+
+        service = ModelSpecsService()
+
+        result = service.find_specs(
+            brand=brand,
+            model=model,
+            serial=serial,
+        )
+
+        data = result.to_dict()
+
+        # ====================================================
+        # REMEMBER CONFIRMED MODEL SPECS
+        #
+        # FIND SPECS remains read-only for ApplianceUnit.
+        # We only persist reusable Brand + Model knowledge
+        # into ApplianceModelSpec.
+        #
+        # Next lookup for the same exact Brand + Model will
+        # use LOCAL CACHE and will not call OpenAI/Web.
+        # ====================================================
+
+        if bool(
+            data.get("exact_model_confirmed")
+        ):
+
+            cached_model = (
+                ApplianceModelSpec.query
+                .filter(
+                    ApplianceModelSpec.normalized_brand
+                    == brand_key,
+
+                    ApplianceModelSpec.normalized_model
+                    == model_key,
+                )
+                .first()
+            )
+
+            if cached_model is None:
+
+                cached_model = ApplianceModelSpec(
+                    brand=brand,
+                    model_number=model,
+                    normalized_brand=brand_key,
+                    normalized_model=model_key,
+                )
+
+                db.session.add(
+                    cached_model
+                )
+
+            cached_model.brand = brand
+            cached_model.model_number = model
+
+            cached_model.normalized_brand = (
+                brand_key
+            )
+
+            cached_model.normalized_model = (
+                model_key
+            )
+
+            cached_model.size_value = (
+                data.get("size_value")
+            )
+
+            cached_model.size_unit = (
+                data.get("size_unit")
+            )
+
+            cached_model.color = (
+                data.get("color")
+            )
+
+            cached_model.notes_block = (
+                data.get("notes_block")
+            )
+
+            cached_model.exact_model_confirmed = True
+
+            cached_model.confirmed_model = (
+                data.get("confirmed_model")
+                or model
+            )
+
+            cached_model.suggested_model = (
+                data.get("suggested_model")
+            )
+
+            cached_model.appliance_type = (
+                data.get("appliance_type")
+            )
+
+            cached_model.match_notes = (
+                data.get("match_notes")
+            )
+
+            cached_model.confidence = (
+                data.get("confidence")
+                or "confirmed"
+            )
+
+            cached_model.source_name = (
+                data.get("source_name")
+            )
+
+            cached_model.source_url = (
+                data.get("source_url")
+            )
+
+            cached_model.sources_json = (
+                json.dumps(
+                    data.get("sources") or [],
+                    ensure_ascii=False,
+                )
+            )
+
+            cached_model.confirmed_by_id = (
+                current_user.id
+            )
+
+            cached_model.confirmed_at = (
+                datetime.utcnow()
+            )
+
+            db.session.commit()
+
+            current_app.logger.info(
+                "MODEL_SPECS_CACHE_SAVED "
+                "unit_id=%s brand=%s model=%s "
+                "cache_id=%s",
+                unit.id,
+                brand,
+                model,
+                cached_model.id,
+            )
+
+            # Inform frontend/debugging that this result
+            # has now been persisted in local catalog.
+            data["cache_saved"] = True
+            data["cache_id"] = cached_model.id
+
+        return jsonify(
+            {
+                "ok": True,
+                "result": data,
+            }
+        )
+
+    except Exception as exc:
+
+        current_app.logger.exception(
+            "MODEL_SPECS_LOOKUP_FAILED "
+            "unit_id=%s brand=%s model=%s",
+            unit.id,
+            brand,
+            model,
+        )
+
+        return jsonify(
+            {
+                "ok": False,
+                "error": (
+                    "Model specs lookup failed. "
+                    f"{exc}"
+                ),
+            }
+        ), 500
 
 
 # ============================================================
@@ -2724,9 +5239,8 @@ def issue_remove_line(line_id):
 #
 # Superadmin-only correction tool.
 #
-# This is NOT a normal warehouse return.
-# It removes an incorrectly created Issue only while the
-# appliances are still untouched after the original ISSUE.
+# Business rules live in ApplianceIssueService.
+# This route only handles HTTP / flash / redirect.
 # ============================================================
 
 @appliance_bp.post(
@@ -2735,61 +5249,18 @@ def issue_remove_line(line_id):
 @login_required
 def issue_delete(issue_id):
 
-    from models import (
-        ApplianceIssue,
-        ApplianceIssueLine,
-        ApplianceMovement,
-        ApplianceUnit,
-    )
-
-    # --------------------------------------------------------
-    # Role protection
-    # --------------------------------------------------------
-
-    if (
+    # Defense-in-depth:
+    # physical Issue deletion is a SUPERADMIN-only
+    # correction operation. The service enforces the same rule.
+    role = (
         getattr(current_user, "role", "")
         or ""
-    ).strip().lower() != "superadmin":
+    ).strip().lower()
 
+    if role != "superadmin":
         flash(
-            "Only SUPERADMIN can delete an Appliance Issue.",
-            "danger",
-        )
-
-        return redirect(
-            url_for(
-                "appliance.issue_detail",
-                issue_id=issue_id,
-            )
-        )
-
-    issue = db.session.get(
-        ApplianceIssue,
-        issue_id,
-    )
-
-    if issue is None:
-
-        flash(
-            "Appliance Issue not found.",
-            "danger",
-        )
-
-        return redirect(
-            url_for(
-                "appliance.inventory_list"
-            )
-        )
-
-    # User must also have warehouse access.
-    if not AccessControlService.can(
-        current_user,
-        "appliance.receive",
-        warehouse_id=issue.warehouse_id,
-    ):
-
-        flash(
-            "You do not have access to this warehouse.",
+            "Only SUPERADMIN can delete "
+            "an Appliance Issue.",
             "danger",
         )
 
@@ -2801,310 +5272,18 @@ def issue_delete(issue_id):
 
     try:
 
-        # ----------------------------------------------------
-        # Lines / physical units
-        # ----------------------------------------------------
-
-        lines = (
-            ApplianceIssueLine.query
-            .filter(
-                ApplianceIssueLine.issue_id
-                == issue.id
-            )
-            .order_by(
-                ApplianceIssueLine.line_no.asc()
-            )
-            .all()
-        )
-
-        if not lines:
-
-            raise ApplianceIssueError(
-                "Issue contains no appliance lines."
-            )
-
-        unit_ids = [
-            int(line.appliance_unit_id)
-            for line in lines
-        ]
-
-        units = (
-            ApplianceUnit.query
-            .filter(
-                ApplianceUnit.id.in_(
-                    unit_ids
-                )
-            )
-            .all()
-        )
-
-        units_by_id = {
-            int(unit.id): unit
-            for unit in units
-        }
-
-        if len(units_by_id) != len(
-            set(unit_ids)
-        ):
-
-            raise ApplianceIssueError(
-                "One or more appliance units "
-                "from this Issue no longer exist."
-            )
-
-        # ----------------------------------------------------
-        # Find original ISSUE movements belonging to this AIS.
-        # ----------------------------------------------------
-
-        original_issue_movements = (
-            ApplianceMovement.query
-            .filter(
-                ApplianceMovement.issue_id
-                == issue.id,
-                ApplianceMovement.movement_type
-                == "ISSUE",
-            )
-            .all()
-        )
-
-        original_movement_ids = [
-            movement.id
-            for movement
-            in original_issue_movements
-        ]
-
-        # ----------------------------------------------------
-        # SAFETY CHECK:
-        #
-        # DELETE is allowed only if THIS Issue is still the
-        # latest operational movement for every appliance line.
-        #
-        # IMPORTANT:
-        # Historical movements that happened BEFORE this Issue
-        # do NOT block deletion.
-        #
-        # Example allowed:
-        #
-        #   ISSUE AIS-000001
-        #   RETURN_TO_STOCK
-        #   ISSUE AIS-000002   <-- deleting this
-        #
-        # because nothing happened after AIS-000002 ISSUE.
-        #
-        # Example blocked:
-        #
-        #   ISSUE AIS-000002
-        #   RETURN / CHANGE_WO / REPLACE
-        #
-        # because later movement exists.
-        # ----------------------------------------------------
-
-        issue_movements_by_line = {
-            movement.issue_line_id: movement
-            for movement in original_issue_movements
-            if movement.issue_line_id is not None
-        }
-
-        for line in lines:
-
-            issue_movement = (
-                issue_movements_by_line.get(
-                    line.id
-                )
-            )
-
-            if issue_movement is None:
-
-                raise ApplianceIssueError(
-                    f"Original ISSUE movement is missing "
-                    f"for line #{line.line_no}. "
-                    "Issue deletion is blocked."
-                )
-
-            later_movement = (
-                ApplianceMovement.query
-                .filter(
-                    ApplianceMovement.appliance_unit_id
-                    == line.appliance_unit_id,
-
-                    ApplianceMovement.created_at
-                    > issue_movement.created_at,
-                )
-                .order_by(
-                    ApplianceMovement.created_at.asc(),
-                    ApplianceMovement.id.asc(),
-                )
-                .first()
-            )
-
-            if later_movement is not None:
-
-                unit = units_by_id[
-                    int(line.appliance_unit_id)
-                ]
-
-                raise ApplianceIssueError(
-                    f"{unit.inventory_number} has movement "
-                    f"{later_movement.movement_type} after "
-                    f"{issue.issue_number}. "
-                    "Issue deletion is no longer allowed. "
-                    "Use RETURN / REPLACE / CHANGE W/O instead."
-                )
-
-        # ----------------------------------------------------
-        # Current-state validation
-        # ----------------------------------------------------
-
-        for line in lines:
-
-            unit = units_by_id[
-                int(line.appliance_unit_id)
-            ]
-
-            status = (
-                unit.status
-                or ""
-            ).strip().lower()
-
-            line_status = (
-                line.status
-                or ""
-            ).strip().lower()
-
-            # An untouched Issue line is still ISSUED.
-            if (
-                line_status == "issued"
-                and status != "issued"
-            ):
-
-                raise ApplianceIssueError(
-                    f"{unit.inventory_number} has unexpected "
-                    f"inventory status "
-                    f"{status.upper() or 'UNKNOWN'}. "
-                    "Issue deletion is blocked."
-                )
-
-            # A line already RETURNED by this same AIS is
-            # expected to be physically AVAILABLE.
-            if (
-                line_status == "returned"
-                and status != "available"
-            ):
-
-                raise ApplianceIssueError(
-                    f"{unit.inventory_number} was returned "
-                    "from this Issue but is no longer AVAILABLE. "
-                    "Issue deletion is blocked."
-                )
-
-            if line_status not in (
-                "issued",
-                "returned",
-            ):
-
-                raise ApplianceIssueError(
-                    f"{unit.inventory_number} has Issue status "
-                    f"{line_status.upper() or 'UNKNOWN'}. "
-                    "Issue deletion is no longer allowed."
-                )
-
-            current_wo = (
-                unit.current_work_order_number
-                or ""
-            ).strip().upper()
-
-            issue_wo = (
-                issue.work_order_number
-                or ""
-            ).strip().upper()
-
-            if (
-                current_wo
-                and issue_wo
-                and current_wo != issue_wo
-            ):
-
-                raise ApplianceIssueError(
-                    f"{unit.inventory_number} is already "
-                    "assigned to another Work Order. "
-                    "Issue deletion is blocked."
-                )
-
-        issue_number = issue.issue_number
-
-        # ----------------------------------------------------
-        # Restore inventory
-        # ----------------------------------------------------
-
-        now = datetime.utcnow()
-
-        for unit in units:
-
-            unit.status = "available"
-
-            unit.current_work_order_id = None
-            unit.current_work_order_number = None
-
-            unit.updated_at = now
-            unit.updated_by_id = current_user.id
-
-        db.session.flush()
-
-        # ----------------------------------------------------
-        # Remove original ISSUE movements
-        # ----------------------------------------------------
-
-        (
-            ApplianceMovement.query
-            .filter(
-                ApplianceMovement.issue_id
-                == issue.id
-            )
-            .delete(
-                synchronize_session=False
+        result = (
+            ApplianceIssueService
+            .delete_issue_correction(
+                actor=current_user,
+                issue_id=issue_id,
             )
         )
-
-        # ----------------------------------------------------
-        # Remove Issue Lines
-        # ----------------------------------------------------
-
-        (
-            ApplianceIssueLine.query
-            .filter(
-                ApplianceIssueLine.issue_id
-                == issue.id
-            )
-            .delete(
-                synchronize_session=False
-            )
-        )
-
-        db.session.flush()
-
-        # ----------------------------------------------------
-        # Remove Issue header
-        #
-        # Bulk delete avoids SQLAlchemy trying to cascade-delete
-        # already deleted lines a second time.
-        # ----------------------------------------------------
-
-        (
-            ApplianceIssue.query
-            .filter(
-                ApplianceIssue.id
-                == issue.id
-            )
-            .delete(
-                synchronize_session=False
-            )
-        )
-
-        db.session.commit()
 
         flash(
-            f"{issue_number} deleted. "
-            f"{len(units)} appliance(s) returned to AVAILABLE.",
+            f"{result['issue_number']} deleted. "
+            f"{result['deleted_units']} appliance(s) "
+            "returned to AVAILABLE.",
             "success",
         )
 
@@ -3137,6 +5316,7 @@ def issue_delete(issue_id):
             issue_id=issue_id,
         )
     )
+
 
 # ============================================================
 # APPLIANCE VENDOR RETURN CONTROL
@@ -3410,12 +5590,7 @@ def vendor_returns_queue():
 @login_required
 def vendor_return_queue_confirm(unit_id):
 
-    import json
-
-    from models import (
-        ApplianceMovement,
-        ApplianceUnit,
-    )
+    from models import ApplianceUnit
 
     from services.appliance_issue_service import (
         ApplianceIssueAccessDenied,
@@ -3536,86 +5711,33 @@ def vendor_return_queue_confirm(unit_id):
             action="CONFIRM_VENDOR_RETURN",
             reason_code="RETURNED_TO_VENDOR",
             notes=movement_notes,
-        )
+            extra_movement_meta={
+                "vendor_name":
+                    vendor_name,
 
-        # ----------------------------------------------------
-        # Enrich final immutable operational movement with
-        # structured Vendor Return information.
-        #
-        # Existing service already created the movement and
-        # changed the physical unit status.
-        # ----------------------------------------------------
+                "rma_reference":
+                    rma_reference,
 
-        movement = (
-            ApplianceMovement.query
-            .filter(
-                ApplianceMovement.appliance_unit_id
-                == unit.id,
-                ApplianceMovement.movement_type
-                == "VENDOR_RETURN",
-            )
-            .order_by(
-                ApplianceMovement.created_at.desc(),
-                ApplianceMovement.id.desc(),
-            )
-            .first()
-        )
+                "return_notes":
+                    return_notes,
 
-        if movement is not None:
-
-            meta = {}
-
-            if movement.meta_json:
-
-                try:
-                    loaded = json.loads(
-                        movement.meta_json
+                "source_receiving_number":
+                    (
+                        receiving.receiving_number
+                        if receiving
+                        else ""
                     )
+                    or "",
 
-                    if isinstance(
-                        loaded,
-                        dict,
-                    ):
-                        meta = loaded
-
-                except Exception:
-                    meta = {}
-
-            meta.update(
-                {
-                    "vendor_name":
-                        vendor_name,
-
-                    "rma_reference":
-                        rma_reference,
-
-                    "return_notes":
-                        return_notes,
-
-                    "source_receiving_number":
-                        (
-                            receiving.receiving_number
-                            if receiving
-                            else ""
-                        )
-                        or "",
-
-                    "source_invoice_number":
-                        (
-                            receiving.invoice_number
-                            if receiving
-                            else ""
-                        )
-                        or "",
-                }
-            )
-
-            movement.meta_json = json.dumps(
-                meta,
-                ensure_ascii=False,
-            )
-
-            db.session.commit()
+                "source_invoice_number":
+                    (
+                        receiving.invoice_number
+                        if receiving
+                        else ""
+                    )
+                    or "",
+            },
+        )
 
         flash(
             f"{unit.inventory_number} returned to "

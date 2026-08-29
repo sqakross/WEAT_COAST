@@ -770,6 +770,405 @@ class ApplianceIssueService:
             raise
 
     # =========================================================
+    # Delete incorrectly-created Appliance Issue
+    # =========================================================
+
+    @staticmethod
+    def delete_issue_correction(
+        *,
+        actor: User,
+        issue_id: int,
+    ) -> dict:
+        """
+        SUPERADMIN correction tool.
+
+        This is NOT a normal warehouse RETURN.
+
+        It physically removes an incorrectly-created Appliance
+        Issue only while every appliance is still untouched
+        after that Issue's original ISSUE movement.
+
+        Existing behavior is intentionally preserved from the
+        former route-level implementation.
+
+        One transaction.
+        """
+        actor = (
+            ApplianceIssueService
+            ._require_user(actor)
+        )
+
+        # -----------------------------------------------------
+        # SUPERADMIN only
+        # -----------------------------------------------------
+
+        role = (
+            getattr(
+                actor,
+                "role",
+                "",
+            )
+            or ""
+        ).strip().lower()
+
+        if role != "superadmin":
+            raise ApplianceIssueAccessDenied(
+                "Only SUPERADMIN can delete an Appliance Issue."
+            )
+
+        # -----------------------------------------------------
+        # Validate Issue ID / load Issue
+        # -----------------------------------------------------
+
+        try:
+            issue_id_int = int(issue_id)
+        except (
+            TypeError,
+            ValueError,
+        ):
+            raise ApplianceIssueError(
+                "Invalid Appliance Issue."
+            )
+
+        issue = db.session.get(
+            ApplianceIssue,
+            issue_id_int,
+        )
+
+        if issue is None:
+            raise ApplianceIssueError(
+                "Appliance Issue not found."
+            )
+
+        # -----------------------------------------------------
+        # Preserve existing warehouse-access rule.
+        # -----------------------------------------------------
+
+        if not AccessControlService.can(
+            actor,
+            "appliance.receive",
+            warehouse_id=issue.warehouse_id,
+        ):
+            raise ApplianceIssueAccessDenied(
+                "You do not have access to this warehouse."
+            )
+
+        # -----------------------------------------------------
+        # Lines / physical units
+        # -----------------------------------------------------
+
+        lines = (
+            ApplianceIssueLine.query
+            .filter(
+                ApplianceIssueLine.issue_id
+                == issue.id
+            )
+            .order_by(
+                ApplianceIssueLine.line_no.asc()
+            )
+            .all()
+        )
+
+        if not lines:
+            raise ApplianceIssueError(
+                "Issue contains no appliance lines."
+            )
+
+        unit_ids = [
+            int(line.appliance_unit_id)
+            for line in lines
+        ]
+
+        units = (
+            ApplianceUnit.query
+            .filter(
+                ApplianceUnit.id.in_(
+                    unit_ids
+                )
+            )
+            .all()
+        )
+
+        units_by_id = {
+            int(unit.id): unit
+            for unit in units
+        }
+
+        if len(units_by_id) != len(
+            set(unit_ids)
+        ):
+            raise ApplianceIssueError(
+                "One or more appliance units "
+                "from this Issue no longer exist."
+            )
+
+        # -----------------------------------------------------
+        # Find original ISSUE movements belonging to this AIS.
+        # -----------------------------------------------------
+
+        original_issue_movements = (
+            ApplianceMovement.query
+            .filter(
+                ApplianceMovement.issue_id
+                == issue.id,
+                ApplianceMovement.movement_type
+                == "ISSUE",
+            )
+            .all()
+        )
+
+        # Kept intentionally for behavioral parity / diagnostics.
+        original_movement_ids = [
+            movement.id
+            for movement
+            in original_issue_movements
+        ]
+
+        # -----------------------------------------------------
+        # SAFETY CHECK
+        #
+        # Delete is allowed only if THIS Issue is still the
+        # latest operational movement for every appliance line.
+        #
+        # Historical movements before this Issue do not block.
+        # -----------------------------------------------------
+
+        issue_movements_by_line = {
+            movement.issue_line_id: movement
+            for movement in original_issue_movements
+            if movement.issue_line_id is not None
+        }
+
+        for line in lines:
+
+            issue_movement = (
+                issue_movements_by_line.get(
+                    line.id
+                )
+            )
+
+            if issue_movement is None:
+                raise ApplianceIssueError(
+                    f"Original ISSUE movement is missing "
+                    f"for line #{line.line_no}. "
+                    "Issue deletion is blocked."
+                )
+
+            later_movement = (
+                ApplianceMovement.query
+                .filter(
+                    ApplianceMovement.appliance_unit_id
+                    == line.appliance_unit_id,
+
+                    db.or_(
+                        ApplianceMovement.created_at
+                        > issue_movement.created_at,
+
+                        (
+                            ApplianceMovement.created_at
+                            == issue_movement.created_at
+                        )
+                        & (
+                            ApplianceMovement.id
+                            > issue_movement.id
+                        ),
+                    ),
+                )
+                .order_by(
+                    ApplianceMovement.created_at.asc(),
+                    ApplianceMovement.id.asc(),
+                )
+                .first()
+            )
+
+            if later_movement is not None:
+
+                unit = units_by_id[
+                    int(line.appliance_unit_id)
+                ]
+
+                raise ApplianceIssueError(
+                    f"{unit.inventory_number} has movement "
+                    f"{later_movement.movement_type} after "
+                    f"{issue.issue_number}. "
+                    "Issue deletion is no longer allowed. "
+                    "Use RETURN / REPLACE / CHANGE W/O instead."
+                )
+
+        # -----------------------------------------------------
+        # Current-state validation
+        # -----------------------------------------------------
+
+        for line in lines:
+
+            unit = units_by_id[
+                int(line.appliance_unit_id)
+            ]
+
+            status = (
+                unit.status
+                or ""
+            ).strip().lower()
+
+            line_status = (
+                line.status
+                or ""
+            ).strip().lower()
+
+            # An untouched Issue line is still ISSUED.
+            if (
+                line_status == "issued"
+                and status != "issued"
+            ):
+                raise ApplianceIssueError(
+                    f"{unit.inventory_number} has unexpected "
+                    f"inventory status "
+                    f"{status.upper() or 'UNKNOWN'}. "
+                    "Issue deletion is blocked."
+                )
+
+            # Preserve existing route behavior for RETURNED.
+            if (
+                line_status == "returned"
+                and status != "available"
+            ):
+                raise ApplianceIssueError(
+                    f"{unit.inventory_number} was returned "
+                    "from this Issue but is no longer AVAILABLE. "
+                    "Issue deletion is blocked."
+                )
+
+            if line_status not in (
+                "issued",
+                "returned",
+            ):
+                raise ApplianceIssueError(
+                    f"{unit.inventory_number} has Issue status "
+                    f"{line_status.upper() or 'UNKNOWN'}. "
+                    "Issue deletion is no longer allowed."
+                )
+
+            current_wo = (
+                unit.current_work_order_number
+                or ""
+            ).strip().upper()
+
+            issue_wo = (
+                issue.work_order_number
+                or ""
+            ).strip().upper()
+
+            if (
+                current_wo
+                and issue_wo
+                and current_wo != issue_wo
+            ):
+                raise ApplianceIssueError(
+                    f"{unit.inventory_number} is already "
+                    "assigned to another Work Order. "
+                    "Issue deletion is blocked."
+                )
+
+        issue_number = issue.issue_number
+        deleted_unit_count = len(units)
+
+        now = datetime.utcnow()
+
+        try:
+            # -------------------------------------------------
+            # Restore physical inventory
+            # -------------------------------------------------
+
+            for unit in units:
+
+                unit.status = "available"
+
+                unit.current_work_order_id = None
+                unit.current_work_order_number = None
+
+                unit.updated_at = now
+                unit.updated_by_id = actor.id
+
+            db.session.flush()
+
+            # -------------------------------------------------
+            # Remove movements belonging to this Issue
+            # -------------------------------------------------
+
+            deleted_movements = (
+                ApplianceMovement.query
+                .filter(
+                    ApplianceMovement.issue_id
+                    == issue.id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            # -------------------------------------------------
+            # Remove Issue Lines
+            # -------------------------------------------------
+
+            deleted_lines = (
+                ApplianceIssueLine.query
+                .filter(
+                    ApplianceIssueLine.issue_id
+                    == issue.id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            db.session.flush()
+
+            # -------------------------------------------------
+            # Remove Issue header
+            #
+            # Bulk delete preserves the behavior of the
+            # existing route implementation.
+            # -------------------------------------------------
+
+            deleted_issues = (
+                ApplianceIssue.query
+                .filter(
+                    ApplianceIssue.id
+                    == issue.id
+                )
+                .delete(
+                    synchronize_session=False
+                )
+            )
+
+            if deleted_issues != 1:
+                raise ApplianceIssueError(
+                    "Appliance Issue deletion failed."
+                )
+
+            db.session.commit()
+
+            return {
+                "deleted": True,
+                "issue_id": issue_id_int,
+                "issue_number": issue_number,
+                "deleted_units": deleted_unit_count,
+                "deleted_lines": int(
+                    deleted_lines or 0
+                ),
+                "deleted_movements": int(
+                    deleted_movements or 0
+                ),
+                "original_issue_movement_ids":
+                    original_movement_ids,
+            }
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+
+    # =========================================================
     # Return one issued appliance back to warehouse stock
     # =========================================================
 
@@ -1279,8 +1678,19 @@ class ApplianceIssueService:
                 ApplianceMovement.appliance_unit_id
                 == unit.id,
 
-                ApplianceMovement.created_at
-                > latest_own_movement.created_at,
+                db.or_(
+                    ApplianceMovement.created_at
+                    > latest_own_movement.created_at,
+
+                    (
+                        ApplianceMovement.created_at
+                        == latest_own_movement.created_at
+                    )
+                    & (
+                        ApplianceMovement.id
+                        > latest_own_movement.id
+                    ),
+                ),
 
                 db.or_(
                     ApplianceMovement.issue_id.is_(None),
@@ -2130,6 +2540,7 @@ class ApplianceIssueService:
         action: str,
         reason_code: str | None = None,
         notes: str | None = None,
+        extra_movement_meta: dict | None = None,
     ) -> ApplianceUnit:
         """
         Change warehouse operational status for ONE physical
@@ -2189,11 +2600,6 @@ class ApplianceIssueService:
             ._get_warehouse(
                 unit.warehouse_id
             )
-        )
-
-        ApplianceIssueService._require_permission(
-            actor=actor,
-            warehouse_id=warehouse.id,
         )
 
         current_status = (
@@ -2508,6 +2914,48 @@ class ApplianceIssueService:
                 "Unsupported appliance action."
             )
 
+        # ----------------------------------------------------
+        # Authorization belongs to the service.
+        #
+        # Routes and UI are not trusted to choose the correct
+        # permission for a disposition action.
+        #
+        # Keep legacy appliance.receive behavior for existing
+        # Repair / Loaner disposition workflows until those
+        # workflows receive their own dedicated permission.
+        # ----------------------------------------------------
+
+        vendor_return_actions = {
+            "MARK_VENDOR_RETURN",
+            "REPAIR_TO_VENDOR_RETURN",
+            "CONFIRM_VENDOR_RETURN",
+            "CANCEL_VENDOR_RETURN",
+            "VENDOR_RETURN_TO_LOANER",
+            "VENDOR_RETURN_TO_SCRAP",
+        }
+
+        if action_clean in vendor_return_actions:
+            required_permission = "appliance.vendor_return"
+        elif action_clean == "SCRAP":
+            required_permission = "appliance.write_off"
+        else:
+            required_permission = (
+                ApplianceIssueService.ISSUE_PERMISSION
+            )
+
+        allowed = AccessControlService.can(
+            actor,
+            required_permission,
+            warehouse_id=warehouse.id,
+        )
+
+        if not allowed:
+            raise ApplianceIssueAccessDenied(
+                "You do not have permission to perform "
+                f"{action_clean.replace('_', ' ')} "
+                f"for warehouse {warehouse.code}."
+            )
+
         if current_status != rule["from"]:
 
             if current_status == "issued":
@@ -2530,6 +2978,108 @@ class ApplianceIssueService:
             reason_clean
             or rule["default_reason"]
         )
+
+        # ----------------------------------------------------
+        # Final immutable movement metadata.
+        #
+        # The service owns system/audit fields. Callers may
+        # provide additional business metadata, but may not
+        # overwrite service-owned keys.
+        #
+        # Build this BEFORE the inventory UPDATE so invalid
+        # metadata fails without changing physical inventory.
+        # ----------------------------------------------------
+
+        movement_meta = {
+            "inventory_number":
+                unit.inventory_number,
+
+            "action":
+                action_clean,
+
+            "from_status":
+                current_status,
+
+            "to_status":
+                new_status,
+
+            "old_stock_class":
+                getattr(
+                    unit,
+                    "stock_class",
+                    None,
+                ),
+
+            "new_stock_class":
+                rule.get(
+                    "stock_class"
+                ),
+
+            "old_condition":
+                getattr(
+                    unit,
+                    "condition",
+                    None,
+                ),
+
+            "new_condition":
+                rule.get(
+                    "condition"
+                ),
+
+            "warehouse_id":
+                warehouse.id,
+
+            "warehouse_code":
+                warehouse.code,
+
+            "reason_code":
+                reason_final,
+        }
+
+        if extra_movement_meta is not None:
+
+            if not isinstance(
+                extra_movement_meta,
+                dict,
+            ):
+                raise ApplianceIssueError(
+                    "Invalid movement metadata."
+                )
+
+            protected_keys = set(
+                movement_meta.keys()
+            )
+
+            conflicting_keys = sorted(
+                protected_keys.intersection(
+                    extra_movement_meta.keys()
+                )
+            )
+
+            if conflicting_keys:
+                raise ApplianceIssueError(
+                    "Movement metadata cannot overwrite "
+                    "system audit fields: "
+                    + ", ".join(conflicting_keys)
+                )
+
+            movement_meta.update(
+                extra_movement_meta
+            )
+
+        try:
+            movement_meta_json = json.dumps(
+                movement_meta,
+                ensure_ascii=False,
+            )
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise ApplianceIssueError(
+                "Movement metadata is not JSON serializable."
+            ) from exc
 
         now = datetime.utcnow()
 
@@ -2644,55 +3194,7 @@ class ApplianceIssueService:
 
                 notes=notes_clean,
 
-                meta_json=json.dumps(
-                    {
-                        "inventory_number":
-                            unit.inventory_number,
-
-                        "action":
-                            action_clean,
-
-                        "from_status":
-                            current_status,
-
-                        "to_status":
-                            new_status,
-
-                        "old_stock_class":
-                            getattr(
-                                unit,
-                                "stock_class",
-                                None,
-                            ),
-
-                        "new_stock_class":
-                            rule.get(
-                                "stock_class"
-                            ),
-
-                        "old_condition":
-                            getattr(
-                                unit,
-                                "condition",
-                                None,
-                            ),
-
-                        "new_condition":
-                            rule.get(
-                                "condition"
-                            ),
-
-                        "warehouse_id":
-                            warehouse.id,
-
-                        "warehouse_code":
-                            warehouse.code,
-
-                        "reason_code":
-                            reason_final,
-                    },
-                    ensure_ascii=False,
-                ),
+                meta_json=movement_meta_json,
 
                 actor_id=actor.id,
                 created_at=now,

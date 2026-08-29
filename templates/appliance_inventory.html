@@ -580,6 +580,135 @@
   }
 
 
+
+  /* ========================================================
+     APPLIANCE QUICK INFO
+     ======================================================== */
+
+  .appliance-quick-trigger {
+    display:inline-flex;
+    align-items:center;
+    gap:.28rem;
+    padding:0;
+    border:0;
+    background:transparent;
+    color:#0d6efd;
+    font:inherit;
+    font-weight:600;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  .appliance-quick-trigger:hover,
+  .appliance-quick-trigger:focus {
+    color:#084298;
+    text-decoration:underline dotted;
+    text-underline-offset:3px;
+  }
+
+  .appliance-quick-info-icon {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:15px;
+    height:15px;
+    border:1px solid #6c757d;
+    border-radius:50%;
+    color:#6c757d;
+    font-size:.58rem;
+    font-weight:700;
+    line-height:1;
+  }
+
+  #applianceQuickInfo {
+    position:fixed;
+    z-index:20000;
+    display:none;
+    width:320px;
+    max-width:calc(100vw - 24px);
+    background:#fff;
+    border:1px solid #cfd6de;
+    border-radius:.55rem;
+    box-shadow:0 .45rem 1.35rem rgba(0,0,0,.20);
+    overflow:hidden;
+    text-align:left;
+  }
+
+  #applianceQuickInfo.quick-info-visible {
+    display:block;
+  }
+
+  .quick-info-header {
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:.75rem;
+    padding:.65rem .75rem;
+    background:#f4f6f8;
+    border-bottom:1px solid #dce1e6;
+  }
+
+  .quick-info-title {
+    font-size:.78rem;
+    font-weight:800;
+    color:#212529;
+  }
+
+  .quick-info-ap {
+    margin-top:.15rem;
+    font-size:.65rem;
+    color:#6c757d;
+    font-weight:700;
+  }
+
+  .quick-info-close {
+    border:0;
+    background:transparent;
+    color:#6c757d;
+    padding:0;
+    font-size:1.05rem;
+    cursor:pointer;
+  }
+
+  .quick-info-body {
+    padding:.65rem .75rem .75rem;
+  }
+
+  .quick-info-grid {
+    display:grid;
+    grid-template-columns:95px 1fr;
+    gap:.42rem .6rem;
+  }
+
+  .quick-info-label {
+    color:#6c757d;
+    font-size:.64rem;
+    font-weight:800;
+    text-transform:uppercase;
+  }
+
+  .quick-info-value {
+    color:#212529;
+    font-size:.74rem;
+    font-weight:600;
+    overflow-wrap:anywhere;
+  }
+
+  .quick-info-notes {
+    margin-top:.65rem;
+    padding-top:.55rem;
+    border-top:1px solid #e5e8eb;
+  }
+
+  .quick-info-notes-text {
+    margin-top:.25rem;
+    color:#343a40;
+    font-size:.73rem;
+    line-height:1.35;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+  }
+
 </style>
 
 
@@ -1025,7 +1154,31 @@
 
 
                 <td>
-                  {{ (unit.model_number or '—')|upper }}
+
+                  <button type="button"
+                          class="appliance-quick-trigger"
+                          data-quick-ap="{{ unit.inventory_number or '' }}"
+                          data-quick-appliance="{{ unit.category.name|upper if unit.category else '—' }}"
+                          data-quick-brand="{{ (unit.brand or '—')|upper }}"
+                          data-quick-model="{{ (unit.model_number or '—')|upper }}"
+                          data-quick-size="{{ unit.size_value if unit.size_value is not none else '' }}"
+                          data-quick-unit="{{ (unit.size_unit or '')|upper }}"
+                          data-quick-color="{{ (unit.color or '—')|upper }}"
+                          data-quick-condition="{{ (unit.condition or '—')|replace('_', ' ')|upper }}"
+                          data-quick-class="{{ (unit.stock_class or 'new')|replace('_', ' ')|upper }}"
+                          data-quick-notes="{{ unit.notes or '' }}"
+                          onclick="event.stopPropagation();">
+
+                    <span>
+                      {{ (unit.model_number or '—')|upper }}
+                    </span>
+
+                    <span class="appliance-quick-info-icon">
+                      i
+                    </span>
+
+                  </button>
+
                 </td>
 
 
@@ -1390,5 +1543,344 @@
   {% endif %}
 
 </div>
+
+
+<!-- =========================================================
+     APPLIANCE QUICK INFO
+     ========================================================= -->
+
+<div id="applianceQuickInfo"
+     aria-hidden="true">
+
+  <div class="quick-info-header">
+
+    <div>
+      <div class="quick-info-title"
+           id="quickInfoTitle"></div>
+
+      <div class="quick-info-ap"
+           id="quickInfoAp"></div>
+    </div>
+
+    <button type="button"
+            class="quick-info-close"
+            id="quickInfoClose">
+      ×
+    </button>
+
+  </div>
+
+  <div class="quick-info-body">
+
+    <div class="quick-info-grid">
+
+      <div class="quick-info-label">Size</div>
+      <div class="quick-info-value"
+           id="quickInfoSize">—</div>
+
+      <div class="quick-info-label">Color</div>
+      <div class="quick-info-value"
+           id="quickInfoColor">—</div>
+
+      <div class="quick-info-label">Condition</div>
+      <div class="quick-info-value"
+           id="quickInfoCondition">—</div>
+
+      <div class="quick-info-label">Stock Class</div>
+      <div class="quick-info-value"
+           id="quickInfoClass">—</div>
+
+    </div>
+
+    <div class="quick-info-notes">
+
+      <div class="quick-info-label">
+        Notes
+      </div>
+
+      <div class="quick-info-notes-text"
+           id="quickInfoNotes">—</div>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<script>
+(() => {
+  "use strict";
+
+  const popup =
+    document.getElementById("applianceQuickInfo");
+
+  if (!popup) {
+    return;
+  }
+
+  const triggers =
+    document.querySelectorAll(
+      ".appliance-quick-trigger"
+    );
+
+  const title =
+    document.getElementById("quickInfoTitle");
+
+  const ap =
+    document.getElementById("quickInfoAp");
+
+  const size =
+    document.getElementById("quickInfoSize");
+
+  const color =
+    document.getElementById("quickInfoColor");
+
+  const condition =
+    document.getElementById("quickInfoCondition");
+
+  const stockClass =
+    document.getElementById("quickInfoClass");
+
+  const notes =
+    document.getElementById("quickInfoNotes");
+
+  const closeButton =
+    document.getElementById("quickInfoClose");
+
+  let activeTrigger = null;
+  let hideTimer = null;
+
+
+  function valueOrDash(value) {
+    const text =
+      String(value || "").trim();
+
+    return text || "—";
+  }
+
+
+  function positionPopup(trigger) {
+
+    const rect =
+      trigger.getBoundingClientRect();
+
+    const popupWidth = 320;
+    const gap = 8;
+
+    let left = rect.left;
+    let top = rect.bottom + gap;
+
+    if (
+      left + popupWidth
+      > window.innerWidth - 12
+    ) {
+      left =
+        window.innerWidth
+        - popupWidth
+        - 12;
+    }
+
+    if (left < 12) {
+      left = 12;
+    }
+
+    popup.style.left =
+      `${Math.round(left)}px`;
+
+    popup.style.top =
+      `${Math.round(top)}px`;
+
+    /*
+     * After it is visible we know its actual height.
+     */
+    const popupRect =
+      popup.getBoundingClientRect();
+
+    if (
+      popupRect.bottom
+      > window.innerHeight - 12
+    ) {
+
+      top =
+        rect.top
+        - popupRect.height
+        - gap;
+
+      if (top < 12) {
+        top = 12;
+      }
+
+      popup.style.top =
+        `${Math.round(top)}px`;
+    }
+  }
+
+
+  function showPopup(trigger) {
+
+    clearTimeout(hideTimer);
+
+    activeTrigger = trigger;
+
+    const d = trigger.dataset;
+
+    title.textContent =
+      `${valueOrDash(d.quickAppliance)} · ` +
+      `${valueOrDash(d.quickBrand)} ` +
+      `${valueOrDash(d.quickModel)}`;
+
+    ap.textContent =
+      valueOrDash(d.quickAp);
+
+    const sizeValue =
+      String(d.quickSize || "").trim();
+
+    const sizeUnit =
+      String(d.quickUnit || "").trim();
+
+    size.textContent =
+      [sizeValue, sizeUnit]
+        .filter(Boolean)
+        .join(" ")
+      || "—";
+
+    color.textContent =
+      valueOrDash(d.quickColor);
+
+    condition.textContent =
+      valueOrDash(d.quickCondition);
+
+    stockClass.textContent =
+      valueOrDash(d.quickClass);
+
+    notes.textContent =
+      valueOrDash(d.quickNotes);
+
+    popup.classList.add(
+      "quick-info-visible"
+    );
+
+    popup.setAttribute(
+      "aria-hidden",
+      "false"
+    );
+
+    positionPopup(trigger);
+  }
+
+
+  function hidePopup() {
+
+    clearTimeout(hideTimer);
+
+    popup.classList.remove(
+      "quick-info-visible"
+    );
+
+    popup.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+
+    activeTrigger = null;
+  }
+
+
+  function scheduleHide() {
+
+    clearTimeout(hideTimer);
+
+    hideTimer =
+      setTimeout(
+        hidePopup,
+        180
+      );
+  }
+
+
+  triggers.forEach(trigger => {
+
+    trigger.addEventListener(
+      "mouseenter",
+      () => showPopup(trigger)
+    );
+
+    trigger.addEventListener(
+      "mouseleave",
+      scheduleHide
+    );
+
+    trigger.addEventListener(
+      "click",
+      event => {
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (
+          activeTrigger === trigger
+          && popup.classList.contains(
+            "quick-info-visible"
+          )
+        ) {
+          hidePopup();
+        } else {
+          showPopup(trigger);
+        }
+      }
+    );
+  });
+
+
+  popup.addEventListener(
+    "mouseenter",
+    () => clearTimeout(hideTimer)
+  );
+
+  popup.addEventListener(
+    "mouseleave",
+    scheduleHide
+  );
+
+  popup.addEventListener(
+    "click",
+    event => event.stopPropagation()
+  );
+
+
+  closeButton.addEventListener(
+    "click",
+    event => {
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      hidePopup();
+    }
+  );
+
+
+  document.addEventListener(
+    "click",
+    hidePopup
+  );
+
+
+  window.addEventListener(
+    "scroll",
+    hidePopup,
+    true
+  );
+
+
+  window.addEventListener(
+    "resize",
+    hidePopup
+  );
+
+})();
+</script>
+
 
 {% endblock %}

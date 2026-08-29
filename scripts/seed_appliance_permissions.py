@@ -132,6 +132,26 @@ APPLIANCE_PERMISSIONS = [
         "sort_order": 180,
     },
     {
+        "code": "appliance.receiving.delete_draft",
+        "name": "Delete Draft Receiving",
+        "description": (
+            "Delete Draft Appliance Receiving documents and "
+            "their draft lines."
+        ),
+        "group_name": "Receiving",
+        "sort_order": 155,
+    },
+    {
+        "code": "appliance.receiving.void",
+        "name": "Void Posted Receiving",
+        "description": (
+            "Void a Posted Appliance Receiving when its "
+            "appliances have no downstream lifecycle history."
+        ),
+        "group_name": "Receiving",
+        "sort_order": 156,
+    },
+    {
         "code": "access.manage_permissions",
         "name": "Manage Permissions",
         "description": "Assign or remove user permissions and warehouse access.",

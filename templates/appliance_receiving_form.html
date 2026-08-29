@@ -1,9 +1,76 @@
 ﻿{% extends "base.html" %}
 {% block content %}
+{% if can_receive %}
+
+  <!-- ======================================================
+       QUICK ADD APPLIANCE TYPE
+
+       Warehouse Receiving staff may create missing
+       operational master-data without leaving Receiving.
+       ====================================================== -->
+
+  <div class="card border-primary mb-3">
+
+    <div class="card-body py-2">
+
+      <form method="post"
+            id="addApplianceTypeForm"
+            action="{{ url_for(
+                'appliance.receiving_add_category'
+            ) }}"
+            class="row g-2 align-items-end">
+
+        <div class="col-auto">
+
+          <label for="newApplianceTypeName"
+                 class="form-label small fw-bold mb-1">
+            NEW APPLIANCE TYPE
+          </label>
+
+          <input type="text"
+                 id="newApplianceTypeName"
+                 name="name"
+                 maxlength="120"
+                 class="form-control form-control-sm text-uppercase"
+                 style="min-width:260px;"
+                 placeholder="Example: ICE MAKER"
+                 autocomplete="off"
+                 required>
+
+        </div>
+
+        <div class="col-auto">
+
+          <button type="submit"
+                  class="btn btn-outline-primary btn-sm">
+            + ADD TYPE
+          </button>
+
+        </div>
+
+        <div class="col-auto">
+
+          <div class="small text-muted pb-1">
+            If a new appliance type arrives, add it here.
+            It will immediately appear in Receiving.
+          </div>
+
+        </div>
+
+      </form>
+
+    </div>
+
+  </div>
+
+{% endif %}
+
+
 
 {% set is_new = receiving is none %}
 {% set is_draft = receiving and receiving.status == 'draft' %}
 {% set is_posted = receiving and receiving.status == 'posted' %}
+{% set is_voided = receiving and receiving.status == 'voided' %}
 
 <style>
   .appliance-sheet {
@@ -19,7 +86,9 @@
   }
 
   .appliance-grid {
-    font-size:.75rem;
+    width:100%;
+    table-layout:fixed;
+    font-size:.72rem;
   }
 
   .appliance-grid th {
@@ -66,14 +135,15 @@
   }
 
   .appliance-receiving-page {
-    width: calc(100vw - 40px);
-    max-width: 1600px;
+    width: calc(100vw - 16px);
+    max-width: none;
     margin-left: 50%;
     transform: translateX(-50%);
   }
 
   #batchEntryTable {
     width:100%;
+    table-layout:fixed;
     table-layout:fixed;
     min-width:0;
   }
@@ -100,14 +170,34 @@
   #batchEntryTable select {
     width:100%;
     min-width:0;
-    font-size:.72rem;
-    padding-left:.3rem;
-    padding-right:.3rem;
+    font-size:.68rem;
+    padding:.2rem .22rem;
+  }
+
+  #batchEntryTable th,
+  #batchEntryTable td {
+    padding:.18rem;
+    vertical-align:middle;
+  }
+
+  #batchEntryTable th {
+    font-size:.64rem;
+    white-space:nowrap;
   }
 
   .batch-entry-wrapper {
-    overflow-x:auto;
+    overflow-x:hidden;
     width:100%;
+  }
+
+  @media (max-width: 1100px) {
+    .batch-entry-wrapper {
+      overflow-x:auto;
+    }
+
+    #batchEntryTable {
+      min-width:1050px;
+    }
   }
 
   .batch-entry-toolbar {
@@ -115,6 +205,101 @@
     flex-wrap:wrap;
     align-items:center;
     gap:.35rem;
+  }
+
+  /*
+   * Final Receiving column layout.
+   * COST / SELL compact.
+   * ACTION only as wide as the X button.
+   * NOTES receives the freed space.
+   */
+
+  #batchEntryTable th:nth-child(10),
+  #batchEntryTable td:nth-child(10),
+  #batchEntryTable th:nth-child(11),
+  #batchEntryTable td:nth-child(11) {
+    width:72px !important;
+  }
+
+  #batchEntryTable th:nth-child(12),
+  #batchEntryTable td:nth-child(12) {
+    width:auto !important;
+  }
+
+  #batchEntryTable th:nth-child(13),
+  #batchEntryTable td:nth-child(13) {
+    width:52px !important;
+    min-width:52px !important;
+    max-width:52px !important;
+    text-align:center;
+  }
+
+  #batchEntryTable td:nth-child(12) input {
+    width:100%;
+  }
+
+  #batchEntryTable td:nth-child(13) .batch-remove {
+    width:28px;
+    min-width:28px;
+    padding-left:0;
+    padding-right:0;
+  }
+
+  .appliance-grid th:nth-child(10),
+  .appliance-grid td:nth-child(10),
+  .appliance-grid th:nth-child(11),
+  .appliance-grid td:nth-child(11) {
+    width:72px !important;
+  }
+
+  .appliance-grid th:nth-child(12),
+  .appliance-grid td:nth-child(12) {
+    width:auto !important;
+  }
+
+  .appliance-grid th:last-child,
+  .appliance-grid td:last-child {
+    width:70px !important;
+    min-width:70px !important;
+    max-width:70px !important;
+  }
+
+  /*
+   * Receiving column sizing.
+   * Keep Cost / Sell compact and give the saved space to Notes.
+   */
+
+  #batchEntryTable th:nth-child(10),
+  #batchEntryTable td:nth-child(10),
+  #batchEntryTable th:nth-child(11),
+  #batchEntryTable td:nth-child(11) {
+    width:72px;
+  }
+
+  #batchEntryTable th:nth-child(12),
+  #batchEntryTable td:nth-child(12) {
+    width:180px;
+  }
+
+  #batchEntryTable td:nth-child(10) input,
+  #batchEntryTable td:nth-child(11) input {
+    text-align:right;
+  }
+
+  #batchEntryTable td:nth-child(12) input {
+    width:100%;
+  }
+
+  .appliance-grid th:nth-child(10),
+  .appliance-grid td:nth-child(10),
+  .appliance-grid th:nth-child(11),
+  .appliance-grid td:nth-child(11) {
+    width:72px !important;
+  }
+
+  .appliance-grid th:nth-child(12),
+  .appliance-grid td:nth-child(12) {
+    width:180px !important;
   }
 
   .batch-entry-toolbar .batch-save {
@@ -153,6 +338,10 @@
           <span class="badge bg-success sheet-status">
             POSTED
           </span>
+        {% elif is_voided %}
+          <span class="badge bg-danger sheet-status">
+            VOIDED
+          </span>
         {% else %}
           <span class="badge bg-secondary sheet-status">
             DRAFT
@@ -168,6 +357,29 @@
           Units:
           <strong>{{ receiving.unit_count }}</strong>
         </span>
+
+        {% if is_voided %}
+          <span class="text-danger">
+            Voided:
+            <strong>
+              {{ receiving.voided_at_local.strftime('%m/%d/%Y %I:%M %p')
+                 if receiving.voided_at_local else '—' }}
+            </strong>
+          </span>
+
+          <span class="text-danger">
+            By:
+            <strong>
+              {{ receiving.voided_by.username
+                 if receiving.voided_by else '—' }}
+            </strong>
+          </span>
+
+          <span class="text-danger">
+            Reason:
+            <strong>{{ receiving.void_reason or '—' }}</strong>
+          </span>
+        {% endif %}
 
         {% if receiving.missing_price_count %}
           <span class="badge bg-warning text-dark">
@@ -203,6 +415,58 @@
         </button>
 
       </form>
+    {% endif %}
+
+    {% if is_posted and can_void %}
+      <form method="post"
+            action="{{ url_for('appliance.receiving_void', receiving_id=receiving.id) }}"
+            onsubmit="return prepareReceivingVoid(this);">
+
+        <input type="hidden"
+               name="reason"
+               value="">
+
+        <button class="btn btn-outline-danger btn-sm"
+                type="submit">
+          Void Receiving
+        </button>
+
+      </form>
+    {% endif %}
+
+    {# =====================================================
+       Emergency Purge
+
+       BREAK-GLASS action:
+       - SUPERADMIN only
+       - POSTED / VOIDED only
+       - physical deletion
+       - backend repeats all safety checks
+       ===================================================== #}
+
+    {% if receiving
+          and (is_posted or is_voided)
+          and (current_user.role or '')|trim|lower == 'superadmin' %}
+
+      <form method="post"
+            action="{{ url_for(
+                'appliance.receiving_emergency_purge',
+                receiving_id=receiving.id
+            ) }}"
+            onsubmit="return prepareEmergencyPurge(this);">
+
+        <input type="hidden"
+               name="confirmation"
+               value="">
+
+        <button class="btn btn-danger btn-sm"
+                type="submit"
+                title="SUPERADMIN Emergency Purge — permanently removes this Receiving and its safe-to-purge appliance records">
+          Emergency Purge
+        </button>
+
+      </form>
+
     {% endif %}
 
   </div>
@@ -381,19 +645,20 @@
             <th style="min-width:155px;">Serial</th>
             <th style="width:90px;">Size</th>
             <th style="width:85px;">Unit</th>
+            <th style="width:105px;">Color</th>
             <th style="width:90px;">Condition</th>
 
             {% if can_pricing %}
-              <th style="width:105px;">Cost</th>
-              <th style="width:105px;">Sell Price</th>
+              <th style="width:72px;">Cost</th>
+              <th style="width:72px;">Sell Price</th>
             {% endif %}
 
-            <th style="min-width:150px;">Notes</th>
+            <th>Notes</th>
 
             {% if is_draft and can_receive %}
-              <th style="width:130px;">Action</th>
-            {% elif is_posted and can_pricing %}
-              <th style="width:90px;">Action</th>
+              <th style="width:70px;">Action</th>
+            {% elif is_posted and (can_receive or can_pricing) %}
+              <th style="width:82px;">Action</th>
             {% endif %}
           </tr>
         </thead>
@@ -457,6 +722,13 @@
                            class="form-control form-control-sm"
                            value="{{ line.size_unit or '' }}"
                            placeholder="cu.ft.">
+                  </td>
+
+                  <td>
+                    <input name="color"
+                           class="form-control form-control-sm text-uppercase"
+                           value="{{ line.color or '' }}"
+                           placeholder="WHITE">
                   </td>
 
                   <td>
@@ -530,29 +802,80 @@
 
               <tr {% if line.unit_cost is none %}class="table-warning"{% endif %}>
 
-                {% if is_posted and can_pricing %}
+                {% if is_posted and (can_receive or can_pricing) %}
                   <form method="post"
-                        action="{{ url_for('appliance.receiving_price_line', line_id=line.id) }}">
+                        action="{{ url_for('appliance.receiving_posted_line_update', line_id=line.id) }}">
                 {% endif %}
 
                 <td class="text-center text-muted">
                   {{ line.line_no }}
                 </td>
 
-                <td>{{ line.category.name }}</td>
-                <td>{{ line.brand or '—' }}</td>
-                <td>{{ line.model_number or '—' }}</td>
+                <td>
+                  {{ line.category.name }}
+                </td>
+
+                <td>
+                  {{ line.brand or '—' }}
+                </td>
+
+                <td>
+                  {{ line.model_number or '—' }}
+                </td>
+
                 <td class="fw-semibold">
                   {{ line.serial_number or '—' }}
                 </td>
 
+
+                <!-- SIZE -->
                 <td>
-                  {{ line.size_value if line.size_value is not none else '—' }}
+                  {% if is_posted and can_receive %}
+                    <input name="size_value"
+                           type="number"
+                           step="0.1"
+                           min="0"
+                           class="form-control form-control-sm"
+                           value="{{ line.size_value if line.size_value is not none else '' }}">
+                  {% else %}
+                    {{ line.size_value if line.size_value is not none else '—' }}
+                  {% endif %}
                 </td>
 
-                <td>{{ line.size_unit or '—' }}</td>
-                <td>{{ (line.condition or '')|replace('_', ' ')|upper }}</td>
 
+                <!-- UNIT -->
+                <td>
+                  {% if is_posted and can_receive %}
+                    <input name="size_unit"
+                           class="form-control form-control-sm text-uppercase"
+                           value="{{ line.size_unit or '' }}"
+                           placeholder="CU.FT.">
+                  {% else %}
+                    {{ line.size_unit or '—' }}
+                  {% endif %}
+                </td>
+
+
+                <!-- COLOR -->
+                <td>
+                  {% if is_posted and can_receive %}
+                    <input name="color"
+                           class="form-control form-control-sm text-uppercase"
+                           value="{{ line.color or '' }}"
+                           placeholder="WHITE">
+                  {% else %}
+                    {{ line.color or '—' }}
+                  {% endif %}
+                </td>
+
+
+                <!-- CONDITION stays read-only -->
+                <td>
+                  {{ (line.condition or '')|replace('_', ' ')|upper }}
+                </td>
+
+
+                <!-- PRICING -->
                 {% if can_pricing %}
 
                   <td>
@@ -584,15 +907,40 @@
 
                 {% endif %}
 
-                <td>{{ line.notes or '' }}</td>
 
-                {% if is_posted and can_pricing %}
-                  <td>
-                    <button class="btn btn-warning btn-sm"
-                            type="submit">
-                      Save Price
+                <!-- NOTES -->
+                <td>
+                  {% if is_posted and can_receive %}
+                    <input name="notes"
+                           class="form-control form-control-sm"
+                           value="{{ line.notes or '' }}"
+                           placeholder="Notes">
+                  {% else %}
+                    {{ line.notes or '' }}
+                  {% endif %}
+                </td>
+
+
+                <!-- ACTION -->
+                {% if is_posted and (can_receive or can_pricing) %}
+                  <td class="text-center">
+
+                    <button class="btn btn-primary btn-sm"
+                            type="submit"
+                            style="white-space:nowrap;">
+
+                      {% if can_receive and can_pricing %}
+                        Save
+                      {% elif can_receive %}
+                        Save
+                      {% else %}
+                        Save Price
+                      {% endif %}
+
                     </button>
+
                   </td>
+
                   </form>
                 {% endif %}
 
@@ -660,7 +1008,7 @@
                   Excel paste supported. Copy rows or a serial-number column
                   from Excel and paste directly into the grid.
                   Duplicate keeps appliance / brand / model / size /
-                  condition. "Duplicate + Serial" also increments a numeric
+                  unit / color / condition. "Duplicate + Serial" also increments a numeric
                   serial suffix when possible.
                 </div>
 
@@ -688,6 +1036,7 @@
                         <th>Serial</th>
                         <th>Size</th>
                         <th>Unit</th>
+                        <th>Color</th>
                         <th>Condition</th>
 
                         {% if can_pricing %}
@@ -861,6 +1210,7 @@
       serial_number: get("serial_number"),
       size_value: get("size_value"),
       size_unit: get("size_unit"),
+      color: get("color"),
       condition: get("condition") || "new",
       unit_cost: get("unit_cost"),
       selling_price: get("selling_price"),
@@ -985,6 +1335,307 @@
         models: []
       };
     }
+  }
+
+
+
+  // ==========================================================
+  // LOCAL MODEL SPECS CACHE
+  //
+  // Exact Brand + Model lookup.
+  // No OpenAI / no web request outside this application.
+  // ==========================================================
+
+  const modelSpecsCache = new Map();
+
+
+  function normalizeModelCatalogValue(
+    value
+  ) {
+    return String(
+      value || ""
+    )
+      .trim()
+      .replace(/\s+/g, " ")
+      .toUpperCase();
+  }
+
+
+  function mergeModelSpecsNotes(
+    existingNotes,
+    specsBlock
+  ) {
+
+    const humanNotes =
+      String(existingNotes || "");
+
+    const block =
+      String(specsBlock || "").trim();
+
+    if (!block) {
+      return humanNotes;
+    }
+
+    const pattern =
+      /\[MODEL SPECS\][\s\S]*?\[\/MODEL SPECS\]/i;
+
+    if (pattern.test(humanNotes)) {
+
+      return humanNotes
+        .replace(
+          pattern,
+          block
+        )
+        .trim();
+    }
+
+    if (!humanNotes.trim()) {
+      return block;
+    }
+
+    return (
+      humanNotes.trim()
+      + "\n\n"
+      + block
+    );
+  }
+
+
+  async function loadModelSpecsFromCache(
+    row
+  ) {
+
+    if (!row) {
+      return false;
+    }
+
+    const brandInput =
+      row.querySelector(
+        '[data-field="brand"]'
+      );
+
+    const modelInput =
+      row.querySelector(
+        '[data-field="model_number"]'
+      );
+
+    if (
+      !brandInput
+      || !modelInput
+    ) {
+      return false;
+    }
+
+    const brand =
+      normalizeModelCatalogValue(
+        brandInput.value
+      );
+
+    const model =
+      normalizeModelCatalogValue(
+        modelInput.value
+      );
+
+    if (
+      !brand
+      || !model
+    ) {
+      return false;
+    }
+
+    /*
+      Prevent duplicate fetches caused by blur + change
+      for the same exact Brand + Model.
+    */
+
+    const rowKey =
+      `${brand}|${model}`;
+
+    if (
+      row.dataset.modelSpecsKey
+      === rowKey
+    ) {
+      return false;
+    }
+
+    const cacheKey = rowKey;
+
+    let payload = null;
+
+    if (
+      modelSpecsCache.has(
+        cacheKey
+      )
+    ) {
+
+      payload =
+        modelSpecsCache.get(
+          cacheKey
+        );
+
+    } else {
+
+      const params =
+        new URLSearchParams();
+
+      params.set(
+        "brand",
+        brand
+      );
+
+      params.set(
+        "model_number",
+        model
+      );
+
+      try {
+
+        const response =
+          await fetch(
+            `/appliances/receiving/model-specs-cache?${params.toString()}`,
+            {
+              headers: {
+                "Accept":
+                  "application/json"
+              }
+            }
+          );
+
+        const contentType =
+          response.headers.get(
+            "content-type"
+          ) || "";
+
+        if (
+          !contentType.includes(
+            "application/json"
+          )
+        ) {
+          console.error(
+            "Model specs cache returned non-JSON response."
+          );
+          return false;
+        }
+
+        payload =
+          await response.json();
+
+        if (!response.ok) {
+          console.error(
+            "Model specs cache lookup failed:",
+            payload
+          );
+          return false;
+        }
+
+        modelSpecsCache.set(
+          cacheKey,
+          payload
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Model specs cache error:",
+          error
+        );
+
+        return false;
+      }
+    }
+
+    /*
+      Mark the key after a successful local lookup.
+      MISS is also remembered in JS memory for this row/session.
+    */
+
+    row.dataset.modelSpecsKey =
+      rowKey;
+
+    if (
+      !payload
+      || !payload.ok
+      || !payload.hit
+      || !payload.result
+    ) {
+      return false;
+    }
+
+    const result =
+      payload.result;
+
+    const sizeInput =
+      row.querySelector(
+        '[data-field="size_value"]'
+      );
+
+    const unitInput =
+      row.querySelector(
+        '[data-field="size_unit"]'
+      );
+
+    const colorInput =
+      row.querySelector(
+        '[data-field="color"]'
+      );
+
+    const notesInput =
+      row.querySelector(
+        '[data-field="notes"]'
+      );
+
+
+    // --------------------------------------------------------
+    // Shared model-level fields.
+    //
+    // Exact catalog match is authoritative for these fields.
+    // Serial / Condition / Cost / Sell are intentionally
+    // NEVER touched.
+    // --------------------------------------------------------
+
+    if (
+      sizeInput
+      && result.size_value !== null
+      && result.size_value !== undefined
+      && result.size_value !== ""
+    ) {
+      sizeInput.value =
+        result.size_value;
+    }
+
+    if (
+      unitInput
+      && result.size_unit
+    ) {
+      unitInput.value =
+        String(
+          result.size_unit
+        ).toUpperCase();
+    }
+
+    if (
+      colorInput
+      && result.color
+    ) {
+      colorInput.value =
+        String(
+          result.color
+        ).toUpperCase();
+    }
+
+    if (
+      notesInput
+      && result.notes_block
+    ) {
+
+      notesInput.value =
+        mergeModelSpecsNotes(
+          notesInput.value,
+          result.notes_block
+        );
+    }
+
+    return true;
   }
 
 
@@ -1238,6 +1889,13 @@
       </td>
 
       <td>
+        <input class="form-control form-control-sm text-uppercase"
+               data-field="color"
+               value="${escapeHtml(data.color || "")}"
+               placeholder="WHITE">
+      </td>
+
+      <td>
         <select class="form-select form-select-sm"
                 data-field="condition">
           <option value="new">NEW</option>
@@ -1327,6 +1985,9 @@
             .trim()
             .toUpperCase();
 
+        // Receiving model cache reset after Brand change
+        delete row.dataset.modelSpecsKey;
+
         refreshModelSuggestions(
           row
         );
@@ -1351,6 +2012,44 @@
 
         modelInput.value =
           modelInput.value.toUpperCase();
+
+        /*
+          Brand / Model changed after a previous lookup:
+          allow a new exact cache check.
+        */
+        delete row.dataset.modelSpecsKey;
+      }
+    );
+
+
+    modelInput.addEventListener(
+      "change",
+      async () => {
+
+        modelInput.value =
+          modelInput.value
+            .trim()
+            .toUpperCase();
+
+        await loadModelSpecsFromCache(
+          row
+        );
+      }
+    );
+
+
+    modelInput.addEventListener(
+      "blur",
+      async () => {
+
+        modelInput.value =
+          modelInput.value
+            .trim()
+            .toUpperCase();
+
+        await loadModelSpecsFromCache(
+          row
+        );
       }
     );
 
@@ -1501,6 +2200,7 @@
       || data.model_number
       || data.serial_number
       || data.size_value
+      || data.color
       || data.unit_cost
       || data.selling_price
       || data.notes
@@ -1828,6 +2528,7 @@
       "serial_number",
       "size_value",
       "size_unit",
+      "color",
       "condition"
     ];
 
@@ -1881,6 +2582,8 @@
           previous.size_value || "",
         size_unit:
           previous.size_unit || "",
+        color:
+          previous.color || "",
         condition:
           previous.condition || "new"
       });
@@ -2113,6 +2816,7 @@
           model_number:data.model_number,
           size_value:data.size_value,
           size_unit:data.size_unit,
+          color:data.color,
           condition:data.condition
         },
         {
@@ -2166,6 +2870,92 @@
 {% endif %}
 
 </div>
+
+<script>
+function prepareReceivingVoid(form) {
+  const receivingNumber = {{ (receiving.receiving_number if receiving else '') | tojson }};
+
+  const reason = window.prompt(
+    "Reason for voiding " + receivingNumber + ":"
+  );
+
+  if (reason === null) {
+    return false;
+  }
+
+  const cleanedReason = reason.trim();
+
+  if (!cleanedReason) {
+    window.alert("VOID reason is required.");
+    return false;
+  }
+
+  const confirmed = window.confirm(
+    "VOID " + receivingNumber + "?\n\n" +
+    "This will remove its appliances from active inventory " +
+    "while preserving the Receiving and audit history."
+  );
+
+  if (!confirmed) {
+    return false;
+  }
+
+  form.querySelector(
+    'input[name="reason"]'
+  ).value = cleanedReason;
+
+  return true;
+}
+</script>
+
+<script>
+function prepareEmergencyPurge(form) {
+  const receivingNumber = {{ (receiving.receiving_number if receiving else '') | tojson }};
+  const expected = "PURGE " + receivingNumber;
+
+  const entered = window.prompt(
+    "EMERGENCY PURGE\n\n" +
+    "This permanently deletes " + receivingNumber +
+    " and its safe-to-purge appliance records.\n\n" +
+    "This action is NOT a normal VOID and cannot be undone.\n\n" +
+    "Type exactly:\n" +
+    expected
+  );
+
+  if (entered === null) {
+    return false;
+  }
+
+  const cleaned = entered.trim();
+
+  if (cleaned !== expected) {
+    window.alert(
+      "Emergency Purge cancelled.\n\n" +
+      "Confirmation did not match exactly:\n" +
+      expected
+    );
+
+    return false;
+  }
+
+  const finalConfirm = window.confirm(
+    "FINAL WARNING\n\n" +
+    "Permanently purge " + receivingNumber + "?\n\n" +
+    "The Receiving, its appliance units, and purgeable " +
+    "technical history will be physically deleted."
+  );
+
+  if (!finalConfirm) {
+    return false;
+  }
+
+  form.querySelector(
+    'input[name="confirmation"]'
+  ).value = cleaned;
+
+  return true;
+}
+</script>
 
 <script>
 document.addEventListener("input", function (event) {

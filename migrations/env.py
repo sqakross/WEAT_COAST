@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from logging.config import fileConfig
@@ -51,6 +51,7 @@ ALEMBIC_MANAGED_TABLES = {
     "appliance_receiving",
     "appliance_receiving_line",
     "appliance_unit",
+    "appliance_model_spec",
 
     # Appliance Issue / Movement
     "appliance_issue",

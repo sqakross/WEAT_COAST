@@ -37,3 +37,13 @@ Thumbs.db
 # Flask uploads (если у тебя есть)
 instance/
 uploads/
+
+.env
+
+*.bak
+
+*.bak_*
+
+*.before_*
+
+logs/*.log.*

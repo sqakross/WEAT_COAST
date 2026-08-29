@@ -3023,6 +3023,7 @@ class ApplianceReceiving(db.Model):
     Status:
         draft  - warehouse is still entering received units
         posted - receiving is finalized into appliance stock
+        voided - posted receiving was formally reversed
 
     Pricing completion is intentionally separate from posting.
     A posted receiving may still contain units whose cost is NULL.
@@ -3161,6 +3162,27 @@ class ApplianceReceiving(db.Model):
         index=True,
     )
 
+    voided_at = db.Column(
+        db.DateTime,
+        nullable=True,
+        index=True,
+    )
+
+    voided_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    void_reason = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
     warehouse = db.relationship(
         "Warehouse",
         foreign_keys=[warehouse_id],
@@ -3182,6 +3204,12 @@ class ApplianceReceiving(db.Model):
     posted_by = db.relationship(
         "User",
         foreign_keys=[posted_by_id],
+        lazy="select",
+    )
+
+    voided_by = db.relationship(
+        "User",
+        foreign_keys=[voided_by_id],
         lazy="select",
     )
 
@@ -3208,6 +3236,10 @@ class ApplianceReceiving(db.Model):
     @property
     def posted_at_local(self):
         return utc_to_local(self.posted_at)
+
+    @property
+    def voided_at_local(self):
+        return utc_to_local(self.voided_at)
 
     @property
     def unit_count(self) -> int:
@@ -3334,6 +3366,11 @@ class ApplianceReceivingLine(db.Model):
         nullable=True,
     )
 
+    color = db.Column(
+        db.String(80),
+        nullable=True,
+    )
+
     condition = db.Column(
         db.String(40),
         nullable=False,
@@ -3434,6 +3471,209 @@ class ApplianceReceivingLine(db.Model):
             f"receiving={self.receiving_id} "
             f"line={self.line_no} "
             f"serial={self.serial_number!r}>"
+        )
+
+
+# ============================================================
+# Appliance Model Specs Catalog
+#
+# One row = one confirmed Brand + Model specification.
+#
+# This is NOT a physical appliance.
+# It is reusable model knowledge for all ApplianceUnit rows
+# with the same normalized Brand + Model.
+#
+# AI/web research is NOT written here automatically.
+# A result becomes catalog data only after user confirmation.
+# ============================================================
+
+class ApplianceModelSpec(db.Model):
+    __tablename__ = "appliance_model_spec"
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "normalized_brand",
+            "normalized_model",
+            name="uq_appliance_model_spec_brand_model",
+        ),
+        db.Index(
+            "ix_appliance_model_spec_brand_model",
+            "normalized_brand",
+            "normalized_model",
+        ),
+        {"extend_existing": True},
+    )
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
+
+    # --------------------------------------------------------
+    # Display/original normalized identifiers
+    # --------------------------------------------------------
+
+    brand = db.Column(
+        db.String(120),
+        nullable=False,
+    )
+
+    model_number = db.Column(
+        db.String(120),
+        nullable=False,
+    )
+
+    # --------------------------------------------------------
+    # Lookup key
+    #
+    # Stored uppercase/trimmed so:
+    #   "GE" + "GNE25..."
+    # and
+    #   " ge " + "gne25..."
+    # resolve to the same catalog record.
+    # --------------------------------------------------------
+
+    normalized_brand = db.Column(
+        db.String(120),
+        nullable=False,
+    )
+
+    normalized_model = db.Column(
+        db.String(120),
+        nullable=False,
+    )
+
+    # --------------------------------------------------------
+    # Structured ERP fields
+    # --------------------------------------------------------
+
+    size_value = db.Column(
+        db.Float,
+        nullable=True,
+    )
+
+    size_unit = db.Column(
+        db.String(20),
+        nullable=True,
+    )
+
+    color = db.Column(
+        db.String(80),
+        nullable=True,
+    )
+
+    # Only the reusable [MODEL SPECS] block.
+    # Human/unit-specific notes never belong here.
+    notes_block = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    # --------------------------------------------------------
+    # Model verification / preview metadata
+    # --------------------------------------------------------
+
+    exact_model_confirmed = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    confirmed_model = db.Column(
+        db.String(120),
+        nullable=True,
+    )
+
+    suggested_model = db.Column(
+        db.String(120),
+        nullable=True,
+    )
+
+    appliance_type = db.Column(
+        db.String(160),
+        nullable=True,
+    )
+
+    match_notes = db.Column(
+        db.String(500),
+        nullable=True,
+    )
+
+    confidence = db.Column(
+        db.String(20),
+        nullable=False,
+        default="low",
+    )
+
+    # --------------------------------------------------------
+    # Source information
+    # --------------------------------------------------------
+
+    source_name = db.Column(
+        db.String(250),
+        nullable=True,
+    )
+
+    source_url = db.Column(
+        db.String(2000),
+        nullable=True,
+    )
+
+    # JSON list:
+    # [
+    #   {"name": "...", "url": "..."},
+    #   ...
+    # ]
+    sources_json = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+    # --------------------------------------------------------
+    # Confirmation / audit
+    # --------------------------------------------------------
+
+    confirmed_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "user.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    confirmed_at = db.Column(
+        db.DateTime,
+        nullable=True,
+        index=True,
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    confirmed_by = db.relationship(
+        "User",
+        foreign_keys=[confirmed_by_id],
+        lazy="select",
+    )
+
+    def __repr__(self):
+        return (
+            f"<ApplianceModelSpec id={self.id} "
+            f"brand={self.brand!r} "
+            f"model={self.model_number!r}>"
         )
 
 
@@ -3561,6 +3801,11 @@ class ApplianceUnit(db.Model):
 
     size_unit = db.Column(
         db.String(20),
+        nullable=True,
+    )
+
+    color = db.Column(
+        db.String(80),
         nullable=True,
     )
 

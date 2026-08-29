@@ -8,6 +8,8 @@ from sqlalchemy import func
 from extensions import db
 from models import (
     ApplianceCategory,
+    ApplianceIssueLine,
+    ApplianceMovement,
     ApplianceReceiving,
     ApplianceReceivingLine,
     ApplianceUnit,
@@ -51,8 +53,10 @@ class ApplianceReceivingService:
 
     STATUS_DRAFT = "draft"
     STATUS_POSTED = "posted"
+    STATUS_VOIDED = "voided"
 
     UNIT_STATUS_AVAILABLE = "available"
+    UNIT_STATUS_VOIDED = "voided"
 
     # --------------------------------------------------------
     # Helpers
@@ -600,6 +604,7 @@ class ApplianceReceivingService:
         description: str | None = None,
         size_value=None,
         size_unit: str | None = None,
+        color: str | None = None,
         condition: str = "new",
         unit_cost=None,
         selling_price=None,
@@ -699,6 +704,13 @@ class ApplianceReceivingService:
                 ApplianceReceivingService._clean_text(
                     size_unit,
                     max_length=20,
+                )
+            ),
+            color=(
+                ApplianceReceivingService._clean_text(
+                    color,
+                    upper=True,
+                    max_length=80,
                 )
             ),
             condition=condition_clean,
@@ -919,6 +931,14 @@ class ApplianceReceivingService:
                             max_length=20,
                         )
                     ),
+
+                    "color": (
+                        ApplianceReceivingService._clean_text(
+                            raw.get("color"),
+                            upper=True,
+                            max_length=80,
+                        )
+                    ),
                     "condition": condition,
                     "unit_cost": unit_cost,
                     "selling_price": selling_price,
@@ -1043,6 +1063,7 @@ class ApplianceReceivingService:
                     description=data["description"],
                     size_value=data["size_value"],
                     size_unit=data["size_unit"],
+                    color=data["color"],
                     condition=data["condition"],
                     unit_cost=data["unit_cost"],
                     selling_price=data["selling_price"],
@@ -1081,6 +1102,7 @@ class ApplianceReceivingService:
         description: str | None = None,
         size_value=None,
         size_unit: str | None = None,
+        color: str | None = None,
         condition: str = "new",
         unit_cost=None,
         selling_price=None,
@@ -1183,6 +1205,14 @@ class ApplianceReceivingService:
             )
         )
 
+        line.color = (
+            ApplianceReceivingService._clean_text(
+                color,
+                upper=True,
+                max_length=80,
+            )
+        )
+
         line.condition = (
             ApplianceReceivingService._clean_text(
                 condition,
@@ -1251,6 +1281,70 @@ class ApplianceReceivingService:
         except Exception:
             db.session.rollback()
             raise
+
+    @staticmethod
+    def delete_draft(
+        *,
+        receiving_id: int,
+        actor: User,
+    ) -> None:
+        """
+        Permanently delete an unfinished Draft Receiving.
+
+        This operation is intentionally limited to Draft documents.
+        Posted Receiving must never be hard-deleted through this method.
+
+        Draft lines are removed by the ApplianceReceiving.lines
+        delete-orphan cascade.
+
+        As an additional integrity guard, deletion is refused if any
+        ApplianceUnit already references a line from this Receiving.
+        """
+        actor = ApplianceReceivingService._require_user(actor)
+
+        receiving = (
+            ApplianceReceivingService._get_receiving(
+                receiving_id
+            )
+        )
+
+        ApplianceReceivingService._require_draft(receiving)
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code="appliance.receiving.delete_draft",
+            warehouse_id=receiving.warehouse_id,
+        )
+
+        unit_exists = (
+            ApplianceUnit.query
+            .join(
+                ApplianceReceivingLine,
+                ApplianceUnit.receiving_line_id
+                == ApplianceReceivingLine.id,
+            )
+            .filter(
+                ApplianceReceivingLine.receiving_id
+                == receiving.id
+            )
+            .first()
+        )
+
+        if unit_exists is not None:
+            raise ApplianceReceivingError(
+                "Draft Receiving cannot be deleted because "
+                "an ApplianceUnit already references one of "
+                "its Receiving lines."
+            )
+
+        try:
+            db.session.delete(receiving)
+            db.session.commit()
+
+        except Exception:
+            db.session.rollback()
+            raise
+
 
     # --------------------------------------------------------
     # Posting
@@ -1348,6 +1442,7 @@ class ApplianceReceivingService:
                     description=line.description,
                     size_value=line.size_value,
                     size_unit=line.size_unit,
+                    color=line.color,
                     condition=line.condition,
                     status=(
                         ApplianceReceivingService
@@ -1383,6 +1478,1069 @@ class ApplianceReceivingService:
         except Exception:
             db.session.rollback()
             raise
+
+    # --------------------------------------------------------
+    # Emergency Purge - dependency check
+    # --------------------------------------------------------
+
+    @staticmethod
+    def check_emergency_purge(
+        *,
+        receiving_id: int,
+        actor: User,
+    ) -> dict:
+        """
+        Read-only dependency analysis for Emergency Purge.
+
+        This method NEVER deletes or modifies data.
+
+        Emergency Purge is a break-glass SUPERADMIN operation.
+        It may eventually remove an erroneous Receiving and its
+        technical inventory history only when no downstream
+        business dependency exists.
+
+        Technical/audit movements allowed during purge analysis:
+            DETAILS_UPDATE
+            IDENTITY_CORRECTION
+            MODEL_SPECS_SYNC
+            RECEIVING_VOID
+
+        Any unknown or operational movement blocks purge.
+        """
+        actor = ApplianceReceivingService._require_user(actor)
+
+        role = (
+            getattr(actor, "role", "")
+            or ""
+        ).strip().lower()
+
+        if role != "superadmin":
+            raise ApplianceAccessDenied(
+                "Only SUPERADMIN can perform "
+                "Emergency Purge analysis."
+            )
+
+        receiving = (
+            ApplianceReceivingService._get_receiving(
+                receiving_id
+            )
+        )
+
+        lines = (
+            ApplianceReceivingLine.query
+            .filter_by(
+                receiving_id=receiving.id
+            )
+            .order_by(
+                ApplianceReceivingLine.line_no.asc()
+            )
+            .all()
+        )
+
+        units = (
+            ApplianceUnit.query
+            .join(
+                ApplianceReceivingLine,
+                ApplianceUnit.receiving_line_id
+                == ApplianceReceivingLine.id,
+            )
+            .filter(
+                ApplianceReceivingLine.receiving_id
+                == receiving.id
+            )
+            .order_by(
+                ApplianceUnit.id.asc()
+            )
+            .all()
+        )
+
+        technical_movement_types = {
+            "DETAILS_UPDATE",
+            "IDENTITY_CORRECTION",
+            "MODEL_SPECS_SYNC",
+            "RECEIVING_VOID",
+        }
+
+        blockers = []
+        technical_history = []
+        unit_results = []
+
+        for unit in units:
+            unit_blockers = []
+            unit_technical = []
+
+            # ------------------------------------------------
+            # Current status guard
+            # ------------------------------------------------
+
+            if unit.status not in {
+                "available",
+                "voided",
+            }:
+                unit_blockers.append(
+                    "Current inventory status is "
+                    f"{unit.status!r}."
+                )
+
+            # ------------------------------------------------
+            # Current Work Order guard
+            # ------------------------------------------------
+
+            if (
+                unit.current_work_order_id is not None
+                or (
+                    unit.current_work_order_number
+                    and str(
+                        unit.current_work_order_number
+                    ).strip()
+                )
+            ):
+                wo_ref = (
+                    str(
+                        unit.current_work_order_number
+                    ).strip()
+                    if unit.current_work_order_number
+                    else str(
+                        unit.current_work_order_id
+                    )
+                )
+
+                unit_blockers.append(
+                    "Current Work Order reference exists: "
+                    f"{wo_ref}."
+                )
+
+            # ------------------------------------------------
+            # Issue history is always business history.
+            # ------------------------------------------------
+
+            issue_lines = (
+                ApplianceIssueLine.query
+                .filter_by(
+                    appliance_unit_id=unit.id
+                )
+                .order_by(
+                    ApplianceIssueLine.id.asc()
+                )
+                .all()
+            )
+
+            for issue_line in issue_lines:
+                unit_blockers.append(
+                    "Appliance Issue history exists: "
+                    f"IssueLine #{issue_line.id}, "
+                    f"Issue #{issue_line.issue_id}, "
+                    f"status={issue_line.status!r}."
+                )
+
+            # ------------------------------------------------
+            # Movements owned by this AP.
+            # ------------------------------------------------
+
+            movements = (
+                ApplianceMovement.query
+                .filter_by(
+                    appliance_unit_id=unit.id
+                )
+                .order_by(
+                    ApplianceMovement.created_at.asc(),
+                    ApplianceMovement.id.asc(),
+                )
+                .all()
+            )
+
+            for movement in movements:
+                movement_type = (
+                    movement.movement_type
+                    or ""
+                ).strip()
+
+                if (
+                    movement_type
+                    in technical_movement_types
+                ):
+                    unit_technical.append(
+                        movement_type
+                    )
+                else:
+                    unit_blockers.append(
+                        "Operational lifecycle movement exists: "
+                        f"{movement_type or 'UNKNOWN'} "
+                        f"(Movement #{movement.id})."
+                    )
+
+            # ------------------------------------------------
+            # Another movement may point TO this AP through
+            # related_appliance_unit_id (replace/exchange).
+            # Never silently erase that historical relation.
+            # ------------------------------------------------
+
+            related_movements = (
+                ApplianceMovement.query
+                .filter(
+                    ApplianceMovement
+                    .related_appliance_unit_id
+                    == unit.id
+                )
+                .order_by(
+                    ApplianceMovement.created_at.asc(),
+                    ApplianceMovement.id.asc(),
+                )
+                .all()
+            )
+
+            for movement in related_movements:
+                unit_blockers.append(
+                    "Another appliance movement references "
+                    f"{unit.inventory_number}: "
+                    f"{movement.movement_type or 'UNKNOWN'} "
+                    f"(Movement #{movement.id}, "
+                    f"owner AP id "
+                    f"{movement.appliance_unit_id})."
+                )
+
+            if unit_technical:
+                technical_history.append(
+                    {
+                        "inventory_number":
+                            unit.inventory_number,
+                        "movement_types":
+                            sorted(
+                                set(
+                                    unit_technical
+                                )
+                            ),
+                    }
+                )
+
+            if unit_blockers:
+                blockers.append(
+                    {
+                        "inventory_number":
+                            unit.inventory_number,
+                        "reasons":
+                            unit_blockers,
+                    }
+                )
+
+            unit_results.append(
+                {
+                    "id": unit.id,
+                    "inventory_number":
+                        unit.inventory_number,
+                    "status":
+                        unit.status,
+                    "safe":
+                        not bool(
+                            unit_blockers
+                        ),
+                    "blockers":
+                        unit_blockers,
+                    "technical_history":
+                        sorted(
+                            set(
+                                unit_technical
+                            )
+                        ),
+                }
+            )
+
+        # ----------------------------------------------------
+        # Integrity guard:
+        #
+        # A POSTED / VOIDED Receiving should have exactly one
+        # ApplianceUnit per Receiving line.
+        # ----------------------------------------------------
+
+        receiving_status = (
+            receiving.status
+            or ""
+        ).strip().lower()
+
+        if receiving_status in {
+            "posted",
+            "voided",
+        }:
+            if len(lines) != len(units):
+                blockers.append(
+                    {
+                        "inventory_number":
+                            None,
+                        "reasons": [
+                            (
+                                "Receiving inventory integrity "
+                                "check failed: "
+                                f"{len(lines)} line(s), "
+                                f"{len(units)} ApplianceUnit "
+                                "record(s)."
+                            )
+                        ],
+                    }
+                )
+
+        # Draft Receiving must never already own units.
+        if (
+            receiving_status == "draft"
+            and units
+        ):
+            blockers.append(
+                {
+                    "inventory_number":
+                        None,
+                    "reasons": [
+                        (
+                            "Draft Receiving unexpectedly "
+                            "already has ApplianceUnit records."
+                        )
+                    ],
+                }
+            )
+
+        return {
+            "safe": not bool(blockers),
+            "receiving_id": receiving.id,
+            "receiving_number":
+                receiving.receiving_number,
+            "receiving_status":
+                receiving.status,
+            "line_count": len(lines),
+            "unit_count": len(units),
+            "units": unit_results,
+            "technical_history":
+                technical_history,
+            "blockers": blockers,
+        }
+
+    # --------------------------------------------------------
+    # Emergency Purge
+    # --------------------------------------------------------
+
+    @staticmethod
+    def emergency_purge(
+        *,
+        receiving_id: int,
+        actor: User,
+        confirmation: str,
+    ) -> dict:
+        """
+        Physically remove an erroneous POSTED / VOIDED Receiving.
+
+        BREAK-GLASS operation:
+            - SUPERADMIN only
+            - exact confirmation phrase required
+            - dependency checker must report SAFE
+            - only technical/audit movements may be removed
+            - downstream business history always blocks purge
+
+        This is intentionally NOT controlled by the normal
+        Permission catalog.
+        """
+        actor = ApplianceReceivingService._require_user(actor)
+
+        role = (
+            getattr(actor, "role", "")
+            or ""
+        ).strip().lower()
+
+        if role != "superadmin":
+            raise ApplianceAccessDenied(
+                "Only SUPERADMIN can perform Emergency Purge."
+            )
+
+        receiving = (
+            ApplianceReceivingService._get_receiving(
+                receiving_id
+            )
+        )
+
+        receiving_status = (
+            receiving.status
+            or ""
+        ).strip().lower()
+
+        if receiving_status not in {
+            "posted",
+            "voided",
+        }:
+            raise ApplianceReceivingError(
+                "Emergency Purge is allowed only for "
+                "POSTED or VOIDED Receiving. "
+                "Use normal Delete Draft for DRAFT Receiving."
+            )
+
+        receiving_number = (
+            receiving.receiving_number
+            or ""
+        ).strip()
+
+        expected_confirmation = (
+            f"PURGE {receiving_number}"
+        )
+
+        actual_confirmation = (
+            confirmation
+            or ""
+        ).strip()
+
+        if actual_confirmation != expected_confirmation:
+            raise ApplianceReceivingError(
+                "Emergency Purge confirmation does not match. "
+                f'Type exactly: "{expected_confirmation}"'
+            )
+
+        # ----------------------------------------------------
+        # Full dependency analysis immediately before purge.
+        # ----------------------------------------------------
+
+        inspection = (
+            ApplianceReceivingService
+            .check_emergency_purge(
+                receiving_id=receiving.id,
+                actor=actor,
+            )
+        )
+
+        if not inspection.get("safe"):
+            raise ApplianceReceivingError(
+                "Emergency Purge blocked because downstream "
+                "dependencies exist."
+            )
+
+        technical_movement_types = {
+            "DETAILS_UPDATE",
+            "IDENTITY_CORRECTION",
+            "MODEL_SPECS_SYNC",
+            "RECEIVING_VOID",
+        }
+
+        try:
+            # ------------------------------------------------
+            # Reload Receiving and all physical units.
+            # ------------------------------------------------
+
+            receiving = (
+                ApplianceReceivingService._get_receiving(
+                    receiving_id
+                )
+            )
+
+            units = (
+                ApplianceUnit.query
+                .join(
+                    ApplianceReceivingLine,
+                    ApplianceUnit.receiving_line_id
+                    == ApplianceReceivingLine.id,
+                )
+                .filter(
+                    ApplianceReceivingLine.receiving_id
+                    == receiving.id
+                )
+                .order_by(
+                    ApplianceUnit.id.asc()
+                )
+                .all()
+            )
+
+            unit_ids = [
+                unit.id
+                for unit in units
+            ]
+
+            deleted_movements = 0
+            deleted_units = 0
+
+            # ------------------------------------------------
+            # Final fail-safe movement validation.
+            #
+            # Do not trust only the earlier inspection result.
+            # Re-read immediately before physical deletion.
+            # ------------------------------------------------
+
+            if unit_ids:
+                movements = (
+                    ApplianceMovement.query
+                    .filter(
+                        ApplianceMovement.appliance_unit_id.in_(
+                            unit_ids
+                        )
+                    )
+                    .order_by(
+                        ApplianceMovement.id.asc()
+                    )
+                    .all()
+                )
+
+                for movement in movements:
+                    movement_type = (
+                        movement.movement_type
+                        or ""
+                    ).strip()
+
+                    if (
+                        movement_type
+                        not in technical_movement_types
+                    ):
+                        raise ApplianceReceivingError(
+                            "Emergency Purge aborted: "
+                            "operational or unknown movement "
+                            "appeared before deletion: "
+                            f"{movement_type or 'UNKNOWN'} "
+                            f"(Movement #{movement.id})."
+                        )
+
+                # --------------------------------------------
+                # A movement belonging to another AP must not
+                # reference any AP being purged.
+                # --------------------------------------------
+
+                external_related = (
+                    ApplianceMovement.query
+                    .filter(
+                        ApplianceMovement
+                        .related_appliance_unit_id
+                        .in_(unit_ids),
+                        ~ApplianceMovement
+                        .appliance_unit_id
+                        .in_(unit_ids),
+                    )
+                    .order_by(
+                        ApplianceMovement.id.asc()
+                    )
+                    .first()
+                )
+
+                if external_related is not None:
+                    raise ApplianceReceivingError(
+                        "Emergency Purge aborted: "
+                        "another appliance movement references "
+                        "an AP from this Receiving "
+                        f"(Movement #{external_related.id})."
+                    )
+
+                # --------------------------------------------
+                # Remove technical movements first because
+                # appliance_movement.appliance_unit_id uses
+                # ON DELETE RESTRICT.
+                # --------------------------------------------
+
+                for movement in movements:
+                    db.session.delete(
+                        movement
+                    )
+                    deleted_movements += 1
+
+                db.session.flush()
+
+                # --------------------------------------------
+                # Remove physical inventory units.
+                # --------------------------------------------
+
+                for unit in units:
+                    db.session.delete(
+                        unit
+                    )
+                    deleted_units += 1
+
+                db.session.flush()
+
+            # ------------------------------------------------
+            # Removing Receiving removes its ReceivingLine
+            # rows through the existing ORM delete-orphan
+            # relationship.
+            # ------------------------------------------------
+
+            line_count = (
+                ApplianceReceivingLine.query
+                .filter_by(
+                    receiving_id=receiving.id
+                )
+                .count()
+            )
+
+            purged_receiving_id = receiving.id
+            purged_receiving_number = (
+                receiving.receiving_number
+            )
+
+            db.session.delete(
+                receiving
+            )
+
+            db.session.commit()
+
+            return {
+                "purged": True,
+                "receiving_id":
+                    purged_receiving_id,
+                "receiving_number":
+                    purged_receiving_number,
+                "deleted_lines":
+                    line_count,
+                "deleted_units":
+                    deleted_units,
+                "deleted_movements":
+                    deleted_movements,
+            }
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+
+    # --------------------------------------------------------
+    # Void Posted Receiving
+    # --------------------------------------------------------
+
+    @staticmethod
+    def void_receiving(
+        *,
+        receiving_id: int,
+        actor: User,
+        reason: str,
+    ) -> ApplianceReceiving:
+        """
+        Formally reverse a Posted Appliance Receiving.
+
+        VOID is intentionally conservative.
+
+        It is allowed only when every ApplianceUnit created by this
+        Receiving is still in its untouched post-receiving state:
+
+            - Receiving status is POSTED
+            - one ApplianceUnit exists for every Receiving line
+            - every ApplianceUnit status is AVAILABLE
+            - no ApplianceUnit is attached to a current Work Order
+            - no ApplianceMovement exists for any ApplianceUnit
+
+        Nothing is physically deleted.
+
+        Each ApplianceUnit is marked VOIDED and receives an immutable
+        RECEIVING_VOID movement. The Receiving itself is marked VOIDED
+        with actor, timestamp, and reason.
+
+        All changes commit atomically.
+        """
+        actor = ApplianceReceivingService._require_user(actor)
+
+        receiving = (
+            ApplianceReceivingService._get_receiving(
+                receiving_id
+            )
+        )
+
+        if receiving.status != (
+            ApplianceReceivingService.STATUS_POSTED
+        ):
+            raise ApplianceReceivingError(
+                "Only a Posted Receiving can be voided."
+            )
+
+        ApplianceReceivingService._require_permission(
+            actor=actor,
+            permission_code="appliance.receiving.void",
+            warehouse_id=receiving.warehouse_id,
+        )
+
+        reason_clean = ApplianceReceivingService._clean_text(
+            reason,
+            max_length=1000,
+        )
+
+        if reason_clean is None:
+            raise ApplianceReceivingError(
+                "VOID reason is required."
+            )
+
+        lines = (
+            ApplianceReceivingLine.query
+            .filter_by(receiving_id=receiving.id)
+            .order_by(
+                ApplianceReceivingLine.line_no.asc()
+            )
+            .all()
+        )
+
+        if not lines:
+            raise ApplianceReceivingError(
+                "Posted Receiving has no Receiving lines. "
+                "VOID refused."
+            )
+
+        units = (
+            ApplianceUnit.query
+            .join(
+                ApplianceReceivingLine,
+                ApplianceUnit.receiving_line_id
+                == ApplianceReceivingLine.id,
+            )
+            .filter(
+                ApplianceReceivingLine.receiving_id
+                == receiving.id
+            )
+            .order_by(
+                ApplianceUnit.id.asc()
+            )
+            .all()
+        )
+
+        if len(units) != len(lines):
+            raise ApplianceReceivingError(
+                "Receiving inventory integrity check failed: "
+                f"{len(lines)} Receiving line(s), but "
+                f"{len(units)} ApplianceUnit record(s) found. "
+                "VOID refused."
+            )
+
+        # ----------------------------------------------------
+        # Validate ALL units before changing anything.
+        # ----------------------------------------------------
+        for unit in units:
+            if unit.status != (
+                ApplianceReceivingService
+                .UNIT_STATUS_AVAILABLE
+            ):
+                raise ApplianceReceivingError(
+                    f"{unit.inventory_number} cannot be voided: "
+                    f"current status is {unit.status!r}."
+                )
+
+            if (
+                unit.current_work_order_id is not None
+                or (
+                    unit.current_work_order_number
+                    and str(
+                        unit.current_work_order_number
+                    ).strip()
+                )
+            ):
+                raise ApplianceReceivingError(
+                    f"{unit.inventory_number} cannot be voided: "
+                    "it is or was left attached to a current "
+                    "Work Order."
+                )
+
+            # Audit/correction movements do not represent physical
+            # lifecycle usage and therefore do not block Receiving VOID.
+            #
+            # Everything else is treated as lifecycle history.
+            # This is intentionally fail-safe: any future operational
+            # movement type will automatically block VOID unless it is
+            # explicitly classified as audit-only here.
+            audit_only_movement_types = {
+                "DETAILS_UPDATE",
+                "IDENTITY_CORRECTION",
+                "MODEL_SPECS_SYNC",
+            }
+
+            lifecycle_movement = (
+                ApplianceMovement.query
+                .filter(
+                    ApplianceMovement.appliance_unit_id
+                    == unit.id,
+                    ~ApplianceMovement.movement_type.in_(
+                        audit_only_movement_types
+                    ),
+                )
+                .order_by(
+                    ApplianceMovement.created_at.asc(),
+                    ApplianceMovement.id.asc(),
+                )
+                .first()
+            )
+
+            if lifecycle_movement is not None:
+                raise ApplianceReceivingError(
+                    f"{unit.inventory_number} cannot be voided: "
+                    "lifecycle history already exists "
+                    f"({lifecycle_movement.movement_type})."
+                )
+
+        # ----------------------------------------------------
+        # Validation passed for the whole Receiving.
+        # Apply reversal atomically.
+        # ----------------------------------------------------
+        now = datetime.utcnow()
+
+        try:
+            for unit in units:
+                unit.status = (
+                    ApplianceReceivingService
+                    .UNIT_STATUS_VOIDED
+                )
+                unit.updated_at = now
+                unit.updated_by_id = actor.id
+
+                movement = ApplianceMovement(
+                    appliance_unit_id=unit.id,
+                    movement_type="RECEIVING_VOID",
+                    from_warehouse_id=unit.warehouse_id,
+                    to_warehouse_id=None,
+                    reason_code="RECEIVING_VOID",
+                    notes=reason_clean,
+                    actor_id=actor.id,
+                    created_at=now,
+                )
+
+                db.session.add(movement)
+
+            receiving.status = (
+                ApplianceReceivingService.STATUS_VOIDED
+            )
+            receiving.voided_at = now
+            receiving.voided_by_id = actor.id
+            receiving.void_reason = reason_clean
+            receiving.updated_at = now
+            receiving.updated_by_id = actor.id
+
+            db.session.commit()
+            db.session.refresh(receiving)
+
+            return receiving
+
+        except Exception:
+            db.session.rollback()
+            raise
+
+    # --------------------------------------------------------
+    # Posted Receiving - descriptive fields / pricing
+    # --------------------------------------------------------
+
+    @staticmethod
+    def update_posted_line_fields(
+        *,
+        line_id: int,
+        actor: User,
+        update_details: bool = False,
+        update_pricing: bool = False,
+        size_value=None,
+        size_unit=None,
+        color=None,
+        notes=None,
+        unit_cost=None,
+        selling_price=None,
+    ) -> ApplianceReceivingLine:
+        """
+        Safely update allowed fields after Receiving is posted.
+
+        Warehouse users with appliance.receive may update:
+            - size_value
+            - size_unit
+            - color
+            - notes
+
+        Users with appliance.pricing may update:
+            - unit_cost
+            - selling_price
+
+        Receiving history and current ApplianceUnit are kept
+        synchronized in the same transaction.
+        """
+        actor = ApplianceReceivingService._require_user(actor)
+
+        line = db.session.get(
+            ApplianceReceivingLine,
+            line_id,
+        )
+
+        if line is None:
+            raise ApplianceReceivingError(
+                "Receiving line not found."
+            )
+
+        receiving = line.receiving
+
+        if receiving.status != (
+            ApplianceReceivingService.STATUS_POSTED
+        ):
+            raise ApplianceReceivingError(
+                "This action is available only after "
+                "Receiving is posted."
+            )
+
+        if not update_details and not update_pricing:
+            raise ApplianceReceivingError(
+                "No editable fields were submitted."
+            )
+
+        # ----------------------------------------------------
+        # Permission checks are independent.
+        # Warehouse descriptive editing must NOT grant pricing.
+        # ----------------------------------------------------
+
+        if update_details:
+            ApplianceReceivingService._require_permission(
+                actor=actor,
+                permission_code="appliance.receive",
+                warehouse_id=receiving.warehouse_id,
+            )
+
+        if update_pricing:
+            ApplianceReceivingService._require_permission(
+                actor=actor,
+                permission_code="appliance.pricing",
+                warehouse_id=receiving.warehouse_id,
+            )
+
+        # ----------------------------------------------------
+        # Find physical appliance created from this line.
+        # ----------------------------------------------------
+
+        unit = (
+            ApplianceUnit.query
+            .filter_by(
+                receiving_line_id=line.id
+            )
+            .first()
+        )
+
+        if unit is None:
+            raise ApplianceReceivingError(
+                "ApplianceUnit for this Receiving line "
+                "was not found."
+            )
+
+        # ----------------------------------------------------
+        # Normalize descriptive fields.
+        # ----------------------------------------------------
+
+        new_size_value = None
+        new_size_unit = None
+        new_color = None
+        new_notes = None
+
+        if update_details:
+
+            raw_size = (
+                str(size_value).strip()
+                if size_value is not None
+                else ""
+            )
+
+            if raw_size:
+                try:
+                    new_size_value = float(raw_size)
+                except (TypeError, ValueError):
+                    raise ApplianceReceivingError(
+                        "Size must be a valid number."
+                    )
+
+                if new_size_value < 0:
+                    raise ApplianceReceivingError(
+                        "Size cannot be negative."
+                    )
+
+            raw_unit = (
+                str(size_unit or "")
+                .strip()
+                .upper()
+            )
+
+            if len(raw_unit) > 20:
+                raise ApplianceReceivingError(
+                    "Size Unit cannot exceed 20 characters."
+                )
+
+            new_size_unit = raw_unit or None
+
+            raw_color = (
+                str(color or "")
+                .strip()
+                .upper()
+            )
+
+            if len(raw_color) > 80:
+                raise ApplianceReceivingError(
+                    "Color cannot exceed 80 characters."
+                )
+
+            new_color = raw_color or None
+
+            raw_notes = (
+                str(notes or "")
+                .strip()
+            )
+
+            if len(raw_notes) > 5000:
+                raise ApplianceReceivingError(
+                    "Notes cannot exceed 5000 characters."
+                )
+
+            new_notes = raw_notes or None
+
+        # ----------------------------------------------------
+        # Normalize pricing only when authorized.
+        # ----------------------------------------------------
+
+        new_cost = None
+        new_price = None
+
+        if update_pricing:
+            new_cost = (
+                ApplianceReceivingService._money_or_none(
+                    unit_cost
+                )
+            )
+
+            new_price = (
+                ApplianceReceivingService._money_or_none(
+                    selling_price
+                )
+            )
+
+        now = datetime.utcnow()
+
+        try:
+
+            # ------------------------------------------------
+            # Descriptive data
+            # ------------------------------------------------
+
+            if update_details:
+
+                line.size_value = new_size_value
+                line.size_unit = new_size_unit
+                line.color = new_color
+                line.notes = new_notes
+
+                unit.size_value = new_size_value
+                unit.size_unit = new_size_unit
+                unit.color = new_color
+                unit.notes = new_notes
+
+            # ------------------------------------------------
+            # Pricing
+            # ------------------------------------------------
+
+            if update_pricing:
+
+                line.unit_cost = new_cost
+                line.selling_price = new_price
+
+                unit.unit_cost = new_cost
+                unit.selling_price = new_price
+
+            # ------------------------------------------------
+            # Audit timestamps / actor
+            # ------------------------------------------------
+
+            line.updated_at = now
+            line.updated_by_id = actor.id
+
+            unit.updated_at = now
+            unit.updated_by_id = actor.id
+
+            receiving.updated_at = now
+            receiving.updated_by_id = actor.id
+
+            db.session.commit()
+            db.session.refresh(line)
+
+            return line
+
+        except Exception:
+            db.session.rollback()
+            raise
+
 
     # --------------------------------------------------------
     # Manager Pricing
