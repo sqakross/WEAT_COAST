@@ -1,5 +1,6 @@
 # services/supplier_returns_services.py
 from __future__ import annotations
+from license_client.operation_gate import authorize_mutation as _authorize_mutation
 from datetime import datetime
 from typing import Dict, Any
 
@@ -135,6 +136,8 @@ def post_batch(batch_id: int, actor: str | None = None) -> Dict[str, Any]:
       - уменьшение склада (Part.quantity -= qty_returned);
       - проставление статуса posted/posted_at/by.
     """
+
+    _authorize_mutation("inventory.supplier_return.post")
     b = SupplierReturnBatch.query.get(batch_id)
     if not b:
         raise SupplierReturnError("Batch not found.")
@@ -186,6 +189,8 @@ def unpost_batch(batch_id: int, actor: str | None = None) -> Dict[str, Any]:
       - возвращаем количество на склад (Part.quantity += qty_returned)
       - статус -> draft, чистим метаданные постинга
     """
+
+    _authorize_mutation("inventory.supplier_return.unpost")
     b = SupplierReturnBatch.query.get(batch_id)
     if not b:
         raise SupplierReturnError("Batch not found.")

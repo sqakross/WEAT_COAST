@@ -1,4 +1,5 @@
 ﻿from __future__ import annotations
+from license_client.operation_gate import authorize_mutation as _authorize_mutation
 
 import json
 from datetime import datetime
@@ -340,6 +341,8 @@ class ApplianceIssueService:
             ApplianceUnit.status -> issued
             ApplianceUnit.current_work_order_id -> W/O
         """
+
+        _authorize_mutation("appliance.issue.create")
 
         actor = ApplianceIssueService._require_user(
             actor
@@ -1195,6 +1198,8 @@ class ApplianceIssueService:
 
         The operation is atomic.
         """
+
+        _authorize_mutation("appliance.issue.return")
 
         actor = (
             ApplianceIssueService
@@ -2567,6 +2572,8 @@ class ApplianceIssueService:
 
         Every transition creates immutable ApplianceMovement.
         """
+
+        _authorize_mutation("appliance.inventory.disposition")
 
         actor = (
             ApplianceIssueService

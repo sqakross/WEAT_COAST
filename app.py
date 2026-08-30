@@ -162,9 +162,29 @@ app = Flask(
 app.config.from_object(Config)
 app.config.from_pyfile('config.py', silent=True)  # instance/config.py (если есть)
 
+from license_client.runtime_bridge import require_application_state
+from license_client.periodic import refresh_if_due
+
+
 # -------------------------------------------------------------------
 # REQUEST PERFORMANCE PROFILER
 # -------------------------------------------------------------------
+# WCCR_RUNTIME_STATE_E3
+@app.before_request
+def refresh_runtime_state_periodically():
+    refresh_if_due(
+        app_version="1.1.1.45",
+    )
+
+
+# WCCR_RUNTIME_STATE_E2
+@app.before_request
+def verify_runtime_state():
+    require_application_state(
+        app_version="1.1.1.45",
+    )
+
+
 @app.before_request
 def start_request_timer():
     g.request_started_at = time.perf_counter()
@@ -622,6 +642,15 @@ def cleanup_old_reports(folder: str, days_old: int = 3):
 # 12) Локальный запуск (dev, HTTPS с локальным сертификатом)
 # -------------------------------------------------------------------
 if __name__ == "__main__":
+    # WCCR_RUNTIME_STATE_E1
+    # Production process authorization is established before
+    # startup maintenance or the HTTP server is allowed to run.
+    from license_client.runtime_bridge import prime_application_state
+
+    _runtime_boot_state = prime_application_state(
+        app_version="1.1.1.45",
+    )
+
     with app.app_context():
         # Database schema is managed by Alembic migrations.
         # Do NOT call db.create_all() here: it bypasses migration history.

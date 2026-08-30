@@ -158,5 +158,12 @@ def build_report():
 
 
 if __name__ == "__main__":
+    # WCCR_RUNTIME_STATE_E1_BACKGROUND
+    from license_client.runtime_bridge import prime_application_state
+
+    prime_application_state(
+        app_version="1.1.1.45",
+    )
+
     with app.app_context():
         build_report()

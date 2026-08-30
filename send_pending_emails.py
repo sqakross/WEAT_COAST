@@ -165,6 +165,13 @@ def log_failed_rows(limit: int = 10):
 
 
 if __name__ == "__main__":
+    # WCCR_RUNTIME_STATE_E1_BACKGROUND
+    from license_client.runtime_bridge import prime_application_state
+
+    prime_application_state(
+        app_version="1.1.1.45",
+    )
+
     try:
         with app.app_context():
             skip_bad_pending_pickup_emails()

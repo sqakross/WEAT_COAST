@@ -1,4 +1,5 @@
 from __future__ import annotations
+from license_client.operation_gate import authorize_mutation as _authorize_mutation
 from datetime import date
 from sqlalchemy import func
 from extensions import db
@@ -320,6 +321,8 @@ def create_technician_payment_fifo(
     Safe: affects only technician ledger/payment tables.
     """
 
+    _authorize_mutation("accounting.payment.create")
+
     tech = (technician_name or "").strip()
     pay_amount = round(float(amount or 0.0), 2)
 
@@ -412,6 +415,8 @@ def void_technician_payment(
     The payment and its allocation history are preserved.
     Applied amounts are reversed from ledger entries.
     """
+
+    _authorize_mutation("accounting.payment.void")
 
     from datetime import datetime
 
@@ -696,6 +701,8 @@ def create_technician_adjustment(
     Create manual technician accounting adjustment.
     Does NOT touch old ledger entries.
     """
+
+    _authorize_mutation("accounting.adjustment.create")
 
     from datetime import date
     from extensions import db

@@ -1,4 +1,5 @@
 ﻿from __future__ import annotations
+from license_client.operation_gate import authorize_mutation as _authorize_mutation
 
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -1363,6 +1364,8 @@ class ApplianceReceivingService:
         Missing unit_cost does NOT block posting.
         Those rows appear in the Manager Missing Prices queue.
         """
+
+        _authorize_mutation("appliance.receiving.post")
         actor = ApplianceReceivingService._require_user(actor)
 
         receiving = (
@@ -2120,6 +2123,8 @@ class ApplianceReceivingService:
 
         All changes commit atomically.
         """
+
+        _authorize_mutation("appliance.receiving.void")
         actor = ApplianceReceivingService._require_user(actor)
 
         receiving = (

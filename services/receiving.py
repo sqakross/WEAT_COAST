@@ -1,5 +1,6 @@
 # services/receiving.py
 from __future__ import annotations
+from license_client.operation_gate import authorize_mutation as _authorize_mutation
 
 from datetime import datetime
 from sqlalchemy import func
@@ -144,6 +145,8 @@ def post_receiving_batch(
     - статус posted устанавливается только после успешной обработки всех строк;
     - applied_qty фиксирует реально применённое количество.
     """
+
+    _authorize_mutation("inventory.receiving.post")
     from flask import current_app
 
     try:
@@ -402,6 +405,8 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     - applied_qty -> 0
     - статус batch -> draft
     """
+
+    _authorize_mutation("inventory.receiving.unpost")
     from flask import current_app
 
     batch = ReceivingBatch.query.get(batch_id)

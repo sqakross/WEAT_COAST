@@ -1,4 +1,5 @@
 from __future__ import annotations
+from license_client.operation_gate import authorize_mutation as _authorize_mutation
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -148,6 +149,8 @@ def assign_tool_from_work_order(
     This function intentionally does not commit or roll back.
     The calling route owns the transaction.
     """
+
+    _authorize_mutation("assets.assignment.create")
     part_number = (
         getattr(line, "part_number", "") or ""
     ).strip().upper()
