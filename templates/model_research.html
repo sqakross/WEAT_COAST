@@ -1,7 +1,7 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block content %}
-<div class="container-fluid">
+<div class="container-fluid model-research-page">
 
   <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
     <div>
@@ -14,7 +14,10 @@
 
   <div class="card shadow-sm mb-4">
     <div class="card-body">
-      <form method="get" action="{{ url_for('inventory.model_research') }}" class="row g-2 align-items-end">
+      <form method="get"
+            action="{{ url_for('inventory.model_research') }}"
+            class="row g-2 align-items-end">
+
         <div class="col-md-6">
           <label class="form-label fw-semibold">Model Number</label>
           <input
@@ -31,8 +34,15 @@
         <div class="col-md-3">
           <label class="form-label fw-semibold">Search Mode</label>
           <select name="mode" class="form-select form-select-lg">
-            <option value="contains" {% if search_mode != 'exact' %}selected{% endif %}>Contains</option>
-            <option value="exact" {% if search_mode == 'exact' %}selected{% endif %}>Exact</option>
+            <option value="contains"
+                    {% if search_mode != 'exact' %}selected{% endif %}>
+              Contains
+            </option>
+
+            <option value="exact"
+                    {% if search_mode == 'exact' %}selected{% endif %}>
+              Exact
+            </option>
           </select>
         </div>
 
@@ -41,57 +51,95 @@
             Search
           </button>
         </div>
+
       </form>
     </div>
   </div>
 
   {% if grouped %}
-  <div class="card shadow-sm mb-3">
-    <div class="card-body">
-      <label class="form-label fw-semibold">Filter Results by Part Number / Part Name</label>
-      <input
-        type="text"
-        id="partFilter"
-        class="form-control form-control-lg"
-        placeholder="Example: thermostat, pump, W110..."
-        autocomplete="off"
-      >
-      <div class="form-text">
-        Type to filter visible results without reloading the page.
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+
+        <div class="d-flex flex-wrap justify-content-between align-items-end gap-3">
+
+          <div class="flex-grow-1">
+            <label class="form-label fw-semibold">
+              Filter Results by Part Number / Part Name
+            </label>
+
+            <input
+              type="text"
+              id="partFilter"
+              class="form-control form-control-lg"
+              placeholder="Example: thermostat, pump, W110..."
+              autocomplete="off"
+            >
+
+            <div class="form-text">
+              Type to filter visible results without reloading the page.
+            </div>
+          </div>
+
+          <div class="result-summary text-md-end">
+            <div class="fw-bold text-primary fs-5">
+              <span id="visibleUniqueCount">{{ total_unique_parts }}</span>
+              <span id="uniquePartLabel">
+                {{ 'unique part' if total_unique_parts == 1 else 'unique parts' }}
+              </span>
+            </div>
+
+            <div class="text-muted small">
+              {{ total_matches }}
+              {{ 'description' if total_matches == 1 else 'descriptions' }}
+            </div>
+          </div>
+
+        </div>
       </div>
     </div>
-  </div>
-{% endif %}
+  {% endif %}
 
   {% if model_query and not grouped %}
     <div class="alert alert-warning">
-      No researched parts found for model: <strong>{{ model_query }}</strong>
+      No researched parts found for model:
+      <strong>{{ model_query }}</strong>
     </div>
   {% endif %}
 
   {% if grouped %}
     {% for model, parts in grouped.items() %}
+      {% set model_index = loop.index0 %}
+
       <div class="card shadow-sm mb-4 model-result-card">
+
         <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
           <div>
             <strong>Model:</strong> {{ model }}
           </div>
+
           <span class="badge bg-light text-dark visible-count-badge">
-            {{ parts|length }} part{{ '' if parts|length == 1 else 's' }}
+            {{ parts|length }}
+            {{ 'part' if parts|length == 1 else 'parts' }}
           </span>
         </div>
 
-        <div class="table-responsive">
+        <div class="table-responsive model-table-container">
           <table class="table table-hover table-striped align-middle mb-0 model-research-table">
+
             <thead class="table-light">
               <tr>
-                <th style="width: 260px;">Part Number</th>
+                <th class="part-number-column">Part Number</th>
                 <th>Part Name</th>
+                <th class="matches-column text-center">Matches</th>
               </tr>
             </thead>
+
             <tbody>
               {% for p in parts %}
-                <tr>
+                {% set detail_id = 'part-details-' ~ model_index ~ '-' ~ loop.index0 %}
+
+                <tr class="part-result-row">
+
                   <td>
                     <button
                       type="button"
@@ -102,96 +150,347 @@
                       {{ p.part_number }}
                     </button>
                   </td>
-                  <td>{{ p.part_name or '' }}</td>
+
+                  <td>
+                    <div class="primary-part-name">
+                      {{ p.part_name or 'No part name available' }}
+                    </div>
+
+                    {% if p.alternate_names %}
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-link alternate-toggle p-0 mt-1 text-decoration-none"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#{{ detail_id }}"
+                        aria-expanded="false"
+                        aria-controls="{{ detail_id }}"
+                      >
+                        <span class="toggle-icon">▸</span>
+                        {{ p.alternate_names|length }}
+                        alternate
+                        {{ 'description' if p.alternate_names|length == 1 else 'descriptions' }}
+                      </button>
+
+                      <div class="collapse alternate-names"
+                           id="{{ detail_id }}">
+
+                        <div class="alternate-names-box mt-2">
+                          {% for alternate_name in p.alternate_names %}
+                            <div class="alternate-name-item">
+                              {{ alternate_name }}
+                            </div>
+                          {% endfor %}
+                        </div>
+
+                      </div>
+                    {% endif %}
+                  </td>
+
+                  <td class="text-center">
+                    {% if p.match_count > 1 %}
+                      <button
+                        type="button"
+                        class="btn badge rounded-pill bg-secondary match-badge"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#{{ detail_id }}"
+                        aria-expanded="false"
+                        aria-controls="{{ detail_id }}"
+                        title="Show alternate descriptions"
+                      >
+                        {{ p.match_count }} ▾
+                      </button>
+                    {% else %}
+                      <span class="text-muted">1</span>
+                    {% endif %}
+                  </td>
+
                 </tr>
               {% endfor %}
+
+              <tr class="no-filter-results-row d-none">
+                <td colspan="3"
+                    class="text-center text-muted py-4">
+                  No parts match the current filter.
+                </td>
+              </tr>
+
             </tbody>
           </table>
         </div>
+
       </div>
     {% endfor %}
   {% endif %}
 
 </div>
 
-<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
-  <div id="copyToast" class="toast align-items-center text-bg-success border-0" role="alert">
+<div class="position-fixed bottom-0 end-0 p-3"
+     style="z-index: 9999">
+
+  <div id="copyToast"
+       class="toast align-items-center text-bg-success border-0"
+       role="alert">
+
     <div class="d-flex">
       <div class="toast-body" id="copyToastBody">
         Copied
       </div>
-      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+
+      <button type="button"
+              class="btn-close btn-close-white me-2 m-auto"
+              data-bs-dismiss="toast"
+              aria-label="Close">
+      </button>
     </div>
+
   </div>
 </div>
 
 <style>
+  .model-research-page {
+    max-width: 1500px;
+  }
+
+  .model-table-container {
+    max-height: 68vh;
+  }
+
+  .model-research-table {
+    min-width: 760px;
+  }
+
+  .model-research-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    white-space: nowrap;
+    border-bottom-width: 2px;
+  }
+
   .model-research-table td {
+    padding-top: 0.8rem;
+    padding-bottom: 0.8rem;
     font-size: 1rem;
   }
 
-  .model-research-table .copy-part-number {
-    font-size: 1rem;
-    letter-spacing: .03em;
+  .part-number-column {
+    width: 240px;
   }
 
-  .model-research-table .copy-part-number:hover {
+  .matches-column {
+    width: 130px;
+  }
+
+  .copy-part-number {
+    font-size: 1rem;
+    letter-spacing: 0.03em;
+  }
+
+  .copy-part-number:hover {
     text-decoration: underline !important;
+  }
+
+  .primary-part-name {
+    color: #212529;
+    font-weight: 500;
+  }
+
+  .alternate-toggle {
+    color: #6c757d;
+    font-size: 0.86rem;
+  }
+
+  .alternate-toggle:hover {
+    color: #0d6efd;
+    text-decoration: underline !important;
+  }
+
+  .alternate-names-box {
+    max-width: 700px;
+    padding: 0.6rem 0.8rem;
+    background: #f8f9fa;
+    border-left: 3px solid #adb5bd;
+    border-radius: 0.25rem;
+  }
+
+  .alternate-name-item {
+    padding: 0.2rem 0;
+    color: #495057;
+    font-size: 0.92rem;
+  }
+
+  .alternate-name-item::before {
+    content: "•";
+    margin-right: 0.5rem;
+    color: #6c757d;
+  }
+
+  .match-badge {
+    min-width: 48px;
+    border: 0;
+    font-size: 0.85rem;
+  }
+
+  .result-summary {
+    min-width: 210px;
+  }
+
+  @media (max-width: 767.98px) {
+    .result-summary {
+      width: 100%;
+      text-align: left;
+    }
+
+    .part-number-column {
+      width: 190px;
+    }
+
+    .matches-column {
+      width: 95px;
+    }
   }
 </style>
 
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-  const buttons = document.querySelectorAll(".copy-part-number");
-  const toastEl = document.getElementById("copyToast");
+  const toastElement = document.getElementById("copyToast");
   const toastBody = document.getElementById("copyToastBody");
 
-  buttons.forEach(function (btn) {
-    btn.addEventListener("click", async function () {
-      const pn = btn.dataset.partNumber || btn.innerText.trim();
+  document.querySelectorAll(".copy-part-number").forEach(function (button) {
+    button.addEventListener("click", async function () {
+      const partNumber =
+        button.dataset.partNumber || button.textContent.trim();
+
+      let copied = false;
 
       try {
-        await navigator.clipboard.writeText(pn);
-        toastBody.textContent = "Copied: " + pn;
+        await navigator.clipboard.writeText(partNumber);
+        copied = true;
+      } catch (error) {
+        const temporaryInput = document.createElement("textarea");
 
-        if (window.bootstrap && toastEl) {
-          const toast = bootstrap.Toast.getOrCreateInstance(toastEl, { delay: 1600 });
-          toast.show();
-        }
-      } catch (e) {
-        alert("Copied: " + pn);
+        temporaryInput.value = partNumber;
+        temporaryInput.style.position = "fixed";
+        temporaryInput.style.opacity = "0";
+
+        document.body.appendChild(temporaryInput);
+        temporaryInput.select();
+
+        copied = document.execCommand("copy");
+        temporaryInput.remove();
+      }
+
+      if (copied && toastBody) {
+        toastBody.textContent = "Copied: " + partNumber;
+      }
+
+      if (copied && window.bootstrap && toastElement) {
+        const toast = bootstrap.Toast.getOrCreateInstance(
+          toastElement,
+          { delay: 1600 }
+        );
+
+        toast.show();
       }
     });
   });
 
+  document.querySelectorAll(".collapse").forEach(function (collapseElement) {
+    const collapseId = collapseElement.id;
+
+    if (!collapseId) {
+      return;
+    }
+
+    const controls = document.querySelectorAll(
+      '[data-bs-target="#' + collapseId + '"]'
+    );
+
+    collapseElement.addEventListener("show.bs.collapse", function () {
+      controls.forEach(function (control) {
+        control.setAttribute("aria-expanded", "true");
+
+        const icon = control.querySelector(".toggle-icon");
+
+        if (icon) {
+          icon.textContent = "▾";
+        }
+      });
+    });
+
+    collapseElement.addEventListener("hide.bs.collapse", function () {
+      controls.forEach(function (control) {
+        control.setAttribute("aria-expanded", "false");
+
+        const icon = control.querySelector(".toggle-icon");
+
+        if (icon) {
+          icon.textContent = "▸";
+        }
+      });
+    });
+  });
+
   const filterInput = document.getElementById("partFilter");
+  const visibleUniqueCount =
+    document.getElementById("visibleUniqueCount");
+  const uniquePartLabel =
+    document.getElementById("uniquePartLabel");
 
   if (filterInput) {
     filterInput.addEventListener("input", function () {
       const term = filterInput.value.trim().toLowerCase();
-      const cards = document.querySelectorAll(".model-result-card");
+      let totalVisible = 0;
 
-      cards.forEach(function (card) {
-        let visibleCount = 0;
-        const rows = card.querySelectorAll("tbody tr");
+      document.querySelectorAll(".model-result-card").forEach(function (card) {
+        let cardVisibleCount = 0;
 
-        rows.forEach(function (row) {
-          const text = row.innerText.toLowerCase();
-          const match = !term || text.includes(term);
+        card.querySelectorAll(".part-result-row").forEach(function (row) {
+          const searchableText = row.textContent.toLowerCase();
 
-          row.style.display = match ? "" : "none";
-          if (match) visibleCount += 1;
+          const isMatch =
+            term === "" || searchableText.includes(term);
+
+          row.classList.toggle("d-none", !isMatch);
+
+          if (isMatch) {
+            cardVisibleCount += 1;
+            totalVisible += 1;
+          }
         });
 
         const badge = card.querySelector(".visible-count-badge");
+
         if (badge) {
-          badge.textContent = visibleCount + (visibleCount === 1 ? " part" : " parts");
+          badge.textContent =
+            cardVisibleCount +
+            (cardVisibleCount === 1 ? " part" : " parts");
         }
 
-        card.style.display = visibleCount > 0 ? "" : "none";
+        const emptyRow =
+          card.querySelector(".no-filter-results-row");
+
+        if (emptyRow) {
+          emptyRow.classList.toggle(
+            "d-none",
+            cardVisibleCount !== 0
+          );
+        }
       });
+
+      if (visibleUniqueCount) {
+        visibleUniqueCount.textContent = totalVisible;
+      }
+
+      if (uniquePartLabel) {
+        uniquePartLabel.textContent =
+          totalVisible === 1
+            ? "unique part"
+            : "unique parts";
+      }
     });
   }
 });
 </script>
+
 {% endblock %}

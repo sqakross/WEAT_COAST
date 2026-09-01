@@ -595,7 +595,12 @@ def model_research():
     model_query = (request.args.get("model") or "").strip().upper()
     search_mode = (request.args.get("mode") or "contains").strip().lower()
 
+    if search_mode not in {"contains", "exact"}:
+        search_mode = "contains"
+
     grouped = {}
+    total_unique_parts = 0
+    total_matches = 0
 
     if model_query:
         q = (
@@ -610,9 +615,13 @@ def model_research():
         )
 
         if search_mode == "exact":
-            q = q.filter(func.upper(func.trim(WorkUnit.model)) == model_query)
+            q = q.filter(
+                func.upper(func.trim(WorkUnit.model)) == model_query
+            )
         else:
-            q = q.filter(func.upper(WorkUnit.model).like(f"%{model_query}%"))
+            q = q.filter(
+                func.upper(WorkUnit.model).like(f"%{model_query}%")
+            )
 
         rows = (
             q.order_by(
@@ -622,33 +631,108 @@ def model_research():
             .all()
         )
 
-        seen = set()
+        # Temporary structure:
+        #
+        # {
+        #     "MODEL": {
+        #         "PART_NUMBER": {
+        #             "part_number": "...",
+        #             "names": {
+        #                 "normalized name": {
+        #                     "display": "Original Name",
+        #                     "count": 3,
+        #                 }
+        #             }
+        #         }
+        #     }
+        # }
+        collected = {}
 
         for row in rows:
-            model = (row.model or "").strip().upper()
-            pn = (row.part_number or "").strip().upper()
-            name = (row.part_name or "").strip()
+            model = " ".join((row.model or "").strip().upper().split())
+            part_number = " ".join(
+                (row.part_number or "").strip().upper().split()
+            )
+            part_name = " ".join((row.part_name or "").strip().split())
 
-            if not model or not pn:
+            if not model or not part_number:
                 continue
 
-            key = (model, pn, name.lower())
-            if key in seen:
-                continue
+            model_parts = collected.setdefault(model, {})
 
-            seen.add(key)
+            part_data = model_parts.setdefault(
+                part_number,
+                {
+                    "part_number": part_number,
+                    "names": {},
+                },
+            )
 
-            grouped.setdefault(model, []).append({
-                "part_number": pn,
-                "part_name": name,
-            })
+            if part_name:
+                normalized_name = part_name.casefold()
+
+                name_data = part_data["names"].setdefault(
+                    normalized_name,
+                    {
+                        "display": part_name,
+                        "count": 0,
+                    },
+                )
+
+                name_data["count"] += 1
+
+        for model, model_parts in collected.items():
+            grouped[model] = []
+
+            for part_number in sorted(model_parts):
+                part_data = model_parts[part_number]
+                name_entries = list(part_data["names"].values())
+
+                # Main name:
+                # 1. most frequently used;
+                # 2. longer/more descriptive name;
+                # 3. alphabetical fallback.
+                name_entries.sort(
+                    key=lambda item: (
+                        -item["count"],
+                        -len(item["display"]),
+                        item["display"].casefold(),
+                    )
+                )
+
+                if name_entries:
+                    primary_name = name_entries[0]["display"]
+                    alternate_names = [
+                        item["display"]
+                        for item in name_entries[1:]
+                    ]
+                else:
+                    primary_name = ""
+                    alternate_names = []
+
+                match_count = len(name_entries) if name_entries else 1
+
+                grouped[model].append(
+                    {
+                        "part_number": part_number,
+                        "part_name": primary_name,
+                        "alternate_names": alternate_names,
+                        "match_count": match_count,
+                    }
+                )
+
+                total_unique_parts += 1
+                total_matches += match_count
 
     return render_template(
         "model_research.html",
         model_query=model_query,
         search_mode=search_mode,
         grouped=grouped,
+        total_unique_parts=total_unique_parts,
+        total_matches=total_matches,
     )
+
 @inventory_bp.get("/api/job_reserve", endpoint="api_job_reserve")
 @login_required
 def api_job_reserve():

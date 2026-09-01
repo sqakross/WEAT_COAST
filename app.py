@@ -169,25 +169,48 @@ from license_client.periodic import refresh_if_due
 # -------------------------------------------------------------------
 # REQUEST PERFORMANCE PROFILER
 # -------------------------------------------------------------------
-# WCCR_RUNTIME_STATE_E3
+@app.before_request
+def start_request_timer():
+    g.request_started_at = time.perf_counter()
+
 @app.before_request
 def refresh_runtime_state_periodically():
+    t0 = time.perf_counter()
+
     refresh_if_due(
         app_version="1.1.1.45",
     )
 
+    elapsed = time.perf_counter() - t0
 
-# WCCR_RUNTIME_STATE_E2
+    if elapsed >= 0.05:
+        logging.warning(
+            "LICENSE_HOOK PERF refresh_if_due=%.3fs | "
+            "endpoint=%s path=%s",
+            elapsed,
+            request.endpoint,
+            request.path,
+        )
+
+
 @app.before_request
 def verify_runtime_state():
+    t0 = time.perf_counter()
+
     require_application_state(
         app_version="1.1.1.45",
     )
 
+    elapsed = time.perf_counter() - t0
 
-@app.before_request
-def start_request_timer():
-    g.request_started_at = time.perf_counter()
+    if elapsed >= 0.05:
+        logging.warning(
+            "LICENSE_HOOK PERF require_application_state=%.3fs | "
+            "endpoint=%s path=%s",
+            elapsed,
+            request.endpoint,
+            request.path,
+        )
 
 @app.after_request
 def log_request_duration(response):
