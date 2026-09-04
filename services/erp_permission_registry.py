@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 
 """
@@ -144,10 +144,26 @@ ERP_PERMISSION_GROUPS = [
                 "name": "Create Returns",
                 "description": "Create supplier returns.",
             },
+            # ERP RETURNS STEP 1B-v4 - PERMISSIONS
+            {
+                "code": "erp.returns.edit",
+                "name": "Edit Returns",
+                "description": "Edit supplier return headers and item rows.",
+            },
+            {
+                "code": "erp.returns.post",
+                "name": "Post Returns",
+                "description": "Post supplier returns and decrement inventory.",
+            },
+            {
+                "code": "erp.returns.unpost",
+                "name": "Unpost Returns",
+                "description": "Unpost supplier returns and restore inventory.",
+            },
             {
                 "code": "erp.returns.delete",
                 "name": "Delete Returns",
-                "description": "Delete returns where ERP rules permit.",
+                "description": "Delete draft supplier return documents.",
             },
         ],
     },
@@ -272,7 +288,19 @@ ERP_PERMISSION_GROUPS = [
             {
                 "code": "erp.users.change_role",
                 "name": "Change User Roles",
-                "description": "Change user roles where ERP rules permit.",
+                # ERP ACCESS USERS STEP 2 FIX02V2 - ROLE HELP
+                "description": (
+                    "ALLOW: Admin can create and assign the ADMIN role. "
+                    "Technician, User, Viewer, Accounting, and Manager "
+                    "do not require this elevated permission. "
+                    "SUPERADMIN can only be assigned or modified by a Superadmin."
+                ),
+            },
+            # ERP ACCESS USERS STEP 1 FINAL FIX02 - DELETE PERMISSION
+            {
+                "code": "erp.users.delete",
+                "name": "Delete Users",
+                "description": "Delete users where ERP rules permit.",
             },
             {
                 "code": "erp.users.manage_access",

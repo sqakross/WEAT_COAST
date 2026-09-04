@@ -2,6 +2,59 @@
 {% block content %}
 <div class="container" style="max-width: 1100px;">
 
+  {# ERP ACCESS RETURNS STEP 2 - EDIT #}
+  {% set returns_role = (current_user.role or '')|lower %}
+  {% set returns_legacy =
+      returns_role in ['admin', 'superadmin']
+  %}
+
+  {% set returns_can_edit =
+      erp_access_allowed(
+          current_user,
+          'erp.returns.edit',
+          returns_legacy
+      )
+  %}
+
+  {% set returns_can_post =
+      returns_can_edit
+      and erp_access_allowed(
+          current_user,
+          'erp.returns.post',
+          returns_legacy
+      )
+  %}
+
+  {% set returns_can_unpost =
+      returns_can_edit
+      and erp_access_allowed(
+          current_user,
+          'erp.returns.unpost',
+          returns_legacy
+      )
+  %}
+
+  {% set returns_can_delete =
+      erp_access_allowed(
+          current_user,
+          'erp.returns.delete',
+          returns_legacy
+      )
+  %}
+
+  {#
+     Draft Save = EDIT.
+     Posted Save internally performs UNPOST -> EDIT -> POST,
+     so UI must require all three.
+  #}
+  {% set returns_can_save =
+      returns_can_edit
+      and (
+          b.status != 'posted'
+          or (returns_can_unpost and returns_can_post)
+      )
+  %}
+
   <div class="card shadow-sm mt-4">
 
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -39,22 +92,28 @@
         </button>
 
         {% if b.status == 'draft' %}
+          {% if returns_can_post %}
           <button id="btn-post-top" type="submit" form="editForm" name="action" value="post"
                   class="btn btn-success btn-sm"
                   data-disable-on-submit="true" data-action-label="Posting…"
                   title="Decrement stock">Post</button>
+          {% endif %}
 
+          {% if returns_can_delete %}
           <form method="post" action="{{ url_for('supplier_returns.delete_return', batch_id=b.id) }}"
                 onsubmit="return confirm('{% if b.source_kind == "reports_return" %}This is AUTO return from Reports. Are you sure?{% else %}Delete draft?{% endif %}');">
             <button class="btn btn-outline-danger btn-sm">Delete</button>
           </form>
+          {% endif %}
         {% else %}
+          {% if returns_can_unpost %}
           <button id="btn-unpost-top" type="submit" form="editForm" name="action" value="unpost"
                   class="btn btn-warning btn-sm"
                   data-disable-on-submit="true" data-action-label="Unposting…"
                   onclick="return confirm('Unpost? This will restore stock.');">
             Unpost
           </button>
+          {% endif %}
         {% endif %}
       </div>
     </div>
@@ -64,6 +123,14 @@
       <input type="hidden" name="action" id="action-hidden" value="save"/>
 
       <div class="card-body">
+        {% if not returns_can_edit %}
+        <div class="alert alert-secondary py-2">
+          View only. Editing this Return is not permitted.
+        </div>
+        {% endif %}
+
+        <fieldset class="border-0 p-0 m-0"
+                  {% if not returns_can_edit %}disabled{% endif %}>
 
         <!-- ✅ BACK (внутри card-body, в самом верху) -->
         <div class="mb-3">
@@ -87,7 +154,9 @@
 
         <div class="d-flex justify-content-between align-items-center mb-2">
           <h6 class="mb-0">Items</h6>
+          {% if returns_can_edit %}
           <button type="button" class="btn btn-sm btn-outline-primary" id="btn-add-row">+ Add Row</button>
+          {% endif %}
         </div>
 
         <div class="table-responsive">
@@ -147,7 +216,9 @@
                   ${{ '%.2f'|format(it.total_cost or 0) }}
                 </td>
                 <td>
+                  {% if returns_can_edit %}
                   <button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button>
+                  {% endif %}
                 </td>
               </tr>
               {% endfor %}
@@ -188,7 +259,9 @@
                 </td>
                 <td class="text-end line-total">$0.00</td>
                 <td>
+                  {% if returns_can_edit %}
                   <button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button>
+                  {% endif %}
                 </td>
               </tr>
               {% endif %}
@@ -211,25 +284,32 @@
           </div>
         </div>
 
+        </fieldset>
       </div>
 
       <div class="card-footer d-flex gap-2">
+        {% if returns_can_save %}
         <button id="btn-save-bottom" type="submit" name="action" value="save"
                 class="btn btn-primary"
                 data-disable-on-submit="true" data-action-label="Saving…">Save</button>
+        {% endif %}
         {% if b.status == 'draft' %}
+          {% if returns_can_post %}
           <button id="btn-post-bottom" type="submit" name="action" value="post"
                   class="btn btn-success"
                   data-disable-on-submit="true" data-action-label="Posting…">
             Post (decrement stock)
           </button>
+          {% endif %}
         {% else %}
+          {% if returns_can_unpost %}
           <button id="btn-unpost-bottom" type="submit" name="action" value="unpost"
                   class="btn btn-warning"
                   data-disable-on-submit="true" data-action-label="Unposting…"
                   onclick="return confirm('Unpost? This will restore stock.')">
             Unpost (restore stock)
           </button>
+          {% endif %}
         {% endif %}
         <a href="{{ url_for('supplier_returns.list_returns') }}" class="btn btn-light">Cancel</a>
 
@@ -470,7 +550,7 @@
       <td><input class="form-control form-control-sm" name="location[]" placeholder="auto"></td>
       <td><input class="form-control form-control-sm" name="tech_note[]" placeholder="Tech / Job #"></td>
       <td class="text-end line-total">$0.00</td>
-      <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button></td>`;
+      <td>{% if returns_can_edit %}<button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Delete</button>{% endif %}</td>`;
     tbody.appendChild(tr);
     tr.querySelector('input[name="part_number[]"]').focus();
     recalcAll();

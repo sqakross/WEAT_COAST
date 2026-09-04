@@ -18,10 +18,25 @@
           ← Dashboard
         </a>
 
+        {# ERP ACCESS RETURNS STEP 2 - LIST #}
+        {% set returns_role = (current_user.role or '')|lower %}
+        {% set returns_legacy =
+            returns_role in ['admin', 'superadmin']
+        %}
+        {% set returns_can_create =
+            erp_access_allowed(
+                current_user,
+                'erp.returns.create',
+                returns_legacy
+            )
+        %}
+
+        {% if returns_can_create %}
         <a href="{{ url_for('supplier_returns.new_return') }}"
            class="btn btn-success">
           + New Return
         </a>
+        {% endif %}
       </div>
     </div>
 

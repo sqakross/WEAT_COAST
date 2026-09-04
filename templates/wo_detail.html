@@ -50,18 +50,54 @@
       ← Back to list
     </a>
 
-    {# ✅ NEW: quick create from wo_detail #}
-    {% if role_low in ['admin','superadmin'] %}
+    {# ERP ACCESS PATCH 05 STEP 3B - WO DETAIL ACTION PERMISSIONS #}
+    {% set wo_module_allowed =
+         erp_access_allowed(
+             current_user,
+             'erp.work_orders.access',
+             True
+         )
+    %}
+
+    {% set wo_legacy_create =
+         role_low in ['admin', 'superadmin']
+    %}
+
+    {% set wo_legacy_edit =
+         role_low in ['admin', 'superadmin']
+    %}
+
+    {% set wo_can_create =
+         role_low not in ['technician', 'tech']
+         and wo_module_allowed
+         and erp_access_allowed(
+             current_user,
+             'erp.work_orders.create',
+             wo_legacy_create
+         )
+    %}
+
+    {% set wo_can_edit =
+         role_low not in ['technician', 'tech']
+         and wo_module_allowed
+         and erp_access_allowed(
+             current_user,
+             'erp.work_orders.edit',
+             wo_legacy_edit
+         )
+    %}
+
+    {% if wo_can_create %}
       <a class="btn btn-sm btn-success wo-action-btn"
          href="{{ url_for('inventory.wo_new') }}">
         + New Work Order
       </a>
     {% endif %}
 
-    {% if role_low in ['admin','superadmin'] %}
+    {% if wo_can_edit %}
       <a class="btn btn-sm btn-outline-primary wo-action-btn"
          href="{{ url_for('inventory.wo_edit', wo_id=wo.id) }}">
-        ✏️ Edit
+        Edit
       </a>
     {% else %}
       <a class="btn btn-sm btn-outline-primary wo-action-btn"

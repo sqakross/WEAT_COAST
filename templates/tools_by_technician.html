@@ -1,6 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
 
+{# ERP ACCESS TOOLS STEP 2 - BY TECH ACTION UI #}
+{% set ERP_TOOLS_LEGACY_ADMIN =
+     ((current_user.role or '')|lower)
+     in ['admin', 'superadmin'] %}
+
+{% set CAN_TOOLS_TRANSFER =
+     erp_access_allowed(
+       current_user,
+       'erp.tools.access',
+       True
+     )
+     and
+     erp_access_allowed(
+       current_user,
+       'erp.tools.transfer',
+       ERP_TOOLS_LEGACY_ADMIN
+     ) %}
+
 <div class="card mb-3 shadow-sm">
   <div class="card-body">
 
@@ -85,6 +103,7 @@
             </td>
 
           <td class="text-nowrap text-end">
+            {% if CAN_TOOLS_TRANSFER %}
             <a class="btn btn-sm btn-outline-primary"
                href="{{ url_for('inventory.tool_transfer_form', tool_id=r.tool.id) }}">
               Transfer
@@ -98,6 +117,7 @@
                 Return
               </button>
             </form>
+            {% endif %}
           </td>
         </tr>
     {% else %}

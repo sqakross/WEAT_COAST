@@ -403,6 +403,37 @@ def erp_access_allowed(user, permission_code, default_allowed=False):
 app.jinja_env.globals["erp_access_allowed"] = erp_access_allowed
 
 
+# APPLIANCE NAV ACCESS - JINJA HELPER
+def appliance_access_allowed(user, permission_code):
+    """
+    Template-safe Appliance permission check.
+
+    Uses the existing Appliance / Warehouse access-control layer.
+    Superadmin bypass remains handled by AccessControlService.
+    """
+    from services.access_control_service import AccessControlService
+
+    try:
+        is_authenticated = bool(
+            getattr(user, "is_authenticated", False)
+        )
+    except Exception:
+        is_authenticated = False
+
+    if not is_authenticated:
+        return False
+
+    return AccessControlService.has_permission(
+        user,
+        permission_code,
+    )
+
+
+app.jinja_env.globals[
+    "appliance_access_allowed"
+] = appliance_access_allowed
+
+
 # -------------------------------------------------------------------
 # 8) Blueprints
 # -------------------------------------------------------------------

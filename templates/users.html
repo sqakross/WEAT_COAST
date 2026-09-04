@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{# ERP ACCESS USERS STEP 1 FINAL FIX02 - USERS UI #}
 <div class="container-fluid py-4 d-flex justify-content-center">
   <div style="width:100%; max-width:1100px;">
 
@@ -149,12 +150,25 @@
                         {% endif %}
 
                         <!-- Edit -->
+                        {% if users_edit_allowed %}
                         <a class="btn btn-light btn-sm border shadow-sm"
                            style="font-weight:500; line-height:1.2; border-radius:.6rem; min-width:70px;"
                            href="{{ url_for('inventory.edit_user', user_id=u.id) }}">
                           ✏️ Edit
                         </a>
+                        {% endif %}
 
+                        {# ERP ACCESS USERS UI FIX03 - CHANGE PASSWORD #}
+                        {% set can_change_password_ui =
+                             (current_user.role or '')|lower == 'superadmin'
+                             or current_user.id == u.id
+                             or (
+                               (current_user.role or '')|lower == 'admin'
+                               and users_edit_allowed
+                             )
+                        %}
+                        
+                        {% if can_change_password_ui %}
                         <!-- Change Password (open modal) -->
                         <button class="btn btn-primary btn-sm shadow-sm"
                                 style="font-weight:500; line-height:1.2; border-radius:.6rem; min-width:120px; box-shadow:0 .3rem .6rem rgba(13,110,253,.25)!important;"
@@ -164,8 +178,17 @@
                                 onclick="openPasswordModal(this)">
                           🔐 Change
                         </button>
+                        {% endif %}
 
-                        {% if (current_user.role or '')|lower == 'superadmin' and u.id != current_user.id %}
+                        {% if u.id != current_user.id
+                              and (
+                                (current_user.role or '')|lower == 'superadmin'
+                                or (
+                                  (current_user.role or '')|lower == 'admin'
+                                  and users_delete_allowed
+                                  and (u.role or '')|lower in ['user','viewer','technician']
+                                )
+                              ) %}
                         <!-- Delete -->
                         <form method="post"
                               action="{{ url_for('inventory.delete_user', user_id=u.id) }}"
@@ -198,6 +221,7 @@
         </div>
       </div>
 
+      {% if users_create_allowed %}
       <!-- RIGHT SIDE: Create new user -->
       <div class="col-lg-5">
 
@@ -288,6 +312,7 @@
           </div>
         </div>
       </div>
+      {% endif %}
 
     </div> <!-- /row -->
 

@@ -8,6 +8,7 @@ from models import SupplierReturnBatch, SupplierReturnItem, Part
 from services.supplier_returns_services import (
     recalc_batch_totals, post_batch, unpost_batch, SupplierReturnError
 )
+from services.erp_access_service import ErpAccessService
 
 supplier_returns_bp = Blueprint("supplier_returns", __name__, url_prefix="/supplier_returns")
 
@@ -21,7 +22,31 @@ def _require_admin():
 @supplier_returns_bp.route("/api/lookup")
 @login_required
 def api_part_lookup():
-    if not _require_admin():
+    # ERP ACCESS RETURNS STEP 1 - LOOKUP
+    role = (getattr(current_user, "role", "") or "").lower()
+    legacy_admin_allowed = role in ("admin", "superadmin")
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.returns.access",
+        default_allowed=legacy_admin_allowed,
+    ):
+        return {"ok": False, "error": "forbidden"}, 403
+
+    # ERP RETURNS STEP 1B-v4 - LOOKUP
+    can_create = ErpAccessService.is_allowed(
+        current_user,
+        "erp.returns.create",
+        default_allowed=legacy_admin_allowed,
+    )
+
+    can_edit = ErpAccessService.is_allowed(
+        current_user,
+        "erp.returns.edit",
+        default_allowed=legacy_admin_allowed,
+    )
+
+    if not (can_create or can_edit):
         return {"ok": False, "error": "forbidden"}, 403
 
     pn = (request.args.get("pn") or "").strip()
@@ -46,8 +71,16 @@ def api_part_lookup():
 @supplier_returns_bp.route("/", methods=["GET"])
 @login_required
 def list_returns():
-    if not _require_admin():
-        flash("Access denied", "danger")
+    # ERP ACCESS RETURNS STEP 1 - LIST
+    role = (getattr(current_user, "role", "") or "").lower()
+    legacy_admin_allowed = role in ("admin", "superadmin")
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.returns.access",
+        default_allowed=legacy_admin_allowed,
+    ):
+        flash("Access denied: Returns access is disabled.", "danger")
         return redirect(url_for("inventory.dashboard"))
 
     supplier = (request.args.get("supplier") or "").strip()
@@ -110,9 +143,25 @@ def list_returns():
 @supplier_returns_bp.route("/new", methods=["GET", "POST"])
 @login_required
 def new_return():
-    if not _require_admin():
-        flash("Access denied", "danger")
+    # ERP ACCESS RETURNS STEP 1 - NEW
+    role = (getattr(current_user, "role", "") or "").lower()
+    legacy_admin_allowed = role in ("admin", "superadmin")
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.returns.access",
+        default_allowed=legacy_admin_allowed,
+    ):
+        flash("Access denied: Returns access is disabled.", "danger")
         return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.returns.create",
+        default_allowed=legacy_admin_allowed,
+    ):
+        flash("Access denied: Returns create access is disabled.", "danger")
+        return redirect(url_for(".list_returns"))
 
     if request.method == "POST":
         b = SupplierReturnBatch(
@@ -228,9 +277,18 @@ def _save_rows_from_request(b: SupplierReturnBatch) -> dict[int, str]:
 @supplier_returns_bp.route("/<int:batch_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_return(batch_id: int):
-    if not _require_admin():
-        flash("Access denied", "danger")
+    # ERP ACCESS RETURNS STEP 1 - EDIT
+    role = (getattr(current_user, "role", "") or "").lower()
+    legacy_admin_allowed = role in ("admin", "superadmin")
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.returns.access",
+        default_allowed=legacy_admin_allowed,
+    ):
+        flash("Access denied: Returns access is disabled.", "danger")
         return redirect(url_for("inventory.dashboard"))
+
 
     b = SupplierReturnBatch.query.get_or_404(batch_id)
 
@@ -238,6 +296,76 @@ def edit_return(batch_id: int):
         action = _get_action_from_form()
         # Запомним, был ли батч уже POSTED до любых действий
         was_posted = (b.status or "draft") == "posted"
+        # ERP RETURNS STEP 1B-v4 - ACTION PERMISSIONS
+        def _require_return_permission(code: str, message: str) -> bool:
+            allowed = ErpAccessService.is_allowed(
+                current_user,
+                code,
+                default_allowed=legacy_admin_allowed,
+            )
+            if not allowed:
+                flash(message, "danger")
+            return allowed
+
+        # Every POST to this endpoint changes the Return document.
+        if not _require_return_permission(
+            "erp.returns.edit",
+            "Access denied: Returns edit access is disabled.",
+        ):
+            return redirect(
+                url_for(".edit_return", batch_id=b.id)
+            )
+
+        # Explicit POST changes inventory.
+        if action == "post":
+            if not _require_return_permission(
+                "erp.returns.post",
+                "Access denied: Returns post access is disabled.",
+            ):
+                return redirect(
+                    url_for(".edit_return", batch_id=b.id)
+                )
+
+        # Explicit UNPOST restores inventory.
+        if action == "unpost":
+            if not _require_return_permission(
+                "erp.returns.unpost",
+                "Access denied: Returns unpost access is disabled.",
+            ):
+                return redirect(
+                    url_for(".edit_return", batch_id=b.id)
+                )
+
+        # SAVE of an already POSTED Return internally performs:
+        # UNPOST -> modify -> POST.
+        if was_posted and action == "save":
+            if not _require_return_permission(
+                "erp.returns.unpost",
+                "Access denied: editing a posted Return requires Unpost permission.",
+            ):
+                return redirect(
+                    url_for(".edit_return", batch_id=b.id)
+                )
+
+            if not _require_return_permission(
+                "erp.returns.post",
+                "Access denied: editing a posted Return requires Post permission.",
+            ):
+                return redirect(
+                    url_for(".edit_return", batch_id=b.id)
+                )
+
+        # Existing POST flow can also auto-unpost an already-posted
+        # Return before posting it again.
+        if was_posted and action == "post":
+            if not _require_return_permission(
+                "erp.returns.unpost",
+                "Access denied: re-posting this Return requires Unpost permission.",
+            ):
+                return redirect(
+                    url_for(".edit_return", batch_id=b.id)
+                )
+
 
         # Если батч был POSTED и жмём Save/Post —
         # сначала делаем UNPOST, чтобы вернуть старые количества на склад,
@@ -439,9 +567,25 @@ def edit_return(batch_id: int):
 @supplier_returns_bp.route("/<int:batch_id>/delete", methods=["POST"])
 @login_required
 def delete_return(batch_id: int):
-    if not _require_admin():
-        flash("Access denied", "danger")
+    # ERP ACCESS RETURNS STEP 1 - DELETE
+    role = (getattr(current_user, "role", "") or "").lower()
+    legacy_admin_allowed = role in ("admin", "superadmin")
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.returns.access",
+        default_allowed=legacy_admin_allowed,
+    ):
+        flash("Access denied: Returns access is disabled.", "danger")
         return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.returns.delete",
+        default_allowed=legacy_admin_allowed,
+    ):
+        flash("Access denied: Returns delete access is disabled.", "danger")
+        return redirect(url_for(".list_returns"))
 
     b = SupplierReturnBatch.query.get_or_404(batch_id)
     if (b.status or "draft") != "draft":

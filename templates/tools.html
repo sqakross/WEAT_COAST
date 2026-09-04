@@ -1,6 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
 
+{# ERP ACCESS TOOLS STEP 2 - ACTION UI #}
+{% set ERP_TOOLS_LEGACY_ADMIN =
+     ((current_user.role or '')|lower)
+     in ['admin', 'superadmin'] %}
+
+{% set CAN_TOOLS_TRANSFER =
+     erp_access_allowed(
+       current_user,
+       'erp.tools.access',
+       True
+     )
+     and
+     erp_access_allowed(
+       current_user,
+       'erp.tools.transfer',
+       ERP_TOOLS_LEGACY_ADMIN
+     ) %}
+
 <h3 class="mb-3">Tools</h3>
 
 <form method="get" class="row g-2 mb-3">
@@ -131,7 +149,7 @@
 
 <td>{{ t.location or '—' }}</td>
       <td>
-  {% if t.assigned_qty > 0 %}
+  {% if t.assigned_qty > 0 and CAN_TOOLS_TRANSFER %}
     <div class="d-flex gap-1">
       <form method="post"
             action="{{ url_for('inventory.tool_return', tool_id=t.id) }}"

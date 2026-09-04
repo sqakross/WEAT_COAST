@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 
+{# ERP ACCESS USERS STEP 1 FINAL FIX02 - EDIT UI #}
 <div class="container-sm" style="max-width: 680px;">
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h3 class="mb-0">
@@ -25,6 +26,7 @@
 
         <div class="mb-4">
           <label class="form-label fw-semibold">Role</label>
+          {% if change_role_allowed %}
           <select name="role" class="form-select" required>
             {% for value, caption in role_options %}
               <option value="{{ value }}"
@@ -33,6 +35,18 @@
               </option>
             {% endfor %}
           </select>
+          {% else %}
+          <input type="text"
+                 class="form-control"
+                 value="{{ (user.role or '')|upper }}"
+                 disabled>
+          <input type="hidden"
+                 name="role"
+                 value="{{ (user.role or '')|lower }}">
+          <div class="form-text">
+            Role changes are disabled for your account.
+          </div>
+          {% endif %}
           <div class="form-text">
             Default shop role: <code>Technician</code>.
           </div>

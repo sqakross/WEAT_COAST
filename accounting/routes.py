@@ -1,6 +1,8 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 
+from services.erp_access_service import ErpAccessService
+
 accounting_bp = Blueprint(
     "accounting",
     __name__,
@@ -8,9 +10,89 @@ accounting_bp = Blueprint(
 )
 
 
+# ERP ACCESS ACCOUNTING STEP 1 - BACKEND
+
+_ACCOUNTING_READ_ONLY_ENDPOINTS = {
+    "accounting.technician_balances",
+    "accounting.technician_ledger",
+    "accounting.supplier_statements",
+    "accounting.statement_view",
+}
+
+
+def _accounting_legacy_allowed():
+    role = (
+        getattr(current_user, "role", "")
+        or ""
+    ).strip().lower()
+
+    return role in (
+        "admin",
+        "superadmin",
+    )
+
+
 def _accounting_access_required():
-    role = (getattr(current_user, "role", "") or "").strip().lower()
-    return role in ("admin", "superadmin")
+    return ErpAccessService.is_allowed(
+        current_user,
+        "erp.accounting.access",
+        default_allowed=_accounting_legacy_allowed(),
+    )
+
+
+def _accounting_manage_required():
+    if not _accounting_access_required():
+        return False
+
+    return ErpAccessService.is_allowed(
+        current_user,
+        "erp.accounting.manage",
+        default_allowed=_accounting_legacy_allowed(),
+    )
+
+
+@accounting_bp.before_request
+def _erp_accounting_manage_gate():
+    """
+    ERP top-level Accounting authorization.
+
+    All Accounting routes require module access through their
+    existing _accounting_access_required() checks.
+
+    Confirmed read-only endpoints need ACCESS only.
+    Every other Accounting endpoint is an administrative
+    workflow and additionally requires MANAGE.
+
+    This preserves legacy admin/superadmin behavior when
+    overrides are DEFAULT.
+    """
+
+    endpoint = (
+        request.endpoint
+        or ""
+    )
+
+    if not endpoint.startswith(
+        "accounting."
+    ):
+        return None
+
+    if endpoint in _ACCOUNTING_READ_ONLY_ENDPOINTS:
+        return None
+
+    if _accounting_manage_required():
+        return None
+
+    flash(
+        "Access denied: Accounting management is disabled.",
+        "danger",
+    )
+
+    return redirect(
+        url_for(
+            "accounting.technician_balances"
+        )
+    )
 
 
 @accounting_bp.get("/technicians")

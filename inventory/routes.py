@@ -4883,10 +4883,43 @@ def api_job_duplicate_check():
 @inventory_bp.get("/work_orders/new", endpoint="wo_new")
 @login_required
 def wo_new():
-    role = (getattr(current_user, "role", "") or "").strip().lower()
-    if role not in ("admin", "superadmin"):
+    # ERP ACCESS PATCH 05 STEP 2 - WO NEW
+    role = (
+        getattr(current_user, "role", "") or ""
+    ).strip().lower()
+
+    # Keep the existing technician workflow unchanged.
+    # ERP override must not turn a technician into a WO creator.
+    if role == "technician":
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Work Orders access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    legacy_create_allowed = (
+        role in ("admin", "superadmin")
+    )
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.create",
+        default_allowed=legacy_create_allowed,
+    ):
+        flash(
+            "Access denied: Create Work Order permission is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.wo_list"))
+
 
     # Ð¼Ð¸Ð½Ð¸Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ð¹ "Ð¿ÑƒÑÑ‚Ð¾Ð¹" Ð¾Ð±ÑŠÐµÐºÑ‚, Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÑˆÐ°Ð±Ð»Ð¾Ð½ Ð¼Ð¾Ð³ Ð¾Ñ‚Ñ€Ð¸ÑÐ¾Ð²Ð°Ñ‚ÑŒ Ð¿Ð¾Ð»Ñ
     class _WO:
@@ -5049,7 +5082,24 @@ def wo_toggle_ordered(wo_id: int, wop_id: int):
     role = (getattr(current_user, "role", "") or "").strip().lower()
     tech = (getattr(wo, "technician_name", "") or "").strip().lower()
 
-    if not (role in ("admin", "superadmin") or (me and me == tech)):
+    # ERP ACCESS PATCH 05 STEP 4A-v2 - WO TOGGLE ORDERED
+    # Existing assigned-technician branch (me == tech) is preserved.
+    # ERP edit permission replaces only the legacy admin/superadmin branch.
+    if not ((
+            role != "technician"
+            and ErpAccessService.is_allowed(
+                current_user,
+                "erp.work_orders.access",
+                default_allowed=True,
+            )
+            and ErpAccessService.is_allowed(
+                current_user,
+                "erp.work_orders.edit",
+                default_allowed=(
+                    role in ("admin", "superadmin")
+                ),
+            )
+        ) or (me and me == tech)):
         flash("You are not allowed to change ordered status for this WO.", "danger")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
@@ -5313,6 +5363,31 @@ def api_work_order_stamp(wo_id):
 @inventory_bp.get("/work_orders/<int:wo_id>", endpoint="wo_detail")
 @login_required
 def wo_detail(wo_id):
+    # ERP ACCESS FIX 05 STEP 1A - WO DETAIL current_user import
+    from flask_login import current_user
+
+    # ERP ACCESS PATCH 05 STEP 1A - WO DETAIL ACCESS
+    # Technician workflow is intentionally preserved unchanged.
+    # Existing own-WO restrictions below remain the source of truth
+    # for technicians.
+    role_access_low = (
+        getattr(current_user, "role", "") or ""
+    ).strip().lower()
+
+    if role_access_low != "technician":
+        if not ErpAccessService.is_allowed(
+            current_user,
+            "erp.work_orders.access",
+            default_allowed=True,
+        ):
+            flash(
+                "Access denied: Work Orders access is disabled.",
+                "danger",
+            )
+            return redirect(
+                url_for("inventory.dashboard")
+            )
+
     from flask import render_template, flash, redirect, url_for, session
     from sqlalchemy import func, or_, and_, case
     from sqlalchemy.orm import selectinload, joinedload, lazyload
@@ -5985,6 +6060,21 @@ _RECEIVING_USER_MAP_CACHE = {
 
 @inventory_bp.app_context_processor
 def inject_alerts_count():
+    # ERP ACCESS ALERTS STEP 1 - BADGE
+    if not getattr(current_user, "is_authenticated", False):
+        return {
+            "alerts_count": 0
+        }
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.alerts.access",
+        default_allowed=True,
+    ):
+        return {
+            "alerts_count": 0
+        }
+
     """
     Alert badge Ð´Ð»Ñ Ð²ÐµÑ€Ñ…Ð½ÐµÐ³Ð¾ Ð¼ÐµÐ½ÑŽ.
 
@@ -6032,6 +6122,20 @@ def inject_alerts_count():
 @inventory_bp.get("/work_orders/alerts", endpoint="wo_alerts")
 @login_required
 def wo_alerts():
+    # ERP ACCESS ALERTS STEP 1 - BACKEND
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.alerts.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Alerts access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
     from flask import request, render_template
     from datetime import date, timedelta
     from sqlalchemy import or_, func, case
@@ -6946,6 +7050,50 @@ def asset_receipt_pdf(receipt_number):
 @inventory_bp.get("/reports_grouped/xlsx", endpoint="download_report_xlsx")
 @login_required
 def download_report_xlsx():
+
+    # ERP ACCESS REPORTS STEP 1B - VIEW COSTS EXPORT
+    # Current report exports contain financial cost data.
+    from flask import flash as _erp_cost_flash
+    from flask import redirect as _erp_cost_redirect
+    from flask import url_for as _erp_cost_url_for
+    from flask_login import current_user as _erp_cost_current_user
+
+    if not ErpAccessService.is_allowed(
+        _erp_cost_current_user,
+        "erp.reports.view_costs",
+        default_allowed=True,
+    ):
+        _erp_cost_flash(
+            "Access denied: report cost data is disabled.",
+            "danger",
+        )
+        return _erp_cost_redirect(
+            _erp_cost_url_for("inventory.reports_grouped")
+        )
+
+    # ERP ACCESS REPORTS STEP 1A
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Reports access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.export",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Report export is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
     from flask import request, send_file, flash, redirect, url_for
     from datetime import datetime, timedelta
     from io import BytesIO
@@ -7347,6 +7495,50 @@ def download_report_xlsx():
 @inventory_bp.get("/reports_grouped/returns_xlsx", endpoint="download_returns_xlsx")
 @login_required
 def download_returns_xlsx():
+
+    # ERP ACCESS REPORTS STEP 1B - VIEW COSTS EXPORT
+    # Current report exports contain financial cost data.
+    from flask import flash as _erp_cost_flash
+    from flask import redirect as _erp_cost_redirect
+    from flask import url_for as _erp_cost_url_for
+    from flask_login import current_user as _erp_cost_current_user
+
+    if not ErpAccessService.is_allowed(
+        _erp_cost_current_user,
+        "erp.reports.view_costs",
+        default_allowed=True,
+    ):
+        _erp_cost_flash(
+            "Access denied: report cost data is disabled.",
+            "danger",
+        )
+        return _erp_cost_redirect(
+            _erp_cost_url_for("inventory.reports_grouped")
+        )
+
+    # ERP ACCESS REPORTS STEP 1A
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Reports access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.export",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Report export is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
     from flask import request, send_file, flash, redirect, url_for
     from datetime import datetime, timedelta
     from io import BytesIO
@@ -7790,6 +7982,50 @@ def download_returns_xlsx():
 @inventory_bp.get("/reports_grouped/stock_xlsx", endpoint="download_stock_xlsx")
 @login_required
 def download_stock_xlsx():
+
+    # ERP ACCESS REPORTS STEP 1B - VIEW COSTS EXPORT
+    # Current report exports contain financial cost data.
+    from flask import flash as _erp_cost_flash
+    from flask import redirect as _erp_cost_redirect
+    from flask import url_for as _erp_cost_url_for
+    from flask_login import current_user as _erp_cost_current_user
+
+    if not ErpAccessService.is_allowed(
+        _erp_cost_current_user,
+        "erp.reports.view_costs",
+        default_allowed=True,
+    ):
+        _erp_cost_flash(
+            "Access denied: report cost data is disabled.",
+            "danger",
+        )
+        return _erp_cost_redirect(
+            _erp_cost_url_for("inventory.reports_grouped")
+        )
+
+    # ERP ACCESS REPORTS STEP 1A
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Reports access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.export",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Report export is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
     from flask import request, send_file
     from datetime import datetime
     from io import BytesIO
@@ -8079,10 +8315,43 @@ def download_stock_xlsx():
 @inventory_bp.post("/work_orders/new", endpoint="wo_create")
 @login_required
 def wo_create():
-    role = (getattr(current_user, "role", "") or "").strip().lower()
-    if role not in ("admin", "superadmin"):
+    # ERP ACCESS PATCH 05 STEP 2 - WO CREATE
+    role = (
+        getattr(current_user, "role", "") or ""
+    ).strip().lower()
+
+    # Keep the existing technician workflow unchanged.
+    # ERP override must not turn a technician into a WO creator.
+    if role == "technician":
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Work Orders access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    legacy_create_allowed = (
+        role in ("admin", "superadmin")
+    )
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.create",
+        default_allowed=legacy_create_allowed,
+    ):
+        flash(
+            "Access denied: Create Work Order permission is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.wo_list"))
+
 
     f = request.form
 
@@ -8266,10 +8535,43 @@ def wo_newx(prefill_wo=None, prefill_units=None):
     from flask import session, render_template
     recent_suppliers = session.get("recent_suppliers", [])
 
-    role_low = (getattr(current_user, "role", "") or "").lower()
-    if role_low not in ("admin", "superadmin"):
+    # ERP ACCESS PATCH 05 STEP 2 - WO NEWX
+    role_low = (
+        getattr(current_user, "role", "") or ""
+    ).strip().lower()
+
+    # Keep the existing technician workflow unchanged.
+    # ERP override must not turn a technician into a WO creator.
+    if role_low == "technician":
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Work Orders access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    legacy_create_allowed = (
+        role_low in ("admin", "superadmin")
+    )
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.create",
+        default_allowed=legacy_create_allowed,
+    ):
+        flash(
+            "Access denied: Create Work Order permission is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.wo_list"))
+
 
     if prefill_wo is not None:
         wo = prefill_wo
@@ -8509,10 +8811,6 @@ def wo_save():
         return set(_parse_jobs(getattr(wo_obj, "job_numbers", "") or ""))
 
     # ---------- access control ----------
-    role_low = (getattr(current_user, "role", "") or "").strip().lower()
-    if role_low not in ("admin", "superadmin"):
-        flash("Access denied", "danger")
-        return redirect(url_for("inventory.wo_list"))
 
 
     f = request.form
@@ -8559,6 +8857,55 @@ def wo_save():
     # new vs edit
     wo_id = (f.get("wo_id") or "").strip()
     is_new = not wo_id
+
+    # ERP ACCESS PATCH 05 STEP 3A - WO SAVE
+    role_low = (
+        getattr(current_user, "role", "") or ""
+    ).strip().lower()
+
+    # Technician save behavior is intentionally unchanged.
+    if role_low == "technician":
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_list"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Work Orders access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    legacy_write_allowed = (
+        role_low in ("admin", "superadmin")
+    )
+
+    write_permission = (
+        "erp.work_orders.create"
+        if is_new
+        else "erp.work_orders.edit"
+    )
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        write_permission,
+        default_allowed=legacy_write_allowed,
+    ):
+        if is_new:
+            flash(
+                "Access denied: Create Work Order permission is disabled.",
+                "danger",
+            )
+        else:
+            flash(
+                "Access denied: Edit Work Order permission is disabled.",
+                "danger",
+            )
+
+        return redirect(url_for("inventory.wo_list"))
 
     # Ð²Ð·ÑÑ‚ÑŒ WorkOrder ÑÑ€Ð°Ð·Ñƒ Ð²Ð¼ÐµÑÑ‚Ðµ Ñ appliances Ð¸ parts
     if is_new:
@@ -9663,6 +10010,27 @@ def wo_list():
       type    - BASE | INSURANCE
       status  - search_ordered | ordered | done | cancel_job
     """
+    # ERP ACCESS PATCH 05 STEP 1A - WO LIST ACCESS
+    # Technician workflow is intentionally preserved unchanged.
+    # ERP Work Orders overrides currently apply only to non-technicians.
+    role_low = (
+        getattr(current_user, "role", "") or ""
+    ).strip().lower()
+
+    if role_low != "technician":
+        if not ErpAccessService.is_allowed(
+            current_user,
+            "erp.work_orders.access",
+            default_allowed=True,
+        ):
+            flash(
+                "Access denied: Work Orders access is disabled.",
+                "danger",
+            )
+            return redirect(
+                url_for("inventory.dashboard")
+            )
+
     from datetime import datetime, timedelta
     from sqlalchemy import and_, or_, func, String
     from sqlalchemy.orm import joinedload
@@ -10995,6 +11363,38 @@ def wo_issue_instock(wo_id):
         )
     )
 
+# ============================================================
+# ERP ACCESS TOOLS STEP 2 - ACCESS TRANSFER
+# ============================================================
+
+def _erp_tools_access_allowed(user):
+    return ErpAccessService.is_allowed(
+        user,
+        "erp.tools.access",
+        default_allowed=True,
+    )
+
+
+def _erp_tools_transfer_allowed(user):
+    if not _erp_tools_access_allowed(user):
+        return False
+
+    role = (
+        getattr(user, "role", "") or ""
+    ).strip().lower()
+
+    legacy_allowed = role in (
+        "admin",
+        "superadmin",
+    )
+
+    return ErpAccessService.is_allowed(
+        user,
+        "erp.tools.transfer",
+        default_allowed=legacy_allowed,
+    )
+
+
 @inventory_bp.post("/tools/<int:tool_id>/return", endpoint="tool_return")
 @login_required
 def tool_return(tool_id):
@@ -11004,9 +11404,23 @@ def tool_return(tool_id):
     from extensions import db
     from models import ToolAsset, ToolMovement
 
-    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
-        flash("Access denied", "danger")
-        return redirect(url_for("inventory.tools_list"))
+    if not _erp_tools_access_allowed(current_user):
+        flash(
+            "Access denied: Tools access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
+    if not _erp_tools_transfer_allowed(current_user):
+        flash(
+            "Access denied: Tool transfer permission is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.tools_list")
+        )
 
     tool = ToolAsset.query.get_or_404(tool_id)
 
@@ -11079,6 +11493,15 @@ def tool_return(tool_id):
 @inventory_bp.get("/tools", endpoint="tools_list")
 @login_required
 def tools_list():
+    if not _erp_tools_access_allowed(current_user):
+        flash(
+            "Access denied: Tools access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
     from collections import defaultdict
     from time import perf_counter
 
@@ -11338,6 +11761,24 @@ def tools_list():
 @inventory_bp.get("/tools/<int:tool_id>/transfer", endpoint="tool_transfer_form")
 @login_required
 def tool_transfer_form(tool_id):
+    if not _erp_tools_access_allowed(current_user):
+        flash(
+            "Access denied: Tools access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
+    if not _erp_tools_transfer_allowed(current_user):
+        flash(
+            "Access denied: Tool transfer permission is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.tools_list")
+        )
+
     from models import ToolAsset, ToolMovement, User
     from sqlalchemy import func
 
@@ -11408,9 +11849,23 @@ def tool_transfer(tool_id):
     from extensions import db
     from models import ToolAsset, ToolMovement, User
 
-    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
-        flash("Access denied", "danger")
-        return redirect(url_for("inventory.tools_list"))
+    if not _erp_tools_access_allowed(current_user):
+        flash(
+            "Access denied: Tools access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
+    if not _erp_tools_transfer_allowed(current_user):
+        flash(
+            "Access denied: Tool transfer permission is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.tools_list")
+        )
 
     tool = ToolAsset.query.get_or_404(tool_id)
 
@@ -11546,6 +12001,15 @@ def tool_transfer(tool_id):
 @inventory_bp.get("/tools/history", endpoint="tools_history")
 @login_required
 def tools_history():
+    if not _erp_tools_access_allowed(current_user):
+        flash(
+            "Access denied: Tools access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
     from time import perf_counter
 
     from flask import current_app, render_template, request
@@ -11706,6 +12170,15 @@ def tools_history():
 @inventory_bp.get("/tools/<int:tool_id>", endpoint="tool_detail")
 @login_required
 def tool_detail(tool_id):
+    if not _erp_tools_access_allowed(current_user):
+        flash(
+            "Access denied: Tools access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
     from flask import render_template
     from sqlalchemy import func, case
     from models import ToolAsset, ToolMovement, WorkOrder
@@ -11839,6 +12312,15 @@ def tool_detail(tool_id):
 @inventory_bp.get("/tools/stats", endpoint="tools_stats")
 @login_required
 def tools_stats():
+    if not _erp_tools_access_allowed(current_user):
+        flash(
+            "Access denied: Tools access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
     from collections import defaultdict
     from time import perf_counter
 
@@ -12070,6 +12552,15 @@ def tools_stats():
 @inventory_bp.get("/tools/tech/<technician>", endpoint="tools_by_technician")
 @login_required
 def tools_by_technician(technician):
+    if not _erp_tools_access_allowed(current_user):
+        flash(
+            "Access denied: Tools access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
     from datetime import datetime
     from time import perf_counter
 
@@ -12425,6 +12916,15 @@ def tools_by_technician(technician):
 @inventory_bp.get("/tools/technician_report.pdf", endpoint="tools_tech_report_pdf")
 @login_required
 def tools_tech_report_pdf():
+    if not _erp_tools_access_allowed(current_user):
+        flash(
+            "Access denied: Tools access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.dashboard")
+        )
+
     from datetime import datetime
     from io import BytesIO
 
@@ -12774,13 +13274,47 @@ def wo_edit(wo_id: int):
         Part,
     )
 
-    role = (getattr(current_user, "role", "") or "").strip().lower()
-    readonly_param = request.args.get("readonly", type=int) == 1
-    readonly = (role not in ("admin", "superadmin")) or readonly_param
+    # ERP ACCESS PATCH 05 STEP 3A - WO EDIT
+    role = (
+        getattr(current_user, "role", "") or ""
+    ).strip().lower()
 
-    if not readonly and role not in ("admin", "superadmin"):
-        flash("Access denied", "danger")
-        return redirect(url_for("inventory.wo_list"))
+    readonly_param = (
+        request.args.get("readonly", type=int) == 1
+    )
+
+    legacy_edit_allowed = (
+        role in ("admin", "superadmin")
+    )
+
+    # Technician behavior is intentionally unchanged:
+    # technician remains readonly even if an ERP override exists.
+    if role == "technician":
+        can_edit_wo = False
+    else:
+        module_allowed = ErpAccessService.is_allowed(
+            current_user,
+            "erp.work_orders.access",
+            default_allowed=True,
+        )
+
+        can_edit_wo = (
+            module_allowed
+            and ErpAccessService.is_allowed(
+                current_user,
+                "erp.work_orders.edit",
+                default_allowed=legacy_edit_allowed,
+            )
+        )
+
+    readonly = (
+        (not can_edit_wo)
+        or readonly_param
+    )
+
+    # ERP ACCESS PATCH 05 STEP 3B - REMOVE LEGACY EDIT ROLE BLOCK
+    # Authorization is handled by can_edit_wo / readonly above.
+    # Technician remains forced readonly there.
 
     # ==================================================
     # WORK ORDER EDIT LOCK
@@ -13727,9 +14261,48 @@ def wo_issue_instock_unit(wo_id, unit_id):
 @inventory_bp.post("/work_orders/<int:wo_id>/status")
 @login_required
 def wo_set_status(wo_id):
-    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+    # ERP ACCESS PATCH 05 STEP 4A-v2 - WO SET STATUS
+    role_low = (
+        getattr(current_user, "role", "") or ""
+    ).strip().lower()
+
+    # Technician did not have this action before.
+    if role_low == "technician":
         flash("Access denied", "danger")
-        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+        return redirect(
+            url_for("inventory.wo_detail", wo_id=wo_id)
+        )
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Work Orders access is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.wo_detail", wo_id=wo_id)
+        )
+
+    legacy_status_allowed = (
+        role_low in ("admin", "superadmin")
+    )
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.edit",
+        default_allowed=legacy_status_allowed,
+    ):
+        flash(
+            "Access denied: Edit Work Order permission is disabled.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.wo_detail", wo_id=wo_id)
+        )
+
     new_status = (request.form.get("status") or "").strip()
     if new_status not in ("search_ordered","ordered","done"):
         flash("Invalid status", "warning")
@@ -14725,6 +15298,18 @@ def issue_ui():
 @inventory_bp.route('/reports', methods=['GET', 'POST'])
 @login_required
 def reports():
+    # ERP ACCESS REPORTS STEP 1A
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Reports access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
     query = IssuedPartRecord.query.join(Part)
     start_date = request.form.get('start_date')
     end_date = request.form.get('end_date')
@@ -14783,6 +15368,20 @@ def reports():
 @login_required
 def reports_grouped():
     from collections import defaultdict
+    from flask_login import current_user
+
+    # ERP ACCESS REPORTS STEP 1A FIX 01
+    # current_user must be imported before the ERP access guard.
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Reports access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
     from datetime import datetime, time, timedelta, timezone
     from zoneinfo import ZoneInfo
 
@@ -14790,7 +15389,6 @@ def reports_grouped():
     from sqlalchemy import func, or_, case
 
     from flask import render_template, request, flash, redirect, url_for
-    from flask_login import current_user
 
     from extensions import db
     from models import IssuedPartRecord, IssuedBatch, Part, utc_to_local, IssuedConsumptionLog
@@ -16631,6 +17229,50 @@ def allowed_file(filename: str) -> bool:
 @inventory_bp.route('/reports/download')
 @login_required
 def download_report_pdf():
+
+    # ERP ACCESS REPORTS STEP 1B - VIEW COSTS EXPORT
+    # Current report exports contain financial cost data.
+    from flask import flash as _erp_cost_flash
+    from flask import redirect as _erp_cost_redirect
+    from flask import url_for as _erp_cost_url_for
+    from flask_login import current_user as _erp_cost_current_user
+
+    if not ErpAccessService.is_allowed(
+        _erp_cost_current_user,
+        "erp.reports.view_costs",
+        default_allowed=True,
+    ):
+        _erp_cost_flash(
+            "Access denied: report cost data is disabled.",
+            "danger",
+        )
+        return _erp_cost_redirect(
+            _erp_cost_url_for("inventory.reports_grouped")
+        )
+
+    # ERP ACCESS REPORTS STEP 1A
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Reports access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.reports.export",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Report export is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.reports_grouped"))
+
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter, landscape
@@ -16748,9 +17390,38 @@ def download_report_pdf():
 @inventory_bp.route("/users", methods=["GET", "POST"])
 @login_required
 def users():
+    # ERP ACCESS USERS STEP 1 FINAL FIX02 - BACKEND
+    actor_role = (current_user.role or "").strip().lower()
+
+    # ERP overrides customize ADMIN STAFF only.
+    # They do not promote operational roles into administrators.
+    if actor_role not in {ROLE_ADMIN, ROLE_SUPERADMIN}:
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Manage Users access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
     if request.method == "POST":
-        if current_user.role != ROLE_SUPERADMIN:
-            flash("Access denied", "danger")
+        if not ErpAccessService.is_allowed(
+            current_user,
+            "erp.users.create",
+            default_allowed=(
+                actor_role == ROLE_SUPERADMIN
+            ),
+        ):
+            flash(
+                "Access denied: Create Users is disabled.",
+                "danger",
+            )
             return redirect(url_for("inventory.users"))
 
         username = (request.form.get("username") or "").strip()
@@ -16765,15 +17436,37 @@ def users():
             )
             return redirect(url_for("inventory.users"))
 
-        allowed_roles = {
-            ROLE_TECHNICIAN,
-            ROLE_USER,
-            ROLE_VIEWER,
-            ROLE_ACCOUNTING,
-            "manager",
-            ROLE_ADMIN,
-            ROLE_SUPERADMIN,
-        }
+        if actor_role == ROLE_SUPERADMIN:
+            allowed_roles = {
+                ROLE_TECHNICIAN,
+                ROLE_USER,
+                ROLE_VIEWER,
+                ROLE_ACCOUNTING,
+                "manager",
+                ROLE_ADMIN,
+                ROLE_SUPERADMIN,
+            }
+        else:
+            # ERP ACCESS USERS STEP 2 FIX02V2 - ADMIN ROLE ONLY
+            #
+            # Create Users allows normal operational/business roles.
+            # ADMIN additionally requires explicit Change User Roles = ALLOW.
+            # SUPERADMIN is never assignable by an ADMIN.
+            allowed_roles = {
+                ROLE_TECHNICIAN,
+                ROLE_USER,
+                ROLE_VIEWER,
+                ROLE_ACCOUNTING,
+                "manager",
+            }
+
+            change_role_override = ErpAccessService.get_override(
+                current_user,
+                "erp.users.change_role",
+            )
+
+            if change_role_override == "ALLOW":
+                allowed_roles.add(ROLE_ADMIN)
 
         if role not in allowed_roles:
             flash("Invalid user role.", "danger")
@@ -16814,20 +17507,71 @@ def users():
         .all()
     )
 
-    role_options = [
-        (ROLE_TECHNICIAN, "Technician"),
-        (ROLE_USER, "User"),
-        (ROLE_VIEWER, "Viewer"),
-        (ROLE_ACCOUNTING, "Accounting"),
-        ("manager", "Manager"),
-        (ROLE_ADMIN, "Admin"),
-        (ROLE_SUPERADMIN, "Superadmin"),
-    ]
+    if actor_role == ROLE_SUPERADMIN:
+        role_options = [
+            (ROLE_TECHNICIAN, "Technician"),
+            (ROLE_USER, "User"),
+            (ROLE_VIEWER, "Viewer"),
+            (ROLE_ACCOUNTING, "Accounting"),
+            ("manager", "Manager"),
+            (ROLE_ADMIN, "Admin"),
+            (ROLE_SUPERADMIN, "Superadmin"),
+        ]
+    else:
+        change_role_override = ErpAccessService.get_override(
+            current_user,
+            "erp.users.change_role",
+        )
+
+        role_options = [
+            (ROLE_TECHNICIAN, "Technician"),
+            (ROLE_USER, "User"),
+            (ROLE_VIEWER, "Viewer"),
+            (ROLE_ACCOUNTING, "Accounting"),
+            ("manager", "Manager"),
+        ]
+
+        if change_role_override == "ALLOW":
+            role_options.append(
+                (ROLE_ADMIN, "Admin")
+            )
+
+    users_create_allowed = ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.create",
+        default_allowed=(
+            actor_role == ROLE_SUPERADMIN
+        ),
+    )
+
+    users_edit_allowed = ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.edit",
+        default_allowed=True,
+    )
+
+    users_change_role_allowed = ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.change_role",
+        default_allowed=True,
+    )
+
+    users_delete_allowed = ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.delete",
+        default_allowed=(
+            actor_role == ROLE_SUPERADMIN
+        ),
+    )
 
     response = render_template(
         "users.html",
         users=users,
         role_options=role_options,
+        users_create_allowed=users_create_allowed,
+        users_edit_allowed=users_edit_allowed,
+        users_change_role_allowed=users_change_role_allowed,
+        users_delete_allowed=users_delete_allowed,
     )
 
     return response
@@ -17204,7 +17948,21 @@ def user_access(user_id):
     # ERP ACCESS OVERRIDES - LOAD FOR UI
     # =========================================================
 
-    erp_permission_groups = ERP_PERMISSION_GROUPS
+    # ERP ACCESS USERS UI - HIDE MANAGE ACCESS
+    # Keep erp.users.manage_access registered for possible future use,
+    # but do not expose it in Access / Permissions UI.
+    erp_permission_groups = []
+
+    for group in ERP_PERMISSION_GROUPS:
+        ui_group = dict(group)
+
+        ui_group["permissions"] = [
+            dict(permission)
+            for permission in group.get("permissions", [])
+            if permission.get("code") != "erp.users.manage_access"
+        ]
+
+        erp_permission_groups.append(ui_group)
 
     if is_target_superadmin:
         erp_override_map = {
@@ -17361,9 +18119,33 @@ def user_access(user_id):
 @inventory_bp.route('/users/add', methods=['GET', 'POST'])
 @login_required
 def add_user():
-    if current_user.role not in ['superadmin', 'admin']:
+    actor_role = (current_user.role or "").strip().lower()
+
+    if actor_role not in {ROLE_ADMIN, ROLE_SUPERADMIN}:
         flash("Access denied", "danger")
-        return redirect(url_for('inventory.dashboard'))
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Manage Users access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.create",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Create Users is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.users"))
 
     if request.method == 'POST':
         username = request.form['username'].strip()
@@ -17371,9 +18153,29 @@ def add_user():
         password = request.form['password']
 
         # ÐÐ´Ð¼Ð¸Ð½ Ð¼Ð¾Ð¶ÐµÑ‚ ÑÐ¾Ð·Ð´Ð°Ð²Ð°Ñ‚ÑŒ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ user
-        if current_user.role == 'admin' and role != 'user':
-            flash("Admins can only create users with role 'user'.", "danger")
-            return redirect(url_for('inventory.add_user'))
+        if actor_role == ROLE_ADMIN:
+            allowed_create_roles = {
+                ROLE_TECHNICIAN,
+                ROLE_USER,
+                ROLE_VIEWER,
+                ROLE_ACCOUNTING,
+                "manager",
+            }
+
+            if ErpAccessService.get_override(
+                current_user,
+                "erp.users.change_role",
+            ) == "ALLOW":
+                allowed_create_roles.add(ROLE_ADMIN)
+
+            if role not in allowed_create_roles:
+                flash(
+                    "Access denied: this role cannot be created.",
+                    "danger",
+                )
+                return redirect(
+                    url_for("inventory.add_user")
+                )
 
         if User.query.filter_by(username=username).first():
             flash("Username already exists", "danger")
@@ -17389,7 +18191,30 @@ def add_user():
         flash("User added successfully", "success")
         return redirect(url_for('inventory.users'))
 
-    allowed_roles = ['user'] if current_user.role == 'admin' else ['user', 'admin', 'superadmin']
+    if actor_role == ROLE_SUPERADMIN:
+        allowed_roles = [
+            ROLE_USER,
+            ROLE_ADMIN,
+            ROLE_SUPERADMIN,
+        ]
+    else:
+        change_role_override = ErpAccessService.get_override(
+            current_user,
+            "erp.users.change_role",
+        )
+
+        allowed_roles = [
+            ROLE_TECHNICIAN,
+            ROLE_USER,
+            ROLE_VIEWER,
+            ROLE_ACCOUNTING,
+            "manager",
+        ]
+
+        if change_role_override == "ALLOW":
+            allowed_roles.append(
+                ROLE_ADMIN
+            )
     return render_template('add_user.html', allowed_roles=allowed_roles)
 
 
@@ -17401,6 +18226,38 @@ def edit_user(user_id):
 
     me_role = (current_user.role or '').lower()
     target_role = (user.role or '').lower()
+
+    if me_role not in {ROLE_ADMIN, ROLE_SUPERADMIN}:
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Manage Users access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.edit",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Edit Users is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.users"))
+
+    change_role_allowed = ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.change_role",
+        default_allowed=True,
+    )
 
     # ÐŸÑ€Ð°Ð²Ð°: superadmin â€” Ð²ÑÐµÑ…; admin â€” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ user/viewer/technician Ð¸ ÑÐµÐ±Ñ
     if me_role == 'admin':
@@ -17429,13 +18286,26 @@ def edit_user(user_id):
         ]
 
     else:  # admin
+        change_role_override = ErpAccessService.get_override(
+            current_user,
+            "erp.users.change_role",
+        )
+
         role_options = [
             (ROLE_TECHNICIAN, "Technician"),
             (ROLE_USER, "User"),
             (ROLE_VIEWER, "Viewer"),
+            (ROLE_ACCOUNTING, "Accounting"),
+            ("manager", "Manager"),
         ]
 
-        if user.id == current_user.id:
+        if change_role_override == "ALLOW":
+            role_options.append(
+                (ROLE_ADMIN, "Admin")
+            )
+        elif user.id == current_user.id:
+            # Keep current ADMIN visible when editing yourself.
+            # This does not grant promotion rights.
             role_options.append(
                 (ROLE_ADMIN, "Admin")
             )
@@ -17459,6 +18329,18 @@ def edit_user(user_id):
 
         # Ñ€Ð¾Ð»ÑŒ â€” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð² Ð¿Ñ€ÐµÐ´ÐµÐ»Ð°Ñ… Ñ€Ð°Ð·Ñ€ÐµÑˆÑ‘Ð½Ð½Ñ‹Ñ… Ð¾Ð¿Ñ†Ð¸Ð¹
         allowed_values = {value for value, _caption in role_options}
+
+        if (
+            new_role_raw != target_role
+            and not change_role_allowed
+        ):
+            flash(
+                "Access denied: Change User Roles is disabled.",
+                "danger",
+            )
+            return redirect(
+                url_for("inventory.edit_user", user_id=user.id)
+            )
 
         if new_role_raw not in allowed_values:
             flash(
@@ -17487,7 +18369,12 @@ def edit_user(user_id):
         )
         return redirect(url_for("inventory.users"))
 
-    return render_template('edit_user.html', user=user, role_options=role_options)
+    return render_template(
+        "edit_user.html",
+        user=user,
+        role_options=role_options,
+        change_role_allowed=change_role_allowed,
+    )
 
 @inventory_bp.route('/users/change_password/<int:user_id>', methods=['GET', 'POST'])
 @login_required
@@ -17568,19 +18455,64 @@ def change_password(user_id):
 def delete_user(user_id):
     user = User.query.get_or_404(user_id)
 
-    # Ð¢Ð¾Ð»ÑŒÐºÐ¾ superadmin Ð¼Ð¾Ð¶ÐµÑ‚ ÑƒÐ´Ð°Ð»ÑÑ‚ÑŒ
-    if current_user.role != 'superadmin':
-        flash("Access denied", "danger")
-        return redirect(url_for('inventory.dashboard'))
+    actor_role = (current_user.role or "").strip().lower()
 
+    # Only ADMIN / SUPERADMIN may enter user administration.
+    if actor_role not in {ROLE_ADMIN, ROLE_SUPERADMIN}:
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.access",
+        default_allowed=True,
+    ):
+        flash(
+            "Access denied: Manage Users access is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.dashboard"))
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.users.delete",
+        default_allowed=(
+            actor_role == ROLE_SUPERADMIN
+        ),
+    ):
+        flash(
+            "Access denied: Delete Users is disabled.",
+            "danger",
+        )
+        return redirect(url_for("inventory.users"))
+
+    # Nobody may delete their own account.
     if user.id == current_user.id:
         flash("You cannot delete yourself!", "danger")
-        return redirect(url_for('inventory.users'))
+        return redirect(url_for("inventory.users"))
+
+    target_role = (user.role or "").strip().lower()
+
+    # ADMIN with explicit DELETE may delete operational users only.
+    # ADMIN cannot delete ADMIN, MANAGER, ACCOUNTING or SUPERADMIN.
+    if (
+        actor_role != ROLE_SUPERADMIN
+        and target_role not in {
+            ROLE_TECHNICIAN,
+            ROLE_USER,
+            ROLE_VIEWER,
+        }
+    ):
+        flash(
+            "Access denied: Admin cannot delete this user role.",
+            "danger",
+        )
+        return redirect(url_for("inventory.users"))
 
     db.session.delete(user)
     db.session.commit()
     flash("User deleted successfully", "success")
-    return redirect(url_for('inventory.users'))
+    return redirect(url_for("inventory.users"))
 
 
 @inventory_bp.route('/clear_issued_records')

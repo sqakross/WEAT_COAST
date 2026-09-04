@@ -323,8 +323,41 @@
           Filters
         </button>
 
-        {% if current_user.is_authenticated and current_user.role in ['admin','superadmin'] %}
-          <a href="{{ url_for('inventory.wo_new') }}" class="btn btn-success btn-sm">+ New Work Order</a>
+        {# ERP ACCESS PATCH 05 STEP 5 - WO LIST ACTION PERMISSIONS #}
+        {% set wo_list_role_low = (current_user.role or '')|lower %}
+
+        {% set wo_list_module_allowed =
+             wo_list_role_low in ['technician', 'tech']
+             or erp_access_allowed(
+                 current_user,
+                 'erp.work_orders.access',
+                 True
+             )
+        %}
+
+        {% set wo_list_can_create =
+             wo_list_role_low not in ['technician', 'tech']
+             and wo_list_module_allowed
+             and erp_access_allowed(
+                 current_user,
+                 'erp.work_orders.create',
+                 wo_list_role_low in ['admin', 'superadmin']
+             )
+        %}
+
+        {% set wo_list_can_edit =
+             wo_list_role_low not in ['technician', 'tech']
+             and wo_list_module_allowed
+             and erp_access_allowed(
+                 current_user,
+                 'erp.work_orders.edit',
+                 wo_list_role_low in ['admin', 'superadmin']
+             )
+        %}
+
+        {% if wo_list_can_create %}
+          <a href="{{ url_for('inventory.wo_new') }}"
+             class="btn btn-success btn-sm">+ New Work Order</a>
         {% endif %}
       </div>
     </div>
@@ -599,10 +632,10 @@
             <div class="wo-actions d-inline-flex gap-1">
               <a class="btn btn-outline-primary btn-sm"
                  href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">Open</a>
-              {% if current_user.role in ['admin','superadmin'] %}
+              {% if wo_list_can_edit %}
                   <a class="btn btn-outline-secondary btn-sm"
                      href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">Edit</a>
-                {% elif current_user.role not in ['technician','tech'] %}
+                {% elif wo_list_role_low not in ['technician','tech'] %}
                   <a class="btn btn-outline-secondary btn-sm"
                      href="{{ url_for('inventory.wo_edit', wo_id=w.id, readonly=1) }}">Form</a>
                 {% endif %}

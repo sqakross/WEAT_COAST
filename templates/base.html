@@ -322,12 +322,19 @@
                href="{{ url_for('inventory.dashboard') }}">DASHBOARD</a>
           </li>
           {% endif %}
+          {# ERP ACCESS TOOLS STEP 2 - NAVBAR #}
+          {% if erp_access_allowed(
+               current_user,
+               'erp.tools.access',
+               True
+             ) %}
           <li class="nav-item">
               <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.tools') %} active{% endif %}"
                  href="{{ url_for('inventory.tools_list') }}">
                 TOOLS
               </a>
             </li>
+          {% endif %}
           {% if nav_can_part_create %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.add_part' %} active{% endif %}"
@@ -341,12 +348,31 @@
           </li>
           {% endif %}
 
+          {# ERP ACCESS PATCH 05 STEP 5 - WO NAV #}
           {% set is_wo = request.endpoint and request.endpoint.startswith('inventory.wo_') %}
+          {% set nav_role_low = (current_user.role or '')|lower %}
+          {% set nav_wo_allowed =
+               nav_role_low in ['technician', 'tech']
+               or erp_access_allowed(
+                   current_user,
+                   'erp.work_orders.access',
+                   True
+               )
+          %}
+
+          {% if nav_wo_allowed %}
             <li class="nav-item">
               <a class="nav-link{{ ' active' if is_wo and request.endpoint != 'inventory.wo_alerts' else '' }}"
                  href="{{ url_for('inventory.wo_list') }}">WORK ORDERS</a>
             </li>
+          {% endif %}
 
+            {# ERP ACCESS ALERTS STEP 1 - NAVBAR #}
+            {% if erp_access_allowed(
+                 current_user,
+                 'erp.alerts.access',
+                 True
+               ) %}
             <li class="nav-item">
               <a class="nav-link{% if request.endpoint == 'inventory.wo_alerts' %} active{% endif %}"
                  href="{{ url_for('inventory.wo_alerts') }}">
@@ -356,6 +382,7 @@
                 {% endif %}
               </a>
             </li>
+            {% endif %}
 
             <li class="nav-item">
               <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.model_research' %} active{% endif %}"
@@ -375,7 +402,13 @@
               </li>
             {% endif %}
 
-            <li class="nav-item dropdown">
+            {# APPLIANCE NAV ACCESS - HIDE MODULE #}
+            {% if current_user.is_authenticated
+                  and appliance_access_allowed(
+                      current_user,
+                      'appliance.view'
+                  ) %}
+<li class="nav-item dropdown">
 
               <a class="nav-link dropdown-toggle{% if request.endpoint and request.endpoint.startswith('appliance.') %} active{% endif %}"
                  href="#"
@@ -457,24 +490,69 @@
               </ul>
 
             </li>
+            {% endif %}
 
-          {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
+          {# ERP ACCESS RETURNS STEP 2 - NAVBAR #}
+          {% set nav_returns_role = (current_user.role or '')|lower %}
+          {% set nav_returns_legacy =
+              nav_returns_role in ['admin', 'superadmin']
+          %}
+          {% set nav_can_returns =
+              current_user.is_authenticated
+              and erp_access_allowed(
+                  current_user,
+                  'erp.returns.access',
+                  nav_returns_legacy
+              )
+          %}
+
+          {% if nav_can_returns %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('supplier_returns.') %} active{% endif %}"
                href="{{ url_for('supplier_returns.list_returns') }}">RETURNS</a>
           </li>
           {% endif %}
 
+          {# ERP ACCESS REPORTS STEP 1A - NAVBAR #}
+          {% set nav_reports_role = (current_user.role or '')|lower %}
+          {% set nav_reports_legacy =
+              nav_reports_role in ['admin', 'superadmin', 'accounting', 'user', 'viewer', 'technician']
+          %}
+          {% set nav_can_reports =
+              current_user.is_authenticated
+              and erp_access_allowed(
+                  current_user,
+                  'erp.reports.access',
+                  true
+              )
+          %}
+
+          {% if nav_can_reports %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.reports') %} active{% endif %}"
                href="{{ url_for('inventory.reports_grouped') }}">REPORTS</a>
           </li>
+          {% endif %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.import_parts') %} active{% endif %}"
                href="{{ url_for('inventory.import_parts_upload') }}">IMPORT PARTS</a>
           </li>
 
-          {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
+          {# ERP ACCESS ACCOUNTING STEP 1 - NAVBAR #}
+          {% set nav_accounting_role = (current_user.role or '')|lower %}
+          {% set nav_accounting_legacy =
+              nav_accounting_role in ['admin', 'superadmin']
+          %}
+          {% set nav_accounting_access =
+              current_user.is_authenticated
+              and erp_access_allowed(
+                  current_user,
+                  'erp.accounting.access',
+                  nav_accounting_legacy
+              )
+          %}
+
+          {% if nav_accounting_access %}
             <li class="nav-item dropdown">
               <a
                 class="nav-link dropdown-toggle text-uppercase{% if request.endpoint and request.endpoint.startswith('accounting.') %} active{% endif %}"
@@ -513,7 +591,14 @@
             </li>
             {% endif %}
 
-          {% if current_user.is_authenticated and current_user.role in ['superadmin', 'admin'] %}
+          {# ERP ACCESS USERS STEP 1 FINAL FIX02 - NAVBAR #}
+          {% if current_user.is_authenticated
+                and (current_user.role or '')|lower in ['superadmin', 'admin']
+                and erp_access_allowed(
+                    current_user,
+                    'erp.users.access',
+                    true
+                ) %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.users') %} active{% endif %}"
                href="{{ url_for('inventory.users') }}">MANAGE USERS</a>
