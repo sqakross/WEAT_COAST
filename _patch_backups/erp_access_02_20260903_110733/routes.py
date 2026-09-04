@@ -99,7 +99,7 @@ def process_email_queue(limit: int = 10):
         try:
             _send_email_smtp(row.to_email, row.subject, row.body)
 
-            # âœ… SUCCESS
+            # ✅ SUCCESS
             row.status = "sent"
             row.sent_at = datetime.utcnow()
             row.error = None
@@ -122,7 +122,7 @@ def process_email_queue(limit: int = 10):
             sent_count += 1
 
         except Exception as e:
-            # âŒ FAIL â†’ retry logic
+            # ❌ FAIL → retry logic
             row.attempt_count = int(row.attempt_count or 0) + 1
             row.last_attempt_at = datetime.utcnow()
             row.error = str(e)[:1000]
@@ -224,11 +224,11 @@ _TOTALS_RX    = re.compile(r'^\s*(order\s*total|orderinetot|ordertot|subtotal|to
 
 
 # --- Invoice numbering baseline ---
-INVOICE_START_AT = 140  # Ð½Ð¾Ð²Ñ‹Ðµ Ð¸Ð½Ð²Ð¾Ð¹ÑÑ‹ Ð½Ð°Ñ‡Ð½ÑƒÑ‚ÑÑ Ñ 000140
+INVOICE_START_AT = 140  # новые инвойсы начнутся с 000140
 
 ALLOWED_PDF = {".pdf"}
 
-# ÐšÐ»ÑŽÑ‡ â†’ Ð´ÐµÑ„Ð¾Ð»Ñ‚Ð½Ð°Ñ Ð»Ð¾ÐºÐ°Ñ†Ð¸Ñ
+# Ключ → дефолтная локация
 SUPPLIER_LOC_DEFAULTS = {
     "reliable": "REL",
     "marcone":  "MAR",
@@ -237,10 +237,10 @@ SUPPLIER_LOC_DEFAULTS = {
     "encompass": "ENC",
 }
 
-# inventory/routes.py  (Ð´Ð¾Ð±Ð°Ð²ÑŒ Ñ€ÑÐ´Ð¾Ð¼ Ñ _create_batch_for_records)
-# --- TECH ROLE HELPER (fallback, ÐµÑÐ»Ð¸ Ð½ÐµÑ‚ security.py) ---
+# inventory/routes.py  (добавь рядом с _create_batch_for_records)
+# --- TECH ROLE HELPER (fallback, если нет security.py) ---
 try:
-    from security import is_technician  # Ð¾ÑÐ½Ð¾Ð²Ð½Ð¾Ð¹ Ð¿ÑƒÑ‚ÑŒ
+    from security import is_technician  # основной путь
 except Exception:
     from flask_login import current_user
     def is_technician() -> bool:
@@ -274,9 +274,9 @@ def _back_to_invoice(inv_no=None):
 
 def _job_tokens_from_text(s: str) -> list[str]:
     raw = (s or "").upper()
-    # Ð±ÐµÑ€Ñ‘Ð¼ Ñ‡Ð¸ÑÐ»Ð° (Ñ‚Ð²Ð¾Ñ canonical_job Ð½Ð° ÑÑ‚Ð¾Ð¼ Ð¶Ðµ Ð¿Ñ€Ð¸Ð½Ñ†Ð¸Ð¿Ðµ)
+    # берём числа (твоя canonical_job на этом же принципе)
     nums = re.findall(r"\d+", raw)
-    # ÑƒÐ½Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ðµ, ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÐ¼ Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº
+    # уникальные, сохраняем порядок
     out = []
     for n in nums:
         n = n.strip()
@@ -296,10 +296,10 @@ def _job_tokens(raw: str) -> list[str]:
 
 
 
-# Ñ€ÑÐ´Ð¾Ð¼ Ñ Ð´Ñ€ÑƒÐ³Ð¸Ð¼Ð¸ ÑƒÑ‚Ð¸Ð»Ð¸Ñ‚Ð°Ð¼Ð¸
+# рядом с другими утилитами
 def _is_superadmin_user(u) -> bool:
     role = (getattr(u, "role", "") or "").strip().lower()
-    # Ð¿Ð¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð²Ð°ÐµÐ¼ Ð²ÑÐµ Ñ‚Ð²Ð¾Ð¸ Ð²Ð°Ñ€Ð¸Ð°Ð½Ñ‚Ñ‹ Ñ„Ð»Ð°Ð³Ð¾Ð²
+    # поддерживаем все твои варианты флагов
     return (
         role in ("superadmin", "super admin")
         or bool(getattr(u, "is_superadmin", False))
@@ -308,7 +308,7 @@ def _is_superadmin_user(u) -> bool:
 
 
 def _supplier_to_default_location(supplier_hint: str | None) -> str:
-    """ÐŸÐ¾ Ð¸Ð¼ÐµÐ½Ð¸/Ð¿Ð¾Ð´ÑÐºÐ°Ð·ÐºÐµ Ð¿Ð¾ÑÑ‚Ð°Ð²Ñ‰Ð¸ÐºÐ° Ð²Ñ‹Ð±Ñ€Ð°Ñ‚ÑŒ Ð´ÐµÑ„Ð¾Ð»Ñ‚Ð½ÑƒÑŽ Ð»Ð¾ÐºÐ°Ñ†Ð¸ÑŽ."""
+    """По имени/подсказке поставщика выбрать дефолтную локацию."""
     s = (supplier_hint or "").lower()
     for key, loc in SUPPLIER_LOC_DEFAULTS.items():
         if key in s:
@@ -317,10 +317,10 @@ def _supplier_to_default_location(supplier_hint: str | None) -> str:
 
 def _reserve_invoice_number():
     """
-    Ð‘ÐµÑ€Ñ‘Ð¼ Ð¼Ð°ÐºÑÐ¸Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ð¹ invoice_number Ð¸ Ð² IssuedBatch, Ð¸ Ð² IssuedPartRecord
-    Ð¸ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÐ¼ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¹ Ð½Ð¾Ð¼ÐµÑ€.
+    Берём максимальный invoice_number и в IssuedBatch, и в IssuedPartRecord
+    и возвращаем следующий номер.
     """
-    from models import IssuedBatch, IssuedPartRecord  # Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ Ð»Ð¾Ð²Ð¸Ñ‚ÑŒ Ñ†Ð¸ÐºÐ»Ñ‹
+    from models import IssuedBatch, IssuedPartRecord  # локальный импорт, чтобы не ловить циклы
 
     mb = (
         db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0))
@@ -337,12 +337,12 @@ def _reserve_invoice_number():
 
 def _apply_default_location(obj, default_loc: str):
     """
-    ÐŸÑ€Ð¾ÑÑ‚Ð°Ð²Ð¸Ñ‚ÑŒ default_loc Ñ‚ÑƒÐ´Ð°, Ð³Ð´Ðµ location Ð¿ÑƒÑÑ‚Ð°Ñ.
-    Ð Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚ Ð¸ Ñ DataFrame, Ð¸ ÑÐ¾ ÑÐ¿Ð¸ÑÐºÐ¾Ð¼ dict.
+    Проставить default_loc туда, где location пустая.
+    Работает и с DataFrame, и со списком dict.
     """
     try:
-        import pandas as pd  # Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚ â€” Ð½Ðµ Ð¼ÐµÑˆÐ°ÐµÐ¼ Ð¾ÑÑ‚Ð°Ð»ÑŒÐ½Ð¾Ð¼Ñƒ
-        if hasattr(obj, "copy") and hasattr(obj, "columns"):  # Ð²ÐµÑ€Ð¾ÑÑ‚Ð½Ð¾, DataFrame
+        import pandas as pd  # локальный импорт — не мешаем остальному
+        if hasattr(obj, "copy") and hasattr(obj, "columns"):  # вероятно, DataFrame
             df = obj.copy()
             if "location" not in df.columns:
                 df["location"] = ""
@@ -351,7 +351,7 @@ def _apply_default_location(obj, default_loc: str):
     except Exception:
         pass
 
-    # ÑÐ¿Ð¸ÑÐ¾Ðº ÑÐ»Ð¾Ð²Ð°Ñ€ÐµÐ¹
+    # список словарей
     if isinstance(obj, list):
         for r in obj:
             if not (r.get("location") or "").strip():
@@ -362,14 +362,14 @@ def _apply_default_location(obj, default_loc: str):
 
 def _resolve_default_loc(df, default_loc: str | None, saved_path: str, supplier_hint: str | None = None) -> str:
     """
-    ÐÐ°Ð´Ñ‘Ð¶Ð½Ð¾ Ð²Ñ‹Ð±Ð¸Ñ€Ð°ÐµÐ¼ Ð´ÐµÑ„Ð¾Ð»Ñ‚Ð½ÑƒÑŽ Ð»Ð¾ÐºÐ°Ñ†Ð¸ÑŽ:
-    1) Ð¯Ð²Ð½Ñ‹Ð¹ default_loc (ÐµÑÐ»Ð¸ Ð¿ÐµÑ€ÐµÐ´Ð°Ð»Ð¸)
-    2) supplier_hint (Ð¸Ð· ÐºÐ¾Ð½Ñ‚ÐµÐ½Ñ‚Ð° / Ñ„Ð¾Ñ€Ð¼Ñ‹)
-    3) df['supplier'] (ÐµÑÐ»Ð¸ Ñ€Ð°ÑÐ¿Ð¾Ð·Ð½Ð°Ð»ÑÑ Ñ‚ÐµÐºÑÑ‚Ð¾Ð¼)
-    4) Ð¸Ð¼Ñ Ñ„Ð°Ð¹Ð»Ð° (contains 'reliable'/'marcone' Ð¸ Ñ‚.Ð¿.)
+    Надёжно выбираем дефолтную локацию:
+    1) Явный default_loc (если передали)
+    2) supplier_hint (из контента / формы)
+    3) df['supplier'] (если распознался текстом)
+    4) имя файла (contains 'reliable'/'marcone' и т.п.)
     5) MAIN
     """
-    # 1) ÑƒÐ¶Ðµ Ð¿ÐµÑ€ÐµÐ´Ð°Ð½Ð½Ñ‹Ð¹ default_loc
+    # 1) уже переданный default_loc
     if default_loc:
         return str(default_loc).strip().upper()
 
@@ -378,7 +378,7 @@ def _resolve_default_loc(df, default_loc: str | None, saved_path: str, supplier_
     if loc and loc != "MAIN":
         return loc
 
-    # 3) ÐºÐ¾Ð»Ð¾Ð½ÐºÐ° supplier Ð² DF
+    # 3) колонка supplier в DF
     try:
         if df is not None and "supplier" in df.columns:
             vals = " ".join(str(x) for x in df["supplier"].dropna().astype(str).tolist()).lower()
@@ -388,37 +388,37 @@ def _resolve_default_loc(df, default_loc: str | None, saved_path: str, supplier_
     except Exception:
         pass
 
-    # 4) Ð¸Ð¼Ñ Ñ„Ð°Ð¹Ð»Ð°
+    # 4) имя файла
     base = (saved_path or "").lower()
     loc4 = _supplier_to_default_location(base)
     if loc4 and loc4 != "MAIN":
         return loc4
 
-    # 5) Ð·Ð°Ð¿Ð°ÑÐ½Ð¾Ð¹ Ð²Ð°Ñ€Ð¸Ð°Ð½Ñ‚
+    # 5) запасной вариант
     return "MAIN"
 
 
 def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invoice: str | None = None) -> int:
     """
-    Ð£Ð´Ð°Ð»ÑÐµÑ‚ Ð·Ð°Ð¿Ð¸ÑÐ¸ Ð°Ð½Ñ‚Ð¸-Ð´ÐµÐ´ÑƒÐ¿Ð°, ÑÐ²ÑÐ·Ð°Ð½Ð½Ñ‹Ðµ Ñ batch_id / supplier / invoice.
-    Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ ÐºÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾ ÑƒÐ´Ð°Ð»Ñ‘Ð½Ð½Ñ‹Ñ… Ð·Ð°Ð¿Ð¸ÑÐµÐ¹.
-    Ð¡Ñ‚Ñ€Ð°Ñ‚ÐµÐ³Ð¸Ð¸:
-      1) ImportDedupKey (ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ).
-      2) inventory.dedup_store (ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ).
-      3) Ð ÐµÑ„Ð»ÐµÐºÑÐ¸Ñ Ð‘Ð” Ð¿Ð¾ 'dedup' + 'import' + 'processed' + 'parse' + 'lock' + 'invoice' Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ð°Ð¼.
-         ÐœÐ°Ñ‚Ñ‡ Ð¿Ð¾:
+    Удаляет записи анти-дедупа, связанные с batch_id / supplier / invoice.
+    Возвращает количество удалённых записей.
+    Стратегии:
+      1) ImportDedupKey (если есть).
+      2) inventory.dedup_store (если есть).
+      3) Рефлексия БД по 'dedup' + 'import' + 'processed' + 'parse' + 'lock' + 'invoice' таблицам.
+         Матч по:
            - batch_id/receiving_batch_id/goods_receipt_id
            - supplier/supplier_name/vendor/vendor_name
            - invoice/invoice_number/inv_no/inv_number/invoice_no/order_no
            - key/hash/fingerprint
            - source_file/filename/file_path
-           - JSON-Ð¿Ð¾Ð»Ñ (meta_json/meta/data) Ð¿Ð¾ batch_id/supplier/invoice
+           - JSON-поля (meta_json/meta/data) по batch_id/supplier/invoice
     """
     deleted = 0
     sup = (supplier or "").strip()
     inv = (invoice  or "").strip()
 
-    # --- Ð¡Ñ‚Ñ€Ð°Ñ‚ÐµÐ³Ð¸Ñ 1: ImportDedupKey (ÐµÑÐ»Ð¸ Ð¼Ð¾Ð´ÐµÐ»ÑŒ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÐµÑ‚) ---
+    # --- Стратегия 1: ImportDedupKey (если модель существует) ---
     try:
         from models import ImportDedupKey
         from sqlalchemy import or_, cast, String, func
@@ -426,7 +426,7 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
         q = ImportDedupKey.query
         or_conds = []
 
-        # JSON-Ð¿Ð¾Ð»Ñ: batch_id, supplier, invoice
+        # JSON-поля: batch_id, supplier, invoice
         for mc in ("meta_json", "meta", "data"):
             if hasattr(ImportDedupKey, mc):
                 col = getattr(ImportDedupKey, mc)
@@ -450,7 +450,7 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
                 if sup and inv:
                     or_conds.append(func.upper(col) == (sup + inv).upper())
 
-        # supplier/invoice Ð¿Ñ€ÑÐ¼Ñ‹Ð¼Ð¸ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ°Ð¼Ð¸
+        # supplier/invoice прямыми колонками
         if sup and hasattr(ImportDedupKey, "supplier"):
             or_conds.append(func.upper(getattr(ImportDedupKey, "supplier")) == sup.upper())
         if sup and hasattr(ImportDedupKey, "supplier_name"):
@@ -459,12 +459,12 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
             if inv and hasattr(ImportDedupKey, inv_col):
                 or_conds.append(func.upper(getattr(ImportDedupKey, inv_col)) == inv.upper())
 
-        # Ñ„Ð°Ð¹Ð»Ð¾Ð²Ñ‹Ðµ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ¸
+        # файловые колонки
         for file_col in ("source_file", "filename", "file_path"):
             if hasattr(ImportDedupKey, file_col):
                 col = getattr(ImportDedupKey, file_col)
-                # ÐµÑÐ»Ð¸ Ð² meta Ð½ÐµÑ‚ - Ð²ÑÑ‘ Ñ€Ð°Ð²Ð½Ð¾ Ð¿Ð¾Ñ‡Ð¸ÑÑ‚Ð¸Ð¼ Ð¿Ð¾ Ð½Ð°Ð»Ð¸Ñ‡Ð¸ÑŽ Ñ„Ð°Ð¹Ð»Ð°, ÑÐ¼. Ð¾Ñ‚ÐºÑƒÐ´Ð° Ð²Ñ‹Ð·Ñ‹Ð²Ð°ÐµÑ‚ Ð¿Ð°Ñ€ÑÐµÑ€
-                # Ð¾ÑÑ‚Ð°Ð²Ð»ÑÐµÐ¼ Ð±ÐµÐ· ÑƒÑÐ»Ð¾Ð²Ð¸Ñ â€” Ð·Ð°Ð²Ð¸ÑÐ¸Ñ‚ Ð¾Ñ‚ Ñ‚Ð²Ð¾ÐµÐ³Ð¾ ÐºÐµÐ¹ÑÐ°
+                # если в meta нет - всё равно почистим по наличию файла, см. откуда вызывает парсер
+                # оставляем без условия — зависит от твоего кейса
 
         if or_conds:
             rows = q.filter(or_(*or_conds)).all()
@@ -478,7 +478,7 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
     except Exception:
         db.session.rollback()
 
-    # --- Ð¡Ñ‚Ñ€Ð°Ñ‚ÐµÐ³Ð¸Ñ 2: dedup_store API (ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ) ---
+    # --- Стратегия 2: dedup_store API (если есть) ---
     try:
         try:
             from inventory.dedup_store import iter_keys, del_key  # type: ignore
@@ -513,7 +513,7 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
     except Exception:
         pass
 
-    # --- Ð¡Ñ‚Ñ€Ð°Ñ‚ÐµÐ³Ð¸Ñ 3: Ñ€Ð°ÑÑˆÐ¸Ñ€ÐµÐ½Ð½Ð°Ñ Ñ€ÐµÑ„Ð»ÐµÐºÑÐ¸Ñ Ð‘Ð” ---
+    # --- Стратегия 3: расширенная рефлексия БД ---
     try:
         import sqlalchemy as sa
         engine = db.session.get_bind()
@@ -554,12 +554,12 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
             if inv and col_inv is not None:
                 or_conds.append(sa.func.upper(col_inv) == inv.upper())
             if col_key is not None:
-                # Ð´Ð²Ð° Ð¿Ð¾Ð¿ÑƒÐ»ÑÑ€Ð½Ñ‹Ñ… Ð¿Ð°Ñ‚Ñ‚ÐµÑ€Ð½Ð° ÐºÐ»ÑŽÑ‡ÐµÐ¹
+                # два популярных паттерна ключей
                 if batch_id:
                     or_conds.append(sa.cast(col_key, String).ilike(f"%|B{batch_id}"))
                 if sup and inv:
                     or_conds.append(sa.func.upper(col_key) == (sup + inv).upper())
-            # JSON-Ð¿Ð¾Ð»Ñ
+            # JSON-поля
             for mc in META_CANDS:
                 if mc in cols:
                     jcol = cols[mc]
@@ -588,13 +588,6 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
         pass
 
     return int(deleted or 0)
-
-
-# ============================================================
-# ERP ACCESS - GLOBAL SERVICE IMPORT
-# Required by ERP route authorization guards.
-# ============================================================
-from services.erp_access_service import ErpAccessService
 
 @inventory_bp.get("/parts/model-research", endpoint="model_research")
 @login_required
@@ -1190,7 +1183,7 @@ def receiving_delete(batch_id: int):
     from models import ReceivingBatch
     from services.receiving import unpost_receiving_batch
 
-    # --- Ð´Ð¾ÑÑ‚ÑƒÐ¿ ---
+    # --- доступ ---
     role = (getattr(current_user, "role", "") or "").lower()
     if not (
         role == "superadmin"
@@ -1209,7 +1202,7 @@ def receiving_delete(batch_id: int):
     invoice  = (getattr(batch, "invoice_number", "") or "").strip()
     status   = (getattr(batch, "status", "") or "").lower()
 
-    # helper: Ð²Ñ‹Ñ‚Ð°Ñ‰Ð¸Ñ‚ÑŒ ÑÑ‚Ñ€Ð¾ÐºÐ¸ batch-Ð° (Ð´Ð»Ñ Ð»Ð¾Ð³Ð¾Ð², Ð¸ Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¿Ð¾Ñ‚Ð¾Ð¼ Ð½Ðµ Ð»Ð°Ð·Ð¸Ñ‚ÑŒ Ð² ÑƒÐ¶Ðµ ÑƒÐ´Ð°Ð»Ñ‘Ð½Ð½Ñ‹Ð¹ Ð¾Ð±ÑŠÐµÐºÑ‚)
+    # helper: вытащить строки batch-а (для логов, и чтобы потом не лазить в уже удалённый объект)
     def _get_lines_for_batch(b):
         try:
             return list(b.items or [])
@@ -1234,14 +1227,14 @@ def receiving_delete(batch_id: int):
         batch_id, status, supplier, invoice, sorted(pns)
     )
 
-    # 1. Ð•ÑÐ»Ð¸ Ð±Ð°Ñ‚Ñ‡ Ð±Ñ‹Ð» posted â†’ Ð°ÐºÐºÑƒÑ€Ð°Ñ‚Ð½Ð¾ Ð¾Ñ‚ÐºÐ°Ñ‚Ñ‹Ð²Ð°ÐµÐ¼ Ð¡ÐšÐ›ÐÐ” Ñ‡ÐµÑ€ÐµÐ· Ð¾Ñ„Ð¸Ñ†Ð¸Ð°Ð»ÑŒÐ½Ñ‹Ð¹ ÑÐµÑ€Ð²Ð¸Ñ.
-    #    Ð’ÐÐ–ÐÐž: ÑÑ‚Ð¾ ÑƒÐ¶Ðµ Ð´ÐµÐ»Ð°ÐµÑ‚ Ð¼Ð¸Ð½ÑƒÑ qty Ð¿Ð¾ ÐºÐ°Ð¶Ð´Ð¾Ð¹ ÑÑ‚Ñ€Ð¾ÐºÐµ.
-    #    ÐŸÐ¾ÑÐ»Ðµ ÑÑ‚Ð¾Ð³Ð¾ qty Ð² Ð¸Ð½Ð²ÐµÐ½Ñ‚Ð°Ñ€Ðµ Ð´Ð¾Ð»Ð¶ÐµÐ½ ÑÑ‚Ð°Ñ‚ÑŒ (ÑÑ‚Ð°Ñ€Ñ‹Ð¹ - Ð¿Ñ€Ð¸Ñ…Ð¾Ð´Ð° ÑÑ‚Ð¾Ð³Ð¾ Ð±Ð°Ñ‚Ñ‡Ð°).
+    # 1. Если батч был posted → аккуратно откатываем СКЛАД через официальный сервис.
+    #    ВАЖНО: это уже делает минус qty по каждой строке.
+    #    После этого qty в инвентаре должен стать (старый - прихода этого батча).
     if status == "posted":
         try:
             unpost_receiving_batch(batch.id, getattr(current_user, "id", None))
             current_app.logger.info("[DELETE RECEIVING] unposted batch_id=%s", batch_id)
-            # Ð¿ÐµÑ€ÐµÑ‡Ð¸Ñ‚Ð°ÐµÐ¼ batch Ð¿Ð¾ÑÐ»Ðµ unpost (Ð¾Ð½ Ñ‚ÐµÐ¿ÐµÑ€ÑŒ draft)
+            # перечитаем batch после unpost (он теперь draft)
             batch = db.session.get(ReceivingBatch, batch_id)
         except Exception as e:
             current_app.logger.exception(
@@ -1251,11 +1244,11 @@ def receiving_delete(batch_id: int):
             flash(f"Unable to delete: auto-unpost failed: {e}", "danger")
             return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
-    # 2. Ð•ÑÐ»Ð¸ Ð±Ð°Ñ‚Ñ‡ ÑƒÐ¶Ðµ Ð±Ñ‹Ð» draft (Ð½Ðµ posted), Ð¼Ñ‹ ÐÐ˜Ð§Ð•Ð“Ðž Ð½Ðµ Ñ‚Ñ€Ð¾Ð³Ð°ÐµÐ¼ Ð² Ð¾ÑÑ‚Ð°Ñ‚ÐºÐ°Ñ….
-    #    ÐŸÐ¾Ñ‡ÐµÐ¼Ñƒ? draft Ð½Ðµ Ð´Ð¾Ð»Ð¶ÐµÐ½ Ð±Ñ‹Ñ‚ÑŒ Ð² Ð¸Ð½Ð²ÐµÐ½Ñ‚Ð°Ñ€Ðµ. Ð•ÑÐ»Ð¸ Ð¾Ð½ ÐºÐ°Ðº-Ñ‚Ð¾ Ð¿Ð¾Ð¿Ð°Ð» Ñ‚ÑƒÐ´Ð° Ñ€Ð°Ð½Ð½Ð¸Ð¼ Ð±Ð°Ð³Ð¾Ð¼ â€”
-    #    Ð¼Ñ‹ Ð½Ðµ Ð±ÑƒÐ´ÐµÐ¼ Ð´ÐµÐ»Ð°Ñ‚ÑŒ Ð²Ñ‚Ð¾Ñ€Ð¾Ð¹ Ð¼Ð¸Ð½ÑƒÑ. Ð­Ñ‚Ð¾ Ð»ÑƒÑ‡ÑˆÐµ, Ñ‡ÐµÐ¼ ÑÐ»ÑƒÑ‡Ð°Ð¹Ð½Ð¾ Ð¾Ð±Ð½ÑƒÐ»Ð¸Ñ‚ÑŒ ÑÑ‚Ð¾Ðº.
+    # 2. Если батч уже был draft (не posted), мы НИЧЕГО не трогаем в остатках.
+    #    Почему? draft не должен быть в инвентаре. Если он как-то попал туда ранним багом —
+    #    мы не будем делать второй минус. Это лучше, чем случайно обнулить сток.
 
-    # 3. Ð¢ÐµÐ¿ÐµÑ€ÑŒ ÑƒÐ´Ð°Ð»ÑÐµÐ¼ ÑÐ°Ð¼ batch.
+    # 3. Теперь удаляем сам batch.
     try:
         batch = db.session.get(ReceivingBatch, batch_id)
         if batch:
@@ -1268,7 +1261,7 @@ def receiving_delete(batch_id: int):
         flash(f"Failed to delete batch: {e}", "danger")
         return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
-    # 4. Ð§Ð¸ÑÑ‚Ð¸Ð¼ dedup-ÐºÐ»ÑŽÑ‡Ð¸ (Ñ‡Ñ‚Ð¾Ð± Ð¼Ð¾Ð¶Ð½Ð¾ Ð±Ñ‹Ð»Ð¾ ÑÐ½Ð¾Ð²Ð° Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚Ð½ÑƒÑ‚ÑŒ Ñ‚Ð¾Ñ‚ Ð¶Ðµ invoice/file).
+    # 4. Чистим dedup-ключи (чтоб можно было снова импортнуть тот же invoice/file).
     keys_removed = 0
     try:
         fn = globals().get("_clear_dedup_keys_for_batch")
@@ -1339,7 +1332,7 @@ def receiving_clear_keys(batch_id: int):
 #     import pandas as pd
 #     df = _coerce_norm_df(df).copy()
 #
-#     # Ð‘Ð°Ð·Ð¾Ð²Ñ‹Ð¹ Ð½Ð°Ð±Ð¾Ñ€
+#     # Базовый набор
 #     need_cols = [
 #         "part_number", "part_name",
 #         "qty", "unit_cost", "location",
@@ -1350,15 +1343,15 @@ def receiving_clear_keys(batch_id: int):
 #         if c not in df.columns:
 #             df[c] = None
 #
-#     # qty â†’ int, Ð¾Ñ‚Ñ€Ð¸Ñ†Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ðµ Ð² 0
+#     # qty → int, отрицательные в 0
 #     df["qty"] = pd.to_numeric(df["qty"], errors="coerce").fillna(0).astype(int)
 #     df.loc[df["qty"] < 0, "qty"] = 0
 #
-#     # === ALIASES (Ð’ÐÐ–ÐÐž) =====================================================
-#     # build_receive_movements Ð¶Ð´Ñ‘Ñ‚ 'quantity' â†’ Ð´ÐµÐ»Ð°ÐµÐ¼ Ð°Ð»Ð¸Ð°Ñ
+#     # === ALIASES (ВАЖНО) =====================================================
+#     # build_receive_movements ждёт 'quantity' → делаем алиас
 #     df["quantity"] = df["qty"]
 #
-#     # ÐÐ° Ð²ÑÑÐºÐ¸Ð¹ ÑÐ»ÑƒÑ‡Ð°Ð¹ Ð¿Ð¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð¼ Ñ€Ð°Ð·Ð½Ñ‹Ðµ Ð¸Ð¼ÐµÐ½Ð° Ñ†ÐµÐ½Ñ‹
+#     # На всякий случай поддержим разные имена цены
 #     if "unit_cost" not in df.columns or df["unit_cost"].isna().all():
 #         for alt in ["unitcost", "unit_price", "unitprice", "price", "cost", "last_cost"]:
 #             if alt in df.columns and not df[alt].isna().all():
@@ -1366,18 +1359,18 @@ def receiving_clear_keys(batch_id: int):
 #                 break
 #     # ========================================================================
 #
-#     # unit_cost â†’ float
+#     # unit_cost → float
 #     df["unit_cost"] = pd.to_numeric(df["unit_cost"], errors="coerce")
 #
-#     # location: Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿ÑƒÑÑ‚Ñ‹Ðµ Ð·Ð°Ð¿Ð¾Ð»Ð½ÑÐµÐ¼ default_loc
+#     # location: только пустые заполняем default_loc
 #     empty_loc = df["location"].isna() | (df["location"].astype(str).str.strip() == "")
 #     df.loc[empty_loc, "location"] = default_loc
 #
-#     # source_file: Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿ÑƒÑÑ‚Ñ‹Ðµ â€” Ð¿ÑƒÑ‚Ñ‘Ð¼ Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸
+#     # source_file: только пустые — путём загрузки
 #     empty_sf = df["source_file"].isna() | (df["source_file"].astype(str).str.strip() == "")
 #     df.loc[empty_sf, "source_file"] = saved_path
 #
-#     # row_key: Ð³ÐµÐ½ÐµÑ€Ð¸Ð¼, ÐµÑÐ»Ð¸ Ð¿ÑƒÑÑ‚Ð¾
+#     # row_key: генерим, если пусто
 #     def _mk_key(row):
 #         return f"{row.get('part_number','')}/{row.get('location','')}/{row.get('qty',0)}/{row.get('unit_cost','')}"
 #     empty_rk = df["row_key"].isna() | (df["row_key"].astype(str).str.strip() == "")
@@ -1385,12 +1378,12 @@ def receiving_clear_keys(batch_id: int):
 #
 #     return df
 
-# --- Ð–ÐÐ¡Ð¢ÐšÐÐ¯ ÐÐžÐ ÐœÐÐ›Ð˜Ð—ÐÐ¦Ð˜Ð¯ Ð¨ÐÐŸÐžÐš Ð¢ÐÐ‘Ð›Ð˜Ð¦Ð« ---
+# --- ЖЁСТКАЯ НОРМАЛИЗАЦИЯ ШАПОК ТАБЛИЦЫ ---
 def _harden_preview_headers(df, default_loc: str, supplier_hint: str | None, source_file: str | None):
     """
-    Ð“Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ€ÑƒÐµÑ‚ Ð½Ð°Ð»Ð¸Ñ‡Ð¸Ðµ Ð¸ ÐºÐ¾Ñ€Ñ€ÐµÐºÑ‚Ð½Ñ‹Ðµ Ñ‚Ð¸Ð¿Ñ‹ ÐºÐ¾Ð»Ð¾Ð½Ð¾Ðº:
+    Гарантирует наличие и корректные типы колонок:
       part_number, part_name, quantity, unit_cost, location, supplier, source_file
-    ÐŸÐ¾Ð½Ð¸Ð¼Ð°ÐµÑ‚ PDF-ÑˆÐ°Ð¿ÐºÐ¸: PART #, DESCRIPTION, QTY, UNIT COST, LOCATION.
+    Понимает PDF-шапки: PART #, DESCRIPTION, QTY, UNIT COST, LOCATION.
     """
     import re
     import pandas as pd
@@ -1398,7 +1391,7 @@ def _harden_preview_headers(df, default_loc: str, supplier_hint: str | None, sou
     if df is None:
         return df
 
-    # 1) Ñ‚Ð¾Ñ‡Ð½Ñ‹Ðµ Ð·Ð°Ð³Ð¾Ð»Ð¾Ð²ÐºÐ¸ Ð¸Ð· PDF
+    # 1) точные заголовки из PDF
     hard_map = {
         "PART #": "part_number",
         "PART#": "part_number",
@@ -1416,7 +1409,7 @@ def _harden_preview_headers(df, default_loc: str, supplier_hint: str | None, sou
         if k.upper() in hard_map:
             df.rename(columns={col: hard_map[k.upper()]}, inplace=True)
 
-    # 2) Ð°Ð»Ð¸Ð°ÑÑ‹ Ð½Ð° Ð²ÑÑÐºÐ¸Ð¹ ÑÐ»ÑƒÑ‡Ð°Ð¹ (Ð²Ð´Ñ€ÑƒÐ³ normalize_table Ð²ÐµÑ€Ð½ÑƒÐ»Ð° Ð¸Ð½Ð°Ñ‡Ðµ)
+    # 2) алиасы на всякий случай (вдруг normalize_table вернула иначе)
     alias = {
         "part_number": ["pn", "part", "number", "sku", "code", "item", "item #", "item#"],
         "part_name":   ["name", "descr", "description", "title"],
@@ -1433,12 +1426,12 @@ def _harden_preview_headers(df, default_loc: str, supplier_hint: str | None, sou
                     df.rename(columns={c: canonical}, inplace=True)
                     break
 
-    # 3) Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ðµ Ð¿Ð¾Ð»Ñ â€” ÐµÑÐ»Ð¸ Ð½ÐµÑ‚, ÑÐ¾Ð·Ð´Ð°Ð´Ð¸Ð¼ Ð¿ÑƒÑÑ‚Ñ‹Ðµ
+    # 3) обязательные поля — если нет, создадим пустые
     for col in ("part_number", "part_name", "quantity", "unit_cost", "location", "supplier", "order_no", "source_file"):
         if col not in df.columns:
             df[col] = None
 
-    # 4) ÐµÑÐ»Ð¸ part_number Ð¿ÑƒÑÑ‚ â€” Ð¿Ð¾Ð¿Ñ‹Ñ‚ÐºÐ° ÑƒÐ³Ð°Ð´Ð°Ñ‚ÑŒ Ð¿Ð¾ Â«Ð¿Ð¾Ñ…Ð¾Ð¶ÐµÑÑ‚Ð¸Â» Ð½Ð° Ð°Ñ€Ñ‚Ð¸ÐºÑƒÐ»Ñ‹
+    # 4) если part_number пуст — попытка угадать по «похожести» на артикулы
     if df["part_number"].isna().all() or (df["part_number"].astype(str).str.strip() == "").all():
         candidate = None
         for c in df.columns:
@@ -1452,14 +1445,14 @@ def _harden_preview_headers(df, default_loc: str, supplier_hint: str | None, sou
         if candidate:
             df["part_number"] = df[candidate].astype(str).str.strip()
 
-    # 5) Ñ‚Ð¸Ð¿Ñ‹
+    # 5) типы
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).astype(int)
     df["unit_cost"] = pd.to_numeric(df["unit_cost"], errors="coerce").fillna(0.0)
 
     for col in ("part_number", "part_name", "location", "supplier", "order_no", "source_file"):
         df[col] = df[col].astype(str).replace({"None": ""}).fillna("").str.strip()
 
-    # 6) Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ñ Ð¿Ð¾ ÑƒÐ¼Ð¾Ð»Ñ‡Ð°Ð½Ð¸ÑŽ
+    # 6) значения по умолчанию
     if not default_loc:
         default_loc = "MAIN"
     df.loc[df["location"].eq("") | df["location"].isna(), "location"] = default_loc
@@ -1469,11 +1462,11 @@ def _harden_preview_headers(df, default_loc: str, supplier_hint: str | None, sou
         df.loc[df["supplier"].eq("") | df["supplier"].isna(), "supplier"] = supplier_hint
 
     if source_file:
-        # Ð·Ð°Ð¿Ð¾Ð»Ð½Ð¸Ð¼ Ð¿ÑƒÑÑ‚Ñ‹Ðµ/Ð¿Ñ€Ð¾Ð±ÐµÐ»ÑŒÐ½Ñ‹Ðµ source_file
+        # заполним пустые/пробельные source_file
         empty_sf = (df["source_file"].isna()) | (df["source_file"].astype(str).str.strip() == "")
         df.loc[empty_sf, "source_file"] = source_file
 
-    # 7) Ð¾Ñ‚Ñ„Ð¸Ð»ÑŒÑ‚Ñ€ÑƒÐµÐ¼ Ð¿ÑƒÑÑ‚Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸, Ð½Ð¾ ÐÐ• ÑÐ»Ð¸ÑˆÐºÐ¾Ð¼ Ð°Ð³Ñ€ÐµÑÑÐ¸Ð²Ð½Ð¾
+    # 7) отфильтруем пустые строки, но НЕ слишком агрессивно
     keep = (
         (~df["part_number"].astype(str).str.strip().eq("")) |
         (~df["part_name"].astype(str).str.strip().eq("")) |
@@ -1501,7 +1494,7 @@ def _job_token_match(col, token: str):
 
 
 def _coerce_norm_df(obj) -> pd.DataFrame:
-    """Ð“Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ€ÑƒÐµÑ‚, Ñ‡Ñ‚Ð¾ Ð½Ð° Ð²Ñ‹Ñ…Ð¾Ð´Ðµ Ð±ÑƒÐ´ÐµÑ‚ DataFrame. None/ÑÐ¿Ð¸ÑÐ¾Ðº/ÑÐ»Ð¾Ð²Ð°Ñ€ÑŒ â†’ DF."""
+    """Гарантирует, что на выходе будет DataFrame. None/список/словарь → DF."""
     if isinstance(obj, pd.DataFrame):
         return obj
     if obj is None:
@@ -1524,7 +1517,7 @@ def rows_to_norm_df(rows: list[dict], source_file: str):
         loc  = (r.get("location") or "").strip()
         sup  = (r.get("supplier") or "").strip() or None
 
-        # qty / unit_cost Ð¼ÑÐ³ÐºÐ¾
+        # qty / unit_cost мягко
         q_raw = r.get("qty", r.get("quantity", 0))
         try:    qty = int(float(str(q_raw).strip() or 0))
         except: qty = 0
@@ -1544,26 +1537,26 @@ def rows_to_norm_df(rows: list[dict], source_file: str):
             "source_file": source_file,
             "order_no": (r.get("order_no") or "").strip() or None,
             "invoice_no": (r.get("invoice_no") or "").strip() or None,
-            "date": (r.get("date") or "").strip() or None,   # â† Ð”ÐžÐ‘ÐÐ’Ð›Ð•ÐÐž
+            "date": (r.get("date") or "").strip() or None,   # ← ДОБАВЛЕНО
             "row_key": f"{pn}|{loc or ''}|{i}",
         })
     return pd.DataFrame(out)
 
 
 def fix_norm_records(records: list[dict], default_loc: str = "MAIN") -> list[dict]:
-    """ÐŸÑ€Ð°Ð²Ð¸Ñ‚ Ð·Ð°Ð¿Ð¸ÑÐ¸ ÑƒÐ¶Ðµ ÐŸÐžÐ¡Ð›Ð• normalize_table: Ñ€Ð°Ð·Ð»ÐµÐ¿Ð»ÑÐµÑ‚ PN/NAME, Ñ‡Ð¸ÑÑ‚Ð¸Ñ‚ Ð¼ÑƒÑÐ¾Ñ€/Ð¸Ñ‚Ð¾Ð³Ð¸, Ð´Ð¾Ð¿Ð¸ÑÑ‹Ð²Ð°ÐµÑ‚ LOCATION."""
+    """Правит записи уже ПОСЛЕ normalize_table: разлепляет PN/NAME, чистит мусор/итоги, дописывает LOCATION."""
     out = []
     for r in records:
         pn  = str(r.get("part_number", "") or "").strip()
         nm  = str(r.get("part_name", "") or "").strip()
 
-        # 0) Ð¼ÑƒÑÐ¾Ñ€ Ð¸ Ð¸Ñ‚Ð¾Ð³Ð¸ (Ð½Ð° Ð²ÑÑÐºÐ¸Ð¹ ÑÐ»ÑƒÑ‡Ð°Ð¹)
+        # 0) мусор и итоги (на всякий случай)
         if _MARKER_RX.match(pn) or _MARKER_RX.match(nm):
             continue
         if _TOTALS_RX.match(pn) or _TOTALS_RX.match(nm):
             continue
 
-        # 1) PN Ð²Ñ‹Ð³Ð»ÑÐ´Ð¸Ñ‚ ÐºÐ°Ðº "PN rest..." â†’ Ð´ÐµÐ»Ð¸Ð¼
+        # 1) PN выглядит как "PN rest..." → делим
         m = _PN_SPLIT_RX.match(pn)
         if m:
             tok, rest = m.group(1).strip(), m.group(2).strip()
@@ -1573,25 +1566,25 @@ def fix_norm_records(records: list[dict], default_loc: str = "MAIN") -> list[dic
             elif rest and rest not in nm:
                 nm = f"{nm} {rest}".strip()
 
-        # 2) PN Ð¿ÑƒÑÑ‚, Ð° NAME = "PN rest..." â†’ Ð¿ÐµÑ€ÐµÐ½Ð¾ÑÐ¸Ð¼
+        # 2) PN пуст, а NAME = "PN rest..." → переносим
         elif not pn:
             m2 = _PN_SPLIT_RX.match(nm)
             if m2:
                 pn, nm = m2.group(1).strip(), m2.group(2).strip()
 
-        # 3) NAME Ð´ÑƒÐ±Ð»Ð¸Ñ€ÑƒÐµÑ‚ PN â†’ Ð¿Ð¾Ñ‡Ð¸ÑÑ‚Ð¸Ð¼
+        # 3) NAME дублирует PN → почистим
         if pn and nm and pn.upper() == nm.upper():
             nm = ""
 
-        # 4) Ð›Ð¾ÐºÐ°Ñ†Ð¸Ñ Ð¿Ð¾ ÑƒÐ¼Ð¾Ð»Ñ‡Ð°Ð½Ð¸ÑŽ
+        # 4) Локация по умолчанию
         loc = (r.get("location") or "").strip() or default_loc
 
-        # 5) Ð—Ð°Ð¿Ð¸ÑÑ‹Ð²Ð°ÐµÐ¼ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾
+        # 5) Записываем обратно
         r["part_number"] = pn
         r["part_name"]   = nm
         r["location"]    = loc
 
-        # 6) ÐžÑ‚ÑÐµÐºÐ°ÐµÐ¼ Ð¿Ð¾Ð»Ð½Ð¾ÑÑ‚ÑŒÑŽ Ð¿ÑƒÑÑ‚Ñ‹Ðµ
+        # 6) Отсекаем полностью пустые
         if pn or nm or (r.get("quantity") or 0) or (r.get("unit_cost") or 0):
             out.append(r)
     return out
@@ -1642,27 +1635,27 @@ def fix_pn_and_description_in_df(df):
 
 def _promote_split_pn_desc(df):
     """
-    Ð•ÑÐ»Ð¸ Ð² Ð¸ÑÑ…Ð¾Ð´Ð½Ð¾Ð¹ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ðµ PN ÑÐºÐ»ÐµÐµÐ½ Ñ Ð¾Ð¿Ð¸ÑÐ°Ð½Ð¸ÐµÐ¼ Ð² Ð¾Ð´Ð½Ð¾Ð¼ Ð¿Ð¾Ð»Ðµ
-    (Ð½Ð°Ð¿Ñ€Ð¸Ð¼ÐµÑ€: '60034 1/2FLRX1/2FIPANGG EZI'), ÑÐ¾Ð·Ð´Ð°Ñ‘Ð¼/Ð·Ð°Ð¿Ð¾Ð»Ð½ÑÐµÐ¼
-    ÑÐ²Ð½Ñ‹Ðµ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ¸ df['part_number'] Ð¸ df['part_name'].
-    Ð›Ð¾Ð³Ð¸ÐºÐ° Ð¼ÑÐ³ÐºÐ°Ñ: Ð¿Ñ€Ð¸Ð¼ÐµÐ½ÑÐµÐ¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÐµÑÐ»Ð¸ ÑƒÐ´Ð°Ñ‘Ñ‚ÑÑ Ð½Ð¾Ñ€Ð¼Ð°Ð»ÑŒÐ½Ð¾ ÑÐ¿Ð»Ð¸Ñ‚Ð½ÑƒÑ‚ÑŒ
-    Ð·Ð°Ð¼ÐµÑ‚Ð½ÑƒÑŽ Ñ‡Ð°ÑÑ‚ÑŒ ÑÑ‚Ñ€Ð¾Ðº.
+    Если в исходной таблице PN склеен с описанием в одном поле
+    (например: '60034 1/2FLRX1/2FIPANGG EZI'), создаём/заполняем
+    явные колонки df['part_number'] и df['part_name'].
+    Логика мягкая: применяем только если удаётся нормально сплитнуть
+    заметную часть строк.
     """
     if df is None or getattr(df, "empty", True):
         return df
 
-    # 1) Ð½Ð°Ð¹Ð´Ñ‘Ð¼ Ñ‚ÐµÐºÑÑ‚Ð¾Ð²Ñ‹Ðµ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ¸-ÐºÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚Ñ‹
+    # 1) найдём текстовые колонки-кандидаты
     text_cols = [c for c in df.columns if getattr(df[c], "dtype", None) == object]
     if not text_cols:
         return df
 
-    # 2) ÐµÑÐ»Ð¸ ÑƒÐ¶Ðµ ÐµÑÑ‚ÑŒ Ð²Ð½ÑÑ‚Ð½Ñ‹Ðµ part_number/part_name â€” ÑƒÑ…Ð¾Ð´Ð¸Ð¼
+    # 2) если уже есть внятные part_number/part_name — уходим
     has_pn  = any(c.lower() == "part_number" for c in df.columns)
     has_name= any(c.lower() in ("part_name", "description", "descr", "desc", "name") for c in df.columns)
     if has_pn and has_name:
-        return df  # Ð½Ðµ Ð²Ð¼ÐµÑˆÐ¸Ð²Ð°ÐµÐ¼ÑÑ
+        return df  # не вмешиваемся
 
-    # 3) Ð¿Ñ€Ð¾Ð±ÑƒÐµÐ¼ Ð½Ð°Ð¹Ñ‚Ð¸ ÐºÐ¾Ð»Ð¾Ð½ÐºÑƒ, Ð³Ð´Ðµ Ð±Ð¾Ð»ÑŒÑˆÐ¸Ð½ÑÑ‚Ð²Ð¾ ÑÑ‚Ñ€Ð¾Ðº Ð²Ñ‹Ð³Ð»ÑÐ´Ð¸Ñ‚ ÐºÐ°Ðº "TOKEN + Ð¿Ñ€Ð¾Ð±ÐµÐ» + Ñ‚ÐµÐºÑÑ‚"
+    # 3) пробуем найти колонку, где большинство строк выглядит как "TOKEN + пробел + текст"
     best_col = None
     best_score = 0
     for c in text_cols:
@@ -1672,11 +1665,11 @@ def _promote_split_pn_desc(df):
         if score > best_score:
             best_score, best_col = score, c
 
-    # Ð¿Ñ€Ð¸Ð¼ÐµÐ½ÑÐµÐ¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÐµÑÐ»Ð¸ >= 0.5 ÑÑ‚Ñ€Ð¾Ðº Ð² ÐºÐ¾Ð»Ð¾Ð½ÐºÐµ ÑÐ¾Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚ Ð¿Ð°Ñ‚Ñ‚ÐµÑ€Ð½Ñƒ
+    # применяем только если >= 0.5 строк в колонке соответствует паттерну
     if not best_col or best_score < 0.5:
         return df
 
-    # 4) Ð´ÐµÐ»Ð¸Ð¼ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½ÑƒÑŽ ÐºÐ¾Ð»Ð¾Ð½ÐºÑƒ Ð½Ð° PN + NAME
+    # 4) делим выбранную колонку на PN + NAME
     pn_series  = []
     name_series= []
     for s in df[best_col].astype(str).tolist():
@@ -1689,15 +1682,15 @@ def _promote_split_pn_desc(df):
             pn_series.append("")
             name_series.append(s)
 
-    # 5) Ð¡Ð¾Ð·Ð´Ð°Ñ‘Ð¼/Ð·Ð°Ð¿Ð¾Ð»Ð½ÑÐµÐ¼ ÑÐ²Ð½Ñ‹Ðµ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ¸ â€” Ñ‚Ð°Ðº normalize_table Ð²Ð¾Ð·ÑŒÐ¼Ñ‘Ñ‚ Ð¸Ñ… Ð±ÐµÐ· ÑÐ²Ñ€Ð¸ÑÑ‚Ð¸Ðº
+    # 5) Создаём/заполняем явные колонки — так normalize_table возьмёт их без эвристик
     if "part_number" not in df.columns:
         df["part_number"] = pn_series
     else:
-        # Ð·Ð°Ð¿Ð¾Ð»Ð½ÑÐµÐ¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿ÑƒÑÑ‚Ñ‹Ðµ
+        # заполняем только пустые
         df["part_number"] = df["part_number"].astype(str).where(df["part_number"].astype(str).str.strip() != "", pn_series)
 
-    # Ð¸Ð¼Ñ/Ð¾Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ
-    # ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ 'part_name' â€” Ð´Ð¾Ð¿Ð¾Ð»Ð½ÑÐµÐ¼, Ð¸Ð½Ð°Ñ‡Ðµ ÑÐ¾Ð·Ð´Ð°Ñ‘Ð¼
+    # имя/описание
+    # если есть 'part_name' — дополняем, иначе создаём
     if "part_name" in df.columns:
         cur = df["part_name"].astype(str)
         df["part_name"] = cur.where(cur.str.strip() != "", name_series)
@@ -1732,8 +1725,8 @@ def detect_supplier_hint(df, fname: str | None = None) -> str | None:
 
 def _coalesce_same_parts(rows: list[dict]) -> list[dict]:
     """
-    Ð¡ÐºÐ»ÐµÐ¸Ð²Ð°ÐµÑ‚ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ñ Ð¾Ð´Ð¸Ð½Ð°ÐºÐ¾Ð²Ñ‹Ð¼ part_number (Ð¸ Ð¾Ð´Ð¸Ð½Ð°ÐºÐ¾Ð²Ð¾Ð¹ Ñ†ÐµÐ½Ð¾Ð¹),
-    ÑÑƒÐ¼Ð¼Ð¸Ñ€ÑƒÑ quantity. PN Ð½Ð¾Ñ€Ð¼Ð°Ð»Ð¸Ð·ÑƒÐµÐ¼ Ð² UPPER.
+    Склеивает строки с одинаковым part_number (и одинаковой ценой),
+    суммируя quantity. PN нормализуем в UPPER.
     """
     acc = {}
     for r in rows:
@@ -1751,23 +1744,23 @@ def _coalesce_same_parts(rows: list[dict]) -> list[dict]:
                 "location": (r.get("location") or r.get("supplier") or "").strip(),
             }
         acc[key]["quantity"] += int((r.get("quantity") or r.get("qty") or 0) or 0)
-    # Ð¾Ñ‚Ð±Ñ€Ð°ÑÑ‹Ð²Ð°ÐµÐ¼ Ð¿ÑƒÑÑ‚Ñ‹Ðµ
+    # отбрасываем пустые
     return [v for v in acc.values() if v["quantity"] > 0]
 
 
 
 def _is_return_row(r) -> bool:
-    """Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ð½Ð°Ñ ÑÑ‚Ñ€Ð¾ÐºÐ° â€” ÑÑ‚Ð¾ ÑÑ‚Ñ€Ð¾ÐºÐ° Ñ Ð¾Ñ‚Ñ€Ð¸Ñ†Ð°Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ð¼ ÐºÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾Ð¼."""
+    """Возвратная строка — это строка с отрицательным количеством."""
     try:
         return (r.quantity or 0) < 0
     except Exception:
         return False
 
 def _ensure_column(table: str, column: str, ddl_type: str):
-    """Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ Ð´Ð¾Ð±Ð°Ð²Ð»ÑÐµÑ‚ ÐºÐ¾Ð»Ð¾Ð½ÐºÑƒ, ÐµÑÐ»Ð¸ ÐµÑ‘ Ð½ÐµÑ‚ (SQLite).
-       Ð•ÑÐ»Ð¸ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ñ‹ Ð½ÐµÑ‚ â€” Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð»Ð¾Ð³Ð¸Ñ€ÑƒÐµÐ¼ Ð¸ Ð²Ñ‹Ñ…Ð¾Ð´Ð¸Ð¼ (Ð±ÐµÐ· Ð¾ÑˆÐ¸Ð±Ð¾Ðº)."""
+    """Безопасно добавляет колонку, если её нет (SQLite).
+       Если таблицы нет — просто логируем и выходим (без ошибок)."""
     try:
-        # ÐµÑÑ‚ÑŒ Ð»Ð¸ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ð°?
+        # есть ли таблица?
         row = db.session.execute(
             db.text("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name=:t"),
             {"t": table}
@@ -1776,9 +1769,9 @@ def _ensure_column(table: str, column: str, ddl_type: str):
             logging.info("Skip ensure column %s.%s: table does not exist", table, column)
             return
 
-        # ÐµÑÑ‚ÑŒ Ð»Ð¸ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ°?
+        # есть ли колонка?
         rows = db.session.execute(db.text(f"PRAGMA table_info({table})")).fetchall()
-        names = {r[1] for r in rows}  # name Ð½Ð° Ð¸Ð½Ð´ÐµÐºÑÐµ 1
+        names = {r[1] for r in rows}  # name на индексе 1
         if column in names:
             return
 
@@ -1792,15 +1785,15 @@ def _ensure_column(table: str, column: str, ddl_type: str):
 
 def _ensure_invoice_number_for_records(records, issued_to, issued_by, reference_job, issue_date, location):
     """
-    Ð•ÑÐ»Ð¸ Ñƒ Ð²ÑÐµÑ… ÑÑ‚Ñ€Ð¾Ðº invoice_number == None â€” ÑÐ¾Ð·Ð´Ð°Ñ‘Ñ‚ Ð±Ð°Ñ‚Ñ‡ Ð¸ Ð·Ð°ÐºÑ€ÐµÐ¿Ð»ÑÐµÑ‚ ÑƒÐ½Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ Ð½Ð¾Ð¼ÐµÑ€.
-    Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð¸Ð½Ð²Ð¾Ð¹ÑÑ‹ Ñ ÑƒÐ¶Ðµ Ð·Ð°Ð´Ð°Ð½Ð½Ñ‹Ð¼ Ð½Ð¾Ð¼ÐµÑ€Ð¾Ð¼ ÐÐ• Ñ‚Ñ€Ð¾Ð³Ð°ÐµÐ¼.
+    Если у всех строк invoice_number == None — создаёт батч и закрепляет уникальный номер.
+    Исторические инвойсы с уже заданным номером НЕ трогаем.
     """
     from extensions import db
     if not records:
         return
 
     if all(getattr(r, "invoice_number", None) is None for r in records):
-        # Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÐ¼ ÑƒÐ¶Ðµ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰ÑƒÑŽ Ñƒ Ñ‚ÐµÐ±Ñ Ñ„ÑƒÐ½ÐºÑ†Ð¸ÑŽ
+        # Используем уже существующую у тебя функцию
         batch = _create_batch_for_records(
             records=records,
             issued_to=issued_to,
@@ -1809,13 +1802,13 @@ def _ensure_invoice_number_for_records(records, issued_to, issued_by, reference_
             issue_date=issue_date,
             location=location or None,
         )
-        # Ð½Ð¾Ð¼ÐµÑ€ Ð·Ð°ÐºÑ€ÐµÐ¿Ð»Ñ‘Ð½ Ð² batch.invoice_number
-        # flush/commit ÑÐ½Ð°Ñ€ÑƒÐ¶Ð¸, Ð² update_invoice
+        # номер закреплён в batch.invoice_number
+        # flush/commit снаружи, в update_invoice
 
 
 def _format_invoice_no(n: int | None) -> str:
-    """UI/PDF Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚: 6 Ñ†Ð¸Ñ„Ñ€ Ñ Ð²ÐµÐ´ÑƒÑ‰Ð¸Ð¼Ð¸ Ð½ÑƒÐ»ÑÐ¼Ð¸; 'â€”' ÐµÑÐ»Ð¸ None."""
-    return f"{int(n):06d}" if n else "â€”"
+    """UI/PDF формат: 6 цифр с ведущими нулями; '—' если None."""
+    return f"{int(n):06d}" if n else "—"
 
 
 def _tech_norm(s: str) -> str:
@@ -1823,16 +1816,16 @@ def _tech_norm(s: str) -> str:
 
 def _next_invoice_number() -> int:
     """
-    Ð¡Ð»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¹ invoice_number:
+    Следующий invoice_number:
       max(IssuedBatch.invoice_number, IssuedPartRecord.invoice_number, INVOICE_START_AT-1) + 1
-      (ÑƒÑ‡Ð¸Ñ‚Ñ‹Ð²Ð°ÐµÑ‚ legacy-ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¸ Ð³Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ€ÑƒÐµÑ‚ ÑÑ‚Ð°Ñ€Ñ‚ Ñ 140)
+      (учитывает legacy-строки и гарантирует старт с 140)
     """
-    # max Ð¿Ð¾ Ð±Ð°Ñ‚Ñ‡Ð°Ð¼ (Ð½Ð¾Ð²Ð°Ñ ÑÑ…ÐµÐ¼Ð°)
+    # max по батчам (новая схема)
     max_batch = db.session.query(
         func.coalesce(func.max(IssuedBatch.invoice_number), 0)
     ).scalar()
 
-    # max Ð¿Ð¾ ÑÑ‚Ñ€Ð¾ÐºÐ°Ð¼ (legacy)
+    # max по строкам (legacy)
     max_line = db.session.query(
         func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)
     ).scalar()
@@ -1846,12 +1839,12 @@ def _next_invoice_number() -> int:
     except Exception:
         ml = 0
 
-    # Ð±Ð°Ð·Ð¾Ð²Ñ‹Ð¹ Â«ÑÐµÐ¼ÐµÑ‡ÐºÐ¾Â», Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¿ÐµÑ€Ð²Ñ‹Ð¹ Ð½Ð¾Ð²Ñ‹Ð¹ = 140
+    # базовый «семечко», чтобы первый новый = 140
     seed = INVOICE_START_AT - 1
     return max(mb, ml, seed) + 1
 
 def _next_invoice_number() -> int:
-    """ÐÐ¾Ð²Ñ‹Ð¹ ÑƒÐ½Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ invoice_number Ð½Ð° Ð¾ÑÐ½Ð¾Ð²Ðµ Ð¼Ð°ÐºÑÐ¸Ð¼ÑƒÐ¼Ð¾Ð² Ð¿Ð¾ Batch Ð¸ Record."""
+    """Новый уникальный invoice_number на основе максимумов по Batch и Record."""
     mb = db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0)).scalar() or 0
     ml = db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)).scalar() or 0
     return max(int(mb), int(ml)) + 1
@@ -1863,11 +1856,11 @@ def _create_batch_for_records(
     reference_job: str | None = None,
     issue_date: datetime | None = None,
     location: str | None = None,
-    work_order_id: int | None = None,   # âœ… ADD
+    work_order_id: int | None = None,   # ✅ ADD
 ):
     """
-    Ð¡Ð¾Ð·Ð´Ð°Ñ‘Ñ‚ IssuedBatch Ñ ÑƒÐ½Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¼ invoice_number Ð¸ Ð¿Ñ€Ð¸Ð²ÑÐ·Ñ‹Ð²Ð°ÐµÑ‚ Ð²ÑÐµ ÑÑ‚Ñ€Ð¾ÐºÐ¸.
-    Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÑ‚ SAVEPOINT (begin_nested), Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÐºÐ¾Ð»Ð»Ð¸Ð·Ð¸Ñ unique Ð½Ðµ Ð¾Ñ‚ÐºÐ°Ñ‚Ñ‹Ð²Ð°Ð»Ð° Ð²ÑÑŽ ÑÐµÑÑÐ¸ÑŽ.
+    Создаёт IssuedBatch с уникальным invoice_number и привязывает все строки.
+    Использует SAVEPOINT (begin_nested), чтобы коллизия unique не откатывала всю сессию.
     """
     if not records:
         raise ValueError("No records passed to _create_batch_for_records")
@@ -1880,7 +1873,7 @@ def _create_batch_for_records(
     if issue_date is None:
         issue_date = datetime.now(LA_TZ).astimezone(timezone.utc).replace(tzinfo=None)
 
-    for _ in range(5):  # Ð½ÐµÑÐºÐ¾Ð»ÑŒÐºÐ¾ Ð¿Ð¾Ð¿Ñ‹Ñ‚Ð¾Ðº Ð½Ð° ÑÐ»ÑƒÑ‡Ð°Ð¹ Ð³Ð¾Ð½ÐºÐ¸ Ð·Ð° Ð½Ð¾Ð¼ÐµÑ€
+    for _ in range(5):  # несколько попыток на случай гонки за номер
         inv_no = _next_invoice_number()
         try:
             with db.session.begin_nested():  # SAVEPOINT
@@ -1891,12 +1884,12 @@ def _create_batch_for_records(
                     reference_job=reference_job,
                     issue_date=issue_date,
                     location=(location or None),
-                    work_order_id=work_order_id,   # âœ… ADD
+                    work_order_id=work_order_id,   # ✅ ADD
                 )
                 db.session.add(batch)
-                db.session.flush()  # Ñ€ÐµÐ·ÐµÑ€Ð²Ð¸Ñ€ÑƒÐµÐ¼ ÑƒÐ½Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ Ð½Ð¾Ð¼ÐµÑ€ (Ð¼Ð¾Ð¶ÐµÑ‚ ÐºÐ¸Ð½ÑƒÑ‚ÑŒ IntegrityError)
+                db.session.flush()  # резервируем уникальный номер (может кинуть IntegrityError)
 
-                # Ð¿Ñ€Ð¸Ð²ÑÐ·Ð°Ñ‚ÑŒ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ðº Ð±Ð°Ñ‚Ñ‡Ñƒ + ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Â«ÑˆÐ°Ð¿ÐºÑƒÂ»
+                # привязать строки к батчу + синхронизировать «шапку»
                 for r in records:
                     r.batch_id = batch.id
                     r.invoice_number = inv_no
@@ -1950,22 +1943,22 @@ def _create_batch_for_records(
 
                 db.session.flush()
 
-            return batch  # ÑƒÑÐ¿ÐµÑ…
+            return batch  # успех
 
         except IntegrityError:
             db.session.rollback()
             continue
 
-    raise RuntimeError("ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑÐ³ÐµÐ½ÐµÑ€Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ ÑƒÐ½Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ invoice_number Ð¿Ð¾ÑÐ»Ðµ Ð½ÐµÑÐºÐ¾Ð»ÑŒÐºÐ¸Ñ… Ð¿Ð¾Ð¿Ñ‹Ñ‚Ð¾Ðº")
+    raise RuntimeError("Не удалось сгенерировать уникальный invoice_number после нескольких попыток")
 
 
 def _parse_dt_flex(s: str):
-    """Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ñ‹Ð¹ Ð¿Ð°Ñ€ÑÐµÑ€ Ð´Ð°Ñ‚Ñ‹/Ð²Ñ€ÐµÐ¼ÐµÐ½Ð¸.
-       ÐŸÐ¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð²Ð°ÐµÑ‚:
+    """Безопасный парсер даты/времени.
+       Поддерживает:
          - YYYY-MM-DD HH:MM:SS.%f
          - YYYY-MM-DD HH:MM:SS
          - YYYY-MM-DD
-       Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ datetime Ð¸Ð»Ð¸ None.
+       Возвращает datetime или None.
     """
     if not s:
         return None
@@ -1976,7 +1969,7 @@ def _parse_dt_flex(s: str):
         try:
             dt = datetime.strptime(s, fmt)
             if fmt == '%Y-%m-%d':
-                # Ð•ÑÐ»Ð¸ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð´Ð°Ñ‚Ð° â†’ Ð¿Ñ€Ð¸ÐºÑ€ÐµÐ¿Ð»ÑÐµÐ¼ Ð¿Ð¾Ð»Ð½Ð¾Ñ‡ÑŒ
+                # Если только дата → прикрепляем полночь
                 return datetime.combine(dt.date(), time.min)
             return dt
         except Exception:
@@ -1985,7 +1978,7 @@ def _parse_dt_flex(s: str):
 
 def _parse_units_form(form):
     """
-    ÐŸÑ€ÐµÐ²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ Ð¿Ð»Ð¾ÑÐºÐ¸Ð¹ request.form Ð²Ð¾ Ð²Ð»Ð¾Ð¶ÐµÐ½Ð½ÑƒÑŽ ÑÑ‚Ñ€ÑƒÐºÑ‚ÑƒÑ€Ñƒ:
+    Превращает плоский request.form во вложенную структуру:
     [
       {
         "brand": "...", "model": "...", "serial": "...",
@@ -1999,7 +1992,7 @@ def _parse_units_form(form):
     """
     units = {}
 
-    # Ð¼ÐµÑ‚Ð°-Ð¿Ð¾Ð»Ñ ÑŽÐ½Ð¸Ñ‚Ð¾Ð² (brand/model/serial)
+    # мета-поля юнитов (brand/model/serial)
     for k in form.keys():
         m = _units_re.match(k)
         if not m:
@@ -2009,7 +2002,7 @@ def _parse_units_form(form):
         units.setdefault(ui, {"brand": "", "model": "", "serial": "", "rows": {}})
         units[ui][key] = (form.get(k) or "").strip()
 
-    # ÑÑ‚Ñ€Ð¾ÐºÐ¸
+    # строки
     for k in form.keys():
         m = _rows_re.match(k)
         if not m:
@@ -2028,15 +2021,15 @@ def _parse_units_form(form):
         val = form.get(k)
 
         if key == "backorder_flag":
-            units[ui]["rows"][ri][key] = True  # Ð½Ð°Ð»Ð¸Ñ‡Ð¸Ðµ ÐºÐ»ÑŽÑ‡Ð° = checked
+            units[ui]["rows"][ri][key] = True  # наличие ключа = checked
         else:
             units[ui]["rows"][ri][key] = (val or "").strip()
 
-    # Ð¿Ñ€Ð¸Ð²ÐµÑÑ‚Ð¸ ÑÐ»Ð¾Ð²Ð°Ñ€ÑŒ â†’ ÑƒÐ¿Ð¾Ñ€ÑÐ´Ð¾Ñ‡ÐµÐ½Ð½Ñ‹Ð¹ ÑÐ¿Ð¸ÑÐ¾Ðº
+    # привести словарь → упорядоченный список
     result = []
     for ui in sorted(units.keys()):
         u = units[ui]
-        # rows Ð¿Ð¾ Ð¿Ð¾Ñ€ÑÐ´ÐºÑƒ
+        # rows по порядку
         rows = [u["rows"][ri] for ri in sorted(u["rows"].keys())]
         u["rows"] = rows
         result.append(u)
@@ -2088,7 +2081,7 @@ def issued_batch_update(batch_id):
         except:
             pass
 
-    # === ðŸ”¥ SYNC WITH IssuedPartRecord ===
+    # === 🔥 SYNC WITH IssuedPartRecord ===
     IssuedPartRecord.query.filter_by(batch_id=batch.id).update({
         "issued_to": batch.issued_to,
         "reference_job": batch.reference_job,
@@ -2117,7 +2110,7 @@ def issued_batch_update(batch_id):
 @inventory_bp.post("/api/issued/confirm_toggle", endpoint="issued_confirm_toggle")
 @login_required
 def issued_confirm_toggle():
-    """Ð¢ÐµÑ…Ð½Ð¸Ðº ÑÑ‚Ð°Ð²Ð¸Ñ‚ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ Ñ‡ÐµÑ€ÐµÐ· fetch (one-way), Ð°Ð´Ð¼Ð¸Ð½ Ð¼Ð¾Ð¶ÐµÑ‚ ÑÑ‚Ð°Ð²Ð¸Ñ‚ÑŒ/ÑÐ½Ð¸Ð¼Ð°Ñ‚ÑŒ Ñ‡ÐµÑ€ÐµÐ· Ñ„Ð¾Ñ€Ð¼Ñƒ."""
+    """Техник ставит подтверждение через fetch (one-way), админ может ставить/снимать через форму."""
     from flask import request, redirect, url_for, jsonify, current_app
     from datetime import datetime, timezone
     from flask_login import current_user
@@ -2275,7 +2268,7 @@ def issued_confirm_toggle():
                     subject = f"All parts arrived - {tech_name} - {jobs_text}"
                     body = f"All parts arrived - {tech_name} - {jobs_text}"
                 else:
-                    subject = f"Tech has picked up all the parts. â€” {tech_name} â€” {jobs_text}"
+                    subject = f"Tech has picked up all the parts. — {tech_name} — {jobs_text}"
                     body = f"{tech_name} {jobs_text} has picked up all the parts.".strip()
 
                 target_email = get_orders_email_for_job(jobs_text)
@@ -2426,7 +2419,7 @@ def issued_send_received_message():
         subject = f"All parts arrived - {tech_name} - {jobs_text}"
         body = f"All parts arrived - {tech_name} - {jobs_text}"
     else:
-        subject = f"Tech has picked up all the parts. â€” {tech_name} â€” {jobs_text}"
+        subject = f"Tech has picked up all the parts. — {tech_name} — {jobs_text}"
         body = f"{tech_name} {jobs_text} has picked up all the parts."
 
     email = EmailOutbox(
@@ -2575,7 +2568,7 @@ def issued_confirm_bulk():
                 if AS_JOB_RE.search(job_source):
                     subject = f"All parts arrived - {tech_name} - {allowed_jobs}"
                 else:
-                    subject = f"Tech has picked up all the parts. â€” {tech_name} â€” {allowed_jobs}"
+                    subject = f"Tech has picked up all the parts. — {tech_name} — {allowed_jobs}"
 
                 body = f"{tech_name} {allowed_jobs} has picked up all the parts."
 
@@ -2801,7 +2794,7 @@ def debug_db_objects():
 
 
 def _db_path() -> str:
-    # Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÐ¼ instance-Ð¿Ð°Ð¿ÐºÑƒ Flask, Ñ‚Ð°Ð¼ Ñƒ Ñ‚ÐµÐ±Ñ Ð¸ Ð»ÐµÐ¶Ð¸Ñ‚ inventory.db
+    # Используем instance-папку Flask, там у тебя и лежит inventory.db
     p = os.path.join(current_app.instance_path, "inventory.db")
     return os.path.normpath(p)
 
@@ -2845,7 +2838,7 @@ def _parse_q(q: str):
     return {"type": m.group(1).lower(), "value": m.group(2).strip()} if m else {"type":"text","value":q.strip()}
 
 def get_on_hand(part_number: str) -> int:
-    """Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ ÑÑƒÐ¼Ð¼Ð°Ñ€Ð½Ñ‹Ð¹ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº Ð¿Ð¾ PN (Ð²ÑÐµÑ… Ð»Ð¾ÐºÐ°Ñ†Ð¸Ð¹) Ð¸Ð· Ñ‚Ð²Ð¾ÐµÐ¹ Ð¼Ð¾Ð´ÐµÐ»Ð¸ Part."""
+    """Возвращает суммарный остаток по PN (всех локаций) из твоей модели Part."""
     try:
         total = db.session.query(db.func.sum(Part.quantity)).filter(
             Part.part_number == part_number.upper()
@@ -2934,7 +2927,7 @@ def compute_availability(work_order: "WorkOrder"):
 
 def compute_availability_unit(unit: "WorkUnit", wo_status: str):
     """
-    Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ ÑÐ¿Ð¸ÑÐ¾Ðº ÑÑ‚Ñ€Ð¾Ðº Ð¿Ð¾ Ð¾Ð´Ð½Ð¾Ð¼Ñƒ unit:
+    Возвращает список строк по одному unit:
     [{unit_id, unit_label, part_number, part_name, requested, on_hand, issue_now, status_hint}, ...]
     """
     rows = []
@@ -2945,7 +2938,7 @@ def compute_availability_unit(unit: "WorkUnit", wo_status: str):
         req = int(wup.quantity or 0)
         on  = get_on_hand((wup.part_number or "").upper())
         issue = 0
-        # ÐºÐ°Ðº Ð´Ð¾Ð³Ð¾Ð²Ð°Ñ€Ð¸Ð²Ð°Ð»Ð¸ÑÑŒ: Ð¿Ð¾ÐºÐ° WO Ð½Ðµ Ð² "ordered" â€” Ð½Ðµ Ð²Ñ‹Ð´Ð°Ñ‘Ð¼, Ñ‚Ð¾Ð»ÑŒÐºÐ¾ WAIT ...
+        # как договаривались: пока WO не в "ordered" — не выдаём, только WAIT ...
         if wo_status == "ordered":
             issue = max(0, min(req, on))
             hint = "STOCK" if on >= req else f"WAIT {req - on} (stock {on})"
@@ -2966,17 +2959,17 @@ def compute_availability_unit(unit: "WorkUnit", wo_status: str):
 
 def compute_availability_multi(wo: "WorkOrder"):
     """
-    ÐžÐ±ÑŠÐµÐ´Ð¸Ð½ÑÐµÑ‚:
-      - ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¿Ð¾ ÑŽÐ½Ð¸Ñ‚Ð°Ð¼ (Ð½Ð¾Ð²Ð°Ñ ÑÑ…ÐµÐ¼Ð°)
-      - Ð¸ Ñ‚Ð²Ð¾Ð¸ ÑÑ‚Ð°Ñ€Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ work_order.parts (Ñ‡Ñ‚Ð¾Ð±Ñ‹ legacy Ð½Ðµ ÑÐ»Ð¾Ð¼Ð°Ñ‚ÑŒ)
+    Объединяет:
+      - строки по юнитам (новая схема)
+      - и твои старые строки work_order.parts (чтобы legacy не сломать)
     """
     all_rows = []
 
-    # ÐÐ¾Ð²Ñ‹Ðµ unit-ÑÑ‚Ñ€Ð¾ÐºÐ¸
+    # Новые unit-строки
     for unit in getattr(wo, "units", []) or []:
         all_rows.extend(compute_availability_unit(unit, wo.status))
 
-    # Legacy-ÑÑ‚Ñ€Ð¾ÐºÐ¸ (ÐµÑÐ»Ð¸ Ñƒ Ð·Ð°ÐºÐ°Ð·Ð° ÐµÑ‰Ñ‘ ÐµÑÑ‚ÑŒ ÑÑ‚Ð°Ñ€Ñ‹Ðµ parts)
+    # Legacy-строки (если у заказа ещё есть старые parts)
     for wop in getattr(wo, "parts", []) or []:
         req = int(wop.quantity or 0)
         on  = get_on_hand((wop.part_number or "").upper())
@@ -3409,14 +3402,14 @@ def _issue_records_bulk(
     return issue_date, created_records
 
 def _is_return_record(record: IssuedPartRecord) -> bool:
-    """ÐŸÑ€Ð¸Ð·Ð½Ð°Ðº 'Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ð½Ð¾Ð¹' ÑÑ‚Ñ€Ð¾ÐºÐ¸ â€” Ð¾Ñ‚Ñ€Ð¸Ñ†Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ ÐºÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾ Ð¸Ð»Ð¸ reference_job Ð½Ð°Ñ‡Ð¸Ð½Ð°ÐµÑ‚ÑÑ Ñ RETURN."""
+    """Признак 'возвратной' строки — отрицательное количество или reference_job начинается с RETURN."""
     if record.quantity is not None and record.quantity < 0:
         return True
     ref = (record.reference_job or "").strip().upper()
     return ref.startswith("RETURN")
 
 def _is_return_group(records: list[IssuedPartRecord]) -> bool:
-    """Ð“Ñ€ÑƒÐ¿Ð¿Ð° â€” Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ð½Ð°Ñ, ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ Ñ…Ð¾Ñ‚Ñ Ð±Ñ‹ Ð¾Ð´Ð½Ð° Ð¿Ð¾Ð·Ð¸Ñ†Ð¸Ñ Ñ qty<0 Ð¸Ð»Ð¸ ref Ð½Ð°Ñ‡Ð¸Ð½Ð°ÐµÑ‚ÑÑ Ñ RETURN."""
+    """Группа — возвратная, если есть хотя бы одна позиция с qty<0 или ref начинается с RETURN."""
     if not records:
         return False
     if any((r.quantity or 0) < 0 for r in records):
@@ -3425,7 +3418,7 @@ def _is_return_group(records: list[IssuedPartRecord]) -> bool:
     return ref.startswith("RETURN")
 
 def _fetch_invoice_group(issued_to: str, reference_job: str|None, issued_by: str, issue_date):
-    """Ð”Ð¾ÑÑ‚Ð°Ñ‘Ð¼ Ð’Ð¡Ð• Ð·Ð°Ð¿Ð¸ÑÐ¸ Ð½Ð°ÐºÐ»Ð°Ð´Ð½Ð¾Ð¹ Ð·Ð° ÐºÐ¾Ð½ÐºÑ€ÐµÑ‚Ð½Ñ‹Ð¹ Ð´ÐµÐ½ÑŒ Ð¿Ð¾ ÐºÐ»ÑŽÑ‡Ñƒ (issued_to, reference_job, issued_by, Ð´Ð°Ñ‚Ð°)."""
+    """Достаём ВСЕ записи накладной за конкретный день по ключу (issued_to, reference_job, issued_by, дата)."""
     from datetime import datetime
     start = datetime.combine(issue_date.date(), datetime.min.time())
     end   = datetime.combine(issue_date.date(), datetime.max.time())
@@ -3517,7 +3510,7 @@ def coerce_invoice_items(df_raw):
         "UNIT COST":   ["UNIT COST", "UNIT PRICE", "PRICE", "COST", "PRICE $", "PRICE USD"],
         "TOTAL":       ["TOTAL", "EXT", "EXTENDED", "LINE TOTAL", "AMOUNT"],
 
-        # Optional extras â€” if present we keep them, else no problem
+        # Optional extras — if present we keep them, else no problem
         "ORDER #":     ["ORDER #", "ORDER", "PO #", "SO #", "WORK ORDER", "WO"],
         "DATE":        ["DATE", "ORDER DATE", "INVOICE DATE"],
         "LOCATION":    ["LOCATION", "BIN", "SHELF", "PLACE", "LOC"],
@@ -3946,7 +3939,7 @@ def dataframe_from_pdf(path, try_ocr: bool = False):
 
     # ---------- B) OCR ----------
     if not try_ocr:
-        log("[OCR] try_ocr=False â†’ skipping OCR")
+        log("[OCR] try_ocr=False → skipping OCR")
         return pd.DataFrame()
 
     from pdf2image import convert_from_path
@@ -3965,7 +3958,7 @@ def dataframe_from_pdf(path, try_ocr: bool = False):
         log(f"[OCR] pages={len(images)} poppler_bin={poppler_bin}")
     except Exception as e:
         log(f"[OCR] convert_from_path failed: {e}")
-        # Ð²ÐµÑ€Ð½Ñ‘Ð¼ ÑÐ¿ÐµÑ†-Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ñƒ, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð² Ð¿Ñ€ÐµÐ²ÑŒÑŽ Ð²Ð¸Ð´Ð½Ð¾ Ð±Ñ‹Ð»Ð¾ Ð¿Ñ€Ð¸Ñ‡Ð¸Ð½Ñƒ
+        # вернём спец-таблицу, чтобы в превью видно было причину
         return pd.DataFrame({"error": [f"OCR init failed: {e}"]})
 
     tesseract_cfg = r"--oem 3 --psm 6"
@@ -3981,7 +3974,7 @@ def dataframe_from_pdf(path, try_ocr: bool = False):
             if s:
                 lines.append(s)
 
-    # Dump raw OCR text (ÑƒÐ´Ð¾Ð±Ð½Ð¾ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÑÑ‚ÑŒ Ð³Ð»Ð°Ð·Ð°Ð¼Ð¸)
+    # Dump raw OCR text (удобно проверять глазами)
     dump_path = os.path.splitext(path)[0] + ".ocr.txt"
     try:
         with open(dump_path, "w", encoding="utf-8") as fh:
@@ -4029,7 +4022,7 @@ def dataframe_from_pdf(path, try_ocr: bool = False):
         log(f"[OCR-MARCONE] parsed rows={len(df)}")
         return df
 
-    # ---- D) Generic heuristic: "<qty> <pn> <descr...> <price$>" Ð˜Ð›Ð˜ "<pn> <descr...> <qty> <price$>"
+    # ---- D) Generic heuristic: "<qty> <pn> <descr...> <price$>" ИЛИ "<pn> <descr...> <qty> <price$>"
     pat1 = re.compile(rf"^\s*(?P<qty>\d+)\s+(?P<pn>[A-Za-z0-9\-\/\.]+)\s+(?P<descr>.+?)\s+(?P<unit>{money})\s*$")
     pat2 = re.compile(rf"^\s*(?P<pn>[A-Za-z0-9\-\/\.]+)\s+(?P<descr>.+?)\s+(?P<qty>\d+)\s+(?P<unit>{money})\s*$")
 
@@ -4090,12 +4083,12 @@ def set_setting(key, value):
 
 def _recompute_batch_consumption(batch: "IssuedBatch") -> None:
     """
-    Ð£ÑÑ‚Ð°Ð½Ð°Ð²Ð»Ð¸Ð²Ð°ÐµÑ‚ batch.consumed_flag = True, ÐµÑÐ»Ð¸ Ð²ÑÐµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð² Ð±Ð°Ñ‚Ñ‡Ðµ Ð¿Ð¾Ð»Ð½Ð¾ÑÑ‚ÑŒÑŽ ÑÐ¿Ð¸ÑÐ°Ð½Ñ‹ (Ð¸Ð»Ð¸ qty<=0),
-    Ð¸Ð½Ð°Ñ‡Ðµ False. Ð¢Ð°ÐºÐ¶Ðµ Ð¾Ð±Ð½Ð¾Ð²Ð»ÑÐµÑ‚ consumed_at/by Ð¿Ð¾ Ð¿Ð¾ÑÐ»ÐµÐ´Ð½ÐµÐ¼Ñƒ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸ÑŽ.
+    Устанавливает batch.consumed_flag = True, если все строки в батче полностью списаны (или qty<=0),
+    иначе False. Также обновляет consumed_at/by по последнему действию.
     """
     if not batch:
         return
-    # Ð¡Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼ ÑÑƒÐ¼Ð¼Ñƒ Ð¿Ð¾Ð·Ð¸Ñ‚Ð¸Ð²Ð½Ñ‹Ñ… qty Ð¸ ÑÑƒÐ¼Ð¼Ñƒ consumed Ð¿Ð¾ Ð²ÑÐµÐ¼ ÑÑ‚Ñ€Ð¾ÐºÐ°Ð¼
+    # Считаем сумму позитивных qty и сумму consumed по всем строкам
     total_qty = 0
     total_used = 0
     last_when = None
@@ -4107,7 +4100,7 @@ def _recompute_batch_consumption(batch: "IssuedBatch") -> None:
         if q > 0:
             total_qty  += q
             total_used += min(q, used)
-        # Ð²Ð¾Ð·ÑŒÐ¼Ñ‘Ð¼ ÑÐ°Ð¼Ð¾Ðµ Ð¿Ð¾Ð·Ð´Ð½ÐµÐµ consumed_at
+        # возьмём самое позднее consumed_at
         if it.consumed_at and (last_when is None or it.consumed_at > last_when):
             last_when = it.consumed_at
             last_who  = it.consumed_by
@@ -4121,13 +4114,13 @@ def _recompute_batch_consumption(batch: "IssuedBatch") -> None:
 @login_required
 def unconsume_invoice():
     """
-    Ð§Ð°ÑÑ‚Ð¸Ñ‡Ð½Ð¾ ÑÐ½Ð¸Ð¼Ð°ÐµÑ‚ consumed_* Ñƒ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ñ… ÑÑ‚Ñ€Ð¾Ðº Ð¸Ð½Ð²Ð¾Ð¹ÑÐ°, Ð»Ð¸Ð±Ð¾ Ñƒ Ð²ÑÐµÐ³Ð¾ Ð¸Ð½Ð²Ð¾Ð¹ÑÐ° (Ð¿Ð¾ Ð³Ñ€ÑƒÐ¿Ð¿Ðµ).
-    Ð¡Ð½Ð¸Ð¼Ð°ÐµÑ‚ ÐÐ• Ð²ÑÑ‘, Ð° Ñ€Ð¾Ð²Ð½Ð¾ qty_<id> Ð´Ð»Ñ ÐºÐ°Ð¶Ð´Ð¾Ð¹ ÑÑ‚Ñ€Ð¾ÐºÐ¸ (ÐºÐ°Ðº Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð°Ñ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ñ Ðº consume_invoice).
-    Ð”Ð¾ÑÑ‚ÑƒÐ¿: Ñ‚Ð¾Ð»ÑŒÐºÐ¾ superadmin.
+    Частично снимает consumed_* у выбранных строк инвойса, либо у всего инвойса (по группе).
+    Снимает НЕ всё, а ровно qty_<id> для каждой строки (как обратная операция к consume_invoice).
+    Доступ: только superadmin.
     """
     from flask_login import current_user
     role = (getattr(current_user, "role", "") or "").strip().lower()
-    # Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÑÑƒÐ¿ÐµÑ€-Ð°Ð´Ð¼Ð¸Ð½
+    # только супер-админ
     if role not in ("superadmin", "user"):
         flash("Access denied (unconsume is superadmin only).", "danger")
         return redirect(url_for("inventory.reports_grouped"))
@@ -4138,7 +4131,7 @@ def unconsume_invoice():
 
     form = request.form
 
-    # Ð“Ñ€ÑƒÐ¿Ð¿Ð° (Ð´Ð»Ñ Ñ€ÐµÐ¶Ð¸Ð¼Ð° "Entire invoice")
+    # Группа (для режима "Entire invoice")
     issued_to     = (form.get("group_issued_to") or "").strip()
     reference_job = (form.get("group_reference_job") or "").strip()
     issued_by     = (form.get("group_issued_by") or "").strip()
@@ -4150,13 +4143,13 @@ def unconsume_invoice():
     apply_scope = (form.get("apply_scope") or "all").strip().lower()  # all|selected
     selected_ids = [int(x) for x in form.getlist("record_ids[]") if str(x).isdigit()]
 
-    # Ð‘Ð°Ð·Ð¾Ð²Ñ‹Ð¹ Ð·Ð°Ð¿Ñ€Ð¾Ñ
+    # Базовый запрос
     q = IssuedPartRecord.query
 
     if invoice_number:
         q = q.filter(IssuedPartRecord.invoice_number == invoice_number)
     else:
-        # ÑÑƒÐ¿ÐµÑ€-Ñ‚Ð¾Ñ‡Ð½Ð¾Ðµ ÑÐ¾Ð²Ð¿Ð°Ð´ÐµÐ½Ð¸Ðµ Ð³Ñ€ÑƒÐ¿Ð¿Ñ‹
+        # супер-точное совпадение группы
         q = q.filter(
             IssuedPartRecord.issued_to == issued_to,
             IssuedPartRecord.issued_by == issued_by,
@@ -4166,7 +4159,7 @@ def unconsume_invoice():
         if location:
             q = q.filter(func.coalesce(IssuedPartRecord.location, Part.location) == location)
 
-    # Ð¡ÐºÐ¾ÑƒÐ¿: Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¸Ð»Ð¸ Ð²ÐµÑÑŒ Ð¸Ð½Ð²Ð¾Ð¹Ñ
+    # Скоуп: только выбранные строки или весь инвойс
     rows = q.all()
     if apply_scope == "selected" and selected_ids:
         sel = set(selected_ids)
@@ -4180,7 +4173,7 @@ def unconsume_invoice():
     touched_batches = set()
 
     for r in rows:
-        # Ð¸Ð³Ð½Ð¾Ñ€Ð¸Ñ€ÑƒÐµÐ¼ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ñ‹
+        # игнорируем возвраты
         if (r.quantity or 0) <= 0:
             continue
 
@@ -4188,7 +4181,7 @@ def unconsume_invoice():
         if used <= 0:
             continue
 
-        # ÑÐºÐ¾Ð»ÑŒÐºÐ¾ ÑÐ½ÑÑ‚ÑŒ â€” Ð°Ð½Ð°Ð»Ð¾Ð³Ð¸Ñ‡Ð½Ð¾ consume_invoice: qty_<id>, Ð¿Ð¾ ÑƒÐ¼Ð¾Ð»Ñ‡Ð°Ð½Ð¸ÑŽ 1
+        # сколько снять — аналогично consume_invoice: qty_<id>, по умолчанию 1
         try:
             dec_qty = int(form.get(f"qty_{r.id}", "1"))
         except Exception:
@@ -4197,23 +4190,23 @@ def unconsume_invoice():
         if dec_qty <= 0:
             continue
 
-        # Ð½Ðµ ÑÐ½Ð¸Ð¼Ð°ÐµÐ¼ Ð±Ð¾Ð»ÑŒÑˆÐµ, Ñ‡ÐµÐ¼ ÑƒÐ¶Ðµ ÑÐ¿Ð¸ÑÐ°Ð½Ð¾
+        # не снимаем больше, чем уже списано
         dec_qty = min(dec_qty, used)
         new_used = used - dec_qty
 
-        # Ð¾Ð±Ð½Ð¾Ð²Ð»ÑÐµÐ¼ consumed_* Ð¿Ð¾Ð»Ñ
+        # обновляем consumed_* поля
         r.consumed_qty = new_used if new_used > 0 else None
-        # ÐµÑÐ»Ð¸ Ð²ÑÑ‘ ÑÐ½ÑÐ»Ð¸ â€” Ñ‡Ð¸ÑÑ‚Ð¸Ð¼ Ð¼ÐµÑ‚Ð°Ð´Ð°Ð½Ð½Ñ‹Ðµ
+        # если всё сняли — чистим метаданные
         if new_used <= 0:
             r.consumed_flag = False
             r.consumed_at = None
             r.consumed_by = None
             r.consumed_note = None
         else:
-            # Ð¿Ñ€Ð¾ÑÑ‚Ð¾ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€ÑƒÐµÐ¼ Ñ„Ð»Ð°Ð³
+            # просто синхронизируем флаг
             r.consumed_flag = (new_used >= int(r.quantity or 0))
 
-        # Ð¿Ñ€Ð°Ð²Ð¸Ð¼ Ð»Ð¾Ð³Ð¸ IssuedConsumptionLog (LIFO â€” Ð¿Ð¾ÑÐ»ÐµÐ´Ð½Ð¸Ðµ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ñ ÑÐ½Ð¸Ð¼Ð°ÐµÐ¼ Ð¿ÐµÑ€Ð²Ñ‹Ð¼Ð¸)
+        # правим логи IssuedConsumptionLog (LIFO — последние списания снимаем первыми)
         logs = (IssuedConsumptionLog.query
                 .filter_by(issued_part_id=r.id)
                 .order_by(IssuedConsumptionLog.id.desc())
@@ -4229,11 +4222,11 @@ def unconsume_invoice():
                 continue
 
             if log_qty <= to_remove:
-                # Ð¿Ð¾Ð»Ð½Ð¾ÑÑ‚ÑŒÑŽ ÑƒÐ±Ð¸Ñ€Ð°ÐµÐ¼ Ð»Ð¾Ð³
+                # полностью убираем лог
                 to_remove -= log_qty
                 db.session.delete(log)
             else:
-                # ÑƒÐ¼ÐµÐ½ÑŒÑˆÐ°ÐµÐ¼ qty Ð² Ð»Ð¾Ð³Ðµ
+                # уменьшаем qty в логе
                 log.qty = log_qty - to_remove
                 to_remove = 0
                 db.session.add(log)
@@ -4243,15 +4236,15 @@ def unconsume_invoice():
             touched_batches.add(r.batch_id)
         db.session.add(r)
 
-    # ÐŸÐµÑ€ÐµÑÑ‡Ñ‘Ñ‚ consumed_flag Ð½Ð° Ð±Ð°Ñ‚Ñ‡Ð°Ñ…
+    # Пересчёт consumed_flag на батчах
     if touched_batches:
         batches = IssuedBatch.query.filter(IssuedBatch.id.in_(list(touched_batches))).all()
         for b in batches:
-            # ÐµÑÐ»Ð¸ Ñƒ Ñ‚ÐµÐ±Ñ ÐµÑÑ‚ÑŒ _recompute_batch_consumption(b) â€” Ð¾ÑÑ‚Ð°Ð²Ð»ÑÐµÐ¼
+            # если у тебя есть _recompute_batch_consumption(b) — оставляем
             try:
                 _recompute_batch_consumption(b)
             except NameError:
-                # ÐµÑÐ»Ð¸ ÐµÐ³Ð¾ Ð½ÐµÑ‚, Ð½Ð¾ ÐµÑÑ‚ÑŒ _sync_batches_consumed_flag â€” Ð¼Ð¾Ð¶Ð½Ð¾ Ð²Ñ‹Ð·Ð²Ð°Ñ‚ÑŒ ÐµÑ‘ Ð²Ð¼ÐµÑÑ‚Ð¾
+                # если его нет, но есть _sync_batches_consumed_flag — можно вызвать её вместо
                 pass
 
     db.session.commit()
@@ -4557,10 +4550,10 @@ def undo_consumption_log(log_id):
 @login_required
 def consume_invoice():
     """
-    Ð£Ð²ÐµÐ»Ð¸Ñ‡Ð¸Ð²Ð°ÐµÑ‚ consumed_qty Ð¿Ð¾ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ð¼ ÑÑ‚Ñ€Ð¾ÐºÐ°Ð¼ (Ð¸Ð»Ð¸ Ð¿Ð¾ Ð²ÑÐµÐ¼Ñƒ Ð¸Ð½Ð²Ð¾Ð¹ÑÑƒ â€” Ð¿Ð¾ radio apply_scope).
-    Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÑ‚ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ñ qty_<id> Ð¸Ð· Ñ„Ð¾Ñ€Ð¼Ñ‹. ÐÐ¸ÐºÐ¾Ð³Ð´Ð° Ð½Ðµ Ð¿Ñ€ÐµÐ²Ñ‹ÑˆÐ°ÐµÑ‚ Ð¸ÑÑ…Ð¾Ð´Ð½Ñ‹Ð¹ quantity.
-    Ð˜Ð³Ð½Ð¾Ñ€Ð¸Ñ€ÑƒÐµÑ‚ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ñ‹ (quantity < 0).
-    Ð”Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¾ Ð´Ð»Ñ admin/superadmin/user.
+    Увеличивает consumed_qty по выбранным строкам (или по всему инвойсу — по radio apply_scope).
+    Использует значения qty_<id> из формы. Никогда не превышает исходный quantity.
+    Игнорирует возвраты (quantity < 0).
+    Доступно для admin/superadmin/user.
     """
     from flask_login import current_user
     # from sqlalchemy import func
@@ -4573,26 +4566,26 @@ def consume_invoice():
 
     form = request.form
 
-    # ÐºÐ»ÑŽÑ‡Ð¸ Ð³Ñ€ÑƒÐ¿Ð¿Ñ‹ (Ð´Ð»Ñ Ñ€ÐµÐ¶Ð¸Ð¼Ð° 'Entire invoice')
+    # ключи группы (для режима 'Entire invoice')
     group_issued_to     = (form.get("group_issued_to") or "").strip()
     group_reference_job = (form.get("group_reference_job") or "").strip()
     group_issued_by     = (form.get("group_issued_by") or "").strip()
     group_issue_date_s  = (form.get("group_issue_date") or "").strip()
     location            = (form.get("location") or "").strip()
 
-    # âš ï¸ Job ÐžÐ‘Ð¯Ð—ÐÐ¢Ð•Ð›Ð•Ð
+    # ⚠️ Job ОБЯЗАТЕЛЕН
     job_ref_raw = (form.get("job_ref") or "").strip()
     if not job_ref_raw:
         flash("Job number is required to mark parts as consumed.", "warning")
         return redirect(url_for("inventory.reports_grouped"))
     job_ref = job_ref_raw
 
-    # Ñ€Ð°Ð´Ð¸Ð¾ÐºÐ½Ð¾Ð¿ÐºÐ° Ð¾Ð±Ð»Ð°ÑÑ‚Ð¸: all | selected
+    # радиокнопка области: all | selected
     apply_scope = (form.get("apply_scope") or "all").strip().lower()
-    # ÑÐ¿Ð¸ÑÐ¾Ðº Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ñ… Ð·Ð°Ð¿Ð¸ÑÐµÐ¹ Ð´Ð»Ñ Ñ€ÐµÐ¶Ð¸Ð¼Ð° 'selected'
+    # список выбранных записей для режима 'selected'
     selected_ids = [int(x) for x in form.getlist("record_ids[]") if str(x).isdigit()]
 
-    # Ð¡Ð¾Ð±Ð¸Ñ€Ð°ÐµÐ¼ ÐºÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚Ð½Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸
+    # Собираем кандидатные строки
     q = db.session.query(IssuedPartRecord).options(
         db.joinedload(IssuedPartRecord.part),
         db.joinedload(IssuedPartRecord.batch),
@@ -4601,7 +4594,7 @@ def consume_invoice():
     if apply_scope == "selected" and selected_ids:
         q = q.filter(IssuedPartRecord.id.in_(selected_ids))
     else:
-        # Entire invoice (legacy-Ð³Ñ€ÑƒÐ¿Ð¿Ð° Ð¿Ð¾ ÐºÐ»ÑŽÑ‡Ð°Ð¼)
+        # Entire invoice (legacy-группа по ключам)
         try:
             grp_dt = datetime.strptime(group_issue_date_s, "%Y-%m-%d %H:%M:%S")
         except Exception:
@@ -4616,13 +4609,13 @@ def consume_invoice():
             func.trim(IssuedPartRecord.issued_by) == group_issued_by,
             func.date(IssuedPartRecord.issue_date) == grp_dt.date(),
         )
-        # reference_job Ð¼Ð¾Ð¶ÐµÑ‚ Ð±Ñ‹Ñ‚ÑŒ Ð¿ÑƒÑÑ‚Ñ‹Ð¼
+        # reference_job может быть пустым
         if group_reference_job:
             q = q.filter(func.trim(IssuedPartRecord.reference_job) == group_reference_job)
         else:
             q = q.filter(func.coalesce(IssuedPartRecord.reference_job, "") == "")
 
-        # Ð•ÑÐ»Ð¸ Ð² ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐµ Ð±Ñ‹Ð» location â€” Ð±ÐµÑ€Ñ‘Ð¼ ÐµÐ³Ð¾ ÐºÐ°Ðº scope.
+        # Если в карточке был location — берём его как scope.
         if location:
             q = q.filter(func.trim(IssuedPartRecord.location) == location)
 
@@ -4635,11 +4628,11 @@ def consume_invoice():
     now_user = (getattr(current_user, "username", "") or "").strip()
 
     for r in rows:
-        # Ð˜Ð³Ð½Ð¾Ñ€Ð¸Ñ€ÑƒÐµÐ¼ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ñ‹
+        # Игнорируем возвраты
         if (r.quantity or 0) <= 0:
             continue
 
-        # Ð¡ÐºÐ¾Ð»ÑŒÐºÐ¾ ÑƒÐ²ÐµÐ»Ð¸Ñ‡Ð¸Ñ‚ÑŒ â€” Ð±ÐµÑ€Ñ‘Ð¼ qty_<id> Ð¸Ð· Ñ„Ð¾Ñ€Ð¼Ñ‹, Ð¿Ð¾ ÑƒÐ¼Ð¾Ð»Ñ‡Ð°Ð½Ð¸ÑŽ 1
+        # Сколько увеличить — берём qty_<id> из формы, по умолчанию 1
         try:
             add_qty = int(form.get(f"qty_{r.id}", "1"))
         except Exception:
@@ -4647,7 +4640,7 @@ def consume_invoice():
         if add_qty <= 0:
             continue
 
-        # Ð¾Ð³Ñ€Ð°Ð½Ð¸Ñ‡Ð¸Ð¼ Ð¿Ð¾ Ð¾ÑÑ‚Ð°Ð²ÑˆÐµÐ¼ÑƒÑÑ
+        # ограничим по оставшемуся
         q_total = int(r.quantity or 0)
         used    = int(r.consumed_qty or 0)
         remain  = max(0, q_total - used)
@@ -4656,12 +4649,12 @@ def consume_invoice():
 
         add_qty = min(add_qty, remain)
 
-        # ÐžÐ±Ð½Ð¾Ð²Ð»ÑÐµÐ¼ Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚ Ð² IssuedPartRecord
+        # Обновляем агрегат в IssuedPartRecord
         if r.apply_consume(add_qty, user=now_user, note="consume via reports_grouped"):
             changed += 1
             db.session.add(r)
 
-            # Ð›Ð¾Ð³Ð¸Ñ€ÑƒÐµÐ¼ ÑÑ‚Ð¾ Ñ‡Ð°ÑÑ‚Ð¸Ñ‡Ð½Ð¾Ðµ ÑÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ Ð² IssuedConsumptionLog
+            # Логируем это частичное списание в IssuedConsumptionLog
             log = IssuedConsumptionLog(
                 issued_part_id=r.id,
                 qty=add_qty,
@@ -4672,7 +4665,7 @@ def consume_invoice():
             db.session.add(log)
 
     if changed:
-        # ÐŸÐµÑ€ÐµÑÑ‡Ñ‘Ñ‚ consumed_flag Ð½Ð° Ð±Ð°Ñ‚Ñ‡Ð°Ñ… (ÐºÐ°Ðº Ð² unconsume_invoice)
+        # Пересчёт consumed_flag на батчах (как в unconsume_invoice)
         touched_batches = set()
         for r in rows:
             if r.batch_id:
@@ -4727,7 +4720,7 @@ def wo_confirm_lines(wo_id: int):
         ROLE_SUPERADMIN,
     )
 
-    # Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° Â«ÑÐ²Ð¾Ð¹ Ð»Ð¸ WOÂ» Ð´Ð»Ñ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°
+    # проверка «свой ли WO» для техника
     if role == "technician":
         me_id = getattr(current_user, "id", None)
         me_name = (current_user.username or "").strip().lower()
@@ -4741,7 +4734,7 @@ def wo_confirm_lines(wo_id: int):
             flash("Access denied", "danger")
             return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # Ð°Ð»Ð¸Ð°ÑÑ‹ Ð¸Ð¼ÐµÐ½Ð¸ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ° â€” Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÑÐ¾Ð²Ð¿Ð°Ð»Ð¾ Ñ issued_to
+    # алиасы имени техника — чтобы совпало с issued_to
     me_aliases = {
         (current_user.username or "").strip().lower(),
         (wo.technician_username or "").strip().lower(),
@@ -4783,7 +4776,7 @@ def wo_confirm_lines(wo_id: int):
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     if not is_admin_like and me_aliases:
-        # Ñ‚ÐµÑ…Ð½Ð¸Ðº Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´Ð°ÐµÑ‚ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÑÐ²Ð¾Ð¸ ÑÑ‚Ñ€Ð¾ÐºÐ¸ (Ð±ÐµÐ· Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð°)
+        # техник подтверждает только свои строки (без регистра)
         q = q.filter(func.lower(func.trim(IssuedPartRecord.issued_to)).in_(list(me_aliases)))
 
     rows = q.all()
@@ -4816,14 +4809,14 @@ def wo_confirm_lines(wo_id: int):
 @login_required
 def api_job_duplicate_check():
     """
-    ÐŸÑ€Ð¾Ð²ÐµÑ€ÑÐµÑ‚, Ð¿ÐµÑ€ÐµÑÐµÐºÐ°ÐµÑ‚ÑÑ Ð»Ð¸ Ð»ÑŽÐ±Ð¾Ð¹ Ð¸Ð· Ð¿ÐµÑ€ÐµÐ´Ð°Ð½Ð½Ñ‹Ñ… job numbers Ñ ÑƒÐ¶Ðµ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰Ð¸Ð¼Ð¸ Work Orders.
-    ÐŸÐ°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ñ‹:
-      - job_numbers: ÑÑ‚Ñ€Ð¾ÐºÐ° Ñ Ð½Ð¾Ð¼ÐµÑ€Ð°Ð¼Ð¸ Ñ‡ÐµÑ€ÐµÐ· Ð·Ð°Ð¿ÑÑ‚ÑƒÑŽ/Ð¿Ñ€Ð¾Ð±ÐµÐ»/; (Ð½Ð°Ð¿Ñ€Ð¸Ð¼ÐµÑ€ '984891, 989898')
-      - current_wo_id (Ð¾Ð¿Ñ†.): id Ñ‚ÐµÐºÑƒÑ‰ÐµÐ¹ WO â€” Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ ÑÑ‡Ð¸Ñ‚Ð°Ñ‚ÑŒ ÐµÑ‘ Ð¶Ðµ Ð´ÑƒÐ±Ð»ÐµÐ¼ Ð¿Ñ€Ð¸ Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ð¸
+    Проверяет, пересекается ли любой из переданных job numbers с уже существующими Work Orders.
+    Параметры:
+      - job_numbers: строка с номерами через запятую/пробел/; (например '984891, 989898')
+      - current_wo_id (опц.): id текущей WO — чтобы не считать её же дублем при редактировании
 
-    ÐžÑ‚Ð²ÐµÑ‚:
+    Ответ:
       { "duplicate": true, "existing_id": 123, "existing_jobs": "984891, 989898" }
-      Ð¸Ð»Ð¸
+      или
       { "duplicate": false }
     """
     from flask import request, jsonify
@@ -4860,7 +4853,7 @@ def api_job_duplicate_check():
         return jsonify({"duplicate": False})
     jobs_set = set(jobs_list)
 
-    # Ð£Ð·ÐºÐ¾Ðµ SQL-Ñ„Ð¸Ð»ÑŒÑ‚Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð¿Ð¾ LIKE, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð²ÑÐµ WOs
+    # Узкое SQL-фильтрование по LIKE, чтобы не грузить все WOs
     like_filters = [WorkOrder.job_numbers.ilike(f"%{j}%") for j in jobs_list]
     q = WorkOrder.query.filter(or_(*like_filters))
     if current_wo_id.isdigit():
@@ -4888,7 +4881,7 @@ def wo_new():
         flash("Access denied", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # Ð¼Ð¸Ð½Ð¸Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ð¹ "Ð¿ÑƒÑÑ‚Ð¾Ð¹" Ð¾Ð±ÑŠÐµÐºÑ‚, Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÑˆÐ°Ð±Ð»Ð¾Ð½ Ð¼Ð¾Ð³ Ð¾Ñ‚Ñ€Ð¸ÑÐ¾Ð²Ð°Ñ‚ÑŒ Ð¿Ð¾Ð»Ñ
+    # минимальный "пустой" объект, чтобы шаблон мог отрисовать поля
     class _WO:
         id = None
         technician_id = None
@@ -4908,7 +4901,7 @@ def wo_new():
     technicians = _query_technicians()
     recent_suppliers = session.get("recent_suppliers", []) or []
 
-    # Ð¾Ð´Ð¸Ð½ Ð¿ÑƒÑÑ‚Ð¾Ð¹ unit Ñ Ð¾Ð´Ð½Ð¾Ð¹ Ð¿ÑƒÑÑ‚Ð¾Ð¹ ÑÑ‚Ñ€Ð¾ÐºÐ¾Ð¹ parts Ð´Ð»Ñ Ñ„Ð¾Ñ€Ð¼Ñ‹
+    # один пустой unit с одной пустой строкой parts для формы
     units = [{
         "brand":  "",
         "model":  "",
@@ -5026,7 +5019,7 @@ def search():
 @inventory_bp.get("/inventory/search", endpoint="search_alias")
 @login_required
 def search_alias():
-    # Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð¿Ñ€Ð¾ÐºÑÐ¸Ñ€ÑƒÐµÐ¼ Ð½Ð° Ð½Ð¾Ð²Ñ‹Ð¹ Ð¾Ð±Ñ€Ð°Ð±Ð¾Ñ‚Ñ‡Ð¸Ðº, ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÑ query params
+    # просто проксируем на новый обработчик, сохраняя query params
     return search()
 
 # --- toggle "Ordered" for a single WorkOrderPart ---
@@ -5056,7 +5049,7 @@ def wo_toggle_ordered(wo_id: int, wop_id: int):
     new_state = (request.form.get("state") or "0").strip().lower() in ("1","true","on","yes")
 
     try:
-        # sync Ñ„Ð»Ð°Ð³Ð¸/ÑÑ‚Ð°Ñ‚ÑƒÑÑ‹
+        # sync флаги/статусы
         if hasattr(wop, "ordered_flag"):
             wop.ordered_flag = bool(new_state)
         if hasattr(wop, "status"):
@@ -5064,14 +5057,14 @@ def wo_toggle_ordered(wo_id: int, wop_id: int):
         if hasattr(wop, "line_status"):
             wop.line_status = "ordered" if new_state else "search_ordered"
 
-        # Ð´Ð°Ñ‚Ð°:
+        # дата:
         if hasattr(wop, "ordered_date"):
             if new_state:
-                # ÐµÑÐ»Ð¸ Ð´Ð°Ñ‚Ñ‹ Ð½ÐµÑ‚ â€” Ð¿Ð¾ÑÑ‚Ð°Ð²Ð¸Ð¼ ÑÐµÐ³Ð¾Ð´Ð½Ñ; ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ â€” Ð½Ðµ Ñ‚Ñ€Ð¾Ð³Ð°ÐµÐ¼
+                # если даты нет — поставим сегодня; если есть — не трогаем
                 if not wop.ordered_date:
                     wop.ordered_date = date.today()
             else:
-                # ÑÐ½ÑÑ‚Ð¸Ðµ Ñ‡ÐµÐºÐ±Ð¾ÐºÑÐ° â€” Ñ‡Ð¸ÑÑ‚Ð¸Ð¼ Ð´Ð°Ñ‚Ñƒ
+                # снятие чекбокса — чистим дату
                 wop.ordered_date = None
 
         db.session.commit()
@@ -5084,9 +5077,9 @@ def wo_toggle_ordered(wo_id: int, wop_id: int):
 
 def _auto_assign_invoice_for_wo(wo, current_user):
     """
-    ÐÐ°Ñ…Ð¾Ð´Ð¸Ñ‚ Â«ÑÐ²ÐµÐ¶Ð¸ÐµÂ» ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ Ð´Ð»Ñ ÑÑ‚Ð¾Ð³Ð¾ WO Ð±ÐµÐ· invoice_number/batch
-    Ð¸ Ð³Ñ€ÑƒÐ¿Ð¿Ð°Ð¼Ð¸ Ð¿Ñ€Ð¸ÑÐ²Ð°Ð¸Ð²Ð°ÐµÑ‚ Ð¸Ð¼ Ð½Ð¾Ð¼ÐµÑ€ Ñ‡ÐµÑ€ÐµÐ· _create_batch_for_records(...).
-    Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚: ÐºÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾ ÑÐ¾Ð·Ð´Ð°Ð½Ð½Ñ‹Ñ… Ð±Ð°Ñ‚Ñ‡ÐµÐ¹.
+    Находит «свежие» строки выдачи для этого WO без invoice_number/batch
+    и группами присваивает им номер через _create_batch_for_records(...).
+    Возвращает: количество созданных батчей.
     """
     from extensions import db
     from models import IssuedPartRecord
@@ -5095,17 +5088,17 @@ def _auto_assign_invoice_for_wo(wo, current_user):
     if not canon:
         return 0
 
-    # ÐÐ¾Ñ€Ð¼Ð°Ð»Ð¸Ð·ÑƒÐµÐ¼ Ð¸Ð¼Ñ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ° (ÐºÑƒÐ´Ð° Ð²Ñ‹Ð´Ð°Ð²Ð°Ð»Ð¸)
+    # Нормализуем имя техника (куда выдавали)
     issued_to = (wo.technician_username or wo.technician_name or "").strip()
     if not issued_to:
         return 0
 
-    # ÐŸÐ¾Ð´ÑÐºÐ¾Ð¿ Â«ÑÐ²ÐµÐ¶ÐµÑÑ‚Ð¸Â»: Ð·Ð° Ð¿Ð¾ÑÐ»ÐµÐ´Ð½Ð¸Ð¹ Ð´ÐµÐ½ÑŒ (Ð¼Ð¾Ð¶Ð½Ð¾ ÑÑƒÐ·Ð¸Ñ‚ÑŒ Ð´Ð¾ ÑÐµÐ³Ð¾Ð´Ð½ÑÑˆÐ½ÐµÐ¹ Ð´Ð°Ñ‚Ñ‹)
+    # Подскоп «свежести»: за последний день (можно сузить до сегодняшней даты)
     now = datetime.utcnow()
     start = datetime.combine(now.date(), _time.min)
     end   = datetime.combine(now.date(), _time.max)
 
-    # ÐšÐ°Ð½Ð´Ð¸Ð´Ð°Ñ‚Ñ‹: ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¿Ð¾ ÑÑ‚Ð¾Ð¼Ñƒ Ñ€ÐµÑ„Ñƒ, Ð±ÐµÐ· Ð½Ð¾Ð¼ÐµÑ€Ð° Ð¸ Ð±ÐµÐ· Ð±Ð°Ñ‚Ñ‡Ð°, Ð·Ð° ÑÐµÐ³Ð¾Ð´Ð½Ñ
+    # Кандидаты: строки по этому рефу, без номера и без батча, за сегодня
     q = (
         db.session.query(IssuedPartRecord)
         .filter(
@@ -5124,14 +5117,14 @@ def _auto_assign_invoice_for_wo(wo, current_user):
     if not cand:
         return 0
 
-    # Ð¤Ð¸Ð»ÑŒÑ‚Ñ€ÑƒÐµÐ¼ Ñ€ÐµÐ°Ð»ÑŒÐ½Ð¾ Â«Ð½Ð°ÑˆÐ¸Â» ÑÑ‚Ñ€Ð¾ÐºÐ¸ (Ð½Ð° ÑÐ»ÑƒÑ‡Ð°Ð¹ Ð¾Ð±Ñ‰Ð¸Ñ… Ñ€ÐµÑ„Ð¾Ð²)
-    # Ð§Ð°Ñ‰Ðµ Ð²ÑÐµÐ³Ð¾ issued_to ÑÐ¾Ð²Ð¿Ð°Ð´Ð°ÐµÑ‚ Ñ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ¾Ð¼ WO:
+    # Фильтруем реально «наши» строки (на случай общих рефов)
+    # Чаще всего issued_to совпадает с техником WO:
     same_to = [r for r in cand if (r.issued_to or "").strip().lower() == issued_to.strip().lower()]
     if not same_to:
-        # ÐµÑÐ»Ð¸ Ð½Ð¸Ñ‡ÐµÐ³Ð¾ Ð½Ðµ Ð½Ð°ÑˆÐ»Ð¸ Ð¿Ð¾ issued_to â€” Ð½Ðµ Ñ‚Ñ€Ð¾Ð³Ð°ÐµÐ¼ (Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ ÑÑ…Ð²Ð°Ñ‚Ð¸Ñ‚ÑŒ Ñ‡ÑƒÐ¶Ð¸Ðµ)
+        # если ничего не нашли по issued_to — не трогаем (чтобы не схватить чужие)
         return 0
 
-    # Ð“Ñ€ÑƒÐ¿Ð¿Ð¸Ñ€Ð¾Ð²ÐºÐ° Ð¿Ð¾ (issued_to, issued_by, reference_job, Ð´Ð°Ñ‚Ð°)
+    # Группировка по (issued_to, issued_by, reference_job, дата)
     def _key(r):
         d = r.issue_date.date() if r.issue_date else now.date()
         return (
@@ -5178,19 +5171,19 @@ from datetime import datetime
 
 def _serialize_batches_for_wo_detail(db_batches, wo):
     """
-    db_batches: iterable IssuedBatch (Ð¸Ð»Ð¸ Ñ‚Ð²Ð¾Ñ ÑÑ‚Ñ€ÑƒÐºÑ‚ÑƒÑ€Ð°), Ñƒ ÐºÐ¾Ñ‚Ð¾Ñ€Ð¾Ð¹ ÐµÑÑ‚ÑŒ:
-      - id, technician (Ð¸Ð¼Ñ/username), canonical_ref/reference_job, invoice_number, issued_at
-      - items/records: ÑÐ¿Ð¸ÑÐ¾Ðº IssuedPartRecord (Ð¸Ð»Ð¸ ÑÐºÐ²Ð¸Ð²Ð°Ð»ÐµÐ½Ñ‚) Ñ Ð¿Ð¾Ð»ÑÐ¼Ð¸:
-          id, part (obj) Ð¸Ð»Ð¸ part_id, quantity, unit_cost_at_issue, issue_date, confirmed
-    wo: Ñ‚ÐµÐºÑƒÑ‰Ð¸Ð¹ WorkOrder (Ð´Ð»Ñ Ñ„Ð¾Ð»Ð±ÑÐºÐ¾Ð² Ð½Ð° canonical_job/technician_name)
+    db_batches: iterable IssuedBatch (или твоя структура), у которой есть:
+      - id, technician (имя/username), canonical_ref/reference_job, invoice_number, issued_at
+      - items/records: список IssuedPartRecord (или эквивалент) с полями:
+          id, part (obj) или part_id, quantity, unit_cost_at_issue, issue_date, confirmed
+    wo: текущий WorkOrder (для фолбэков на canonical_job/technician_name)
 
-    Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ ÑÐ¿Ð¸ÑÐ¾Ðº ÑÐ»Ð¾Ð²Ð°Ñ€ÐµÐ¹ Ð´Ð»Ñ Jinja:
+    Возвращает список словарей для Jinja:
       keys: is_return, items, total_value, technician, canonical_ref, reference_job,
-            invoice_number, issued_at_dt  (+ Ð¾ÑÑ‚Ð°Ð²Ð¸Ð¼ issued_at Ð´Ð»Ñ Ð±ÑÐº-ÑÐ¾Ð²Ð¼ÐµÑÑ‚Ð¸Ð¼Ð¾ÑÑ‚Ð¸)
+            invoice_number, issued_at_dt  (+ оставим issued_at для бэк-совместимости)
     """
     result = []
     for b in db_batches:
-        # --- Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ ÑÐ¾Ð±Ð¸Ñ€Ð°ÐµÐ¼ ÑÐ¿Ð¸ÑÐ¾Ðº Ð·Ð°Ð¿Ð¸ÑÐµÐ¹ (IssuedPartRecord)
+        # --- безопасно собираем список записей (IssuedPartRecord)
         recs = getattr(b, "records", None) or getattr(b, "items", None) or []
 
         items = []
@@ -5199,13 +5192,13 @@ def _serialize_batches_for_wo_detail(db_batches, wo):
         all_confirmed = True if recs else False
         is_return_batch = False
 
-        # ÐžÐ¿Ñ€ÐµÐ´ÐµÐ»ÑÐµÐ¼ issued_at_dt: Ð¿Ñ€Ð¸Ð¾Ñ€Ð¸Ñ‚ÐµÑ‚ â€” Ð¿Ð¾Ð»Ðµ Ð±Ð°Ñ‚Ñ‡Ð°; Ð¸Ð½Ð°Ñ‡Ðµ Ð¿Ð¾ Ð¿ÐµÑ€Ð²Ð¾Ð¹ Ð·Ð°Ð¿Ð¸ÑÐ¸
+        # Определяем issued_at_dt: приоритет — поле батча; иначе по первой записи
         issued_at_dt = getattr(b, "issued_at", None)
         if not issued_at_dt and recs:
-            # Ð²Ð¾Ð·ÑŒÐ¼Ñ‘Ð¼ Ð¼Ð¸Ð½Ð¸Ð¼Ð°Ð»ÑŒÐ½ÑƒÑŽ Ð´Ð°Ñ‚Ñƒ Ð·Ð°Ð¿Ð¸ÑÐ¸ ÐºÐ°Ðº Â«Ð²Ñ€ÐµÐ¼Ñ Ð±Ð°Ñ‚Ñ‡Ð°Â»
+            # возьмём минимальную дату записи как «время батча»
             issued_at_dt = min((getattr(r, "issue_date", None) for r in recs if getattr(r, "issue_date", None)), default=None)
 
-        # Ð¡Ð¾Ð±Ð¸Ñ€Ð°ÐµÐ¼ Ð°Ð¹Ñ‚ÐµÐ¼Ñ‹
+        # Собираем айтемы
         for r in recs:
             qty = getattr(r, "quantity", 0) or 0
             unit = getattr(r, "unit_cost_at_issue", None)
@@ -5241,7 +5234,7 @@ def _serialize_batches_for_wo_detail(db_batches, wo):
                 "negative": qty < 0,
             })
 
-        # Ð¤Ð¾Ð»Ð±ÑÐºÐ¸ Ð¿Ð¾ Ñ‚ÐµÑ…Ð½Ð¸ÐºÑƒ/Ñ€ÐµÑ„ÐµÑ€ÐµÐ½ÑÑƒ
+        # Фолбэки по технику/референсу
         tech = getattr(b, "technician", None) or getattr(wo, "technician_name", None) or ""
         canonical_ref = getattr(b, "canonical_ref", None) or getattr(b, "reference_job", None) or getattr(wo, "canonical_job", None) or ""
         reference_job = getattr(b, "reference_job", None) or getattr(wo, "canonical_job", None) or ""
@@ -5255,14 +5248,14 @@ def _serialize_batches_for_wo_detail(db_batches, wo):
             "reference_job": reference_job,
             "invoice_number": getattr(b, "invoice_number", None),
 
-            # ÐºÐ»ÑŽÑ‡ Ð´Ð»Ñ Ð½Ð¾Ð²Ð¾Ð³Ð¾ ÑˆÐ°Ð±Ð»Ð¾Ð½Ð° (Ð±ÑƒÐ´ÐµÑ‚ Ð¾Ñ‚Ñ€ÐµÐ½Ð´ÐµÑ€ÐµÐ½ Ñ‡ÐµÑ€ÐµÐ· |local_dt):
+            # ключ для нового шаблона (будет отрендерен через |local_dt):
             "issued_at_dt": issued_at_dt,
 
-            # Ð¾ÑÑ‚Ð°Ð²Ð¸Ð¼ ÑÑ‚Ð°Ñ€Ñ‹Ð¹, ÐµÑÐ»Ð¸ Ð³Ð´Ðµ-Ñ‚Ð¾ ÐµÑ‰Ñ‘ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÑ‚ÑÑ:
+            # оставим старый, если где-то ещё используется:
             "issued_at": getattr(b, "issued_at", None) or (
                 issued_at_dt.strftime("%Y-%m-%d %H:%M") if isinstance(issued_at_dt, datetime) else None
             ),
-            # Ð´Ð»Ñ ÑÐ¾Ð²Ð¼ÐµÑÑ‚Ð¸Ð¼Ð¾ÑÑ‚Ð¸ Ð¼Ð¾Ð¶Ð½Ð¾ Ð²ÐµÑ€Ð½ÑƒÑ‚ÑŒ Ð¸ Â«issued_byÂ», ÐµÑÐ»Ð¸ Ð½ÑƒÐ¶Ð½Ð¾ Ð² legacy-Ð¿ÐµÑ‡Ð°Ñ‚ÑÑ…
+            # для совместимости можно вернуть и «issued_by», если нужно в legacy-печатях
             "issued_by": getattr(b, "issued_by", None),
         })
     return result
@@ -5433,13 +5426,13 @@ def wo_detail(wo_id):
             "action": (a.action or ""),
             "message": pretty_message,
             "message_json": parsed_json,
-            "actor": (a.actor_username or "â€”"),
+            "actor": (a.actor_username or "—"),
             "meta": "",
         })
 
 
     # ------------------------------------------------------------
-    # 4) Issued / Batches â€” FIXED (work_order_id + safe fallback)
+    # 4) Issued / Batches — FIXED (work_order_id + safe fallback)
     # ------------------------------------------------------------
     canon = (wo.canonical_job or "").strip()
     raw_jobs = (getattr(wo, "job_numbers", "") or "").strip()
@@ -5483,9 +5476,9 @@ def wo_detail(wo_id):
     # ------------------------------------------------------------
     # 4) Issued records
     #
-    # Ð¡Ð½Ð°Ñ‡Ð°Ð»Ð° Ð±Ñ‹ÑÑ‚Ñ€Ð¾ Ð¿Ð¾Ð»ÑƒÑ‡Ð°ÐµÐ¼ Ð½Ð¾Ð²Ñ‹Ðµ Ð·Ð°Ð¿Ð¸ÑÐ¸ Ñ‡ÐµÑ€ÐµÐ· work_order_id.
-    # Legacy-Ð¿Ð¾Ð¸ÑÐº Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐµÐ¼ Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ð¾ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð´Ð»Ñ Ð·Ð°Ð¿Ð¸ÑÐµÐ¹,
-    # ÐºÐ¾Ñ‚Ð¾Ñ€Ñ‹Ðµ ÐµÑ‰Ñ‘ Ð½Ðµ ÑÐ²ÑÐ·Ð°Ð½Ñ‹ Ð½Ð°Ð¿Ñ€ÑÐ¼ÑƒÑŽ Ñ Work Order.
+    # Сначала быстро получаем новые записи через work_order_id.
+    # Legacy-поиск выполняем отдельно только для записей,
+    # которые ещё не связаны напрямую с Work Order.
     # ------------------------------------------------------------
 
     def _issued_base_query():
@@ -5564,7 +5557,7 @@ def wo_detail(wo_id):
 
     issued_by_id = []
 
-    # Ð‘Ñ‹ÑÑ‚Ñ€Ñ‹Ð¹ Ð¾ÑÐ½Ð¾Ð²Ð½Ð¾Ð¹ Ð·Ð°Ð¿Ñ€Ð¾Ñ Ð´Ð»Ñ Ð½Ð¾Ð²Ñ‹Ñ… Ð·Ð°Ð¿Ð¸ÑÐµÐ¹.
+    # Быстрый основной запрос для новых записей.
     if "work_order_id" in IssuedBatch.__table__.c:
         linked_query = (
             _issued_base_query()
@@ -5611,7 +5604,7 @@ def wo_detail(wo_id):
     if token_ors:
         legacy_query = _issued_base_query()
 
-        # ÐÐµ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€ÑÐµÐ¼ Ð·Ð°Ð¿Ð¸ÑÐ¸, ÑƒÐ¶Ðµ ÑÐ²ÑÐ·Ð°Ð½Ð½Ñ‹Ðµ Ñ‡ÐµÑ€ÐµÐ· work_order_id.
+        # Не повторяем записи, уже связанные через work_order_id.
         if "work_order_id" in IssuedBatch.__table__.c:
             legacy_query = legacy_query.filter(
                 or_(
@@ -5716,7 +5709,7 @@ def wo_detail(wo_id):
     net_qty = issued_qty - returned_qty
 
     def _fmt(dt):
-        return dt.strftime("%Y-%m-%d %H:%M") if dt else "â€”"
+        return dt.strftime("%Y-%m-%d %H:%M") if dt else "—"
 
     def _extract(rec):
         return (
@@ -5791,7 +5784,7 @@ def wo_detail(wo_id):
                 {
                     "id": rid,
                     "pn": pn,
-                    "name": name or "â€”",
+                    "name": name or "—",
                     "qty": abs(qty),
                     "unit_price": price,
                     "negative": (line_total < 0) or is_item_return,
@@ -5828,7 +5821,7 @@ def wo_detail(wo_id):
 
     invoiced_pns = sorted([pn for pn, net in net_by_pn.items() if net > 0])
 
-    # 5) BLENDED PRICING + INS-ÑÑ‚Ñ€Ð¾ÐºÐ¸
+    # 5) BLENDED PRICING + INS-строки
     all_rows = []
     if wo.units:
         for u in wo.units:
@@ -5902,7 +5895,7 @@ def wo_detail(wo_id):
             blended_total_val = 0.0
             blended_unit_price = 0.0
 
-        # ÑÑ‚Ñ€Ð°Ñ…Ð¾Ð²Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð² ÑÑ‚Ñ€Ð°Ñ…Ð¾Ð²Ð¾Ð¹ Ñ€Ð°Ð±Ð¾Ñ‚Ðµ â€” ÐºÐ»Ð¸ÐµÐ½Ñ‚ = 0$
+        # страховые строки в страховой работе — клиент = 0$
         if wo.job_type == "INSURANCE" and is_ins:
             blended_total_val = 0.0
             blended_unit_price = 0.0
@@ -5928,7 +5921,7 @@ def wo_detail(wo_id):
                     getattr(r, "alt_pn", "") or
                     ""
                 ),
-                "part_name": getattr(r, "part_name", "") or getattr(r, "name", "") or "â€”",
+                "part_name": getattr(r, "part_name", "") or getattr(r, "name", "") or "—",
                 "qty": qty_planned,
                 "unit_price_display": blended_unit_price,
                 "total_display": blended_total_val,
@@ -5940,7 +5933,7 @@ def wo_detail(wo_id):
                 "is_invoiced": is_invoiced,
                 "is_insurance_supplied": is_ins,
 
-                # âœ… INV# from WorkOrderPart.invoice_number
+                # ✅ INV# from WorkOrderPart.invoice_number
                 "invoice_number": (getattr(r, "invoice_number", "") or "").strip(),
                 "inv_ref": (getattr(r, "invoice_number", "") or "").strip(),
             }
@@ -5986,10 +5979,10 @@ _RECEIVING_USER_MAP_CACHE = {
 @inventory_bp.app_context_processor
 def inject_alerts_count():
     """
-    Alert badge Ð´Ð»Ñ Ð²ÐµÑ€Ñ…Ð½ÐµÐ³Ð¾ Ð¼ÐµÐ½ÑŽ.
+    Alert badge для верхнего меню.
 
-    Ð—Ð½Ð°Ñ‡ÐµÐ½Ð¸Ðµ ÐºÑÑˆÐ¸Ñ€ÑƒÐµÑ‚ÑÑ Ð½Ð° 30 ÑÐµÐºÑƒÐ½Ð´, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¾Ð´Ð¸Ð½ Ð¸ Ñ‚Ð¾Ñ‚ Ð¶Ðµ COUNT
-    Ð½Ðµ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐ»ÑÑ Ð¿Ñ€Ð¸ ÐºÐ°Ð¶Ð´Ð¾Ð¼ Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ð¸Ð¸ CSS-heavy ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ†Ñ‹ Ð¸ ÐºÐ°Ð¶Ð´Ð¾Ð³Ð¾ Ñ€Ð°Ð·Ð´ÐµÐ»Ð°.
+    Значение кэшируется на 30 секунд, чтобы один и тот же COUNT
+    не выполнялся при каждом открытии CSS-heavy страницы и каждого раздела.
     """
     from datetime import date, timedelta
     from sqlalchemy import func
@@ -7005,7 +6998,7 @@ def download_report_xlsx():
 
     end_dt_exclusive = end_dt + timedelta(days=1)
 
-    # --------- Ð·Ð°Ð¿Ñ€Ð¾Ñ ---------
+    # --------- запрос ---------
     q = (
         db.session.query(IssuedPartRecord)
         .join(Part, IssuedPartRecord.part_id == Part.id)
@@ -7100,7 +7093,7 @@ def download_report_xlsx():
         bottom=Side(style="thin"),
     )
 
-    # >>> Ð¸Ñ‚Ð¾Ð³Ð¾Ð²Ñ‹Ð¹ Ð½Ð°Ð±Ð¾Ñ€ ÐºÐ¾Ð»Ð¾Ð½Ð¾Ðº (13) <<<
+    # >>> итоговый набор колонок (13) <<<
     header = [
         "Date",             # A
         "Invoice #",        # B
@@ -7117,10 +7110,10 @@ def download_report_xlsx():
         "Return Company",   # M
     ]
 
-    # ÑÑ‚Ñ€Ð¾ÐºÐ° Ñ„Ð¸Ð»ÑŒÑ‚Ñ€Ð¾Ð²
+    # строка фильтров
     filters_parts = []
     if start_date_str or end_date_str:
-        filters_parts.append(f"from {start_date_str or 'â€¦'} to {end_date_str or 'â€¦'}")
+        filters_parts.append(f"from {start_date_str or '…'} to {end_date_str or '…'}")
     if q_s:
         filters_parts.append(f"Search q = '{q_s}'")
     if location:
@@ -7197,9 +7190,9 @@ def download_report_xlsx():
         inv_val = rec.invoice_number
         inv_str = fmt_invoice_num(inv_val)
 
-        # GROUPED: Ð½Ð¾Ð²Ð°Ñ ÑˆÐ°Ð¿ÐºÐ° Ð¸Ð½Ð²Ð¾Ð¹ÑÐ°
+        # GROUPED: новая шапка инвойса
         if inv_val != current_invoice:
-            # subtotal Ð¿Ñ€ÐµÐ´Ñ‹Ð´ÑƒÑ‰ÐµÐ³Ð¾ Ð¸Ð½Ð²Ð¾Ð¹ÑÐ°
+            # subtotal предыдущего инвойса
             if current_invoice is not None:
                 ws_grouped.append([
                     "", "", "", "Invoice subtotal:",
@@ -7215,7 +7208,7 @@ def download_report_xlsx():
                 ws_grouped.append([])
 
             header_text = f"Invoice {inv_str or '(no number)'}"
-            ws_grouped.append([header_text] + [""] * 12)  # 13 ÐºÐ¾Ð»Ð¾Ð½Ð¾Ðº
+            ws_grouped.append([header_text] + [""] * 12)  # 13 колонок
             for cell in ws_grouped[ws_grouped.max_row]:
                 cell.fill = invoice_header_fill
                 cell.font = bold_font
@@ -7281,7 +7274,7 @@ def download_report_xlsx():
         ws_flat[row_idx_flat][5].alignment = right_align
         ws_flat[row_idx_flat][6].alignment = right_align
 
-    # subtotal Ð¿Ð¾ÑÐ»ÐµÐ´Ð½ÐµÐ³Ð¾ Ð¸Ð½Ð²Ð¾Ð¹ÑÐ°
+    # subtotal последнего инвойса
     if current_invoice is not None:
         ws_grouped.append([
             "", "", "", "Invoice subtotal:",
@@ -7962,7 +7955,7 @@ def download_stock_xlsx():
 
     filters_parts = []
     if start_date_str or end_date_str:
-        filters_parts.append(f"from {start_date_str or 'â€¦'} to {end_date_str or 'â€¦'}")
+        filters_parts.append(f"from {start_date_str or '…'} to {end_date_str or '…'}")
     if q_s:
         filters_parts.append(f"Search q = '{q_s}'")
     if location:
@@ -8183,27 +8176,27 @@ def wo_create():
 
 def _render_new_wo_form(prefill=None, units_prefill=None, flash_msg=None):
     """
-    Ð ÐµÐ½Ð´ÐµÑ€ Ñ‚Ð¾Ð¹ ÑÐ°Ð¼Ð¾Ð¹ multi-appliance Ñ„Ð¾Ñ€Ð¼Ñ‹ /work_orders/new
-    Ð±ÐµÐ· Ñ€ÐµÐ´Ð¸Ñ€ÐµÐºÑ‚Ð°, Ñ ÑƒÐ¶Ðµ Ð²Ð²ÐµÐ´Ñ‘Ð½Ð½Ñ‹Ð¼Ð¸ Ð´Ð°Ð½Ð½Ñ‹Ð¼Ð¸.
+    Рендер той самой multi-appliance формы /work_orders/new
+    без редиректа, с уже введёнными данными.
     """
     from flask import session, render_template, flash
     from flask_login import current_user
     from models import User
 
-    # recent suppliers (Ñ‡Ñ‚Ð¾Ð± datalist Ð¸ Ñ‚.Ð¿. Ð¾ÑÑ‚Ð°Ð»Ð¸ÑÑŒ ÐºÐ°Ðº Ñ€Ð°Ð½ÑŒÑˆÐµ)
+    # recent suppliers (чтоб datalist и т.п. остались как раньше)
     recent_suppliers = session.get("recent_suppliers", [])
 
     if flash_msg:
         flash(flash_msg, "warning")
 
     # ---------- technician dropdown ----------
-    # Ñƒ Ñ‚ÐµÐ±Ñ Ð² ÑˆÐ°Ð±Ð»Ð¾Ð½Ðµ "This list includes only users with the technician role."
+    # у тебя в шаблоне "This list includes only users with the technician role."
     tech_users = User.query.filter(
         (User.role == "technician") | (User.role == "TECHNICIAN")
     ).order_by(User.username.asc()).all()
 
-    # ---------- ÑˆÐ°Ð¿ÐºÐ° Ð¾Ñ€Ð´ÐµÑ€Ð° ----------
-    # prefill Ð¼Ð¾Ð¶ÐµÑ‚ Ð±Ñ‹Ñ‚ÑŒ WorkOrder (Ð½ÐµÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½Ð½Ñ‹Ð¹) Ð¸Ð»Ð¸ dict
+    # ---------- шапка ордера ----------
+    # prefill может быть WorkOrder (несохранённый) или dict
     wo_hdr = {
         "technician_id":    "",
         "technician_name":  "",
@@ -8214,7 +8207,7 @@ def _render_new_wo_form(prefill=None, units_prefill=None, flash_msg=None):
         "status":           "search_ordered",
     }
     if prefill:
-        # Ð°ÐºÐºÑƒÑ€Ð°Ñ‚Ð½Ð¾ ÐºÐ¾Ð¿Ð¸Ñ€ÑƒÐµÐ¼ Ð¿Ð¾Ð»Ñ, ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ
+        # аккуратно копируем поля, если есть
         wo_hdr["technician_id"]   = getattr(prefill, "technician_id",   "") or ""
         wo_hdr["technician_name"] = getattr(prefill, "technician_name", "") or ""
         wo_hdr["job_numbers"]     = getattr(prefill, "job_numbers",     "") or ""
@@ -8223,10 +8216,10 @@ def _render_new_wo_form(prefill=None, units_prefill=None, flash_msg=None):
         wo_hdr["markup_percent"]  = getattr(prefill, "markup_percent",  0.0) or 0.0
         wo_hdr["status"]          = getattr(prefill, "status",          "search_ordered") or "search_ordered"
 
-    # ---------- Ð±Ð»Ð¾ÐºÐ¸ appliances / units / rows ----------
-    # Ð­Ñ‚Ð¾ Ñ‚Ð¾, Ñ‡Ñ‚Ð¾ Ñ‚Ñ‹ ÑÐ¾Ð±Ð¸Ñ€Ð°ÐµÑˆÑŒ Ð²Ð½ÑƒÑ‚Ñ€Ð¸ wo_save Ð² units_payload.
-    # Ð•ÑÐ»Ð¸ Ñƒ Ð½Ð°Ñ ÑƒÐ¶Ðµ ÐµÑÑ‚ÑŒ units_prefill (ÑÐ¿Ð°Ñ€ÑÐ¸Ð»Ð¸ Ð¸Ð· Ñ„Ð¾Ñ€Ð¼Ñ‹ Ð¿ÐµÑ€ÐµÐ´ Ð²Ð°Ð»Ð¸Ð´Ð°Ñ†Ð¸ÐµÐ¹),
-    # Ñ‚Ð¾ Ð¾Ñ‚Ð´Ð°Ñ‘Ð¼ ÐµÐ³Ð¾; Ð¸Ð½Ð°Ñ‡Ðµ Ð¾Ñ‚Ð´Ð°Ñ‘Ð¼ Ð´ÐµÑ„Ð¾Ð»Ñ‚ Ñ Ð¾Ð´Ð½Ð¸Ð¼ appliance Ð¸ Ð¾Ð´Ð½Ð¾Ð¹ Ð¿ÑƒÑÑ‚Ð¾Ð¹ ÑÑ‚Ñ€Ð¾ÐºÐ¾Ð¹.
+    # ---------- блоки appliances / units / rows ----------
+    # Это то, что ты собираешь внутри wo_save в units_payload.
+    # Если у нас уже есть units_prefill (спарсили из формы перед валидацией),
+    # то отдаём его; иначе отдаём дефолт с одним appliance и одной пустой строкой.
     if units_prefill:
         units_for_template = units_prefill
     else:
@@ -8249,8 +8242,8 @@ def _render_new_wo_form(prefill=None, units_prefill=None, flash_msg=None):
             }],
         }]
 
-    # Ð’ÐÐ–ÐÐž: ÑÑ‚Ð¾Ñ‚ ÑˆÐ°Ð±Ð»Ð¾Ð½ Ð´Ð¾Ð»Ð¶ÐµÐ½ Ð±Ñ‹Ñ‚ÑŒ Ð¢ÐžÐ§ÐÐž Ñ‚Ð¾Ð¹ ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ†ÐµÐ¹, ÐºÐ¾Ñ‚Ð¾Ñ€Ð°Ñ Ñƒ Ñ‚ÐµÐ±Ñ Ð½Ð° /work_orders/new ÑÐµÐ¹Ñ‡Ð°Ñ.
-    # Ð•ÑÐ»Ð¸ Ð¾Ð½ Ñƒ Ñ‚ÐµÐ±Ñ Ð½Ð°Ð·Ñ‹Ð²Ð°ÐµÑ‚ÑÑ Ð¸Ð½Ð°Ñ‡Ðµ â€“ Ð¿Ð¾Ð´ÑÑ‚Ð°Ð²ÑŒ Ð¿Ñ€Ð°Ð²Ð¸Ð»ÑŒÐ½Ñ‹Ð¹ Ð¿ÑƒÑ‚ÑŒ.
+    # ВАЖНО: этот шаблон должен быть ТОЧНО той страницей, которая у тебя на /work_orders/new сейчас.
+    # Если он у тебя называется иначе – подставь правильный путь.
     return render_template(
         "work_orders/new.html",
         wo=wo_hdr,
@@ -8398,7 +8391,7 @@ def wo_save():
                 cleaned.append(p)
         return cleaned
 
-    # âœ… IMPORTANT: must exist before _rerender_same_screen uses it (early returns)
+    # ✅ IMPORTANT: must exist before _rerender_same_screen uses it (early returns)
     units_payload = None
 
     def _rerender_same_screen(msg_text: str, errors=None):
@@ -8560,7 +8553,7 @@ def wo_save():
     wo_id = (f.get("wo_id") or "").strip()
     is_new = not wo_id
 
-    # Ð²Ð·ÑÑ‚ÑŒ WorkOrder ÑÑ€Ð°Ð·Ñƒ Ð²Ð¼ÐµÑÑ‚Ðµ Ñ appliances Ð¸ parts
+    # взять WorkOrder сразу вместе с appliances и parts
     if is_new:
         wo = WorkOrder()
         loaded_units = []
@@ -8578,7 +8571,7 @@ def wo_save():
         )
 
         # ==================================================
-        # WORK ORDER EDIT LOCK â€” SAVE OWNERSHIP CHECK
+        # WORK ORDER EDIT LOCK — SAVE OWNERSHIP CHECK
         # ==================================================
         actor_id = getattr(current_user, "id", None)
 
@@ -8650,7 +8643,7 @@ def wo_save():
             "parts_count": len(loaded_parts),
         }
 
-    # ---------- Ð·Ð°Ð³Ð¾Ð»Ð¾Ð²Ð¾Ðº / ÑˆÐ°Ð¿ÐºÐ° ----------
+    # ---------- заголовок / шапка ----------
     tech_id_raw = (f.get("technician_id") or f.get("technician") or "").strip()
     tech_name_raw = (f.get("technician_name") or f.get("technician") or "").strip()
 
@@ -8676,7 +8669,7 @@ def wo_save():
     wo.technician_id = tech_id_val
     wo.technician_name = (tech_name_val or "").strip().upper() if tech_name_val else ""
 
-    # job_numbers Ð²ÑÐµÐ³Ð´Ð° Ð² UPPER
+    # job_numbers всегда в UPPER
     wo.job_numbers = (f.get("job_numbers") or "").upper().strip()
     wo.job_type = (f.get("job_type") or "BASE").strip().upper()
     wo.delivery_fee = _f(f.get("delivery_fee"), 0) or 0.0
@@ -8686,7 +8679,7 @@ def wo_save():
     ALLOWED_WO_STATUSES = ("search_ordered", "ordered", "done", "cancel_job")
     wo.status = st_field if st_field in ALLOWED_WO_STATUSES else "search_ordered"
 
-    # Customer PO (Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð´Ð»Ñ INSURANCE, Ð¸Ð½Ð°Ñ‡Ðµ Ñ‡Ð¸ÑÑ‚Ð¸Ð¼)
+    # Customer PO (только для INSURANCE, иначе чистим)
     po = (f.get("customer_po") or "").strip().upper()
     if (wo.job_type or "").upper() == "INSURANCE":
         wo.customer_po = po or None
@@ -8696,7 +8689,7 @@ def wo_save():
     note_raw = (f.get("note") or "").strip()
     wo.note = note_raw or None
 
-    # Ð­Ñ‚Ð¸ Ð¿Ð¾Ð»Ñ ÑÐµÐ¹Ñ‡Ð°Ñ Ð¼Ð°Ð»Ð¾ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÑŽÑ‚ÑÑ Ð² multi-appliance, Ð½Ð¾ Ð¿Ñ€Ð¸Ð²Ð¾Ð´Ð¸Ð¼ Ðº UPPER Ð½Ð° Ð²ÑÑÐºÐ¸Ð¹ ÑÐ»ÑƒÑ‡Ð°Ð¹
+    # Эти поля сейчас мало используются в multi-appliance, но приводим к UPPER на всякий случай
     brand_hdr_raw = (f.get("brand") or "").strip().upper()
     model_hdr_raw = _clip(f.get("model"), 25).upper() if f.get("model") else ""
     serial_hdr_raw = _clip(f.get("serial"), 25).upper() if f.get("serial") else ""
@@ -8707,7 +8700,7 @@ def wo_save():
     if serial_hdr_raw:
         wo.serial = serial_hdr_raw
 
-    # ---------- Ð’ÐÐ›Ð˜Ð”ÐÐ¦Ð˜Ð¯ Ð·Ð°Ð³Ð¾Ð»Ð¾Ð²ÐºÐ° ----------
+    # ---------- ВАЛИДАЦИЯ заголовка ----------
     if not tech_name_val:
         if is_new:
             pass
@@ -8771,9 +8764,9 @@ def wo_save():
     # === DUP GUARD ===
     input_jobs = _parse_jobs(wo.job_numbers)
 
-    # âœ… Ð’ÐÐ–ÐÐž: ÐµÑÐ»Ð¸ job_numbers Ð¿ÑƒÑÑ‚Ð¾Ð¹ â€” ÐÐ• Ð´ÐµÐ»Ð°ÐµÐ¼ dup-guard ÑÐµÐ¹Ñ‡Ð°Ñ.
-    # ÐŸÑƒÑÑ‚ÑŒ Ð´Ð°Ð»ÑŒÑˆÐµ ÑÐ¾Ð±ÐµÑ€Ñ‘Ñ‚ÑÑ units_payload Ð¸ ÑÑ€Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚ _rerender_same_screen(),
-    # Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÐÐ• Ð¿Ð¾Ñ‚ÐµÑ€ÑÑ‚ÑŒ Ð²Ð²ÐµÐ´Ñ‘Ð½Ð½Ñ‹Ðµ Ð´Ð°Ð½Ð½Ñ‹Ðµ.
+    # ✅ ВАЖНО: если job_numbers пустой — НЕ делаем dup-guard сейчас.
+    # Пусть дальше соберётся units_payload и сработает _rerender_same_screen(),
+    # чтобы НЕ потерять введённые данные.
     if input_jobs:
         input_set = set(input_jobs)
         like_filters = [WorkOrder.job_numbers.ilike(f"%{j}%") for j in input_jobs]
@@ -8795,7 +8788,7 @@ def wo_save():
                     errors={"job_numbers": "Duplicate job number(s)."}
                 )
 
-    # ---------- ÑÐ¾Ð±Ñ€Ð°Ñ‚ÑŒ units[...] Ð¸ Ð¸Ñ… rows[...] ----------
+    # ---------- собрать units[...] и их rows[...] ----------
     re_unit = re.compile(r"^units\[(\d+)\]\[(brand|model|serial)\]$")
     re_row = re.compile(
         r"^units\[(\d+)\]\[rows\]\[(\d+)\]\[(id|item_type|part_number|part_name|quantity|"
@@ -8824,7 +8817,7 @@ def wo_save():
                 val = f.get(key)
             units_map[ui]["rows"][ri][name] = val
 
-    # Ð¿Ñ€ÐµÐ²Ñ€Ð°Ñ‚Ð¸Ñ‚ÑŒ units_map -> units_payload
+    # превратить units_map -> units_payload
     units_payload = []
     new_rows_count = 0
 
@@ -8902,7 +8895,7 @@ def wo_save():
         sum(len(u.get('rows') or []) for u in units_payload)
     )
 
-    # ---------- Ð’ÐÐ›Ð˜Ð”ÐÐ¦Ð˜Ð¯ (Ð¿Ñ€Ð¾Ð´Ð¾Ð»Ð¶ÐµÐ½Ð¸Ðµ) ----------
+    # ---------- ВАЛИДАЦИЯ (продолжение) ----------
     if not tech_name_val:
         if is_new:
             return _rerender_same_screen("Technician is required before saving Work Order.")
@@ -8937,7 +8930,7 @@ def wo_save():
             getattr(wo, "id", None) or "(new)"
         )
 
-    # ---------- ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ð¿Ñ€ÐµÐ¶Ð½Ð¸Ðµ ordered_flag / ordered_date ----------
+    # ---------- сохранить прежние ordered_flag / ordered_date ----------
     def _norm_supplier(s):
         s = (s or "").strip()
         return " ".join(s.split()).lower()
@@ -9114,7 +9107,7 @@ def wo_save():
 
         if added:
             added_txt = ", ".join(
-                f"{x.get('pn')} x{x.get('qty')} â€” {x.get('name')}"
+                f"{x.get('pn')} x{x.get('qty')} — {x.get('name')}"
                 for x in added[:3]
             )
 
@@ -9128,7 +9121,7 @@ def wo_save():
 
         if removed:
             removed_txt = ", ".join(
-                f"{x.get('pn')} x{x.get('qty')} â€” {x.get('name')}"
+                f"{x.get('pn')} x{x.get('qty')} — {x.get('name')}"
                 for x in removed[:3]
             )
 
@@ -9159,7 +9152,7 @@ def wo_save():
 
             def fmt_val(v):
                 if v is None or v == "":
-                    return "â€”"
+                    return "—"
 
                 if v is True:
                     return "YES"
@@ -9190,7 +9183,7 @@ def wo_save():
                     label = field_labels.get(field_name, field_name)
                     old = fmt_val(diff.get("from"))
                     new = fmt_val(diff.get("to"))
-                    part_changes.append(f"{label}: {old} â†’ {new}")
+                    part_changes.append(f"{label}: {old} → {new}")
 
                 changed_txt.append(f"{pn}: " + "; ".join(part_changes))
 
@@ -9469,7 +9462,7 @@ def wo_save():
 
             def fmt_audit_val(v):
                 if v is None or v == "":
-                    return "â€”"
+                    return "—"
                 if v is True:
                     return "YES"
                 if v is False:
@@ -9493,7 +9486,7 @@ def wo_save():
                 for k, diff in header_changed.items():
                     label = header_labels.get(k, k)
                     header_text.append(
-                        f"{label}: {fmt_audit_val(diff.get('from'))} â†’ {fmt_audit_val(diff.get('to'))}"
+                        f"{label}: {fmt_audit_val(diff.get('from'))} → {fmt_audit_val(diff.get('to'))}"
                     )
 
                 msg_bits.append({
@@ -9581,7 +9574,7 @@ def wo_save():
         flash(f"Failed to save Work Order: {e}", "danger")
         return _safe_detail_redirect(wo)
 
-    # âœ… RELEASE reservation only after successful NEW WO save
+    # ✅ RELEASE reservation only after successful NEW WO save
     if is_new:
         try:
             tokens2 = _job_tokens(saved_job_numbers)
@@ -9623,7 +9616,7 @@ def wo_save():
     after_save = (request.form.get("_after_save") or "").strip()
     save_clicked = (request.form.get("_save_clicked") or "").strip()
 
-    # ÐµÑÐ»Ð¸ ÑÑ‚Ð¾ Ð¾Ð±Ñ‹Ñ‡Ð½Ñ‹Ð¹ Save â€” Ð¸Ð³Ð½Ð¾Ñ€Ð¸Ñ€ÑƒÐµÐ¼ auto_issue Ð¿Ð¾Ð»Ð½Ð¾ÑÑ‚ÑŒÑŽ
+    # если это обычный Save — игнорируем auto_issue полностью
     if save_clicked:
         return redirect(
             url_for(
@@ -9632,7 +9625,7 @@ def wo_save():
             )
         )
 
-    # Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÐµÑÐ»Ð¸ ÑÑ‚Ð¾ Ñ€ÐµÐ°Ð»ÑŒÐ½Ð¾ Issue flow
+    # только если это реально Issue flow
     if after_save == "edit_auto_issue":
         return redirect(
             url_for(
@@ -9734,7 +9727,7 @@ def wo_list():
             WorkOrder.technician_id == me_id,
             func.trim(WorkOrder.technician_name) == me_name,
         ))
-        tech_id = None  # Ñ‚ÐµÑ…Ð½Ð¸ÐºÑƒ Ð½ÐµÐ»ÑŒÐ·Ñ Ð²Ñ‹Ð±Ð¸Ñ€Ð°Ñ‚ÑŒ Ñ‡ÑƒÐ¶Ð¾Ð³Ð¾ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°
+        tech_id = None  # технику нельзя выбирать чужого техника
 
     # ---- explicit filters (Apply) ----
     if tech_id:
@@ -10032,7 +10025,7 @@ def wo_list():
         technicians=technicians,
         filters=filters_ctx,
 
-        # âœ… NEW: UI markers
+        # ✅ NEW: UI markers
         matched_by_invoice=matched_by_invoice,
         matched_invoice_number=matched_invoice_number,
         invoice_matched_wo_ids=invoice_matched_wo_ids,
@@ -10042,47 +10035,10 @@ def wo_list():
 @inventory_bp.post("/work_orders/<int:wo_id>/issue_instock", endpoint="wo_issue_instock")
 @login_required
 def wo_issue_instock(wo_id):
-    # Ð´Ð¾ÑÑ‚ÑƒÐ¿
-    # ERP ACCESS PATCH 04A-v2 STEP 4 - WO INVENTORY ISSUE
-    # This endpoint mutates Inventory from inside a Work Order.
-    # Module DENY always wins.
-    # DEFAULT for the action preserves the old admin/superadmin rule.
-    legacy_admin_allowed = (
-        (getattr(current_user, "role", "") or "").strip().lower()
-        in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Inventory access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        flash(
-            "Access denied: Issue Parts permission is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
+    # доступ
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     import re
     from urllib.parse import urlencode
@@ -10203,7 +10159,7 @@ def wo_issue_instock(wo_id):
 
     set_status = (request.form.get("set_status") or "").strip().lower()
 
-    # === availability (Ð´Ð»Ñ greedy) ===
+    # === availability (для greedy) ===
     try:
         avail_rows = compute_availability(wo) or []
     except Exception:
@@ -10247,7 +10203,7 @@ def wo_issue_instock(wo_id):
             return True
         return False
 
-    # --- Ñ…ÐµÐ»Ð¿ÐµÑ€: ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¹ Ð½Ð¾Ð¼ÐµÑ€ Ð¸Ð½Ð²Ð¾Ð¹ÑÐ° ---
+    # --- хелпер: следующий номер инвойса ---
     def _reserve_invoice_number() -> int:
         mb = (
             db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0))
@@ -10406,7 +10362,7 @@ def wo_issue_instock(wo_id):
             issued_so_far = int(line.issued_qty or 0)
 
             if item_type == "tool":
-                # ÐŸÐ¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¾ ÑƒÐ¶Ðµ Ð½Ð°Ð·Ð½Ð°Ñ‡ÐµÐ½Ð½ÑƒÑŽ ÑÑ‚Ñ€Ð¾ÐºÑƒ Ð½Ðµ Ð¾Ð±Ñ€Ð°Ð±Ð°Ñ‚Ñ‹Ð²Ð°ÐµÐ¼.
+                # Повторно уже назначенную строку не обрабатываем.
                 if (
                         issued_so_far >= qty_req
                         and getattr(line, "tool_asset_id", None)
@@ -10464,7 +10420,7 @@ def wo_issue_instock(wo_id):
             # INV# snapshot from UI (even without Save)
             inv_now = (inv_now_by_line_id.get(int(line.id)) or "").strip().upper()[:32]
 
-            # if user typed INV# but didn't Save â€” save it now
+            # if user typed INV# but didn't Save — save it now
             if inv_now:
                 try:
                     line.invoice_number = inv_now
@@ -10516,7 +10472,7 @@ def wo_issue_instock(wo_id):
                 if hasattr(rec, "part_number"):
                     rec.part_number = pn
                 if hasattr(rec, "name_at_issue"):
-                    rec.name_at_issue = getattr(line, "part_name", "") or "â€”"
+                    rec.name_at_issue = getattr(line, "part_name", "") or "—"
 
                 db.session.add(rec)
                 new_records.append(rec)
@@ -10529,7 +10485,7 @@ def wo_issue_instock(wo_id):
                 skipped_rows.append({
                     "id": line.id,
                     "pn": pn,
-                    "name": getattr(line, "part_name", "") or "â€”",
+                    "name": getattr(line, "part_name", "") or "—",
                     "qty": qty_req,
                     "hint": hint_norm,
                 })
@@ -10560,7 +10516,7 @@ def wo_issue_instock(wo_id):
                 skipped_rows.append({
                     "id": line.id,
                     "pn": pn,
-                    "name": getattr(line, "part_name", "") or "â€”",
+                    "name": getattr(line, "part_name", "") or "—",
                     "qty": qty_req,
                     "hint": hint_norm,
                 })
@@ -10696,7 +10652,7 @@ def wo_issue_instock(wo_id):
                     pn = getattr(getattr(r, "part", None), "part_number", None) or getattr(r, "part_number",
                                                                                            None) or str(r.part_id)
                     name = getattr(getattr(r, "part", None), "name", None) or getattr(r, "name_at_issue", None) or ""
-                    issued_summary.append(f"{pn} x{r.quantity}" + (f" â€” {name}" if name else ""))
+                    issued_summary.append(f"{pn} x{r.quantity}" + (f" — {name}" if name else ""))
 
                 _add_wo_audit(
                     action="issued",
@@ -10913,7 +10869,7 @@ def wo_issue_instock(wo_id):
     for r in created_records:
         pn = getattr(getattr(r, "part", None), "part_number", None) or str(r.part_id)
         name = getattr(getattr(r, "part", None), "name", None) or ""
-        issued_summary.append(f"{pn} x{r.quantity}" + (f" â€” {name}" if name else ""))
+        issued_summary.append(f"{pn} x{r.quantity}" + (f" — {name}" if name else ""))
 
     _add_wo_audit(
         action="issued",
@@ -11095,7 +11051,7 @@ def tools_list():
     search_text = (request.args.get("q") or "").strip()
 
     # =========================================================
-    # 1. ÐžÐ´Ð¸Ð½ Ð°Ð³Ñ€ÐµÐ³Ð°Ñ‚ Ð¿Ð¾ ÐºÐ°Ð¶Ð´Ð¾Ð¼Ñƒ asset
+    # 1. Один агрегат по каждому asset
     # =========================================================
 
     net_assigned_expr = func.coalesce(
@@ -11121,7 +11077,7 @@ def tools_list():
             net_assigned_expr.label("assigned_qty"),
         )
         .options(
-            # ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð°ÐµÐ¼ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ joined relationships Ð¼Ð¾Ð´ÐµÐ»Ð¸.
+            # Отключаем автоматические joined relationships модели.
             lazyload("*"),
         )
         .outerjoin(
@@ -11133,8 +11089,8 @@ def tools_list():
     if search_text:
         like_value = f"%{search_text}%"
 
-        # EXISTS-Ð¿Ð¾Ð´Ð·Ð°Ð¿Ñ€Ð¾Ñ Ð´Ð»Ñ Ð¿Ð¾Ð¸ÑÐºÐ° Ð¿Ð¾ holder.
-        # ÐžÐ½ Ð½Ðµ Ð»Ð¾Ð¼Ð°ÐµÑ‚ GROUP BY Ð¾ÑÐ½Ð¾Ð²Ð½Ð¾Ð³Ð¾ Ð·Ð°Ð¿Ñ€Ð¾ÑÐ°.
+        # EXISTS-подзапрос для поиска по holder.
+        # Он не ломает GROUP BY основного запроса.
         holder_match = (
             db.session.query(ToolMovement.id)
             .filter(
@@ -11165,7 +11121,7 @@ def tools_list():
     after_tools_query = perf_counter()
 
     # =========================================================
-    # 2. Ð¤Ð¾Ñ€Ð¼Ð¸Ñ€ÑƒÐµÐ¼ ÑÐ¿Ð¸ÑÐ¾Ðº Ð¸ ÑÑ‚Ð°Ñ‚Ð¸ÑÑ‚Ð¸ÐºÑƒ
+    # 2. Формируем список и статистику
     # =========================================================
 
     tools = []
@@ -11247,7 +11203,7 @@ def tools_list():
     after_python_prep = perf_counter()
 
     # =========================================================
-    # 3. ÐžÐ´Ð¸Ð½ bulk-Ð·Ð°Ð¿Ñ€Ð¾Ñ Ð´Ð»Ñ holders Ð²ÑÐµÑ… Ð²Ð¸Ð´Ð¸Ð¼Ñ‹Ñ… assets
+    # 3. Один bulk-запрос для holders всех видимых assets
     # =========================================================
 
     assigned_by_tool = {
@@ -11304,7 +11260,7 @@ def tools_list():
 
             assigned_by_tool[tool_id].append(
                 {
-                    "tech": row.holder_name or "â€”",
+                    "tech": row.holder_name or "—",
                     "qty": holding_qty,
                 }
             )
@@ -11475,7 +11431,7 @@ def tool_transfer(tool_id):
     actor_id = getattr(current_user, "id", None)
     actor_name = getattr(current_user, "username", "system")
 
-    # 1) ÑÐ½Ð¸Ð¼Ð°ÐµÐ¼ qty Ñ Ð¿ÐµÑ€Ð²Ð¾Ð³Ð¾ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°
+    # 1) снимаем qty с первого техника
     db.session.add(ToolMovement(
         tool_id=tool.id,
         work_order_id=None,
@@ -11491,7 +11447,7 @@ def tool_transfer(tool_id):
         created_at=now,
     ))
 
-    # 2) Ð½Ð°Ð·Ð½Ð°Ñ‡Ð°ÐµÐ¼ qty Ð½Ð¾Ð²Ð¾Ð¼Ñƒ Ñ‚ÐµÑ…Ð½Ð¸ÐºÑƒ
+    # 2) назначаем qty новому технику
     db.session.add(ToolMovement(
         tool_id=tool.id,
         work_order_id=None,
@@ -11511,7 +11467,7 @@ def tool_transfer(tool_id):
         tool_id=tool.id,
         work_order_id=None,
         technician_id=getattr(to_user, "id", None),
-        technician_name=f"{from_tech} â†’ {to_tech}",
+        technician_name=f"{from_tech} → {to_tech}",
         action="transferred",
         quantity=qty,
         from_status="assigned",
@@ -11611,7 +11567,7 @@ def tools_history():
 
     by_tech = [
         {
-            "tech": row.technician_name or "â€”",
+            "tech": row.technician_name or "—",
             "qty": max(
                 int(row.holding_qty or 0),
                 0,
@@ -11747,7 +11703,7 @@ def tool_detail(tool_id):
     )
 
     holders = [
-        {"tech": tech or "â€”", "qty": int(qty or 0)}
+        {"tech": tech or "—", "qty": int(qty or 0)}
         for tech, qty in holders_rows
         if int(qty or 0) > 0
     ]
@@ -11782,12 +11738,12 @@ def tool_detail(tool_id):
     summary_map = {}
 
     for tech, qty in assigned_rows:
-        tech = tech or "â€”"
+        tech = tech or "—"
         summary_map.setdefault(tech, {"tech": tech, "assigned": 0, "returned": 0, "holding": 0})
         summary_map[tech]["assigned"] = int(qty or 0)
 
     for tech, qty in returned_rows:
-        tech = tech or "â€”"
+        tech = tech or "—"
         summary_map.setdefault(tech, {"tech": tech, "assigned": 0, "returned": 0, "holding": 0})
         summary_map[tech]["returned"] = int(qty or 0)
 
@@ -11990,7 +11946,7 @@ def tools_stats():
                 continue
 
             tools_by_technician[row.technician_name].append(
-                f"{row.tool_number or 'â€”'} x{holding_qty}"
+                f"{row.tool_number or '—'} x{holding_qty}"
             )
 
     technicians = []
@@ -11998,7 +11954,7 @@ def tools_stats():
     total_assigned = 0
 
     for row in technician_rows:
-        technician_name = row.technician_name or "â€”"
+        technician_name = row.technician_name or "—"
 
         assigned_total = max(
             int(row.assigned_total or 0),
@@ -12101,7 +12057,7 @@ def tools_by_technician(technician):
         )
 
     # =========================================================
-    # 1. ÐžÐ´Ð¸Ð½ Ð·Ð°Ð¿Ñ€Ð¾Ñ: totals Ð¿Ð¾ technician
+    # 1. Один запрос: totals по technician
     # =========================================================
 
     totals_row = (
@@ -12163,7 +12119,7 @@ def tools_by_technician(technician):
     after_totals = perf_counter()
 
     # =========================================================
-    # 2. ÐžÐ´Ð¸Ð½ bulk-Ð·Ð°Ð¿Ñ€Ð¾Ñ: summary Ð¿Ð¾ ÐºÐ°Ð¶Ð´Ð¾Ð¼Ñƒ tool
+    # 2. Один bulk-запрос: summary по каждому tool
     # =========================================================
 
     assigned_expr = func.coalesce(
@@ -12348,7 +12304,7 @@ def tools_by_technician(technician):
     )
 
     # =========================================================
-    # 3. ÐžÐ´Ð¸Ð½ Ð·Ð°Ð¿Ñ€Ð¾Ñ: movements
+    # 3. Один запрос: movements
     # =========================================================
 
     movements = (
@@ -12371,7 +12327,7 @@ def tools_by_technician(technician):
     )
 
     # =========================================================
-    # 4. Related WO ids ÑƒÐ¶Ðµ Ð±ÐµÑ€Ñ‘Ð¼ Ð¸Ð· movements
+    # 4. Related WO ids уже берём из movements
     # =========================================================
 
     wo_ids = sorted(
@@ -12480,7 +12436,7 @@ def tools_tech_report_pdf():
     technicians = [
         r[0]
         for r in tech_rows
-        if r[0] and "â†’" not in r[0] and "->" not in r[0]
+        if r[0] and "→" not in r[0] and "->" not in r[0]
     ]
 
     if technician_filter:
@@ -12590,14 +12546,14 @@ def tools_tech_report_pdf():
             since_text = (
                 x["since"].strftime("%m/%d/%Y")
                 if x["since"]
-                else "â€”"
+                else "—"
             )
 
-            wo_text = f"#{x['wo_id']}" if x["wo_id"] else "â€”"
+            wo_text = f"#{x['wo_id']}" if x["wo_id"] else "—"
 
             data.append([
-                x["tool"].tool_number or "â€”",
-                x["tool"].name or "â€”",
+                x["tool"].tool_number or "—",
+                x["tool"].name or "—",
                 str(x["qty"]),
                 since_text,
                 str(x["days"]),
@@ -12708,14 +12664,14 @@ def _acquire_work_order_edit_lock(work_order_id: int):
         .first()
     )
 
-    # Ð£Ð¶Ðµ Ð½Ð°Ñˆ ÑÐ¾Ð±ÑÑ‚Ð²ÐµÐ½Ð½Ñ‹Ð¹ lock â€” Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð¾Ð±Ð½Ð¾Ð²Ð»ÑÐµÐ¼ Ð°ÐºÑ‚Ð¸Ð²Ð½Ð¾ÑÑ‚ÑŒ.
+    # Уже наш собственный lock — просто обновляем активность.
     if row and row.user_id == user_id:
         row.username = username or row.username
         row.last_seen_at = now
         db.session.commit()
         return True, row
 
-    # Ð”Ñ€ÑƒÐ³Ð¾Ð¹ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ Ð²ÑÑ‘ ÐµÑ‰Ñ‘ Ð°ÐºÑ‚Ð¸Ð²ÐµÐ½.
+    # Другой пользователь всё ещё активен.
     if (
         row
         and row.last_seen_at
@@ -12723,7 +12679,7 @@ def _acquire_work_order_edit_lock(work_order_id: int):
     ):
         return False, row
 
-    # Ð¡Ñ‚Ð°Ñ€Ñ‹Ð¹ lock ÑƒÐ¼ÐµÑ€ â€” Ð¾ÑÐ²Ð¾Ð±Ð¾Ð¶Ð´Ð°ÐµÐ¼.
+    # Старый lock умер — освобождаем.
     if row:
         db.session.delete(row)
         db.session.flush()
@@ -12743,7 +12699,7 @@ def _acquire_work_order_edit_lock(work_order_id: int):
         return True, new_row
 
     except IntegrityError:
-        # Ð”Ð²Ð° Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ Ð¼Ð¾Ð³Ð»Ð¸ Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚ÑŒ WO Ð¿Ñ€Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸ Ð¾Ð´Ð½Ð¾Ð²Ñ€ÐµÐ¼ÐµÐ½Ð½Ð¾.
+        # Два пользователя могли открыть WO практически одновременно.
         db.session.rollback()
 
         winner = (
@@ -12861,7 +12817,7 @@ def wo_edit(wo_id: int):
 
 
     # ==================================================
-    # 1) Ð¤Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ°Ñ Ð²Ñ‹Ð´Ð°Ñ‡Ð° Ð¿Ð¾ ÑÑ‚Ð¾Ð¼Ñƒ WO
+    # 1) Фактическая выдача по этому WO
     # ==================================================
     canon = (wo.canonical_job or "").strip()
     issued_qty_by_pn = defaultdict(int)
@@ -12878,8 +12834,8 @@ def wo_edit(wo_id: int):
                 IssuedBatch.work_order_id == wo.id,
             )
 
-        # Legacy reference_job Ð¼Ð¾Ð¶ÐµÑ‚ ÑÐ¾Ð´ÐµÑ€Ð¶Ð°Ñ‚ÑŒ Ð½ÐµÑÐºÐ¾Ð»ÑŒÐºÐ¾ jobs.
-        # ÐžÐ³Ñ€Ð°Ð½Ð¸Ñ‡Ð¸Ð²Ð°ÐµÐ¼ LIKE ÑÑ‚Ð°Ñ€Ñ‹Ð¼Ð¸ Ð·Ð°Ð¿Ð¸ÑÑÐ¼Ð¸ Ð±ÐµÐ· Ð¿Ñ€ÑÐ¼Ð¾Ð¹ ÑÐ²ÑÐ·Ð¸ Ñ WO.
+        # Legacy reference_job может содержать несколько jobs.
+        # Ограничиваем LIKE старыми записями без прямой связи с WO.
         legacy_conditions = [
             IssuedPartRecord.reference_job.like(f"%{canon}%"),
         ]
@@ -12937,7 +12893,7 @@ def wo_edit(wo_id: int):
 
 
     # ==================================================
-    # 2) units payload c issued_qty + ALT PN + INS-Ñ„Ð»Ð°Ð³Ð¾Ð¼
+    # 2) units payload c issued_qty + ALT PN + INS-флагом
     # ==================================================
 
     units = []
@@ -13156,16 +13112,16 @@ def wo_delete(wo_id: int):
             return False
 
     try:
-        # 1) ÐŸÑ€Ð¾Ð±ÑƒÐµÐ¼ Ñ‡ÐµÑ€ÐµÐ· Ð¼Ð¾Ð´ÐµÐ»Ð¸ (ÐµÑÐ»Ð¸ Ñƒ Ñ‚ÐµÐ±Ñ Ð¾Ð½Ð¸ ÐµÑÑ‚ÑŒ)
+        # 1) Пробуем через модели (если у тебя они есть)
         try:
-            from models import WorkOrder  # Ð¿Ð¾Ð´ÑÑ‚Ñ€Ð¾Ð¹, ÐµÑÐ»Ð¸ Ð¼Ð¾Ð´ÑƒÐ»ÑŒ Ð´Ñ€ÑƒÐ³Ð¾Ð¹
+            from models import WorkOrder  # подстрой, если модуль другой
             wo = WorkOrder.query.get_or_404(wo_id)
             db.session.delete(wo)
             db.session.commit()
         except Exception as model_err:
             current_app.logger.debug("Model delete failed, fallback to SQL: %s", model_err)
 
-            # 2) Ð¤Ð¾Ð»Ð»Ð±ÑÐº Ð½Ð° SQL â€” ÑƒÐ´Ð°Ð»ÑÐµÐ¼ Ð´Ð¾Ñ‡ÐµÑ€Ð½Ð¸Ðµ Ð·Ð°Ð¿Ð¸ÑÐ¸, Ð½Ð¾ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÐµÑÐ»Ð¸ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ñ‹ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‚
+            # 2) Фоллбэк на SQL — удаляем дочерние записи, но только если таблицы существуют
             for t in ("issued_part_records", "work_order_parts", "issued_batches", "job_index"):
                 if table_exists(t):
                     db.session.execute(text(f"DELETE FROM {t} WHERE work_order_id=:id"), {"id": wo_id})
@@ -13186,7 +13142,7 @@ def wo_delete(wo_id: int):
 
 def _parse_units_form(form):
     """
-    ÐžÐ¶Ð¸Ð´Ð°ÐµÐ¼ ÑÑ…ÐµÐ¼Ñƒ Ð¸Ð¼Ñ‘Ð½:
+    Ожидаем схему имён:
       units[U][brand], units[U][model], units[U][serial]
       units[U][rows][I][part_number], ... quantity, alt_numbers, supplier, backorder_flag, line_status
     """
@@ -13208,13 +13164,13 @@ def _parse_units_form(form):
             units[ui]["rows"][ri][field] = v.strip()
             continue
 
-    # Ñ‡ÐµÐºÐ±Ð¾ÐºÑÑ‹ backorder_flag Ð¼Ð¾Ð³ÑƒÑ‚ Ð½Ðµ Ð¿Ñ€Ð¸Ð¹Ñ‚Ð¸ â€” Ð½Ð¾Ñ€Ð¼Ð°Ð»Ð¸Ð·ÑƒÐµÐ¼
+    # чекбоксы backorder_flag могут не прийти — нормализуем
     for u in units.values():
         for row in u["rows"]:
             row["quantity"] = int(row.get("quantity") or 0)
             row["backorder_flag"] = bool(row.get("backorder_flag") in ("on", "true", "1"))
             row["line_status"] = (row.get("line_status") or "search_ordered")
-    # Ð¿Ñ€ÐµÐ²Ñ€Ð°Ñ‰Ð°ÐµÐ¼ Ð² ÑƒÐ¿Ð¾Ñ€ÑÐ´Ð¾Ñ‡ÐµÐ½Ð½Ñ‹Ð¹ ÑÐ¿Ð¸ÑÐ¾Ðº
+    # превращаем в упорядоченный список
     out = [units[i] for i in sorted(units.keys())]
     return out
 @inventory_bp.get("/api/part_lookup")
@@ -13224,19 +13180,6 @@ def api_part_lookup():
     from sqlalchemy import func
     from extensions import db
     from models import Part
-    # ERP ACCESS PATCH 04A-V2 STEP 1 - INVENTORY MODULE ACCESS
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        return jsonify(
-            {
-                "found": False,
-                "error": "Access denied: Inventory access is disabled.",
-            }
-        ), 403
-
 
     pn = (request.args.get("pn") or "").strip().upper()
     if not pn:
@@ -13244,7 +13187,7 @@ def api_part_lookup():
 
     part = Part.query.filter(func.upper(Part.part_number) == pn).first()
     if not part:
-        return jsonify({"found": False, "stock_hint": "â€”"})
+        return jsonify({"found": False, "stock_hint": "—"})
 
     # --- stock ---
     on_hand = int(getattr(part, "on_hand", 0) or getattr(part, "quantity", 0) or 0)
@@ -13279,20 +13222,20 @@ def api_part_lookup():
             latest_posted_at = getattr(gr, "posted_at", None)
             latest_line_id = getattr(line, "id", None)
     except Exception:
-        # safe fallback â€” Ð½Ð¸Ñ‡ÐµÐ³Ð¾ Ð½Ðµ Ð»Ð¾Ð¼Ð°ÐµÐ¼
+        # safe fallback — ничего не ломаем
         pass
 
     # ============================================================
     # RESPONSE (backward compatible + new fields)
     # ============================================================
     return jsonify({
-        # OLD fields (ÐÐ• Ð›ÐžÐœÐÐ•Ðœ)
+        # OLD fields (НЕ ЛОМАЕМ)
         "found": True,
         "name": getattr(part, "name", "") or "",
         "wh": wh,
         "stock_hint": stock_hint,
 
-        # NEW fields (Ð´Ð»Ñ Ð½Ð¾Ð²Ð¾Ð³Ð¾ UI)
+        # NEW fields (для нового UI)
         "id": part.id,
         "part_number": part.part_number,
         "quantity": on_hand,
@@ -13309,46 +13252,9 @@ def api_part_lookup():
 @inventory_bp.post("/work_orders/<int:wo_id>/units/<int:unit_id>/issue_instock")
 @login_required
 def wo_issue_instock_unit(wo_id, unit_id):
-    # ERP ACCESS PATCH 04A-v2 STEP 4 - WO UNIT INVENTORY ISSUE
-    # This endpoint mutates Inventory from inside a Work Order unit.
-    # Module DENY always wins.
-    # DEFAULT for the action preserves the old admin/superadmin rule.
-    legacy_admin_allowed = (
-        (getattr(current_user, "role", "") or "").strip().lower()
-        in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Inventory access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        flash(
-            "Access denied: Issue Parts permission is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     from datetime import datetime, timedelta
     from sqlalchemy import and_, func
@@ -13370,7 +13276,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         flash("Unit not found", "danger")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # Ñ„Ð»Ð°Ð³ Ð°Ð²Ñ‚Ð¾ÑÐ¼ÐµÐ½Ñ‹ ÑÑ‚Ð°Ñ‚ÑƒÑÐ°
+    # флаг автосмены статуса
     set_status = (request.form.get("set_status") or "").strip().lower()
 
     # clear flags ONLY when line is fully satisfied
@@ -13531,18 +13437,18 @@ def wo_issue_instock_unit(wo_id, unit_id):
         return redirect(
             url_for("inventory.wo_detail", wo_id=wo.id)
         )
-    # --- ÑÐ¾Ð·Ð´Ð°Ñ‘Ð¼ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ ---
+    # --- создаём строки выдачи ---
     issue_date, maybe_records = _issue_records_bulk(
         issued_to=wo.technician_name,
         reference_job=wo.canonical_job,
         items=items
     )
 
-    # Ð¿Ð¾Ð´Ð´ÐµÑ€Ð¶ÐºÐ° Ð¾Ð±Ð¾Ð¸Ñ… Ð²Ð°Ñ€Ð¸Ð°Ð½Ñ‚Ð¾Ð² Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ð° (_issue_records_bulk Ð¼Ð¾Ð¶ÐµÑ‚ Ð²ÐµÑ€Ð½ÑƒÑ‚ÑŒ count)
+    # поддержка обоих вариантов возврата (_issue_records_bulk может вернуть count)
     if isinstance(maybe_records, (list, tuple)) and maybe_records and hasattr(maybe_records[0], "id"):
         new_records = list(maybe_records)
     else:
-        # fallback: ÑÐ¾Ð±Ñ€Ð°Ñ‚ÑŒ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ñ‡Ñ‚Ð¾ ÑÐ¾Ð·Ð´Ð°Ð½Ð½Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¿Ð¾ Ð¾ÐºÐ½Ñƒ +/-2 Ð¼Ð¸Ð½ÑƒÑ‚Ñ‹
+        # fallback: собрать только что созданные строки по окну +/-2 минуты
         t0 = issue_date - timedelta(minutes=2)
         t1 = issue_date + timedelta(minutes=2)
         new_records = IssuedPartRecord.query.filter(
@@ -13565,7 +13471,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         flash("Issued items saved, but could not collect records for invoice.", "warning")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # --- Ñ„Ð¾Ñ€Ð¼Ð¸Ñ€ÑƒÐµÐ¼ Ð¸Ð½Ð²Ð¾Ð¹Ñ/Ð±Ð°Ñ‚Ñ‡ ---
+    # --- формируем инвойс/батч ---
     try:
         inv_no = _reserve_invoice_number()
 
@@ -13578,7 +13484,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
             location=None,
         )
         db.session.add(batch)
-        db.session.flush()  # Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¿Ð¾ÑÐ²Ð¸Ð»ÑÑ batch.id
+        db.session.flush()  # чтобы появился batch.id
 
 
         for r in new_records:
@@ -13598,7 +13504,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         for r in new_records:
             pn = getattr(getattr(r, "part", None), "part_number", None) or str(r.part_id)
             name = getattr(getattr(r, "part", None), "name", None) or ""
-            issued_summary.append(f"{pn} x{r.quantity}" + (f" â€” {name}" if name else ""))
+            issued_summary.append(f"{pn} x{r.quantity}" + (f" — {name}" if name else ""))
 
         db.session.add(WorkOrderAudit(
             work_order_id=wo.id,
@@ -13613,7 +13519,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
             actor_username=getattr(current_user, "username", "system"),
         ))
 
-        # âœ… apply issued_qty to WorkOrderPart rows of this unit; clear bo/ord only when fully satisfied
+        # ✅ apply issued_qty to WorkOrderPart rows of this unit; clear bo/ord only when fully satisfied
         now = datetime.utcnow()
 
         pn_need_to_apply: dict[str, int] = {}
@@ -13695,7 +13601,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         flash(f"Error creating invoice batch: {e}", "danger")
         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
-    # --- Ð¾Ð±Ð½Ð¾Ð²Ð»ÑÐµÐ¼ ÑÑ‚Ð°Ñ‚ÑƒÑ WO ---
+    # --- обновляем статус WO ---
     if set_status == "done":
         try:
             wo.status = "done"
@@ -13715,7 +13621,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         except Exception:
             db.session.rollback()
 
-    # --- ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÐ¼ URL Ð¸Ð½Ð²Ð¾Ð¹ÑÐ° Ð¸ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÐ¼ÑÑ Ð½Ð° ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ†Ñƒ WO ---
+    # --- сохраняем URL инвойса и возвращаемся на страницу WO ---
     params = urlencode({
         "invoice_number": batch.invoice_number,
         "ref_job": (wo.canonical_job or "").strip(),
@@ -13745,41 +13651,9 @@ def wo_set_status(wo_id):
 @inventory_bp.post("/issue/batch")
 @login_required
 def issue_batch():
-    # ðŸ” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ admin/superadmin
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).lower()
-
-    legacy_admin_allowed = (
-        role_low in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Access denied: Inventory access is disabled.",
-            }
-        ), 403
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Access denied: Issue Parts permission is disabled.",
-            }
-        ), 403
-
+    # 🔐 только admin/superadmin
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        return jsonify({"ok": False, "error": "Access denied"}), 403
     try:
         payload = request.get_json(force=True, silent=False) or {}
         issued_to = (payload.get("issued_to") or "").strip()
@@ -13791,7 +13665,7 @@ def issue_batch():
         if not reference_job:
             return jsonify({"ok": False, "error": "reference_job is required"}), 400
 
-        # ðŸ§¾ Ð»Ð¾Ð³Ð¸Ñ€ÑƒÐµÐ¼ ÑÐ¾ÑÑ‚Ð°Ð² Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ (Ð±ÐµÐ· Ð¿ÐµÑ€ÑÐ¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ñ… Ð´Ð°Ð½Ð½Ñ‹Ñ…)
+        # 🧾 логируем состав выдачи (без персональных данных)
         try:
             safe_items = [
                 {"part_id": int(i.get("part_id", 0)), "qty": int(i.get("qty", 0)),
@@ -13812,7 +13686,7 @@ def issue_batch():
         })
         return jsonify({
             "ok": True,
-            "created": created,   # â† Ð´Ð»Ñ Ñ‚Ð¾ÑÑ‚Ð°
+            "created": created,   # ← для тоста
             "redirect": f"/reports_grouped?{params}"
         }), 200
 
@@ -13831,92 +13705,44 @@ def issue_batch():
 @login_required
 def issue_line(part_id):
     """
-    Ð’Ñ‹Ð´Ð°Ñ‚ÑŒ Ð¾Ð´Ð½Ñƒ Ð¿Ð¾Ð·Ð¸Ñ†Ð¸ÑŽ (ÐºÐ¾Ð³Ð´Ð° Ð½ÑƒÐ¶Ð½Ð¾ Ð²Ñ‹Ð´Ð°Ñ‚ÑŒ ÐºÐ¾Ð½ÐºÑ€ÐµÑ‚Ð½Ñ‹Ð¹ Part ÑÐµÐ¹Ñ‡Ð°Ñ).
-    ÐŸÑ€Ð¸Ð½Ð¸Ð¼Ð°ÐµÑ‚ JSON Ð¸Ð»Ð¸ form-data Ñ Ð¿Ð¾Ð»ÑÐ¼Ð¸:
-      - qty (int) â€” Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ, > 0
-      - issued_to (str) â€” Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ
-      - reference_job (str) â€” Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ
-      - unit_price (float) â€” Ð¾Ð¿Ñ†Ð¸Ð¾Ð½Ð°Ð»ÑŒÐ½Ð¾ (ÐµÑÐ»Ð¸ ÑƒÐ¶Ðµ ÑƒÑ‡Ñ‚ÐµÐ½Ñ‹ Ð´Ð¾ÑÑ‚Ð°Ð²ÐºÐ°/Ð½Ð°Ñ†ÐµÐ½ÐºÐ°)
-    Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚:
-      - JSON {"ok": True, "created": 1, "redirect": "..."} Ð´Ð»Ñ JSON-Ð·Ð°Ð¿Ñ€Ð¾ÑÐ¾Ð²
-      - redirect Ð½Ð° /reports_grouped Ð´Ð»Ñ Ñ„Ð¾Ñ€Ð¼
+    Выдать одну позицию (когда нужно выдать конкретный Part сейчас).
+    Принимает JSON или form-data с полями:
+      - qty (int) — обязательное, > 0
+      - issued_to (str) — обязательное
+      - reference_job (str) — обязательное
+      - unit_price (float) — опционально (если уже учтены доставка/наценка)
+    Возвращает:
+      - JSON {"ok": True, "created": 1, "redirect": "..."} для JSON-запросов
+      - redirect на /reports_grouped для форм
     """
-    # ðŸ” Ð Ð°Ð·Ñ€ÐµÑˆÐ°ÐµÐ¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ admin / superadmin
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).lower()
-
-    legacy_admin_allowed = (
-        role_low in ("admin", "superadmin")
-    )
-
-    inventory_access_allowed = (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.inventory.access",
-            default_allowed=True,
-        )
-    )
-
-    issue_allowed = (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.inventory.issue",
-            default_allowed=legacy_admin_allowed,
-        )
-    )
-
-    if not inventory_access_allowed or not issue_allowed:
-
-        if not inventory_access_allowed:
-            error_message = (
-                "Access denied: Inventory access is disabled."
-            )
-        else:
-            error_message = (
-                "Access denied: Issue Parts permission is disabled."
-            )
-
+    # 🔐 Разрешаем только admin / superadmin
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        # Для JSON-запросов — JSON, для форм — flash + редирект
         if request.is_json:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": error_message,
-                }
-            ), 403
-
-        flash(
-            error_message,
-            "danger",
-        )
-
-        return redirect(
-            url_for("inventory.dashboard")
-        )
-
+            return jsonify({"ok": False, "error": "Access denied"}), 403
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.dashboard"))
 
     try:
-        # Ð£Ð½Ð¸Ð²ÐµÑ€ÑÐ°Ð»ÑŒÐ½Ð¾ Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼ Ð´Ð°Ð½Ð½Ñ‹Ðµ (JSON Ð¸Ð»Ð¸ Ñ„Ð¾Ñ€Ð¼Ð°)
+        # Универсально читаем данные (JSON или форма)
         data = (request.get_json(silent=True) or {}) if request.is_json else (request.form or {})
         qty = int(data.get("qty") or 0)
         issued_to = (data.get("issued_to") or "").strip()
         reference_job = (data.get("reference_job") or "").strip()
 
-        # unit_price â€” Ð¾Ð¿Ñ†Ð¸Ð¾Ð½Ð°Ð»ÑŒÐ½Ð¾
+        # unit_price — опционально
         unit_price_raw = data.get("unit_price")
         unit_price = None
         if unit_price_raw not in (None, ""):
             unit_price = float(unit_price_raw)
 
-        # Ð’Ð°Ð»Ð¸Ð´Ð°Ñ†Ð¸Ñ
+        # Валидация
         if qty <= 0:
             raise ValueError("qty must be > 0")
         if not issued_to or not reference_job:
             raise ValueError("issued_to and reference_job are required")
 
-        # ðŸ§¾ Ð›Ð¾Ð³ Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ Ð¾Ð´Ð½Ð¾Ð¹ ÑÑ‚Ñ€Ð¾ÐºÐ¸ (Ð±ÐµÐ· Ñ‡ÑƒÐ²ÑÑ‚Ð²Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ñ… Ð´Ð°Ð½Ð½Ñ‹Ñ…)
+        # 🧾 Лог выдачи одной строки (без чувствительных данных)
         try:
             current_app.logger.info(
                 "ISSUE_LINE by=%s job=%s part_id=%s qty=%s price=%s",
@@ -13926,11 +13752,11 @@ def issue_line(part_id):
         except Exception:
             pass
 
-        # Ð’Ñ‹Ð´Ð°Ñ‘Ð¼ Ñ€Ð¾Ð²Ð½Ð¾ Ð¾Ð´Ð½Ñƒ Ð¿Ð¾Ð·Ð¸Ñ†Ð¸ÑŽ
+        # Выдаём ровно одну позицию
         items = [{"part_id": int(part_id), "qty": qty, "unit_price": unit_price}]
-        issue_date, _created = _issue_records_bulk(issued_to, reference_job, items)  # min(qty, on_hand) Ð²Ð½ÑƒÑ‚Ñ€Ð¸
+        issue_date, _created = _issue_records_bulk(issued_to, reference_job, items)  # min(qty, on_hand) внутри
 
-        # Ð“Ð¾Ñ‚Ð¾Ð²Ð¸Ð¼ Ñ€ÐµÐ´Ð¸Ñ€ÐµÐºÑ‚ Ð½Ð° ÑÐ³Ñ€ÑƒÐ¿Ð¿Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚ Ð·Ð° ÑÐµÐ³Ð¾Ð´Ð½Ñ
+        # Готовим редирект на сгруппированный отчёт за сегодня
         today = issue_date.date().isoformat()
         params = urlencode({
             "start_date": today,
@@ -13966,8 +13792,8 @@ def issue_line(part_id):
 @login_required
 def get_part_by_number(part_number):
     """
-    Ð’ÐµÑ€Ð½Ñ‘Ñ‚ Ð¸Ð½Ñ„Ð¾Ñ€Ð¼Ð°Ñ†Ð¸ÑŽ Ð¾ Ð´ÐµÑ‚Ð°Ð»Ð¸ Ð¿Ð¾ Part #.
-    ÐžÑ‚Ð²ÐµÑ‚ (200):
+    Вернёт информацию о детали по Part #.
+    Ответ (200):
       {
         "id": int,
         "name": str,
@@ -13975,7 +13801,7 @@ def get_part_by_number(part_number):
         "unit_cost": float,
         "quantity": int
       }
-    Ð˜Ð»Ð¸ (404): {"error": "Not found"}
+    Или (404): {"error": "Not found"}
     """
     try:
         pn = (part_number or "").strip().upper()
@@ -13986,7 +13812,7 @@ def get_part_by_number(part_number):
         if not part:
             return jsonify({"error": "Not found"}), 404
 
-        # ÐÐ¾Ñ€Ð¼Ð°Ð»Ð¸Ð·ÑƒÐµÐ¼ Ñ‚Ð¸Ð¿Ñ‹ Ð² Ð¾Ñ‚Ð²ÐµÑ‚Ðµ
+        # Нормализуем типы в ответе
         return jsonify({
             "id": int(part.id),
             "name": part.name or "",
@@ -14059,23 +13885,12 @@ def dashboard():
 @inventory_bp.route('/dashboard/location_report', methods=['GET'], endpoint='location_report')
 @login_required
 def location_report():
-    # ERP ACCESS PATCH 04A-V2 STEP 1 - INVENTORY MODULE ACCESS
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
     current_location_raw = (request.args.get('loc') or '').strip()
     norm = current_location_raw.lower()
 
     base_q = Part.query.filter(Part.quantity > 0)
 
-    # ---- datalist Ð²ÑÐµÑ… Ð»Ð¾ÐºÐ°Ñ†Ð¸Ð¹ (ÑƒÐ½Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ðµ, Ñ ÐºÑ€Ð°ÑÐ¸Ð²Ñ‹Ð¼Ð¸ Ð½Ð°Ð·Ð²Ð°Ð½Ð¸ÑÐ¼Ð¸) ----
+    # ---- datalist всех локаций (уникальные, с красивыми названиями) ----
     loc_rows = (Part.query.with_entities(Part.location)
                 .filter(Part.quantity > 0)
                 .distinct().all())
@@ -14089,13 +13904,13 @@ def location_report():
             all_locations.append(label)
     all_locations.sort()
 
-    # ---- Ð²Ñ‹Ð±Ð¾Ñ€ÐºÐ° Ð¿Ð¾ Ð»Ð¾ÐºÐ°Ñ†Ð¸Ð¸ ----
+    # ---- выборка по локации ----
     if norm:
-        # Unknown-Ð³Ñ€ÑƒÐ¿Ð¿Ð°
-        if norm in ('unknown', 'â€”', '-', 'none', 'null', ''):
+        # Unknown-группа
+        if norm in ('unknown', '—', '-', 'none', 'null', ''):
             parts = base_q.filter(or_(Part.location == None, Part.location == '')).all()
         else:
-            # 1) Ñ‚Ð¾Ñ‡Ð½Ð¾Ðµ ÑÐ¾Ð²Ð¿Ð°Ð´ÐµÐ½Ð¸Ðµ Ð±ÐµÐ· Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð°
+            # 1) точное совпадение без регистра
             exact = (base_q.filter(
                 func.lower(func.coalesce(Part.location, '')) == norm
             ).all())
@@ -14103,22 +13918,22 @@ def location_report():
             if exact:
                 parts = exact
             else:
-                # 2) ÐµÑÐ»Ð¸ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ ÑÐ²Ð½Ð¾ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð» wildcard (*), Ð´ÐµÐ»Ð°ÐµÐ¼ LIKE Ð¿Ð¾ ÑˆÐ°Ð±Ð»Ð¾Ð½Ñƒ
+                # 2) если пользователь явно использовал wildcard (*), делаем LIKE по шаблону
                 if '*' in current_location_raw:
                     like_pat = norm.replace('*', '%')
                     parts = (base_q.filter(
                         func.lower(func.coalesce(Part.location, '')).like(like_pat)
                     ).all())
                 else:
-                    # 3) Ð¿Ñ€ÐµÑ„Ð¸ÐºÑÐ½Ñ‹Ð¹ Ð¿Ð¾Ð¸ÑÐº (Ð±ÐµÐ· Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ð°): norm%
-                    #   (Ñ‡Ñ‚Ð¾Ð±Ñ‹ 'rel' Ð½Ðµ Ð»Ð¾Ð²Ð¸Ð» Ð²ÑÑ‘ Ð¿Ð¾Ð´Ñ€ÑÐ´ ÐºÐ°Ðº contains)
+                    # 3) префиксный поиск (без регистра): norm%
+                    #   (чтобы 'rel' не ловил всё подряд как contains)
                     parts = (base_q.filter(
                         func.lower(func.coalesce(Part.location, '')).like(f"{norm}%")
                     ).all())
     else:
         parts = base_q.all()
 
-    # ---- Ð³Ñ€ÑƒÐ¿Ð¿Ð¸Ñ€Ð¾Ð²ÐºÐ° Ð¸ Ð¸Ñ‚Ð¾Ð³Ð¸ ----
+    # ---- группировка и итоги ----
     locations = defaultdict(lambda: {'parts': [], 'total_quantity': 0, 'total_value': 0.0})
     for part in parts:
         loc = (part.location or 'Unknown').strip() or 'Unknown'
@@ -14139,21 +13954,10 @@ def location_report():
         grand_total_quantity=grand_total_quantity,
         grand_total_value=grand_total_value
     )
-# --- ÐŸÐµÑ‡Ð°Ñ‚ÑŒ Ð´ÐµÑ‚Ð°Ð»ÑŒÐ½Ð¾Ð³Ð¾ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚Ð° Ð¿Ð¾ Ð»Ð¾ÐºÐ°Ñ†Ð¸ÑÐ¼ (Ð²ÐµÑÑŒ ÑÐ¿Ð¸ÑÐ¾Ðº Ñ‚Ð¾Ð²Ð°Ñ€Ð¾Ð²) ---
+# --- Печать детального отчёта по локациям (весь список товаров) ---
 @inventory_bp.route('/dashboard/location_report/print')
 @login_required
 def print_location_report():
-    # ERP ACCESS PATCH 04A-V2 STEP 1 - INVENTORY MODULE ACCESS
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
     parts = Part.query.filter(Part.quantity > 0).all()
 
     locations = defaultdict(lambda: {
@@ -14190,7 +13994,7 @@ def print_location_report():
                 f"${part.unit_cost:.2f}",
                 f"${part.quantity * part.unit_cost:.2f}"
             ])
-        # Ð˜Ñ‚Ð¾Ð³ Ð¿Ð¾ Ð»Ð¾ÐºÐ°Ñ†Ð¸Ð¸
+        # Итог по локации
         table_data.append([
             "Location Total", "",
             str(data['total_quantity']), "", f"${data['total_value']:.2f}"
@@ -14214,7 +14018,7 @@ def print_location_report():
     buffer.seek(0)
     return send_file(buffer, as_attachment=True, download_name="location_report.pdf", mimetype='application/pdf')
 
-# --- ÐŸÐµÑ‡Ð°Ñ‚ÑŒ ÑÐ²Ð¾Ð´Ð½Ð¾Ð³Ð¾ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚Ð° (Ð¸Ñ‚Ð¾Ð³ Ð¿Ð¾ Ð»Ð¾ÐºÐ°Ñ†Ð¸ÑÐ¼ Ð±ÐµÐ· Ð´ÐµÑ‚Ð°Ð»ÐµÐ¹) ---
+# --- Печать сводного отчёта (итог по локациям без деталей) ---
 @inventory_bp.route('/dashboard/inventory_summary/print')
 @login_required
 def print_inventory_summary():
@@ -14248,7 +14052,7 @@ def print_inventory_summary():
             str(data['total_quantity']),
             f"${data['total_value']:.2f}"
         ])
-    # Ð˜Ñ‚Ð¾Ð³
+    # Итог
     table_data.append([
         "Grand Total",
         str(grand_total_quantity),
@@ -14277,27 +14081,6 @@ def print_inventory_summary():
 @inventory_bp.route('/add', methods=['GET', 'POST'])
 @login_required
 def add_part():
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_create",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Add Part permission is disabled.",
-        )
-
     if request.method == 'POST':
         part_number = request.form['part_number'].strip().upper()
         name = request.form['name'].strip().upper()
@@ -14340,29 +14123,8 @@ def issue_part():
     from extensions import db
     from models import Part, IssuedPartRecord, TechnicianLedgerEntry, ToolAsset
 
-    # âœ… lot costing helpers
+    # ✅ lot costing helpers
     from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Issue Parts permission is disabled.",
-        )
-
 
     # ---------- helper: touch Work Order updated_by/updated_at ----------
     def _invoice_available_qty_for_part(pn: str, inv_ref: str) -> tuple[int, int, int]:
@@ -14466,7 +14228,7 @@ def issue_part():
         issued_by = current_user.username
         issue_dt = datetime.utcnow()
 
-        # âœ… server-side guard (UI required, Ð½Ð¾ Ð»ÑƒÑ‡ÑˆÐµ Ð·Ð°Ñ‰Ð¸Ñ‚Ð¸Ñ‚ÑŒ)
+        # ✅ server-side guard (UI required, но лучше защитить)
         if not issued_to:
             flash("Company / Technician is required.", "danger")
             return redirect(url_for(".issue_part"))
@@ -14476,7 +14238,7 @@ def issue_part():
 
         batch_location = None
 
-        # âœ… IMPORTANT: if ANY line fails â†’ rollback â†’ issue NOTHING
+        # ✅ IMPORTANT: if ANY line fails → rollback → issue NOTHING
         try:
             for idx, item in enumerate(all_parts):
                 part_id = item.get('part_id')
@@ -14520,7 +14282,7 @@ def issue_part():
                     db.session.add(rec)
                     new_records.append(rec)
 
-                    # batch_location: ÐµÑÐ»Ð¸ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ INS ÑÑ‚Ñ€Ð¾ÐºÐ¸ â€” Ð½Ð¸Ð¶Ðµ Ð¿Ð¾ÑÑ‚Ð°Ð²Ð¸Ð¼ "INS"
+                    # batch_location: если только INS строки — ниже поставим "INS"
                     if batch_location is None and loc_snapshot:
                         batch_location = loc_snapshot
                     continue
@@ -14532,12 +14294,12 @@ def issue_part():
                         f"need {qty}, have {int(part.quantity or 0)}."
                     )
 
-                # âœ… LOT COSTING (strict when inv_ref is provided)
+                # ✅ LOT COSTING (strict when inv_ref is provided)
                 pn = (getattr(part, "part_number", "") or "").strip()
                 line, src = pick_receipt_line_for_issue(part_number=pn, inv_ref=inv_ref)
 
-                # ðŸ”¥ STRICT RULE:
-                # if inv_ref is set (and not STOCK) â†’ MUST match a posted receipt invoice AND return a line
+                # 🔥 STRICT RULE:
+                # if inv_ref is set (and not STOCK) → MUST match a posted receipt invoice AND return a line
                 if inv_ref and line is None:
                     raise ValueError(
                         f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
@@ -14609,7 +14371,7 @@ def issue_part():
             if not new_records:
                 raise ValueError("No valid lines to issue.")
 
-            # ÐµÑÐ»Ð¸ batch_location Ð²ÑÑ‘ ÐµÑ‰Ñ‘ None â†’ Ð·Ð½Ð°Ñ‡Ð¸Ñ‚ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ INS (Ð¸Ð»Ð¸ Ð»Ð¾ÐºÐ°Ñ†Ð¸Ñ Ð¿ÑƒÑÑ‚Ð°Ñ)
+            # если batch_location всё ещё None → значит только INS (или локация пустая)
             if batch_location is None:
                 batch_location = "INS"
 
@@ -14623,7 +14385,7 @@ def issue_part():
             )
 
 
-            # âœ… Accounting ledger: create CHARGE entries for technician debt
+            # ✅ Accounting ledger: create CHARGE entries for technician debt
             for r in new_records:
                 qty = int(r.quantity or 0)
                 unit_cost = float(r.unit_cost_at_issue or 0.0)
@@ -14661,7 +14423,7 @@ def issue_part():
                 )
                 db.session.add(ledger)
 
-            # âœ… touch WO
+            # ✅ touch WO
             _touch_work_order_from_ref(reference_job, issue_dt, current_user.id)
 
             db.session.commit()
@@ -14689,31 +14451,10 @@ def issue_part():
 def issue_ui():
     from flask_login import current_user
     from models import Part
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Issue Parts permission is disabled.",
-        )
-
 
     parts = Part.query.order_by(Part.part_number).limit(50).all()
     technician_name = getattr(current_user, "username", "TECH")
-    canonical_ref = "TESTJOB123"  # Ð¿Ð¾Ð´ÑÑ‚Ð°Ð²Ð¸ÑˆÑŒ ÑÐ²Ð¾Ð¹ JOB
+    canonical_ref = "TESTJOB123"  # подставишь свой JOB
 
     return render_template(
         "issue_ui.html",
@@ -14743,7 +14484,7 @@ def reports():
 
     records = query.order_by(IssuedPartRecord.issue_date.desc()).all()
 
-    # Ð“Ñ€ÑƒÐ¿Ð¿Ð¸Ñ€ÑƒÐµÐ¼ Ð·Ð°Ð¿Ð¸ÑÐ¸ Ð¿Ð¾ ÐºÐ»ÑŽÑ‡Ñƒ
+    # Группируем записи по ключу
     invoices_map = defaultdict(lambda: {
         'issued_to': '',
         'reference_job': '',
@@ -14796,7 +14537,7 @@ def reports_grouped():
     from models import IssuedPartRecord, IssuedBatch, Part, utc_to_local, IssuedConsumptionLog
 
 
-    # âœ… SAFE import: ÐµÑÐ»Ð¸ Ð¼Ð¾Ð´ÐµÐ»ÑŒ/Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ð° ÐµÑ‰Ñ‘ Ð½Ðµ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÐµÑ‚ â€” Ð¾Ñ‚Ñ‡Ñ‘Ñ‚ Ð½Ðµ Ð¿Ð°Ð´Ð°ÐµÑ‚
+    # ✅ SAFE import: если модель/таблица ещё не существует — отчёт не падает
     try:
         from models import ReturnDestination
     except Exception:
@@ -14813,7 +14554,7 @@ def reports_grouped():
         except Exception:
             return None
 
-    # âœ… Vendor companies (id->name) for dropdown + stable display
+    # ✅ Vendor companies (id->name) for dropdown + stable display
     return_destinations = []
     dest_map = {}
     if ReturnDestination is not None:
@@ -14825,11 +14566,11 @@ def reports_grouped():
             )
             dest_map = {int(d.id): (d.name or "") for d in return_destinations}
         except Exception:
-            # ÐÐ¸ÐºÐ°ÐºÐ¸Ñ… Ð¿Ð°Ð´ÐµÐ½Ð¸Ð¹: Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð±ÐµÐ· ÑÐ¿Ð¸ÑÐºÐ° ÐºÐ¾Ð¼Ð¿Ð°Ð½Ð¸Ð¹
+            # Никаких падений: просто без списка компаний
             return_destinations = []
             dest_map = {}
 
-    # ---------- ÐŸÐ°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ñ‹ (GET/POST) ----------
+    # ---------- Параметры (GET/POST) ----------
     params         = request.values
     q_s = (params.get('q') or '').strip()
     q_search = q_s or None
@@ -14838,7 +14579,7 @@ def reports_grouped():
     recipient_raw  = (params.get('recipient') or '').strip() or None
     reference_job  = (params.get('reference_job') or '').strip() or None
     invoice_s      = (params.get('invoice_number') or params.get('invoice') or params.get('invoice_no') or '').strip()
-    invoice_search = invoice_s or None  # Ð¾Ð±Ñ‰Ð¸Ð¹ Ð¿Ð¾Ð¸ÑÐº (Ð¸ invoice_number, Ð¸ inv_ref)
+    invoice_search = invoice_s or None  # общий поиск (и invoice_number, и inv_ref)
     location       = (params.get('location') or '').strip() or None
     status         = (params.get('status') or '').strip().upper()
 
@@ -14847,20 +14588,20 @@ def reports_grouped():
     # ==================================================
 
 
-    # Ñ€Ð¾Ð»ÑŒ/Ñ‚ÐµÐºÑƒÑ‰Ð¸Ð¹ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ
+    # роль/текущий пользователь
     role_low = (getattr(current_user, "role", "") or "").strip().lower()
     me_user  = (getattr(current_user, "username", "") or "").strip()
 
-    # Ð¢Ð•Ð¥ÐÐ˜Ðš: Ð¿Ñ€Ð¸Ð½ÑƒÐ´Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€ÑƒÐµÐ¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿Ð¾ ÑÐµÐ±Ðµ
+    # ТЕХНИК: принудительно фильтруем только по себе
     recipient_effective = me_user if role_low == "technician" else recipient_raw
 
-    # ---------- Ð”Ð°Ñ‚Ñ‹: Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÐµÐ¼ Ð¿Ð¾ ÐºÐ°Ð»ÐµÐ½Ð´Ð°Ñ€Ð½Ñ‹Ð¼ Ð´Ð½ÑÐ¼ ----------
+    # ---------- Даты: работаем по календарным дням ----------
     start_dt_raw = _parse_date_ymd(start_date_s)
     end_dt_raw   = _parse_date_ymd(end_date_s)
     start_day = start_dt_raw.date() if start_dt_raw else None
     end_day   = end_dt_raw.date()   if end_dt_raw   else None
 
-    # ---------- Ð—Ð°Ð¿Ñ€Ð¾Ñ Ñ Ð¿Ð¾Ð´Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¾Ð¹ ÑÐ²ÑÐ·ÐµÐ¹ ----------
+    # ---------- Запрос с подзагрузкой связей ----------
     q = (
         db.session.query(IssuedPartRecord)
         .join(Part, IssuedPartRecord.part_id == Part.id)
@@ -14876,7 +14617,7 @@ def reports_grouped():
         flash("Access denied.", "danger")
         return redirect(url_for("inventory.wo_list"))
 
-    # ----- ÐšÐ›Ð®Ð§Ð•Ð’ÐžÐ•: Ð¿Ñ€Ð°Ð²Ð¸Ð»ÑŒÐ½Ð°Ñ Â«Ð¾Ñ‚Ñ‡Ñ‘Ñ‚Ð½Ð°Ñ Ð´Ð°Ñ‚Ð°Â» ÑÑ‚Ñ€Ð¾ÐºÐ¸ -----
+    # ----- КЛЮЧЕВОЕ: правильная «отчётная дата» строки -----
     is_return = or_(
         IssuedPartRecord.quantity < 0,
         func.upper(func.coalesce(IssuedPartRecord.reference_job, '')).like('RETURN%')
@@ -14886,7 +14627,7 @@ def reports_grouped():
         else_=func.coalesce(IssuedPartRecord.issue_date, IssuedBatch.issue_date)
     )
 
-    # âœ… Default mode: ÐµÑÐ»Ð¸ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒ ÐÐ• Ð·Ð°Ð´Ð°Ð» Ð½Ð¸ÐºÐ°ÐºÐ¸Ñ… Ñ„Ð¸Ð»ÑŒÑ‚Ñ€Ð¾Ð² â€” Ð¿Ð¾ÐºÐ°Ð·Ñ‹Ð²Ð°ÐµÐ¼ Ð¿Ð¾ÑÐ»ÐµÐ´Ð½Ð¸Ðµ 50 Ð¸Ð½Ð²Ð¾Ð¹ÑÐ¾Ð²
+    # ✅ Default mode: если пользователь НЕ задал никаких фильтров — показываем последние 50 инвойсов
     has_any_filter = any([
         start_day,
         end_day,
@@ -14897,7 +14638,7 @@ def reports_grouped():
 
     default_mode = (not has_any_filter)
 
-    # Ð¤Ð¸Ð»ÑŒÑ‚Ñ€ Ð¿Ð¾ "ÐºÐ¾Ð¼Ñƒ Ð²Ñ‹Ð´Ð°Ð½Ð¾"
+    # Фильтр по "кому выдано"
     # if recipient_effective:
     #     if role_low == "technician":
     #         q = q.filter(
@@ -14960,7 +14701,7 @@ def reports_grouped():
     #
     # if location:
     #     q = q.filter(IssuedPartRecord.location == location)
-    # âœ… ONE common search (q): invoice#, inv_ref, issued_to, job ref, part#, part name, location, issued_by
+    # ✅ ONE common search (q): invoice#, inv_ref, issued_to, job ref, part#, part name, location, issued_by
     if q_search:
         like = f"%{q_search}%"
 
@@ -15014,12 +14755,12 @@ def reports_grouped():
                     )
                 )
             else:
-                # Number may be job/ref/etc. â€” keep normal broad search.
+                # Number may be job/ref/etc. — keep normal broad search.
                 q = q.filter(or_(*ors))
         else:
             q = q.filter(or_(*ors))
 
-    # ---------- Ð¤Ð¸Ð»ÑŒÑ‚Ñ€ Ð¿Ð¾ ÑÑ‚Ð°Ñ‚ÑƒÑÑƒ ÑÑ‚Ñ€Ð¾ÐºÐ¸ ----------
+    # ---------- Фильтр по статусу строки ----------
     if status == "OPEN":
         q = q.filter(
             IssuedPartRecord.quantity > 0,
@@ -15069,7 +14810,7 @@ def reports_grouped():
                 IssuedPartRecord.id.desc()
             ).all()
 
-            # âœ… Ð½Ðµ Ð¿Ð¾ÐºÐ°Ð·Ñ‹Ð²Ð°ÐµÐ¼ Ð´ÐµÑ„Ð¾Ð»Ñ‚Ð½Ñ‹Ðµ Ð´Ð°Ñ‚Ñ‹ Ð² Ñ„Ð¾Ñ€Ð¼Ðµ
+            # ✅ не показываем дефолтные даты в форме
             start_date_s = ""
             end_date_s = ""
 
@@ -15079,7 +14820,7 @@ def reports_grouped():
             IssuedPartRecord.id.desc()
         ).all()
 
-    # ---------- Ð“Ñ€ÑƒÐ¿Ð¿Ð¸Ñ€Ð¾Ð²ÐºÐ°: batch/legacy ----------
+    # ---------- Группировка: batch/legacy ----------
     grouped = defaultdict(list)
     for r in rows:
         if getattr(r, 'batch_id', None):
@@ -15174,7 +14915,7 @@ def reports_grouped():
 
         invoices.append(inv)
 
-    # ---------- Ð¡Ð¾Ñ€Ñ‚Ð¸Ñ€Ð¾Ð²ÐºÐ° ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐµÐº ----------
+    # ---------- Сортировка карточек ----------
     invoices.sort(
         key=lambda g: (
             (g.get('_sort_dt') or datetime.min),
@@ -15185,7 +14926,7 @@ def reports_grouped():
     )
 
     # ==========================================================
-    # RELATED INVOICES â€” same job as the currently opened invoice
+    # RELATED INVOICES — same job as the currently opened invoice
     # ==========================================================
     related_invoices = []
 
@@ -15197,14 +14938,14 @@ def reports_grouped():
 
     current_invoice_no = None
 
-    # ÐžÑÐ½Ð¾Ð²Ð½Ð¾Ð¹ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ð¹ ÑÐµÐ¹Ñ‡Ð°Ñ: /reports_grouped?q=24957
+    # Основной сценарий сейчас: /reports_grouped?q=24957
     if q_s:
         try:
             current_invoice_no = int(q_s)
         except (TypeError, ValueError):
             current_invoice_no = None
 
-    # ÐŸÐ¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð²Ð°ÐµÐ¼ Ñ‚Ð°ÐºÐ¶Ðµ ÑÑ‚Ð°Ñ€Ñ‹Ðµ ÑÑÑ‹Ð»ÐºÐ¸ ?invoice_number=24957
+    # Поддерживаем также старые ссылки ?invoice_number=24957
     if current_invoice_no is None and invoice_search:
         try:
             current_invoice_no = int(invoice_search)
@@ -15213,7 +14954,7 @@ def reports_grouped():
 
     if current_invoice_no is not None:
 
-        # ÐÐ°Ñ…Ð¾Ð´Ð¸Ð¼ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¸Ð¼ÐµÐ½Ð½Ð¾ Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ð¾Ð³Ð¾ invoice.
+        # Находим строки именно открытого invoice.
         current_rows = (
             db.session.query(IssuedPartRecord)
             .outerjoin(
@@ -15230,7 +14971,7 @@ def reports_grouped():
         )
 
         # ------------------------------------------------------
-        # ÐÐ¾Ñ€Ð¼Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ:
+        # Нормализация:
         #   1015546        -> 1015546
         #   RETURN 1015546 -> 1015546
         # ------------------------------------------------------
@@ -15342,7 +15083,7 @@ def reports_grouped():
                 if not inv_no:
                     continue
 
-                # Ð¡Ð°Ð¼ Ñ‚ÐµÐºÑƒÑ‰Ð¸Ð¹ invoice Ð² Related Ð½Ðµ Ð¿Ð¾ÐºÐ°Ð·Ñ‹Ð²Ð°ÐµÐ¼.
+                # Сам текущий invoice в Related не показываем.
                 if int(inv_no) == int(current_invoice_no):
                     continue
 
@@ -15412,7 +15153,7 @@ def reports_grouped():
             )
 
             # ==========================================================
-            # JOB TOTALS â€” current invoice + related invoices
+            # JOB TOTALS — current invoice + related invoices
             # ==========================================================
             job_issued_total = 0.0
             job_returned_total = 0.0
@@ -15452,7 +15193,7 @@ def reports_grouped():
         location=location or '',
         status=status or '',
 
-        # âœ… For dropdown + stable display in template
+        # ✅ For dropdown + stable display in template
         return_destinations=return_destinations,
         dest_map=dest_map,
 
@@ -15469,9 +15210,9 @@ def reports_grouped():
 @login_required
 def invoice_printdirect():
     """
-    Ð‘Ð¾Ð»ÑŒÑˆÐµ Ð½Ðµ Ñ€ÐµÐ½Ð´ÐµÑ€Ð¸Ð¼ Ð¿Ñ€Ð¾Ð¼ÐµÐ¶ÑƒÑ‚Ð¾Ñ‡Ð½ÑƒÑŽ HTML-ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ†Ñƒ Ð¸ Ð½Ðµ Ð²Ñ‹Ð·Ñ‹Ð²Ð°ÐµÐ¼ window.print().
-    ÐŸÑ€Ð¾ÑÑ‚Ð¾ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²Ð»ÑÐµÐ¼ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ Ð² Ð¾Ð±Ñ‹Ñ‡Ð½Ñ‹Ð¹ PDF viewer (/invoice/pdf),
-    Ð¿ÐµÑ€ÐµÐ´Ð°Ð²Ð°Ñ Ð¿Ð¾Ð»ÑƒÑ‡ÐµÐ½Ð½Ñ‹Ðµ query-Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ñ‹ ÐºÐ°Ðº ÐµÑÑ‚ÑŒ.
+    Больше не рендерим промежуточную HTML-страницу и не вызываем window.print().
+    Просто отправляем пользователя в обычный PDF viewer (/invoice/pdf),
+    передавая полученные query-параметры как есть.
     """
     from flask import request, redirect, url_for
 
@@ -15496,23 +15237,23 @@ def invoice_printdirect():
 @login_required
 def view_invoice_pdf():
     """
-    ÐŸÐµÑ‡Ð°Ñ‚ÑŒ Ð¸Ð½Ð²Ð¾Ð¹ÑÐ°.
+    Печать инвойса.
 
-    Ð¢ÐµÑ…Ð½Ð¸Ðº/tech:
-      - Ð²Ð¸Ð´Ð¸Ñ‚ Ð¢ÐžÐ›Ð¬ÐšÐž ÑÐ²Ð¾Ð¸ ÑÑ‚Ñ€Ð¾ÐºÐ¸ (issued_to == ÐµÐ³Ð¾ Ð¸Ð¼Ñ).
-        Ð§ÑƒÐ¶Ð¸Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ñ‚Ð¸Ñ…Ð¾ Ð²Ñ‹Ñ€ÐµÐ·Ð°ÑŽÑ‚ÑÑ.
-        Ð•ÑÐ»Ð¸ Ð¿Ð¾ÑÐ»Ðµ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€Ð°Ñ†Ð¸Ð¸ Ð½Ð¸Ñ‡ÐµÐ³Ð¾ Ð½Ðµ Ð¾ÑÑ‚Ð°Ð»Ð¾ÑÑŒ â€” Ñ€ÐµÐ´Ð¸Ñ€ÐµÐºÑ‚Ð¸Ð¼ ÐµÐ³Ð¾ Ð½Ð°Ð·Ð°Ð´ Ð² grouped.
+    Техник/tech:
+      - видит ТОЛЬКО свои строки (issued_to == его имя).
+        Чужие строки тихо вырезаются.
+        Если после фильтрации ничего не осталось — редиректим его назад в grouped.
     Admin/superadmin:
-      - Ð¿Ð¾Ð»Ð½Ñ‹Ð¹ Ð´Ð¾ÑÑ‚ÑƒÐ¿.
+      - полный доступ.
 
-    Legacy-ÐºÐµÐ¹Ñ:
-      Ð•ÑÐ»Ð¸ Ñƒ Ð³Ñ€ÑƒÐ¿Ð¿Ñ‹ ÐµÑ‰Ñ‘ ÐÐ•Ð¢ invoice_number Ð¸ ÑÑ‚Ð¾ ÑÑ‚Ð°Ñ€Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð±ÐµÐ· batch,
-      Ð°ÐºÐºÑƒÑ€Ð°Ñ‚Ð½Ð¾ ÑÐ¾Ð·Ð´Ð°Ñ‘Ð¼ batch / Ñ€ÐµÐ·ÐµÑ€Ð²Ð¸Ñ€ÑƒÐµÐ¼ Ð½Ð¾Ð¼ÐµÑ€, ÐºÐ¾Ð¼Ð¼Ð¸Ñ‚Ð¸Ð¼,
-      Ð¸ Ð¿ÐµÑ‡Ð°Ñ‚Ð°ÐµÐ¼ ÑƒÐ¶Ðµ Ñ Ð¿Ñ€Ð¸ÑÐ²Ð¾ÐµÐ½Ð½Ñ‹Ð¼ Ð½Ð¾Ð¼ÐµÑ€Ð¾Ð¼.
+    Legacy-кейс:
+      Если у группы ещё НЕТ invoice_number и это старые строки без batch,
+      аккуратно создаём batch / резервируем номер, коммитим,
+      и печатаем уже с присвоенным номером.
 
-    ÐŸÐ°Ñ€Ð°Ð¼ÐµÑ‚Ñ€ ?print=1 Ð¿Ð¾ÐºÐ° Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð¸Ð³Ð½Ð¾Ñ€Ð¸Ñ€ÑƒÐµÑ‚ÑÑ Ð½Ð° ÑƒÑ€Ð¾Ð²Ð½Ðµ Ð¾Ñ‚Ð²ÐµÑ‚Ð° (PDF Ð²ÑÑ‘ Ñ€Ð°Ð²Ð½Ð¾ inline).
-    Ð’ Ð±ÑƒÐ´ÑƒÑ‰ÐµÐ¼ Ð¼Ð¾Ð¶Ð½Ð¾ Ð±ÑƒÐ´ÐµÑ‚ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ ÐµÐ³Ð¾ Ð²Ð½ÑƒÑ‚Ñ€Ð¸ generate_invoice_pdf,
-    ÐµÑÐ»Ð¸ Ñ‚Ñ‹ ÑÐ´ÐµÐ»Ð°ÐµÑˆÑŒ HTML+window.print().
+    Параметр ?print=1 пока просто игнорируется на уровне ответа (PDF всё равно inline).
+    В будущем можно будет использовать его внутри generate_invoice_pdf,
+    если ты сделаешь HTML+window.print().
     """
 
     from extensions import db
@@ -15522,15 +15263,15 @@ def view_invoice_pdf():
     from flask import request, make_response, flash, redirect, url_for
     from flask_login import current_user
 
-    # ---- Ñ€Ð¾Ð»ÑŒ Ñ‚ÐµÐºÑƒÑ‰ÐµÐ³Ð¾ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ ----
+    # ---- роль текущего пользователя ----
     role_raw = (getattr(current_user, "role", "") or "").strip().lower()
     is_admin_like = role_raw in ("admin", "superadmin")
     is_technician = role_raw in ("technician", "tech")
 
-    # Ð½Ð¾Ñ€Ð¼Ð°Ð»Ð¸Ð·Ð¾Ð²Ð°Ð½Ð½Ð¾Ðµ Ð¸Ð¼Ñ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ° (Ð´Ð»Ñ ÑÑ€Ð°Ð²Ð½ÐµÐ½Ð¸Ñ Ñ issued_to Ð² ÑÑ‚Ñ€Ð¾ÐºÐ°Ñ…)
+    # нормализованное имя техника (для сравнения с issued_to в строках)
     my_name_norm = (getattr(current_user, "username", "") or "").strip().lower()
 
-    # ---- Ð²ÑÐ¿Ð¾Ð¼Ð¾Ð³Ð°Ð»ÐºÐ¸ --------------------------------------------------------
+    # ---- вспомогалки --------------------------------------------------------
     def _next_invoice_number():
         mb = (
             db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0))
@@ -15553,19 +15294,19 @@ def view_invoice_pdf():
         location,
     ):
         """
-        Ð“Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ€ÑƒÐµÑ‚, Ñ‡Ñ‚Ð¾ Ñƒ Ð½Ð°Ð±Ð¾Ñ€Ð° records Ð¿Ð¾ÑÐ²Ð¸Ñ‚ÑÑ invoice_number:
-        1) ÐŸÑ‹Ñ‚Ð°ÐµÐ¼ÑÑ Ñ‡ÐµÑ€ÐµÐ· Ñ‚Ð²Ð¾Ð¹ Ð½Ð¾Ñ€Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ñ…ÐµÐ»Ð¿ÐµÑ€ _create_batch_for_records,
-           Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð²ÑÑ‘ Ð±Ñ‹Ð»Ð¾ ÐºÑ€Ð°ÑÐ¸Ð²Ð¾.
-        2) Ð•ÑÐ»Ð¸ Ð½Ðµ Ð²Ñ‹ÑˆÐ»Ð¾ â€” Ð´ÐµÐ»Ð°ÐµÐ¼ fallback: ÑÐ¾Ð·Ð´Ð°Ñ‘Ð¼ IssuedBatch Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ,
-           Ð¿Ñ€Ð¸ÑÐ²Ð°Ð¸Ð²Ð°ÐµÐ¼ Ð½Ð¾Ð¼ÐµÑ€ Ð²ÑÐµÐ¼ ÑÑ‚Ñ€Ð¾ÐºÐ°Ð¼.
-        Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ invoice_number (int) Ð¸Ð»Ð¸ None.
+        Гарантирует, что у набора records появится invoice_number:
+        1) Пытаемся через твой нормальный хелпер _create_batch_for_records,
+           чтобы всё было красиво.
+        2) Если не вышло — делаем fallback: создаём IssuedBatch вручную,
+           присваиваем номер всем строкам.
+        Возвращает invoice_number (int) или None.
         """
 
-        # Ð•ÑÐ»Ð¸ Ð² ÑÐ¿Ð¸ÑÐºÐµ ÑƒÐ¶Ðµ ÐµÑÑ‚ÑŒ Ð½Ð¾Ð¼ÐµÑ€ Ñ…Ð¾Ñ‚ÑŒ Ñƒ Ð¾Ð´Ð½Ð¾Ð¹ ÑÑ‚Ñ€Ð¾ÐºÐ¸ â€” Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð²ÐµÑ€Ð½Ñ‘Ð¼ ÐµÐ³Ð¾.
+        # Если в списке уже есть номер хоть у одной строки — просто вернём его.
         if any(getattr(r, "invoice_number", None) for r in records):
             return getattr(records[0], "invoice_number", None)
 
-        # ÐŸÐ¾Ð¿Ñ€Ð¾Ð±ÑƒÐµÐ¼ Ñ‡ÐµÑ€ÐµÐ· Ñ‚Ð²Ð¾Ð¹ ÑˆÑ‚Ð°Ñ‚Ð½Ñ‹Ð¹ Ñ…ÐµÐ»Ð¿ÐµÑ€.
+        # Попробуем через твой штатный хелпер.
         try:
             batch = _create_batch_for_records(
                 records=records,
@@ -15579,7 +15320,7 @@ def view_invoice_pdf():
         except Exception:
             db.session.rollback()
 
-        # Fallback: Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ Ñ€ÐµÐ·ÐµÑ€Ð²Ð¸Ñ€ÑƒÐµÐ¼ Ð½Ð¾Ð²Ñ‹Ð¹ Ð½Ð¾Ð¼ÐµÑ€ Ð¸ ÑÐ¾Ð·Ð´Ð°Ñ‘Ð¼ IssuedBatch
+        # Fallback: вручную резервируем новый номер и создаём IssuedBatch
         for _ in range(5):
             inv_no_try = _next_invoice_number()
             try:
@@ -15618,23 +15359,23 @@ def view_invoice_pdf():
                 pass
         return None
 
-    # ---- Ð²Ñ…Ð¾Ð´Ð½Ñ‹Ðµ Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ñ‹ (query string) -----------------------------------
+    # ---- входные параметры (query string) -----------------------------------
     inv_s         = (request.args.get("invoice_number") or "").strip()
     issued_to_in  = (request.args.get("issued_to") or "").strip()
     reference_job = (request.args.get("reference_job") or "").strip() or None
     issued_by     = (request.args.get("issued_by") or "").strip()
     issue_date_s  = (request.args.get("issue_date") or "").strip()
-    # Ñ…Ð¾Ñ‚Ð¸Ð¼ Ð°Ð²Ñ‚Ð¾Ð¿ÐµÑ‡Ð°Ñ‚ÑŒ? Ð¿Ð¾ÐºÐ° Ð½Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÐ¼, Ð½Ð¾ future-proof Ð¾ÑÑ‚Ð°Ð²Ð¸Ð¼ Ð¿Ñ€Ð¾Ñ‡Ð¸Ñ‚Ð°Ð½Ð½Ñ‹Ð¼
+    # хотим автопечать? пока не используем, но future-proof оставим прочитанным
     want_auto     = (request.args.get("print") or "").strip() == "1"
 
     inv_no = int(inv_s) if inv_s.isdigit() else None
 
-    # ---- Ð·Ð°Ð³Ñ€ÑƒÐ¶Ð°ÐµÐ¼ ÑÑ‚Ñ€Ð¾ÐºÐ¸ recs Ð¸ ÑÐ¾Ð±Ð¸Ñ€Ð°ÐµÐ¼ hdr -------------------------------
+    # ---- загружаем строки recs и собираем hdr -------------------------------
     recs = []
     hdr  = None
 
     if inv_no is not None:
-        # 1) ÐÐ°Ð¹Ð´Ñ‘Ð¼ batch_ids Ñ Ñ‚Ð°ÐºÐ¸Ð¼ invoice_number
+        # 1) Найдём batch_ids с таким invoice_number
         batch_ids = [
             bid
             for (bid,) in db.session.query(IssuedBatch.id)
@@ -15642,7 +15383,7 @@ def view_invoice_pdf():
             .all()
         ]
 
-        # 2) Ð‘ÐµÑ€Ñ‘Ð¼ IssuedPartRecord Ñ ÑÑ‚Ð¸Ð¼ Ð½Ð¾Ð¼ÐµÑ€Ð¾Ð¼ Ð¸Ð»Ð¸ batch_id
+        # 2) Берём IssuedPartRecord с этим номером или batch_id
         q = IssuedPartRecord.query
         if batch_ids:
             recs = (
@@ -15666,7 +15407,7 @@ def view_invoice_pdf():
             flash(f"Invoice #{inv_no} not found.", "warning")
             return redirect(url_for("inventory.reports_grouped"))
 
-        # 3) ÐŸÐ¾ÑÑ‚Ñ€Ð¾Ð¸Ð¼ hdr Ð½Ð° Ð¾ÑÐ½Ð¾Ð²Ðµ Ð±Ð°Ñ‚Ñ‡Ð° Ð¸Ð»Ð¸ Ð¿ÐµÑ€Ð²Ð¾Ð¹ ÑÑ‚Ñ€Ð¾ÐºÐ¸
+        # 3) Построим hdr на основе батча или первой строки
         if batch_ids:
             b = db.session.get(IssuedBatch, batch_ids[0])
             hdr = {
@@ -15688,7 +15429,7 @@ def view_invoice_pdf():
                 "location": first.location,
             }
 
-        # 4) Ð”Ð¾Ð±Ð°Ð²Ð¸Ð¼ legacy-ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ñ‚Ð¾Ð³Ð¾ Ð¶Ðµ Ð´Ð½Ñ Ð±ÐµÐ· Ð½Ð¾Ð¼ÐµÑ€Ð° (ÑÑ‚Ð°Ñ€Ñ‹Ðµ "Ð²Ð¸ÑÑÑ‡Ð¸Ðµ" ÑÑ‚Ñ€Ð¾ÐºÐ¸)
+        # 4) Добавим legacy-строки того же дня без номера (старые "висячие" строки)
         day = hdr["issue_date"].date() if hdr.get("issue_date") else None
         if day:
             extra = (
@@ -15716,11 +15457,11 @@ def view_invoice_pdf():
                     if r.id not in have_ids:
                         recs.append(r)
 
-        # 5) Ð¸Ñ‚Ð¾Ð³ ÑÐ¾Ñ€Ñ‚Ð¸Ñ€ÑƒÐµÐ¼ Ð¿Ð¾ id
+        # 5) итог сортируем по id
         recs.sort(key=lambda r: r.id)
 
     else:
-        # legacy Ñ€ÐµÐ¶Ð¸Ð¼: Ð¸Ð½Ð²Ð¾Ð¹Ñ Ð±ÐµÐ· Ð½Ð¾Ð¼ÐµÑ€Ð°, Ð¸Ñ‰ÐµÐ¼ Ð¿Ð¾ issued_to / issued_by / reference_job / Ð´Ð°Ñ‚Ðµ
+        # legacy режим: инвойс без номера, ищем по issued_to / issued_by / reference_job / дате
         if issued_to_in and issued_by and issue_date_s:
             dt = _parse_dt_flex(issue_date_s) or datetime.utcnow()
 
@@ -15738,13 +15479,13 @@ def view_invoice_pdf():
                 .all()
             )
 
-    # ÐÐ¸Ñ‡ÐµÐ³Ð¾ Ð½Ðµ Ð½Ð°ÑˆÐ»Ð¸ â†’ Ð½Ð°Ð·Ð°Ð´
+    # Ничего не нашли → назад
     if not recs:
         flash("Invoice lines not found.", "warning")
         return redirect(url_for("inventory.reports_grouped"))
 
-    # ---- ÐžÐ³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð¸Ðµ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð° Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ° ---------------------------------------
-    # Ð¢ÐµÑ…Ð½Ð¸Ðº Ð²Ð¸Ð´Ð¸Ñ‚ Ð¢ÐžÐ›Ð¬ÐšÐž ÑÑ‚Ñ€Ð¾ÐºÐ¸, Ð³Ð´Ðµ issued_to == ÐµÐ³Ð¾ Ð¸Ð¼Ñ.
+    # ---- Ограничение доступа техника ---------------------------------------
+    # Техник видит ТОЛЬКО строки, где issued_to == его имя.
     if is_technician and (not is_admin_like):
         allowed_name = my_name_norm
 
@@ -15756,12 +15497,12 @@ def view_invoice_pdf():
 
         recs = safe_recs
 
-        # ÐŸÐ¾ÑÐ»Ðµ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€Ð°Ñ†Ð¸Ð¸ Ð¿ÑƒÑÑ‚Ð¾? Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÐ¼ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ° Ð² ÐµÐ³Ð¾ Ð¾Ñ‚Ñ‡Ñ‘Ñ‚.
+        # После фильтрации пусто? Возвращаем техника в его отчёт.
         if not recs:
             flash("Access denied for this invoice.", "warning")
             return redirect(url_for("inventory.reports_grouped"))
 
-    # ---- ÐŸÑ€Ð¸ÑÐ²Ð¾ÐµÐ½Ð¸Ðµ invoice_number Ð´Ð»Ñ legacy Ð¸Ð½Ð²Ð¾Ð¹ÑÐ¾Ð² ---------------------
+    # ---- Присвоение invoice_number для legacy инвойсов ---------------------
     if inv_no is None and all(getattr(r, "invoice_number", None) is None for r in recs):
         base = recs[0]
         try:
@@ -15779,13 +15520,13 @@ def view_invoice_pdf():
             db.session.rollback()
             inv_no = None
 
-    # ---- Ð“ÐµÐ½ÐµÑ€Ð°Ñ†Ð¸Ñ PDF (ÐºÐ°Ðº Ñ€Ð°Ð½ÑŒÑˆÐµ, Ð±ÐµÐ· Ð°Ð²Ñ‚Ð¾_print Ð°Ñ€Ð³ÑƒÐ¼ÐµÐ½Ñ‚Ð°) ---------------
+    # ---- Генерация PDF (как раньше, без авто_print аргумента) ---------------
     pdf_bytes = generate_invoice_pdf(
         recs,
         invoice_number=inv_no
     )
 
-    # ÐžÑ‚Ð²ÐµÑ‚
+    # Ответ
     resp = make_response(pdf_bytes)
 
     fname_base = inv_no or getattr(recs[0], "id", "NO_NUM")
@@ -15794,7 +15535,7 @@ def view_invoice_pdf():
     else:
         fname = "INVOICE.pdf"
 
-    # PDF inline (Ð±Ñ€Ð°ÑƒÐ·ÐµÑ€Ð½Ñ‹Ð¹ viewer)
+    # PDF inline (браузерный viewer)
     resp.headers["Content-Type"] = "application/pdf"
     resp.headers["Content-Disposition"] = f'inline; filename="{fname}"'
 
@@ -15810,7 +15551,7 @@ def update_report_record(record_id):
 
     r = IssuedPartRecord.query.get_or_404(record_id)
 
-    # Ð¾Ð±Ð½Ð¾Ð²Ð»ÑÐµÐ¼ Ñ€Ð°Ð·Ñ€ÐµÑˆÑ‘Ð½Ð½Ñ‹Ðµ Ð¿Ð¾Ð»Ñ
+    # обновляем разрешённые поля
     if 'issued_to' in request.form:
         v = (request.form.get('issued_to') or '').strip()
         if v: r.issued_to = v
@@ -15830,7 +15571,7 @@ def update_report_record(record_id):
         s = (request.form.get('issue_date') or '').strip()
         if s:
             try:
-                # ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÐ¼ Ð¢Ð£ Ð–Ð• Ð´Ð°Ñ‚Ñƒ Ñ Ð¿Ð¾Ð»Ð½Ð¾Ñ‡ÑŒÑŽ, Ð²Ñ€ÐµÐ¼Ñ Ð½Ðµ Ñ‚Ñ€Ð¾Ð³Ð°ÐµÐ¼, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ Ð¿Ñ€Ñ‹Ð³Ð°Ð» Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº
+                # сохраняем ТУ ЖЕ дату с полночью, время не трогаем, чтобы не прыгал порядок
                 from datetime import datetime
                 d = datetime.strptime(s, '%Y-%m-%d').date()
                 r.issue_date = datetime.combine(d, r.issue_date.time())
@@ -15839,12 +15580,12 @@ def update_report_record(record_id):
 
     db.session.commit()
 
-    # ÐšÐ›Ð®Ð§Ð•Ð’ÐžÐ•: Ð¿Ð¾ÑÐ»Ðµ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Reference Job/Issued To
-    # Ð½ÑƒÐ¶Ð½Ð¾ Ð¿ÐµÑ€ÐµÑ€Ð¸ÑÐ¾Ð²Ð°Ñ‚ÑŒ ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ†Ñ‹, Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÐºÐ½Ð¾Ð¿ÐºÐ¸ ÐºÐ°Ñ€Ñ‚Ð¾Ñ‡ÐºÐ¸ Ð¿Ð¾Ð»ÑƒÑ‡Ð¸Ð»Ð¸ ÐÐžÐ’Ð«Ð• record_ids[]
+    # КЛЮЧЕВОЕ: после изменения Reference Job/Issued To
+    # нужно перерисовать страницы, чтобы кнопки карточки получили НОВЫЕ record_ids[]
     flash("Line saved.", "success")
     return redirect(url_for('inventory.reports'))
 
-# ÐžÑ‚Ð¼ÐµÐ½Ð° Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ð¾Ð¹ Ð¿Ð¾Ð·Ð¸Ñ†Ð¸Ð¸
+# Отмена отдельной позиции
 @inventory_bp.route('/reports/cancel/<int:record_id>', methods=['POST'])
 @login_required
 def cancel_issued_record(record_id):
@@ -15905,7 +15646,7 @@ def update_invoice():
         force_new=False
     ):
         """
-        Safe version: when force_new=True â€” always creates a new batch with a unique invoice_number.
+        Safe version: when force_new=True — always creates a new batch with a unique invoice_number.
         Used for repeated returns / extra issues.
         """
         from extensions import db
@@ -15914,11 +15655,11 @@ def update_invoice():
         if not records:
             return None
 
-        # If not forced and at least one record already has a number â€” do nothing
+        # If not forced and at least one record already has a number — do nothing
         if not force_new and any(getattr(r, "invoice_number", None) for r in records):
             return None
 
-        # Primary path â€” your helper
+        # Primary path — your helper
         try:
             batch = _create_batch_for_records(
                 records=records,
@@ -15932,7 +15673,7 @@ def update_invoice():
         except Exception:
             db.session.rollback()
 
-        # Fallback â€” reserve manually
+        # Fallback — reserve manually
         for _ in range(5):
             inv_no = _next_invoice_number()
             try:
@@ -16027,7 +15768,7 @@ def update_invoice():
         recs = IssuedPartRecord.query.filter_by(invoice_number=form_invoice_no).all()
 
     if not recs and apply_scope == 'all':
-        # When invoice has no number yet â€” resolve by legacy keys within the day
+        # When invoice has no number yet — resolve by legacy keys within the day
         if g_issued_to and g_issued_by and g_issue_s:
             dt = _parse_dt_flex(g_issue_s) or issue_date
             start = datetime.combine(dt.date(), _time.min)
@@ -16240,7 +15981,7 @@ def update_invoice():
                     batch_id=None
                 )
 
-                # Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼ destination Ð¼Ð°ÐºÑÐ¸Ð¼Ð°Ð»ÑŒÐ½Ð¾ Ñ‚ÐµÑ€Ð¿Ð¸Ð¼Ð¾
+                # читаем destination максимально терпимо
                 ret.return_to = (
                         request.form.get(f"return_to_{r.id}")
                         or request.form.get("return_to")
@@ -16256,7 +15997,7 @@ def update_invoice():
                     ret.return_destination_id = int(dest_id_raw)
 
                 db.session.add(ret)
-                db.session.flush()  # Ð²Ð°Ð¶Ð½Ð¾: ÑÑ€Ð°Ð·Ñƒ Ð¿Ð¾Ð»ÑƒÑ‡Ð¸Ñ‚ÑŒ ret.id
+                db.session.flush()  # важно: сразу получить ret.id
 
                 created_returns.append(ret)
 
@@ -16380,7 +16121,7 @@ def update_invoice():
                     r.reference_job = new_val
                     changed_ref = new_val
 
-            # If we changed ref job â€” also update batch header(s) so the card "Ref:" updates
+            # If we changed ref job — also update batch header(s) so the card "Ref:" updates
             if changed_ref is not None:
                 batch_ids = {getattr(r, "batch_id", None) for r in recs if getattr(r, "batch_id", None)}
                 if batch_ids:
@@ -16472,8 +16213,8 @@ def cancel_invoice():
 @login_required
 def import_parts():
     """
-    Ð—Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° PDF â†’ Ð¿Ð°Ñ€ÑÐ¸Ð½Ð³ â†’ Ð¿Ñ€ÐµÐ²ÑŒÑŽ.
-    Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ Ð¿ÑƒÑ‚ÑŒ Ðº Ñ„Ð°Ð¹Ð»Ñƒ Ð² meta['attachment_path'].
+    Загрузка PDF → парсинг → превью.
+    Безопасно хранит путь к файлу в meta['attachment_path'].
     """
     import os
     from datetime import datetime
@@ -16489,29 +16230,29 @@ def import_parts():
         flash("Select a PDF file.", "warning")
         return redirect(url_for("inventory.import_parts"))
 
-    src_name = secure_filename(file.filename)               # Ð¸ÑÑ…Ð¾Ð´Ð½Ð¾Ðµ Ð¸Ð¼Ñ Ñ„Ð°Ð¹Ð»Ð°
+    src_name = secure_filename(file.filename)               # исходное имя файла
     ext = os.path.splitext(src_name)[1].lower()
     if ext != ".pdf":
         flash("Only PDF is supported.", "warning")
         return redirect(url_for("inventory.import_parts"))
 
-    # ÐšÑƒÐ´Ð° ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÐ¼
+    # Куда сохраняем
     upload_dir = os.path.join(current_app.instance_path, "uploads")
     os.makedirs(upload_dir, exist_ok=True)
     pdf_path = os.path.join(upload_dir, f"{datetime.utcnow():%Y%m%d_%H%M%S}_{src_name}")
 
-    # Ð¡Ð¾Ñ…Ñ€Ð°Ð½ÑÐµÐ¼ Ñ„Ð°Ð¹Ð»
+    # Сохраняем файл
     file.save(pdf_path)
 
-    # ÐŸÐ°Ñ€ÑÐ¸Ð¼ PDF â†’ DataFrame â†’ Ð½Ð¾Ñ€Ð¼Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ ÑÑ‚Ñ€Ð¾Ðº
+    # Парсим PDF → DataFrame → нормализация строк
     try_ocr = bool(request.form.get("try_ocr"))
-    df = dataframe_from_pdf(pdf_path, try_ocr=try_ocr)      # Ñ‚Ð²Ð¾Ð¹ Ñ…ÐµÐ»Ð¿ÐµÑ€
+    df = dataframe_from_pdf(pdf_path, try_ocr=try_ocr)      # твой хелпер
     rows = _norm_cols(df) if not df.empty else []
     if not rows:
         flash("Nothing parsed from PDF. Try OCR option.", "warning")
         return redirect(url_for("inventory.import_parts"))
 
-    # --- Ñ…ÐµÐ»Ð¿ÐµÑ€ Ñ€Ð°Ð·Ð±Ð¾Ñ€Ð° Ð´Ð°Ñ‚Ñ‹ + Ð²Ð°Ð»Ð¸Ð´Ð°Ñ†Ð¸Ñ ---
+    # --- хелпер разбора даты + валидация ---
     def _parse_invoice_date(raw: str | None):
         raw = (raw or "").strip()
         if not raw:
@@ -16568,7 +16309,7 @@ def import_parts():
 
     pdf_text = _pdf_text(pdf_path)
 
-    # ÐœÐµÑ‚Ð°Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð·Ð°Ð³Ð¾Ð»Ð¾Ð²ÐºÐ° (Ð¼Ð¾Ð¶Ð½Ð¾ Ð¿Ñ€Ð°Ð²Ð¸Ñ‚ÑŒ Ð½Ð° Ð¿Ñ€ÐµÐ²ÑŒÑŽ)
+    # Метаданные заголовка (можно править на превью)
     supplier = (request.form.get("supplier") or rows[0].get("supplier") or "").strip()
 
     invoice = (
@@ -16582,11 +16323,11 @@ def import_parts():
     date_s = (request.form.get("invoice_date") or "").strip()
     notes = (request.form.get("notes") or f"Imported from {src_name}").strip()
 
-    # ---- ÐÐ• Ð”ÐÐÐœ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ Ð´Ð°Ñ‚Ñƒ Ð¸Ð· Ð±ÑƒÐ´ÑƒÑ‰ÐµÐ³Ð¾ ----
+    # ---- НЕ ДАЁМ использовать дату из будущего ----
     today = datetime.utcnow().date()
     inv_date_val = _parse_invoice_date(date_s)
     if inv_date_val and inv_date_val > today:
-        # ÑƒÐ´Ð°Ð»ÑÐµÐ¼ ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½Ð½Ñ‹Ð¹ pdf, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ ÐºÐ¾Ð¿Ð¸Ñ‚ÑŒ Ð¼ÑƒÑÐ¾Ñ€
+        # удаляем сохранённый pdf, чтобы не копить мусор
         try:
             os.remove(pdf_path)
         except OSError:
@@ -16595,17 +16336,17 @@ def import_parts():
         flash("Invoice date cannot be in the future. Please correct it and try again.", "danger")
         return redirect(url_for("inventory.import_parts"))
 
-    # Ð ÐµÐ½Ð´ÐµÑ€ Ð¿Ñ€ÐµÐ²ÑŒÑŽ, ÐŸÐ•Ð Ð•Ð”ÐÐÐœ Ð¿ÑƒÑ‚ÑŒ ÑÐºÑ€Ñ‹Ñ‚Ñ‹Ð¼ Ð¿Ð¾Ð»ÐµÐ¼
+    # Рендер превью, ПЕРЕДАЁМ путь скрытым полем
     return render_template(
         "receiving_import_preview.html",
         rows=rows,
         meta=dict(
             supplier=supplier,
             invoice=invoice,
-            date=date_s,          # Ð¿Ð¾ÐºÐ°Ð¶ÐµÐ¼ ÐºÐ°Ðº Ð²Ð²Ñ‘Ð», Ð¼Ð¾Ð¶Ð½Ð¾ Ð¸ÑÐ¿Ñ€Ð°Ð²Ð¸Ñ‚ÑŒ Ð½Ð° Ð¿Ñ€ÐµÐ²ÑŒÑŽ
+            date=date_s,          # покажем как ввёл, можно исправить на превью
             notes=notes,
             currency="USD",
-            attachment_path=pdf_path,        # â† Ñ‚ÑƒÑ‚ Ð¿ÑƒÑ‚ÑŒ Ð´Ð»Ñ hidden
+            attachment_path=pdf_path,        # ← тут путь для hidden
         ),
         src_file=src_name
     )
@@ -16691,11 +16432,11 @@ def download_report_pdf():
             f"${r.unit_cost_at_issue:.2f}",
             f"${total:.2f}",
             Paragraph(r.issued_to, styles['Normal']),
-            Paragraph(r.reference_job or 'â€”', styles['Normal'])
+            Paragraph(r.reference_job or '—', styles['Normal'])
         ]
         data.append(row)
 
-    # Ð˜Ñ‚Ð¾Ð³Ð¾Ð²Ð°Ñ ÑÑ‚Ñ€Ð¾ÐºÐ°
+    # Итоговая строка
     data.append([
         "", "", "", "", "TOTAL:",
         f"${total_sum:.2f}", "", ""
@@ -16713,24 +16454,24 @@ def download_report_pdf():
         ('FONTSIZE', (0, 0), (-1, -1), 9),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
 
-        # Ð—Ð´ÐµÑÑŒ Ñ€Ð¸ÑÑƒÐµÐ¼ ÑÐµÑ‚ÐºÑƒ Ð¿Ð¾ Ð²ÑÐµÐ¹ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ðµ
+        # Здесь рисуем сетку по всей таблице
         ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
 
-        # Ð’ÐµÑ€Ñ‚Ð¸ÐºÐ°Ð»ÑŒÐ½Ð°Ñ Ð»Ð¸Ð½Ð¸Ñ ÑÐ»ÐµÐ²Ð° Ð¾Ñ‚ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ¸ "Unit Cost"
+        # Вертикальная линия слева от колонки "Unit Cost"
         ('LINEBEFORE', (5, 0), (5, -2), 0.25, colors.grey),
 
-        # Ð›Ð¸Ð½Ð¸Ñ Ð½Ð°Ð´ Ð¸Ñ‚Ð¾Ð³Ð¾Ð²Ð¾Ð¹ ÑÑ‚Ñ€Ð¾ÐºÐ¾Ð¹
+        # Линия над итоговой строкой
         ('LINEABOVE', (4, -1), (5, -1), 0.25, colors.grey),
-        # Ð˜Ñ‚Ð¾Ð³Ð¾Ð²Ð°Ñ ÑÑ‚Ñ€Ð¾ÐºÐ° - ÑÐ²ÐµÑ‚Ð»Ñ‹Ð¹ Ñ„Ð¾Ð½, Ð¾Ñ‚ÑÑ‚ÑƒÐ¿Ñ‹, Ð²Ñ‹Ñ€Ð°Ð²Ð½Ð¸Ð²Ð°Ð½Ð¸Ðµ
-        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#f0f0f0")),  # ÑÐ²ÐµÑ‚Ð»Ð¾-ÑÐµÑ€Ñ‹Ð¹ Ñ„Ð¾Ð½
+        # Итоговая строка - светлый фон, отступы, выравнивание
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#f0f0f0")),  # светло-серый фон
         ('TOPPADDING', (0, -1), (-1, -1), 8),
         ('BOTTOMPADDING', (0, -1), (-1, -1), 8),
 
-        # Ð˜Ñ‚Ð¾Ð³Ð¾Ð²Ñ‹Ðµ ÑˆÑ€Ð¸Ñ„Ñ‚Ñ‹
+        # Итоговые шрифты
         ('FONTNAME', (4, -1), (4, -1), 'Helvetica-Bold'),
         ('FONTNAME', (5, -1), (5, -1), 'Helvetica-Bold'),
 
-        # Ð’Ñ‹Ñ€Ð°Ð²Ð½Ð¸Ð²Ð°Ð½Ð¸Ðµ Ð¸Ñ‚Ð¾Ð³Ð° Ð¿Ð¾ Ð¿Ñ€Ð°Ð²Ð¾Ð¼Ñƒ ÐºÑ€Ð°ÑŽ
+        # Выравнивание итога по правому краю
         ('ALIGN', (5, -1), (5, -1), 'RIGHT'),
 
 
@@ -16853,8 +16594,6 @@ def user_access(user_id):
     )
     from services.access_control_service import AccessControlService
     from services.access_management_service import AccessManagementService
-    from services.erp_access_service import ErpAccessService
-    from services.erp_permission_registry import ERP_PERMISSION_GROUPS
 
     # ---------------------------------------------------------
     # Only superadmin may configure access at this stage.
@@ -17078,47 +16817,6 @@ def user_access(user_id):
                 commit=False,
             )
 
-        # =====================================================
-        # ERP ACCESS OVERRIDES - SAVE
-        # =====================================================
-        #
-        # DEFAULT = no override row
-        # ALLOW   = explicit permission
-        # DENY    = explicit restriction
-        #
-        # Existing ERP role checks remain the default.
-        # ERP changes use the same transaction as Warehouse
-        # and Appliance access changes.
-        # =====================================================
-
-        for erp_group in ERP_PERMISSION_GROUPS:
-            for erp_permission in erp_group["permissions"]:
-
-                erp_code = erp_permission["code"]
-
-                requested_effect = (
-                    request.form.get(
-                        f"erp_override__{erp_code}",
-                        "DEFAULT",
-                    )
-                    or "DEFAULT"
-                ).strip().upper()
-
-                if requested_effect not in {
-                    "DEFAULT",
-                    "ALLOW",
-                    "DENY",
-                }:
-                    requested_effect = "DEFAULT"
-
-                ErpAccessService.set_override(
-                    user=user,
-                    permission_code=erp_code,
-                    effect=requested_effect,
-                    actor=current_user,
-                    commit=False,
-                )
-
         # One atomic commit for the complete access update.
         try:
             db.session.commit()
@@ -17199,23 +16897,6 @@ def user_access(user_id):
             permission.group_name or "General",
             [],
         ).append(permission)
-
-    # =========================================================
-    # ERP ACCESS OVERRIDES - LOAD FOR UI
-    # =========================================================
-
-    erp_permission_groups = ERP_PERMISSION_GROUPS
-
-    if is_target_superadmin:
-        erp_override_map = {
-            permission["code"]: "ALLOW"
-            for group in ERP_PERMISSION_GROUPS
-            for permission in group["permissions"]
-        }
-    else:
-        erp_override_map = (
-            ErpAccessService.override_map(user)
-        )
 
     # ---------------------------------------------------------
     # Recent access audit
@@ -17352,8 +17033,6 @@ def user_access(user_id):
         selected_warehouse_ids=selected_warehouse_ids,
         default_warehouse_id=default_warehouse_id,
         selected_permission_codes=selected_permission_codes,
-        erp_permission_groups=erp_permission_groups,
-        erp_override_map=erp_override_map,
         recent_audit_groups=recent_audit_groups,
         is_target_superadmin=is_target_superadmin,
     )
@@ -17370,7 +17049,7 @@ def add_user():
         role = request.form['role']
         password = request.form['password']
 
-        # ÐÐ´Ð¼Ð¸Ð½ Ð¼Ð¾Ð¶ÐµÑ‚ ÑÐ¾Ð·Ð´Ð°Ð²Ð°Ñ‚ÑŒ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ user
+        # Админ может создавать только user
         if current_user.role == 'admin' and role != 'user':
             flash("Admins can only create users with role 'user'.", "danger")
             return redirect(url_for('inventory.add_user'))
@@ -17402,7 +17081,7 @@ def edit_user(user_id):
     me_role = (current_user.role or '').lower()
     target_role = (user.role or '').lower()
 
-    # ÐŸÑ€Ð°Ð²Ð°: superadmin â€” Ð²ÑÐµÑ…; admin â€” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ user/viewer/technician Ð¸ ÑÐµÐ±Ñ
+    # Права: superadmin — всех; admin — только user/viewer/technician и себя
     if me_role == 'admin':
         if not (user.id == current_user.id or target_role in {'user', 'viewer', 'technician'}):
             flash("Admins can only edit users with role 'user/viewer/technician' or themselves.", "danger")
@@ -17411,9 +17090,9 @@ def edit_user(user_id):
         flash("Access denied", "danger")
         return redirect(url_for('inventory.dashboard'))
 
-    # Ð¡Ð¿Ð¸ÑÐ¾Ðº Ñ€Ð¾Ð»ÐµÐ¹ Ð´Ð»Ñ ÑÐµÐ»ÐµÐºÑ‚Ð°:
-    # - ÑÑƒÐ¿ÐµÑ€-Ð°Ð´Ð¼Ð¸Ð½ Ð²Ð¸Ð´Ð¸Ñ‚ Ð²ÑÐµ Ñ€Ð¾Ð»Ð¸
-    # - Ð°Ð´Ð¼Ð¸Ð½ Ð¼Ð¾Ð¶ÐµÑ‚ Ð½Ð°Ð·Ð½Ð°Ñ‡Ð°Ñ‚ÑŒ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ user/viewer/technician; ÑÐµÐ±Ðµ â€” Ð¾ÑÑ‚Ð°Ð²Ð»ÑÑ‚ÑŒ admin
+    # Список ролей для селекта:
+    # - супер-админ видит все роли
+    # - админ может назначать только user/viewer/technician; себе — оставлять admin
 
     role_options = []
 
@@ -17444,9 +17123,9 @@ def edit_user(user_id):
         new_username = (request.form.get('username') or '').strip()
         new_role_raw = (request.form.get('role') or '').strip().lower()
 
-        # username Ð¼Ð¾Ð¶Ð½Ð¾ Ð¼ÐµÐ½ÑÑ‚ÑŒ Ð¾Ð±Ð¾Ð¸Ð¼ (ÐºÐ°Ðº Ð±Ñ‹Ð»Ð¾), Ð±ÐµÐ· ÑƒÑÐ»Ð¾Ð¶Ð½ÐµÐ½Ð¸Ñ Ð»Ð¾Ð³Ð¸ÐºÐ¸
+        # username можно менять обоим (как было), без усложнения логики
         if new_username:
-            # Ð·Ð°Ñ‰Ð¸Ñ‚Ð° Ð¾Ñ‚ Ð´ÑƒÐ±Ð»ÐµÐ¹ Ð¿Ð¾ Ð½Ð¸Ð¶Ð½ÐµÐ¼Ñƒ Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ñƒ
+            # защита от дублей по нижнему регистру
             exists = (
                 db.session.query(User.id)
                 .filter(func.lower(User.username) == new_username.lower(), User.id != user.id)
@@ -17457,7 +17136,7 @@ def edit_user(user_id):
                 return redirect(url_for('inventory.edit_user', user_id=user.id))
             user.username = new_username
 
-        # Ñ€Ð¾Ð»ÑŒ â€” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð² Ð¿Ñ€ÐµÐ´ÐµÐ»Ð°Ñ… Ñ€Ð°Ð·Ñ€ÐµÑˆÑ‘Ð½Ð½Ñ‹Ñ… Ð¾Ð¿Ñ†Ð¸Ð¹
+        # роль — только в пределах разрешённых опций
         allowed_values = {value for value, _caption in role_options}
 
         if new_role_raw not in allowed_values:
@@ -17503,9 +17182,9 @@ def change_password(user_id):
     role = (current_user.role or '').lower()
     is_self = current_user.id == user_id
 
-    # superadmin â†’ Ð»ÑŽÐ±Ð¾Ð¹
-    # admin â†’ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ user Ð¸ ÑÐµÐ±Ñ
-    # Ð¾ÑÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ â†’ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÑÐµÐ±Ñ
+    # superadmin → любой
+    # admin → только user и себя
+    # остальные → только себя
     if role == 'admin':
         if (user.role or '').lower() != 'user' and not is_self:
             # not allowed
@@ -17548,18 +17227,18 @@ def change_password(user_id):
         user.password_hash = generate_password_hash(new_password)
         db.session.commit()
 
-        # ÐµÑÐ»Ð¸ ÑÑ‚Ð¾ fetch-Ð·Ð°Ð¿Ñ€Ð¾Ñ Ð¸Ð· Ð¼Ð¾Ð´Ð°Ð»ÐºÐ¸ -> Ð²ÐµÑ€Ð½Ñ‘Ð¼ json (Ð±ÐµÐ· redirect)
+        # если это fetch-запрос из модалки -> вернём json (без redirect)
         if request.headers.get('X-Requested-With') == 'fetch':
             return jsonify({"ok": True})
 
-        # Ð¾Ð±Ñ‹Ñ‡Ð½Ñ‹Ð¹ ÑÑ†ÐµÐ½Ð°Ñ€Ð¸Ð¹ (ÑŽÐ·ÐµÑ€ ÑÐ°Ð¼ Ð·Ð°ÑˆÑ‘Ð» Ð½Ð° ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ†Ñƒ ÑÐ¼ÐµÐ½Ñ‹ Ð¿Ð°Ñ€Ð¾Ð»Ñ)
+        # обычный сценарий (юзер сам зашёл на страницу смены пароля)
         flash("Password changed successfully", "success")
         if role == 'superadmin':
             return redirect(url_for('inventory.users'))
         else:
             return redirect(url_for('inventory.dashboard'))
 
-    # GET (Ð¾Ð±Ñ‹Ñ‡Ð½Ñ‹Ð¹ Ñ€ÐµÐ¶Ð¸Ð¼, Ð½Ðµ Ñ‡ÐµÑ€ÐµÐ· Ð¼Ð¾Ð´Ð°Ð»ÐºÑƒ)
+    # GET (обычный режим, не через модалку)
     need_current = is_self and role != 'superadmin'
     return render_template('change_password.html', user=user, need_current=need_current)
 
@@ -17568,7 +17247,7 @@ def change_password(user_id):
 def delete_user(user_id):
     user = User.query.get_or_404(user_id)
 
-    # Ð¢Ð¾Ð»ÑŒÐºÐ¾ superadmin Ð¼Ð¾Ð¶ÐµÑ‚ ÑƒÐ´Ð°Ð»ÑÑ‚ÑŒ
+    # Только superadmin может удалять
     if current_user.role != 'superadmin':
         flash("Access denied", "danger")
         return redirect(url_for('inventory.dashboard'))
@@ -17601,31 +17280,9 @@ def clear_issued_records():
 @inventory_bp.route('/update_part/<int:part_id>', methods=['POST'])
 @login_required
 def update_part_field(part_id):
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    legacy_superadmin_allowed = (
-        (getattr(current_user, "role", "") or "").lower()
-        == "superadmin"
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_edit",
-        default_allowed=legacy_superadmin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Edit Part permission is disabled.",
-        )
+    if current_user.role != 'superadmin':
+        flash("Access denied", "danger")
+        return redirect(url_for('inventory.dashboard'))
 
     part = Part.query.get_or_404(part_id)
 
@@ -17653,35 +17310,13 @@ def update_part_field(part_id):
 @inventory_bp.route('/delete/<int:part_id>', methods=['POST'])
 @login_required
 def delete_part(part_id):
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    legacy_superadmin_allowed = (
-        (getattr(current_user, "role", "") or "").lower()
-        == "superadmin"
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_delete",
-        default_allowed=legacy_superadmin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Delete Part permission is disabled.",
-        )
+    if current_user.role != 'superadmin':
+        flash('Only Superadmin can delete parts.', 'danger')
+        return redirect(url_for('inventory.dashboard'))
 
     part = Part.query.get_or_404(part_id)
 
-    # 1) ÐŸÑ€Ð¾Ð²ÐµÑ€ÑÐµÐ¼, Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð»Ð°ÑÑŒ Ð»Ð¸ Ð´ÐµÑ‚Ð°Ð»ÑŒ Ð² Ð²Ñ‹Ð´Ð°Ñ‡Ð°Ñ…
+    # 1) Проверяем, использовалась ли деталь в выдачах
     issued_count = IssuedPartRecord.query.filter_by(part_id=part.id).count()
     if issued_count:
         flash(
@@ -17690,10 +17325,10 @@ def delete_part(part_id):
             f'Set quantity to 0 or mark it as inactive instead.',
             'danger'
         )
-        # Ð’ÐµÑ€Ð½Ñ‘Ð¼ÑÑ Ð½Ð° Ð´Ð°ÑˆÐ±Ð¾Ñ€Ð´ Ñ Ð¿Ð¾Ð¸ÑÐºÐ¾Ð¼ Ð¿Ð¾ ÑÑ‚Ð¾Ð¹ Ð´ÐµÑ‚Ð°Ð»Ð¸
+        # Вернёмся на дашборд с поиском по этой детали
         return redirect(url_for('inventory.dashboard', search=part.part_number))
 
-    # 2) ÐŸÑ‹Ñ‚Ð°ÐµÐ¼ÑÑ ÑƒÐ´Ð°Ð»Ð¸Ñ‚ÑŒ (Ð½Ð° ÑÐ»ÑƒÑ‡Ð°Ð¹ Ð´Ñ€ÑƒÐ³Ð¸Ñ… ÑÐ²ÑÐ·ÐµÐ¹ â€“ Ð¿Ð¾Ð´ÑÑ‚Ñ€Ð°Ñ…ÑƒÐµÐ¼ÑÑ try/except)
+    # 2) Пытаемся удалить (на случай других связей – подстрахуемся try/except)
     try:
         db.session.delete(part)
         db.session.commit()
@@ -17712,31 +17347,9 @@ def delete_part(part_id):
 @inventory_bp.route('/edit/<int:part_id>', methods=['GET', 'POST'])
 @login_required
 def edit_part(part_id):
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    legacy_superadmin_allowed = (
-        (getattr(current_user, "role", "") or "").lower()
-        == "superadmin"
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_edit",
-        default_allowed=legacy_superadmin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Edit Part permission is disabled.",
-        )
+    if current_user.role != 'superadmin':
+        flash("Access denied", "danger")
+        return redirect(url_for('inventory.dashboard'))
 
     part = Part.query.get_or_404(part_id)
 
@@ -17790,20 +17403,20 @@ def clear_parts():
 @inventory_bp.route('/compare_cart')
 def compare_cart():
     try:
-        flash("ðŸ” Collecting Marcone cart...", "info")
+        flash("🔍 Collecting Marcone cart...", "info")
         items = get_marcone_items()
 
-        flash("ðŸ“¦ Comparing with inventory...", "info")
+        flash("📦 Comparing with inventory...", "info")
         result = check_cart_items(items)
 
         filepath = os.path.join(UPLOAD_DIR, "marcone_inventory_report.docx")
         export_to_docx(result, filename=filepath)
 
-        flash("âœ… Marcone report generated! Click below to download.", "success")
+        flash("✅ Marcone report generated! Click below to download.", "success")
         return redirect(url_for("inventory.dashboard"))
 
     except Exception as e:
-        flash(f"âŒ Error (Marcone): {str(e)}", "danger")
+        flash(f"❌ Error (Marcone): {str(e)}", "danger")
         return redirect(url_for("inventory.dashboard"))
 
 # @inventory_bp.route('/download_marcone_report')
@@ -17811,27 +17424,27 @@ def compare_cart():
 #     filepath = os.path.join(UPLOAD_DIR, "marcone_inventory_report.docx")
 #     if os.path.exists(filepath):
 #         return send_file(filepath, as_attachment=True)
-#     flash("âŒ Marcone report not found!", "danger")
+#     flash("❌ Marcone report not found!", "danger")
 #     return redirect(url_for("inventory.dashboard"))
 
 
 @inventory_bp.route('/compare_reliable')
 def compare_reliable():
     try:
-        flash("ðŸ” Collecting Reliable cart...", "info")
+        flash("🔍 Collecting Reliable cart...", "info")
         items = get_reliable_items()
 
-        flash("ðŸ“¦ Comparing with inventory...", "info")
+        flash("📦 Comparing with inventory...", "info")
         result = check_cart_items(items)
 
         filepath = os.path.join(UPLOAD_DIR, "reliable_inventory_report.docx")
         export_to_docx(result, filename=filepath)
 
-        flash("âœ… Reliable report generated! Click below to download.", "success")
+        flash("✅ Reliable report generated! Click below to download.", "success")
         return redirect(url_for("inventory.dashboard"))
 
     except Exception as e:
-        flash(f"âŒ Error (Reliable): {str(e)}", "danger")
+        flash(f"❌ Error (Reliable): {str(e)}", "danger")
         return redirect(url_for("inventory.dashboard"))
 
 # @inventory_bp.route('/download_reliable_report')
@@ -17839,7 +17452,7 @@ def compare_reliable():
 #     filepath = os.path.join(UPLOAD_DIR, "reliable_inventory_report.docx")
 #     if os.path.exists(filepath):
 #         return send_file(filepath, as_attachment=True)
-#     flash("âŒ Reliable report not found!", "danger")
+#     flash("❌ Reliable report not found!", "danger")
 #     return redirect(url_for("inventory.dashboard"))
 
 @inventory_bp.route('/download_marcone_report')
@@ -17849,16 +17462,16 @@ def download_marcone_report():
 
     filepath = os.path.join(UPLOAD_DIR, "marcone_inventory_report.docx")
 
-    # 1. ÐŸÐ¾Ð»ÑƒÑ‡Ð°ÐµÐ¼ Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð¸Ð· ÐºÐ¾Ñ€Ð·Ð¸Ð½Ñ‹ Marcone
+    # 1. Получаем данные из корзины Marcone
     items = get_marcone_items()
 
-    # 2. Ð¡Ñ€Ð°Ð²Ð½Ð¸Ð²Ð°ÐµÐ¼ Ñ Ð±Ð°Ð·Ð¾Ð¹ Ð´Ð°Ð½Ð½Ñ‹Ñ…
+    # 2. Сравниваем с базой данных
     result = check_cart_items(items)
 
-    # 3. Ð“ÐµÐ½ÐµÑ€Ð¸Ñ€ÑƒÐµÐ¼ Ð½Ð¾Ð²Ñ‹Ð¹ Ð¾Ñ‚Ñ‡ÐµÑ‚
+    # 3. Генерируем новый отчет
     export_to_docx(result, filename=filepath)
 
-    # 4. ÐžÑ‚Ð´Ð°ÐµÐ¼ Ñ„Ð°Ð¹Ð» Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŽ
+    # 4. Отдаем файл пользователю
     if os.path.exists(filepath):
         @after_this_request
         def remove_file(response):
@@ -17870,7 +17483,7 @@ def download_marcone_report():
 
         return send_file(filepath, as_attachment=True)
 
-    flash("âŒ Marcone report generation failed!", "danger")
+    flash("❌ Marcone report generation failed!", "danger")
     return redirect(url_for("inventory.dashboard"))
 
 
@@ -17896,7 +17509,7 @@ def download_reliable_report():
 
         return send_file(filepath, as_attachment=True)
 
-    flash("âŒ Reliable report generation failed!", "danger")
+    flash("❌ Reliable report generation failed!", "danger")
     return redirect(url_for("inventory.dashboard"))
 
 from collections import defaultdict
@@ -17913,8 +17526,8 @@ _rows_flat_re = re.compile(r"^rows\[(\d+)\]\[([^\]]+)\]$")
 
 def parse_preview_rows_relaxed(form):
     """
-    Ð¡Ð¾Ð±Ð¸Ñ€Ð°ÐµÑ‚ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¿Ñ€ÐµÐ²ÑŒÑŽ Ð¸Ð· request.form.
-    Ð£Ð¼ÐµÐµÑ‚ Ñ€Ð°Ð·Ð½Ñ‹Ðµ Ð½Ð°Ð·Ð²Ð°Ð½Ð¸Ñ Ð¿Ð¾Ð»ÐµÐ¹ (base/adj/qty), Ñ‡Ñ‚Ð¾Ð±Ñ‹ BASE Ð½Ðµ Ñ‚ÐµÑ€ÑÐ»ÑÑ.
+    Собирает строки превью из request.form.
+    Умеет разные названия полей (base/adj/qty), чтобы BASE не терялся.
 
     Output:
       [{"part_number","part_name","quantity","unit_cost_base","unit_cost","location","supplier"}]
@@ -17928,7 +17541,7 @@ def parse_preview_rows_relaxed(form):
             _unit_idx, row_idx, field = m.groups()
             buckets[int(row_idx)][field] = (val or "").strip()
 
-    # 2) rows[i][field] fallback (Ð½Ðµ Ð·Ð°Ñ‚Ð¸Ñ€Ð°ÐµÐ¼ Ñ‚Ð¾ Ñ‡Ñ‚Ð¾ Ð¿Ñ€Ð¸ÑˆÐ»Ð¾ Ð¸Ð· units[])
+    # 2) rows[i][field] fallback (не затираем то что пришло из units[])
     for key, val in form.items():
         m = _rows_flat_re.match(key)
         if m:
@@ -17976,7 +17589,7 @@ def parse_preview_rows_relaxed(form):
         adj_raw = _first_present(r, ["unit_cost", "adj_cost", "adjusted_cost", "actual_unit_cost", "actual_cost", "cost", "price"])
         adj = _to_float(adj_raw, 0.0)
 
-        # IMPORTANT: ÑÑ€Ð°Ð²Ð½Ð¸Ð²Ð°ÐµÐ¼ Ð¸Ð¼ÐµÐ½Ð½Ð¾ raw-Ð¿ÑƒÑÑ‚Ð¾Ñ‚Ñƒ, Ð° Ð½Ðµ <=0
+        # IMPORTANT: сравниваем именно raw-пустоту, а не <=0
         if (adj_raw.strip() == "") and (base_raw.strip() != ""):
             adj = base
         if (base_raw.strip() == "") and (adj_raw.strip() != ""):
@@ -18152,7 +17765,7 @@ def import_parts_upload():
         import pandas as pd
         import os
 
-        # ÐµÑÐ»Ð¸ ÑÐ¾Ð²ÑÐµÐ¼ Ð½ÐµÑ‡ÐµÐ³Ð¾ â€“ Ð²ÐµÑ€Ð½Ñ‘Ð¼ Ð¿ÑƒÑÑ‚Ð¾Ð¹ df Ñ Ð½ÑƒÐ¶Ð½Ñ‹Ð¼Ð¸ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ°Ð¼Ð¸
+        # если совсем нечего – вернём пустой df с нужными колонками
         if df is None:
             cols = [
                 "part_number", "part_name", "qty", "quantity",
@@ -18164,7 +17777,7 @@ def import_parts_upload():
 
         df = df.copy()
 
-        # Ð³Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ€ÑƒÐµÐ¼ Ð½Ð°Ð»Ð¸Ñ‡Ð¸Ðµ Ð²ÑÐµÑ… ÐºÐ¾Ð»Ð¾Ð½Ð¾Ðº
+        # гарантируем наличие всех колонок
         need_cols = [
             "part_number", "part_name", "qty", "quantity",
             "unit_cost", "unit_cost_base",
@@ -18190,7 +17803,7 @@ def import_parts_upload():
         df["unit_cost_base"] = pd.to_numeric(df["unit_cost_base"], errors="coerce")
         df["unit_cost"]      = pd.to_numeric(df["unit_cost"], errors="coerce")
 
-        # Ð³Ð´Ðµ base Ð¿ÑƒÑÑ‚Ð°Ñ, Ð¿Ð¾Ð´ÑÑ‚Ð°Ð²Ð»ÑÐµÐ¼ unit_cost
+        # где base пустая, подставляем unit_cost
         mask_no_base = df["unit_cost_base"].isna()
         df.loc[mask_no_base, "unit_cost_base"] = df.loc[mask_no_base, "unit_cost"]
 
@@ -18208,7 +17821,7 @@ def import_parts_upload():
             .str.upper()
         )
 
-        # ----- Ð½Ð¾Ñ€Ð¼Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ ÑÑ‚Ñ€Ð¾ÐºÐ¾Ð²Ñ‹Ñ… Ð¿Ð¾Ð»ÐµÐ¹ (Ð‘Ð•Ð— row_key!) -----
+        # ----- нормализация строковых полей (БЕЗ row_key!) -----
         for col in ("part_number", "part_name", "supplier",
                     "order_no", "invoice_no", "source_file"):
             df[col] = (
@@ -18219,8 +17832,8 @@ def import_parts_upload():
                 .str.strip()
             )
 
-        # ===== Ð’Ð¡Ð•Ð“Ð”Ð Ð¿ÐµÑ€ÐµÑÑ‡Ð¸Ñ‚Ñ‹Ð²Ð°ÐµÐ¼ row_key Ð¿Ð¾ Ð½Ð¾Ð²Ð¾Ð¹ ÑÑ…ÐµÐ¼Ðµ =====
-        # Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ ÑÑ‚Ð°Ñ€Ñ‹Ðµ ÐºÐ»ÑŽÑ‡Ð¸ Ð²Ð¸Ð´Ð° "137292700/REL"
+        # ===== ВСЕГДА пересчитываем row_key по новой схеме =====
+        # чтобы не использовать старые ключи вида "137292700/REL"
         df = df.reset_index(drop=False).rename(columns={"index": "__row_i"})
         file_id = os.path.basename(str(saved_path or ""))
 
@@ -18245,22 +17858,22 @@ def import_parts_upload():
         try:
             tmp = df.apply(_mk_key, axis=1)
 
-            # tmp Ð´Ð¾Ð»Ð¶ÐµÐ½ Ð±Ñ‹Ñ‚ÑŒ Series (Ð¾Ð´Ð½Ð° ÐºÐ¾Ð»Ð¾Ð½ÐºÐ°). Ð•ÑÐ»Ð¸ DataFrame â€” Ð·Ð½Ð°Ñ‡Ð¸Ñ‚ Ð´Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚ Ð½Ðµ Ñ‚Ð¾Ð³Ð¾ Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚Ð°.
+            # tmp должен быть Series (одна колонка). Если DataFrame — значит документ не того формата.
             if hasattr(tmp, "columns"):
-                # apply Ð²ÐµÑ€Ð½ÑƒÐ» DataFrame -> _mk_key Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ Ð½Ðµ 1 Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ðµ, Ð¸Ð»Ð¸ Ð²Ñ…Ð¾Ð´ Ð½Ðµ Ñ‚Ð¾Ñ‚
+                # apply вернул DataFrame -> _mk_key возвращает не 1 значение, или вход не тот
                 raise ValueError("Unsupported document format (not a receiving invoice).")
 
             df["row_key"] = tmp.astype(str)
 
         except Exception as e:
-            # ÐŸÐ¾Ð¼ÐµÑ‡Ð°ÐµÐ¼ ÐºÐ°Ðº "Ð½ÐµÐ¿Ð¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð²Ð°ÐµÐ¼Ñ‹Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚" Ð²Ð¼ÐµÑÑ‚Ð¾ 500
+            # Помечаем как "неподдерживаемый импорт" вместо 500
             df["__import_error__"] = f"Unsupported file type/format for receiving import: {e}"
             return df
 
         if "__row_i" in df.columns:
             df = df.drop(columns=["__row_i"])
 
-        # ----- Ð²Ñ‹Ð±Ñ€Ð°ÑÑ‹Ð²Ð°ÐµÐ¼ Ð¿Ð¾Ð»Ð½Ð¾ÑÑ‚ÑŒÑŽ Ð¿ÑƒÑÑ‚Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ -----
+        # ----- выбрасываем полностью пустые строки -----
         drop_mask = (
             (df["part_number"].astype(str).str.strip() == "") &
             (df["part_name"].astype(str).str.strip() == "") &
@@ -18274,13 +17887,13 @@ def import_parts_upload():
 
     def _detect_supplier_from_content(saved_path: str, df_hint):
         """
-        ÐŸÑ‹Ñ‚Ð°ÐµÑ‚ÑÑ Ð¾Ð¿Ñ€ÐµÐ´ÐµÐ»Ð¸Ñ‚ÑŒ Ð¿Ð¾ÑÑ‚Ð°Ð²Ñ‰Ð¸ÐºÐ°:
-        1) Ð¿Ð¾ Ð¸Ð¼ÐµÐ½Ð¸ Ñ„Ð°Ð¹Ð»Ð°
-        2) Ð¿Ð¾ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ°Ð¼ / Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸ÑÐ¼ df_hint
-        3) Ð¿Ð¾ Ñ‚ÐµÐºÑÑ‚Ñƒ PDF:
-           - ÑÐ½Ð°Ñ‡Ð°Ð»Ð° fitz (ÐµÑÐ»Ð¸ ÑƒÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½)
-           - Ð¿Ð¾Ñ‚Ð¾Ð¼ pdfminer (ÐµÑÐ»Ð¸ ÑƒÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½)
-           - ÐµÑÐ»Ð¸ Ð¾Ð±Ð° Ð½ÐµÐ´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ñ‹, Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÐ¼ pdfplumber ÐºÐ°Ðº fallback
+        Пытается определить поставщика:
+        1) по имени файла
+        2) по колонкам / значениям df_hint
+        3) по тексту PDF:
+           - сначала fitz (если установлен)
+           - потом pdfminer (если установлен)
+           - если оба недоступны, используем pdfplumber как fallback
         """
         try:
             base = (saved_path or "").lower()
@@ -18294,7 +17907,7 @@ def import_parts_upload():
                 return "Encompass"
 
             blob = ""
-            # --- 1) df_hint: Ð·Ð°Ð³Ð¾Ð»Ð¾Ð²ÐºÐ¸ + Ð¿ÐµÑ€Ð²Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸
+            # --- 1) df_hint: заголовки + первые строки
             if df_hint is not None:
                 try:
                     blob = " ".join(df_hint.columns.astype(str))
@@ -18317,23 +17930,23 @@ def import_parts_upload():
             if "encompass" in blob_l:
                 return "Encompass"
 
-            # --- 2) PDF Ñ‚ÐµÐºÑÑ‚
+            # --- 2) PDF текст
             text = ""
-            # 2a. fitz (PyMuPDF), ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ
+            # 2a. fitz (PyMuPDF), если есть
             try:
                 import fitz  # type: ignore
                 with fitz.open(saved_path) as d:
                     for i in range(min(3, d.page_count)):
                         text += d[i].get_text() + "\n"
             except Exception:
-                # 2b. pdfminer, ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ
+                # 2b. pdfminer, если есть
                 try:
                     from pdfminer.high_level import extract_text  # type: ignore
                     text = extract_text(saved_path) or ""
                 except Exception:
                     text = ""
 
-            # 2c. fallback Ñ‡ÐµÑ€ÐµÐ· pdfplumber, ÐµÑÐ»Ð¸ Ñ‚ÐµÐºÑÑ‚ Ð²ÑÑ‘ ÐµÑ‰Ñ‘ Ð¿ÑƒÑÑ‚Ð¾Ð¹
+            # 2c. fallback через pdfplumber, если текст всё ещё пустой
             if not text:
                 try:
                     import pdfplumber  # type: ignore
@@ -18380,7 +17993,7 @@ def import_parts_upload():
                 continue
         return date.today()
 
-    # -------- extra: Ð¿Ñ€Ð¸Ð¼ÐµÐ½Ð¸Ñ‚ÑŒ ÐžÐ”Ð˜Ð Ð ÐÐ— --------------------------------------
+    # -------- extra: применить ОДИН РАЗ --------------------------------------
     def _apply_extra_to_df_once(df, extra_expenses_float, eps=1e-6):
         import pandas as pd
 
@@ -18442,7 +18055,7 @@ def import_parts_upload():
             "info"
         )
 
-    # ===== A) POST Ð¸Ð· Ð¿Ñ€ÐµÐ²ÑŒÑŽ (Save / Apply) ===================================
+    # ===== A) POST из превью (Save / Apply) ===================================
     if (
         request.method == "POST" and
         (
@@ -18461,7 +18074,7 @@ def import_parts_upload():
         invoice_date_raw = (request.form.get("invoice_date") or "").strip()
         invoice_date_val = _parse_invoice_date_from_form("invoice_date")
 
-        # ÐÐžÐ’ÐžÐ•: Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼ supplier Ð¸Ð· visible-Ð¿Ð¾Ð»Ñ Ð¸Ð»Ð¸ ÑÐºÑ€Ñ‹Ñ‚Ð¾Ð³Ð¾ supplier_hint
+        # НОВОЕ: читаем supplier из visible-поля или скрытого supplier_hint
         supplier_from_form = (request.form.get("supplier") or
                               request.form.get("supplier_name") or
                               request.form.get("supplier_hint") or "").strip()
@@ -18473,7 +18086,7 @@ def import_parts_upload():
 
         rows = parse_preview_rows_relaxed(request.form)
         if not rows:
-            flash("ÐÐµÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ñ… Ð² Ñ„Ð¾Ñ€Ð¼Ðµ (Ð¿ÑƒÑÑ‚Ð°Ñ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ð°).", "warning")
+            flash("Нет данных в форме (пустая таблица).", "warning")
             return render_template(
                 "import_preview.html",
                 rows=[],
@@ -18485,17 +18098,17 @@ def import_parts_upload():
                 invoice_date=invoice_date_raw,
             )
 
-        # âœ… IMPORTANT: ÑÑ‚Ñ€Ð¾Ð¸Ð¼ norm Ð¿Ñ€ÑÐ¼Ð¾ Ð¸Ð· rows, Ñ‡Ñ‚Ð¾Ð±Ñ‹ unit_cost_base Ð½Ðµ Ñ‚ÐµÑ€ÑÐ»ÑÑ
+        # ✅ IMPORTANT: строим norm прямо из rows, чтобы unit_cost_base не терялся
         norm = pd.DataFrame(rows)
         norm = _coerce_norm_df(norm)
 
-        # ÑÐ¾Ð²Ð¼ÐµÑÑ‚Ð¸Ð¼Ð¾ÑÑ‚ÑŒ: qty <-> quantity
+        # совместимость: qty <-> quantity
         if "qty" not in norm.columns and "quantity" in norm.columns:
             norm["qty"] = norm["quantity"]
         if "quantity" not in norm.columns and "qty" in norm.columns:
             norm["quantity"] = norm["qty"]
 
-        # ÐµÑÐ»Ð¸ ÑŽÐ·ÐµÑ€ Ð½Ðµ Ð²Ð²Ñ‘Ð» supplier â€” Ð¿Ñ€Ð¾Ð±ÑƒÐµÐ¼ ÑƒÐ³Ð°Ð´Ð°Ñ‚ÑŒ; ÐµÑÐ»Ð¸ Ð²ÑÑ‘ Ñ€Ð°Ð²Ð½Ð¾ Ð¿ÑƒÑÑ‚Ð¾, Ñ€ÑƒÐ³Ð°ÐµÐ¼ÑÑ
+        # если юзер не ввёл supplier — пробуем угадать; если всё равно пусто, ругаемся
         supplier_hint = (
             supplier_from_form or
             _detect_supplier_from_content(saved_path, norm) or ""
@@ -18506,7 +18119,7 @@ def import_parts_upload():
         default_loc = _supplier_to_default_location(supplier_hint)
 
         if norm is None or norm.empty:
-            flash("ÐÐµÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ñ… Ð´Ð»Ñ Ð¿Ñ€Ð¸Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚Ð° (Ð¿ÑƒÑÑ‚Ð¾Ð¹ Ð½Ð°Ð±Ð¾Ñ€ ÑÑ‚Ñ€Ð¾Ðº).", "warning")
+            flash("Нет данных для применения импорта (пустой набор строк).", "warning")
             return render_template(
                 "import_preview.html",
                 rows=[],
@@ -18525,15 +18138,15 @@ def import_parts_upload():
         norm["quantity"] = pd.to_numeric(norm["quantity"], errors="coerce").fillna(0).astype(int)
         norm["unit_cost_base"] = pd.to_numeric(norm["unit_cost_base"], errors="coerce").fillna(0.0)
 
-        # âœ… IMPORTANT: Ð²ÑÐµÐ³Ð´Ð° ÑÑ‡Ð¸Ñ‚Ð°ÐµÐ¼ unit_cost Ð½Ð° ÑÐµÑ€Ð²ÐµÑ€Ðµ Ð¸Ð· base + extra
-        # Ñ‡Ñ‚Ð¾Ð±Ñ‹ Save/Apply ÑÐ¾Ð²Ð¿Ð°Ð´Ð°Ð»Ð¸ Ð¸ Ð½Ðµ Ð·Ð°Ð²Ð¸ÑÐµÐ»Ð¸ Ð¾Ñ‚ JS
+        # ✅ IMPORTANT: всегда считаем unit_cost на сервере из base + extra
+        # чтобы Save/Apply совпадали и не зависели от JS
         norm, subtotal_base, grand_total = _apply_extra_to_df_once(norm, extra_expenses_val)
 
-        # âœ… FIX: ÑÐ²Ð½Ð¾ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÐ¼ fee per unit, Ñ‡Ñ‚Ð¾Ð±Ñ‹ UI Ð¿Ð¾ÐºÐ°Ð·Ñ‹Ð²Ð°Ð» Fee, Ð° Base Ð½Ðµ ÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ð»ÑÑ Adj
+        # ✅ FIX: явно сохраняем fee per unit, чтобы UI показывал Fee, а Base не становился Adj
         norm["unit_cost"] = pd.to_numeric(norm.get("unit_cost"), errors="coerce").fillna(0.0)
         norm["extra_alloc_per_unit"] = (norm["unit_cost"] - norm["unit_cost_base"]).clip(lower=0.0)
 
-        # (Ð½Ðµ Ð¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾, Ð½Ð¾ Ð¿Ð¾Ð»ÐµÐ·Ð½Ð¾ â€” Ð°Ð»Ð¸Ð°ÑÑ‹ Ð´Ð»Ñ ÑÐ¾Ð²Ð¼ÐµÑÑ‚Ð¸Ð¼Ð¾ÑÑ‚Ð¸/ÑÑÐ½Ð¾ÑÑ‚Ð¸)
+        # (не обязательно, но полезно — алиасы для совместимости/ясности)
         norm["base_unit_cost"] = norm["unit_cost_base"]
         norm["actual_unit_cost"] = norm["unit_cost"]
 
@@ -18542,17 +18155,17 @@ def import_parts_upload():
             "info"
         )
 
-        # <<< ÐÐžÐ’ÐžÐ•: Ð¿Ñ€Ð¾Ð±ÑƒÐµÐ¼ Ð²Ð·ÑÑ‚ÑŒ Invoice # Ð¸Ð· Ñ„Ð¾Ñ€Ð¼Ñ‹, Ð° ÐµÑÐ»Ð¸ Ð¿ÑƒÑÑ‚Ð¾ â€” Ð°Ð²Ñ‚Ð¾-Ð¿Ð°Ñ€ÑÐ¸Ð¼ >>>
+        # <<< НОВОЕ: пробуем взять Invoice # из формы, а если пусто — авто-парсим >>>
         invoice_guess = (request.form.get("invoice_number") or "").strip()
         if not invoice_guess:
             invoice_guess = _infer_invoice_number(norm, saved_path, supplier_hint) or ""
 
 
-        # --- Ð’ÐÐ›Ð˜Ð”ÐÐ¦Ð˜Ð¯: Ð´Ð°Ñ‚Ð° Ð½Ðµ Ð¼Ð¾Ð¶ÐµÑ‚ Ð±Ñ‹Ñ‚ÑŒ Ð² Ð±ÑƒÐ´ÑƒÑ‰ÐµÐ¼ ---
+        # --- ВАЛИДАЦИЯ: дата не может быть в будущем ---
         today = date.today()
         if invoice_date_val and invoice_date_val > today:
             flash("Invoice date cannot be in the future. Please correct Invoice Date.", "danger")
-            # Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÐ¼ÑÑ Ð½Ð° Ð¿Ñ€ÐµÐ²ÑŒÑŽ, Ð½Ð¸Ñ‡ÐµÐ³Ð¾ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ñ‘Ð¼ Ð² Ð±Ð°Ð·Ðµ
+            # Возвращаемся на превью, ничего не создаём в базе
             return render_template(
                 "import_preview.html",
                 rows=norm.to_dict(orient="records"),
@@ -18562,11 +18175,11 @@ def import_parts_upload():
                 subtotal_base=subtotal_base,
                 grand_total=grand_total,
                 default_loc=default_loc or "MAIN",
-                invoice_date=invoice_date_raw,   # Ð¿Ð¾ÐºÐ°Ð·Ñ‹Ð²Ð°ÐµÐ¼ Ñ‚Ð¾, Ñ‡Ñ‚Ð¾ Ð¾Ð½ Ð²Ð²Ñ‘Ð» (Ð´Ð°Ð¶Ðµ ÐµÑÐ»Ð¸ Ð±ÑƒÐ´ÑƒÑ‰ÐµÐµ)
+                invoice_date=invoice_date_raw,   # показываем то, что он ввёл (даже если будущее)
             )
 
 
-        # ----- SAVE (Ð¾ÑÑ‚Ð°Ñ‚ÑŒÑÑ Ð½Ð° Ð¿Ñ€ÐµÐ²ÑŒÑŽ) -----
+        # ----- SAVE (остаться на превью) -----
         if "save" in request.form:
             return render_template(
                 "import_preview.html",
@@ -18582,10 +18195,10 @@ def import_parts_upload():
             )
 
 
-        # ----- APPLY (ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ batch) -----
+        # ----- APPLY (создать batch) -----
         if "apply" in request.form:
             if dry or not enabled:
-                flash("Ð˜Ð¼Ð¿Ð¾Ñ€Ñ‚ Ð² Ñ€ÐµÐ¶Ð¸Ð¼Ðµ Ð¿Ñ€ÐµÐ´Ð¿Ñ€Ð¾ÑÐ¼Ð¾Ñ‚Ñ€Ð° (DRY) Ð¸Ð»Ð¸ Ð¾Ñ‚ÐºÐ»ÑŽÑ‡Ñ‘Ð½ ÐºÐ¾Ð½Ñ„Ð¸Ð³Ð¾Ð¼.", "info")
+                flash("Импорт в режиме предпросмотра (DRY) или отключён конфигом.", "info")
                 return render_template(
                     "import_preview.html",
                     rows=norm.to_dict(orient="records"),
@@ -18659,12 +18272,12 @@ def import_parts_upload():
                     session.rollback()
                     batch = None
                     logging.exception("DB error while creating receiving batch: %s", e)
-                    flash("DB error while creating receiving batch (ÑÐ¼. Ð»Ð¾Ð³). ÐŸÑ€Ð¾Ð´Ð¾Ð»Ð¶Ð°ÑŽ Ð±ÐµÐ· Ð±Ð°Ñ‚Ñ‡Ð°.", "danger")
+                    flash("DB error while creating receiving batch (см. лог). Продолжаю без батча.", "danger")
                 except Exception as e:
                     session.rollback()
                     batch = None
                     logging.exception("Failed to create ReceivingBatch: %s", e)
-                    flash("ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ ReceivingBatch. ÐŸÑ€Ð¾Ð´Ð¾Ð»Ð¶Ð°ÑŽ Ð±ÐµÐ· Ð±Ð°Ñ‚Ñ‡Ð°.", "warning")
+                    flash("Не удалось создать ReceivingBatch. Продолжаю без батча.", "warning")
 
             def duplicate_exists(rk: str) -> bool:
                 return has_key(rk)
@@ -18702,7 +18315,7 @@ def import_parts_upload():
                 sup_field = _pick_field(PartModel, SUP_FIELDS)
 
                 if pn_field is None or qty_field is None:
-                    raise RuntimeError("ÐÐµ Ð½Ð°Ð¹Ð´ÐµÐ½Ð¾ Ð¿Ð¾Ð»Ðµ PART # Ð¸Ð»Ð¸ QTY Ð² Ð¼Ð¾Ð´ÐµÐ»Ð¸ Part.")
+                    raise RuntimeError("Не найдено поле PART # или QTY в модели Part.")
 
                 def _to_int(x, default=0):
                     try:
@@ -18753,7 +18366,7 @@ def import_parts_upload():
                 if isinstance(base_raw, str) and not base_raw.strip():
                     base_raw = None
 
-                # âœ… fallback: parse base_cost from row_key "...|<base_cost>"
+                # ✅ fallback: parse base_cost from row_key "...|<base_cost>"
                 if base_raw is None:
                     rk = (m.get("row_key") or "").strip()
                     if rk and "|" in rk:
@@ -18855,7 +18468,7 @@ def import_parts_upload():
                         if I_QTY:
                             item_kwargs[I_QTY] = int(incoming_qty or 0)
 
-                        # âœ… costs
+                        # ✅ costs
                         if I_BASE:
                             item_kwargs[I_BASE] = float(base_cost)
                         if I_EXTRA:
@@ -18876,11 +18489,11 @@ def import_parts_upload():
                     except IntegrityError as e:
                         session.rollback()
                         logging.exception("DB error while creating ReceivingItem: %s", e)
-                        flash("DB error while creating ReceivingItem (ÑÐ¼. Ð»Ð¾Ð³).", "danger")
+                        flash("DB error while creating ReceivingItem (см. лог).", "danger")
                     except Exception as e:
                         session.rollback()
                         logging.exception("Failed to create ReceivingItem: %s", e)
-                        flash("ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ ÑÑ‚Ñ€Ð¾ÐºÑƒ Ð¿Ñ€Ð¸Ñ‘Ð¼ÐºÐ¸ (ÑÐ¼. Ð»Ð¾Ð³).", "warning")
+                        flash("Не удалось создать строку приёмки (см. лог).", "warning")
 
                 # ---------------- dedup key ----------------
                 meta = {
@@ -18910,7 +18523,7 @@ def import_parts_upload():
             except Exception as e:
                 session.rollback()
                 logging.exception("Final commit failed: %s", e)
-                flash("ÐžÑˆÐ¸Ð±ÐºÐ° Ð¿Ñ€Ð¸ Ð¾ÐºÐ¾Ð½Ñ‡Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ð¹ Ð·Ð°Ð¿Ð¸ÑÐ¸ Ð² Ð±Ð°Ð·Ñƒ. Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Ð¾Ñ‚ÐºÐ°Ñ‚Ð¸Ð»Ð¸ÑÑŒ.", "danger")
+                flash("Ошибка при окончательной записи в базу. Изменения откатились.", "danger")
                 return redirect(url_for("inventory.import_parts_upload"))
 
             bid = None
@@ -18924,7 +18537,7 @@ def import_parts_upload():
                         B_P_BY = _pick_field(BatchModel, ["posted_by"])
                         B_EXTRA = _pick_field(BatchModel, ["extra_expenses", "shipping_fee", "freight", "expenses"])
 
-                        # âœ… NEW: optional "stock applied" flags (different projects use different names)
+                        # ✅ NEW: optional "stock applied" flags (different projects use different names)
                         B_SA_BOOL = _pick_field(BatchModel, ["stock_applied", "is_stock_applied", "applied_to_stock"])
                         B_SA_AT = _pick_field(BatchModel, ["stock_applied_at", "applied_at", "applied_to_stock_at"])
                         B_SA_BY = _pick_field(BatchModel, ["stock_applied_by", "applied_by"])
@@ -18939,7 +18552,7 @@ def import_parts_upload():
                             except Exception:
                                 uid = 0
                             setattr(fresh_batch, B_P_BY, uid)
-                        # âœ… NEW: mark stock applied (import already updated Part quantities)
+                        # ✅ NEW: mark stock applied (import already updated Part quantities)
                         if B_SA_BOOL:
                             setattr(fresh_batch, B_SA_BOOL, True)
                         if B_SA_AT:
@@ -18959,29 +18572,29 @@ def import_parts_upload():
                 except Exception as e:
                     session.rollback()
                     logging.exception("Failed to finalize batch status: %s", e)
-                    flash("ÐŸÑ€Ð¸Ñ…Ð¾Ð´ ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½, Ð½Ð¾ ÑÑ‚Ð°Ñ‚ÑƒÑ Ð¿Ð°Ñ€Ñ‚Ð¸Ð¸ Ð½Ðµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑƒÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ 'posted'.", "warning")
+                    flash("Приход сохранён, но статус партии не удалось установить 'posted'.", "warning")
 
             for e in errors:
                 flash(e, "danger")
 
             if bid is not None:
                 flash(
-                    f"Stock received and posted. Batch #{bid}. Ð¡Ð¾Ð·Ð´Ð°Ð½Ð¾ ÑÑ‚Ñ€Ð¾Ðº: {len(built)}",
+                    f"Stock received and posted. Batch #{bid}. Создано строк: {len(built)}",
                     "success"
                 )
                 return redirect(url_for("inventory.receiving_detail", batch_id=bid))
             else:
                 flash(
-                    f"Ð¡Ð¾Ð·Ð´Ð°Ð½Ð¾ Ð¿Ñ€Ð¸Ñ…Ð¾Ð´Ð¾Ð²: {len(built)} (Ð±ÐµÐ· Ð·Ð°Ð¿Ð¸ÑÐ¸ ReceivingBatch)",
+                    f"Создано приходов: {len(built)} (без записи ReceivingBatch)",
                     "warning"
                 )
                 return redirect(url_for("inventory.import_parts_upload"))
 
-    # ===== B) Ð¿ÐµÑ€Ð²Ð°Ñ Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° Ñ„Ð°Ð¹Ð»Ð° â†’ Ð¿Ñ€ÐµÐ²ÑŒÑŽ ==================================
+    # ===== B) первая загрузка файла → превью ==================================
     if request.method == "POST":
         f = request.files.get("file")
         if not f or not f.filename.strip():
-            flash("Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ñ„Ð°Ð¹Ð» (.pdf, .xlsx, .xls Ð¸Ð»Ð¸ .csv)", "warning")
+            flash("Выберите файл (.pdf, .xlsx, .xls или .csv)", "warning")
             return redirect(request.url)
 
         filename   = secure_filename(f.filename)
@@ -19007,7 +18620,7 @@ def import_parts_upload():
         df = fix_pn_and_description_in_df(df)
 
         if df is None or df.empty:
-            flash("Ð’ ÑÑ‚Ð¾Ð¼ Ñ„Ð°Ð¹Ð»Ðµ Ð½Ðµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ñ€Ð°ÑÐ¿Ð¾Ð·Ð½Ð°Ñ‚ÑŒ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ñ‹ (Ð²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð¾ Ð¾Ñ‚ÑÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ PDF).", "danger")
+            flash("В этом файле не удалось распознать таблицы (возможно отсканированный PDF).", "danger")
             return render_template(
                 "import_preview.html",
                 rows=[],
@@ -19045,7 +18658,7 @@ def import_parts_upload():
         rows = norm.to_dict(orient="records")
         rows = fix_norm_records(rows, default_loc)
 
-        # ÐÐžÐ’ÐžÐ•: Ð°Ð²Ñ‚Ð¾-Ð´Ð¾Ð³Ð°Ð´ÐºÐ° Invoice #
+        # НОВОЕ: авто-догадка Invoice #
         invoice_guess = _infer_invoice_number(norm, path, supplier_hint) or ""
 
         return render_template(
@@ -19060,7 +18673,7 @@ def import_parts_upload():
         )
 
 
-    # ===== C) GET â†’ Ð¿Ð¾ÐºÐ°Ð·Ð°Ñ‚ÑŒ Ñ„Ð¾Ñ€Ð¼Ñƒ Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸ ===================================
+    # ===== C) GET → показать форму загрузки ===================================
     return render_template("import_parts.html")
 
 @inventory_bp.get("/orders/", endpoint="list_orders")
@@ -19082,7 +18695,7 @@ def list_orders():
     items = base.limit(500).all()
     return render_template("orders_list.html", items=items, q=q)
 
-# ========= ORDERS: Ð¾Ñ‚Ð¼ÐµÑ‚Ð¸Ñ‚ÑŒ ÐºÐ°Ðº Ð¿Ð¾Ð»ÑƒÑ‡ÐµÐ½Ð¾ (Ð¸ Ð¿Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÑŒ ÑÐºÐ»Ð°Ð´) =========
+# ========= ORDERS: отметить как получено (и пополнить склад) =========
 @inventory_bp.post("/orders/<int:item_id>/received", endpoint="mark_received")
 def mark_received(item_id):
     from flask import redirect, url_for, flash
@@ -19090,9 +18703,9 @@ def mark_received(item_id):
     from datetime import datetime
     from models import db
     from models import OrderItem
-    from models import Part  # Ñ‚Ð²Ð¾Ñ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰Ð°Ñ Ð¼Ð¾Ð´ÐµÐ»ÑŒ ÑÐºÐ»Ð°Ð´Ð°
+    from models import Part  # твоя существующая модель склада
 
-    # ÐŸÐ¾Ð¼Ð¾Ñ‰Ð½Ð¸Ðº: Ð¿Ð¾Ð´Ð¾Ð±Ñ€Ð°Ñ‚ÑŒ Ð¸Ð¼ÐµÐ½Ð° Ð¿Ð¾Ð»ÐµÐ¹ Ð¸Ð· Ñ‚Ð²Ð¾ÐµÐ¹ Ð¼Ð¾Ð´ÐµÐ»Ð¸ Part
+    # Помощник: подобрать имена полей из твоей модели Part
     PN_FIELDS   = ["part_number","number","sku","code","partnum","pn"]
     QTY_FIELDS  = ["quantity","qty","on_hand","stock","count"]
     LOC_FIELDS  = ["location","bin","shelf","place","loc"]
@@ -19119,7 +18732,7 @@ def mark_received(item_id):
         flash("Part model missing PN or QTY field.", "danger")
         return redirect(url_for("inventory.list_orders"))
 
-    # ÐÐ°Ð¹Ñ‚Ð¸/ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ Ð¿Ð¾Ð·Ð¸Ñ†Ð¸ÑŽ Ð½Ð° ÑÐºÐ»Ð°Ð´Ðµ (Ð¿Ð¾ PN + Ð»Ð¾ÐºÐ°Ñ†Ð¸Ñ, ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ)
+    # Найти/создать позицию на складе (по PN + локация, если есть)
     filters = {pn_field: item.part_number}
     if loc_field and item.location:
         filters[loc_field] = item.location
@@ -19134,10 +18747,10 @@ def mark_received(item_id):
         db.session.add(part)
         db.session.flush()
 
-    # + Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº
+    # + остаток
     setattr(part, qty_field, (getattr(part, qty_field) or 0) + int(item.qty_ordered or 0))
 
-    # ÑÑ‚Ð°Ñ‚ÑƒÑ Ð·Ð°ÐºÐ°Ð·Ð°
+    # статус заказа
     item.status = "received"
     item.date_received = datetime.utcnow()
     who = getattr(current_user, "email", "system")
@@ -19152,14 +18765,14 @@ def mark_received(item_id):
 @inventory_bp.route("/import-settings", methods=["GET", "POST"], endpoint="import_settings")
 @login_required
 def import_settings():
-    # Ð¿Ñ€Ð¾ÑÑ‚Ð°Ñ Ð·Ð°Ñ‰Ð¸Ñ‚Ð°: Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð°Ð´Ð¼Ð¸Ð½/ÑÑƒÐ¿ÐµÑ€Ð°Ð´Ð¼Ð¸Ð½
+    # простая защита: только админ/суперадмин
     if getattr(current_user, "role", None) not in (ROLE_ADMIN, ROLE_SUPERADMIN):
         abort(403)
 
     if request.method == "POST":
         ocr_on = 1 if request.form.get("pdf_ocr_enabled") == "on" else 0
         set_setting("pdf_ocr_enabled", bool(ocr_on))
-        flash("ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ñ‹.", "success")
+        flash("Настройки сохранены.", "success")
         return redirect(url_for("inventory.import_settings"))
 
     ocr_enabled = bool(get_setting("pdf_ocr_enabled", False))
@@ -19171,14 +18784,14 @@ def create_return_invoice():
         flash("Access denied", "danger")
         return redirect(url_for('inventory.reports'))
 
-    # Ð¸Ð´ÐµÐ½Ñ‚Ð¸Ñ„Ð¸ÐºÐ°Ñ‚Ð¾Ñ€Ñ‹ Ð¸ÑÑ…Ð¾Ð´Ð½Ð¾Ð¹ Ð³Ñ€ÑƒÐ¿Ð¿Ñ‹ (Ð½Ð° Ð²ÑÑÐºÐ¸Ð¹ ÑÐ»ÑƒÑ‡Ð°Ð¹)
+    # идентификаторы исходной группы (на всякий случай)
     issued_to_old     = (request.form.get('issued_to_old') or request.form.get('issued_to') or '').strip()
     reference_job_old = (request.form.get('reference_job_old') or request.form.get('reference_job') or '').strip() or None
     s                 = (request.form.get('issue_date_old') or request.form.get('issue_date') or '').strip()
     issued_by         = (request.form.get('issued_by') or '').strip()
     issue_date_old    = _parse_dt_flex(s)
 
-    # Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð´Ð»Ñ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ð°
+    # выбранные строки для возврата
     line_ids = request.form.getlist('line_ids') or request.form.getlist('line_ids[]')
     if not line_ids:
         flash("No lines selected.", "warning")
@@ -19190,7 +18803,7 @@ def create_return_invoice():
         flash("Invalid selection.", "danger")
         return redirect(url_for('inventory.reports'))
 
-    # Ð¿Ð¾Ð´ ÐºÐ°Ð¶Ð´ÑƒÑŽ ÑÑ‚Ñ€Ð¾ÐºÑƒ Ð²Ð¾Ð·ÑŒÐ¼Ñ‘Ð¼ qty_X
+    # под каждую строку возьмём qty_X
     rows = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(line_ids)).all()
     if not rows:
         flash("Selected lines not found.", "warning")
@@ -19203,11 +18816,11 @@ def create_return_invoice():
             qty = int(qty_raw or 0)
         except Exception:
             qty = 0
-        qty = max(0, min(qty, int(r.quantity or 0)))  # Ð½ÐµÐ»ÑŒÐ·Ñ Ð²ÐµÑ€Ð½ÑƒÑ‚ÑŒ Ð±Ð¾Ð»ÑŒÑˆÐµ, Ñ‡ÐµÐ¼ Ð²Ñ‹Ð´Ð°Ð»Ð¸
+        qty = max(0, min(qty, int(r.quantity or 0)))  # нельзя вернуть больше, чем выдали
         if qty <= 0:
             continue
 
-        # ÑÐ¾Ð·Ð´Ð°Ñ‘Ð¼ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ð½ÑƒÑŽ Ð·Ð°Ð¿Ð¸ÑÑŒ (Ð¾Ñ‚Ñ€Ð¸Ñ†Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ðµ ÐºÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾)
+        # создаём возвратную запись (отрицательное количество)
         ret = IssuedPartRecord(
             part_id=r.part_id,
             quantity=-qty,
@@ -19217,7 +18830,7 @@ def create_return_invoice():
             issue_date=datetime.utcnow(),
             unit_cost_at_issue=r.unit_cost_at_issue,
         )
-        # Ð¿Ñ€Ð¸ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ðµ Ð½Ð° ÑÐºÐ»Ð°Ð´ Ð´Ð¾Ð±Ð°Ð²Ð¸Ð¼ ÐºÐ¾Ð»-Ð²Ð¾ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾
+        # при возврате на склад добавим кол-во обратно
         part = Part.query.get(r.part_id)
         if part:
             part.quantity = int(part.quantity or 0) + qty
@@ -19494,7 +19107,7 @@ def return_selected():
         )
 
         db.session.add(ret)
-        db.session.flush()  # Ð²Ð°Ð¶Ð½Ð¾: Ð½ÑƒÐ¶ÐµÐ½ ret.id Ð´Ð»Ñ ÑÐ²ÑÐ·Ð¸ Ñ supplier return
+        db.session.flush()  # важно: нужен ret.id для связи с supplier return
         created.append(ret)
 
         p_obj = getattr(src, "part", None) or Part.query.get(src.part_id)
@@ -19517,7 +19130,7 @@ def return_selected():
                 if not supplier_label:
                     supplier_label = (r_dest_raw or "").strip() or "VENDOR"
 
-                # Ð¼Ð¾Ð¶Ð½Ð¾ Ð´Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð´Ð°Ñ‚Ñƒ Ðº supplier, ÐºÐ°Ðº Ñƒ Ñ‚ÐµÐ±Ñ Ð² Ð´Ñ€ÑƒÐ³Ð¸Ñ… batch
+                # можно добавить дату к supplier, как у тебя в других batch
                 supplier_label = f"{supplier_label} {now_la.strftime('%m/%d/%y')}"
 
                 tech_job_label = f"{(src.issued_to or '').strip()} {(src.reference_job or '').strip()}".strip()
@@ -19604,7 +19217,7 @@ def _already_returned_qty_for_source(src) -> int:
       - part_id
       - issued_to
       - RETURN <job_ref>
-      - AND same unit_cost_at_issue (price)  âœ… <-- key fix for multi-price invoices
+      - AND same unit_cost_at_issue (price)  ✅ <-- key fix for multi-price invoices
     """
 
     # source reference job (ex: "997191")
@@ -19629,7 +19242,7 @@ def _already_returned_qty_for_source(src) -> int:
             IssuedPartRecord.quantity < 0,
             func.upper(func.coalesce(IssuedPartRecord.reference_job, "")) == want_return_ref,
 
-            # âœ… IMPORTANT: match by price to avoid cross-blocking between different costs
+            # ✅ IMPORTANT: match by price to avoid cross-blocking between different costs
             func.round(func.coalesce(IssuedPartRecord.unit_cost_at_issue, 0.0), 2) == src_cost,
         )
         .scalar()
@@ -19641,30 +19254,16 @@ def _already_returned_qty_for_source(src) -> int:
 @inventory_bp.get("/receiving/by-invoice/<path:inv>", endpoint="receiving_by_invoice")
 @login_required
 def receiving_by_invoice(inv):
-    # ERP ACCESS 03A - RECEIVING BY INVOICE
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Receiving access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for("inventory.dashboard")
-        )
-
     from flask import redirect, url_for, flash, request
     from sqlalchemy import func
     from extensions import db
-    from models import GoodsReceipt  # Ð¸Ð»Ð¸ ReceivingBatch (ÐºÐ°Ðº Ñƒ Ñ‚ÐµÐ±Ñ Ð¼Ð¾Ð´ÐµÐ»ÑŒ Ð½Ð°Ð·Ñ‹Ð²Ð°ÐµÑ‚ÑÑ)
+    from models import GoodsReceipt  # или ReceivingBatch (как у тебя модель называется)
 
     inv = (inv or "").strip()
     if not inv:
         return redirect(url_for("inventory.receiving_list"))
 
-    # Ð¸Ñ‰ÐµÐ¼ ÑÐ°Ð¼Ñ‹Ð¹ ÑÐ²ÐµÐ¶Ð¸Ð¹ batch Ð¿Ð¾ invoice_number (ÑÑ‚Ñ€Ð¾ÐºÐ¾Ð¹)
+    # ищем самый свежий batch по invoice_number (строкой)
     batch = (
         db.session.query(GoodsReceipt)
         .filter(func.trim(GoodsReceipt.invoice_number) == inv)
@@ -19677,32 +19276,16 @@ def receiving_by_invoice(inv):
 
     if not batch:
         flash(f"Receiving invoice not found: {inv}", "warning")
-        # ÑƒÐ´Ð¾Ð±Ð½Ð¾ Ð²ÐµÑ€Ð½ÑƒÑ‚ÑŒ Ð² ÑÐ¿Ð¸ÑÐ¾Ðº receiving ÑƒÐ¶Ðµ Ñ Ð¿Ð¾Ð¸ÑÐºÐ¾Ð¼
+        # удобно вернуть в список receiving уже с поиском
         return redirect(url_for("inventory.receiving_list", q=inv))
 
-    # âš ï¸ Ð¸Ð¼Ñ endpoint Ð¼Ð¾Ð¶ÐµÑ‚ Ð¾Ñ‚Ð»Ð¸Ñ‡Ð°Ñ‚ÑŒÑÑ: receiving_detail / receiving_view / receiving_edit
+    # ⚠️ имя endpoint может отличаться: receiving_detail / receiving_view / receiving_edit
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
 
 @inventory_bp.get("/receiving", endpoint="receiving_list")
 @login_required
 def receiving_list():
-    # ERP ACCESS 03A - RECEIVING LIST
-    # DEFAULT preserves legacy behavior:
-    # any authenticated user may view Receiving.
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Receiving access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for("inventory.dashboard")
-        )
-
     import time
 
     from sqlalchemy import func, inspect as sa_inspect
@@ -20142,38 +19725,38 @@ def receiving_list():
 
 def _batch_consumed_forbid_unpost(batch) -> bool:
     """
-    Ð’Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ True ÐµÑÐ»Ð¸ Ð¸Ð· Ð­Ð¢ÐžÐ“Ðž Ð¿Ñ€Ð¸Ñ…Ð¾Ð´Ð° ÑƒÐ¶Ðµ Ñ‡Ñ‚Ð¾-Ñ‚Ð¾ ÑƒÑˆÐ»Ð¾ Ñ‚ÐµÑ…Ð½Ð¸ÐºÐ°Ð¼.
-    Ð’ ÑÑ‚Ð¾Ð¼ ÑÐ»ÑƒÑ‡Ð°Ðµ unpost ÐÐ•Ð›Ð¬Ð—Ð¯ Ð´ÐµÐ»Ð°Ñ‚ÑŒ (Ð¸Ð½Ð°Ñ‡Ðµ ÑÐ»Ð¾Ð¼Ð°ÐµÑˆÑŒ Ð¾ÑÑ‚Ð°Ñ‚ÐºÐ¸).
+    Возвращает True если из ЭТОГО прихода уже что-то ушло техникам.
+    В этом случае unpost НЕЛЬЗЯ делать (иначе сломаешь остатки).
 
-    Ð›Ð¾Ð³Ð¸ÐºÐ°:
-    - ÑÐ¾Ð±ÐµÑ€Ñ‘Ð¼ Ð²ÑÐµ part_number Ð¸Ð· ÑÑ‚Ñ€Ð¾Ðº Ð¿Ñ€Ð¸Ñ…Ð¾Ð´Ð° (batch.items / batch.lines)
-    - Ð½Ð°Ð¹Ð´Ñ‘Ð¼ Part.id Ð´Ð»Ñ ÑÑ‚Ð¸Ñ… part_number
-    - Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¸Ð¼ IssuedPartRecord Ð¿Ð¾ ÑÑ‚Ð¸Ð¼ Part.id
-    - ÐµÑÐ»Ð¸ ÐµÑÑ‚ÑŒ Ñ…Ð¾Ñ‚Ñ Ð±Ñ‹ Ð¾Ð´Ð½Ð° Ð²Ñ‹Ð´Ð°Ñ‡Ð° -> True
+    Логика:
+    - соберём все part_number из строк прихода (batch.items / batch.lines)
+    - найдём Part.id для этих part_number
+    - проверим IssuedPartRecord по этим Part.id
+    - если есть хотя бы одна выдача -> True
     """
     from sqlalchemy import func
     from extensions import db
     from models import Part, IssuedPartRecord
 
-    # Ð¿Ð¾Ð»ÑƒÑ‡Ð°ÐµÐ¼ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¿Ð°Ñ€Ñ‚Ð¸Ð¸
+    # получаем строки партии
     lines = (
         getattr(batch, "lines", None)
         or getattr(batch, "items", None)
         or []
     )
 
-    # ÑÐ¾Ð±ÐµÑ€Ñ‘Ð¼ PN Ð¸Ð· ÑÑ‚Ñ€Ð¾Ðº
+    # соберём PN из строк
     part_numbers_upper = []
     for it in lines:
         pn = (getattr(it, "part_number", "") or "").strip()
         if pn:
             part_numbers_upper.append(pn.upper())
 
-    # ÐµÑÐ»Ð¸ Ð½ÐµÑ‚ Ð½Ð¾Ñ€Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ñ… PN -> ÑÑ‡Ð¸Ñ‚Ð°ÐµÐ¼ Ñ‡Ñ‚Ð¾ Ñ€Ð°ÑÑ…Ð¾Ð´ Ð½Ðµ Ð´Ð¾ÐºÐ°Ð·Ð°Ð½ => unpost Ñ€Ð°Ð·Ñ€ÐµÑˆÐ°ÐµÐ¼
+    # если нет нормальных PN -> считаем что расход не доказан => unpost разрешаем
     if not part_numbers_upper:
         return False
 
-    # Ð½Ð°Ð¹Ð´Ñ‘Ð¼ ID Ð´ÐµÑ‚Ð°Ð»ÐµÐ¹ Ð¿Ð¾ PN
+    # найдём ID деталей по PN
     part_ids = [
         row[0]
         for row in (
@@ -20184,10 +19767,10 @@ def _batch_consumed_forbid_unpost(batch) -> bool:
     ]
 
     if not part_ids:
-        # Ð½Ðµ Ð½Ð°ÑˆÐ»Ð¸ Part Ð²Ð¾Ð¾Ð±Ñ‰Ðµ -> ÑÑ‡Ð¸Ñ‚Ð°ÐµÐ¼ Ñ‡Ñ‚Ð¾ Ð½ÐµÑ‡ÐµÐ³Ð¾ ÑÐ²ÐµÑ€ÑÑ‚ÑŒ => Ð½Ðµ Ð±Ð»Ð¾ÐºÐ¸Ñ€ÑƒÐµÐ¼
+        # не нашли Part вообще -> считаем что нечего сверять => не блокируем
         return False
 
-    # Ð¸Ñ‰ÐµÐ¼ Ñ…Ð¾Ñ‚ÑŒ Ð¾Ð´Ð½Ñƒ Ð²Ñ‹Ð´Ð°Ñ‡Ñƒ Ð¿Ð¾ ÑÑ‚Ð¸Ð¼ Part.id
+    # ищем хоть одну выдачу по этим Part.id
     used = (
         db.session.query(IssuedPartRecord.id)
         .filter(IssuedPartRecord.part_id.in_(part_ids))
@@ -20195,7 +19778,7 @@ def _batch_consumed_forbid_unpost(batch) -> bool:
         .first()
     )
 
-    # True => Ð£Ð–Ð• Ð•Ð¡Ð¢Ð¬ Ð ÐÐ¡Ð¥ÐžÐ” -> Ð±Ð»Ð¾ÐºÐ¸Ñ€ÑƒÐµÐ¼ unpost
+    # True => УЖЕ ЕСТЬ РАСХОД -> блокируем unpost
     return used is not None
 
 
@@ -20212,7 +19795,7 @@ def receiving_toggle(batch_id: int):
 
     log = current_app.logger
 
-    # --- ÐºÑ‚Ð¾ Ð¼Ð¾Ð¶ÐµÑ‚ Ð¶Ð°Ñ‚ÑŒ Post / Unpost Ñ‡ÐµÑ€ÐµÐ· toggle ---
+    # --- кто может жать Post / Unpost через toggle ---
     role_low = (getattr(current_user, "role", "") or "").strip().lower()
     is_adminish = (
         role_low in ("admin", "superadmin")
@@ -20220,10 +19803,9 @@ def receiving_toggle(batch_id: int):
         or getattr(current_user, "is_superadmin", False)
         or getattr(current_user, "is_super_admin", False)
     )
-    # ERP ACCESS 03A - RECEIVING TOGGLE
-    # Authorization is evaluated after we know whether this
-    # request is POST or UNPOST. Existing business guards below
-    # remain unchanged.
+    if not is_adminish:
+        flash("Access denied. Admin only.", "danger")
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
     batch = db.session.get(ReceivingBatch, batch_id)
     if not batch:
@@ -20233,46 +19815,13 @@ def receiving_toggle(batch_id: int):
     status_now = (getattr(batch, "status", "") or "").strip().lower()
     was_posted_at = getattr(batch, "posted_at", None)
 
-    receiving_action_permission = (
-        "erp.receiving.unpost"
-        if status_now == "posted"
-        else "erp.receiving.post"
-    )
-
-    receiving_module_allowed = ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    )
-
-    receiving_action_allowed = ErpAccessService.is_allowed(
-        current_user,
-        receiving_action_permission,
-        default_allowed=is_adminish,
-    )
-
-    if not (
-        receiving_module_allowed
-        and receiving_action_allowed
-    ):
-        flash(
-            "Access denied for this Receiving operation.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.receiving_detail",
-                batch_id=batch_id,
-            )
-        )
-
     # =========================================================
-    # CASE 1: ÑÐµÐ¹Ñ‡Ð°Ñ Ð½Ðµ POSTED -> Ñ…Ð¾Ñ‚Ð¸Ð¼ POST (Ð¿Ñ€Ð¸Ñ…Ð¾Ð´ Ð½Ð° ÑÐºÐ»Ð°Ð´)
+    # CASE 1: сейчас не POSTED -> хотим POST (приход на склад)
     # =========================================================
     if status_now != "posted":
-        # Ð·Ð°Ñ‰Ð¸Ñ‚Ð° Ð¾Ñ‚ Ð´Ð²Ð¾Ð¹Ð½Ð¾Ð³Ð¾ Ð¿Ñ€Ð¸Ñ…Ð¾Ð´Ð°:
-        # ÐµÑÐ»Ð¸ batch ÑƒÐ¶Ðµ ÐºÐ¾Ð³Ð´Ð°-Ñ‚Ð¾ Ð±Ñ‹Ð» Ð¿Ñ€Ð¾Ð²ÐµÐ´Ñ‘Ð½ (posted_at Ð½Ðµ Ð¿ÑƒÑÑ‚Ð¾Ð¹),
-        # Ñ‚Ð¾ ÑÐºÐ»Ð°Ð´ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¾ Ð½Ðµ Ñ‚Ñ€Ð¾Ð³Ð°ÐµÐ¼, Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð²ÐµÑ€Ð½Ñ‘Ð¼ ÑÑ‚Ð°Ñ‚ÑƒÑ "posted".
+        # защита от двойного прихода:
+        # если batch уже когда-то был проведён (posted_at не пустой),
+        # то склад повторно не трогаем, просто вернём статус "posted".
         if was_posted_at:
             log.warning(
                 "[RECEIVING_TOGGLE] Batch %s already had stock applied earlier "
@@ -20284,7 +19833,7 @@ def receiving_toggle(batch_id: int):
             flash("Batch marked as POSTED (stock was already applied earlier).", "info")
             return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
-        # Ð½Ð¾Ñ€Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¿ÑƒÑ‚ÑŒ: Ð¿ÐµÑ€Ð²Ð°Ñ Ð¿Ñ€Ð¾Ð²Ð¾Ð´ÐºÐ° -> Ð¿Ð»ÑŽÑÑƒÐµÐ¼ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº Ñ‡ÐµÑ€ÐµÐ· ÑÐµÑ€Ð²Ð¸Ñ
+        # нормальный путь: первая проводка -> плюсуем остаток через сервис
         try:
             post_receiving_batch(
                 batch.id,
@@ -20305,9 +19854,9 @@ def receiving_toggle(batch_id: int):
         return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
     # =========================================================
-    # CASE 2: ÑÐµÐ¹Ñ‡Ð°Ñ POSTED -> Ñ…Ð¾Ñ‚Ð¸Ð¼ UNPOST (ÑÐ½ÑÑ‚ÑŒ ÑÐ¾ ÑÐºÐ»Ð°Ð´Ð°)
+    # CASE 2: сейчас POSTED -> хотим UNPOST (снять со склада)
     # =========================================================
-    # helper: ÑÑƒÐ¿ÐµÑ€-Ð°Ð´Ð¼Ð¸Ð½?
+    # helper: супер-админ?
     def is_superadmin(u) -> bool:
         r = (getattr(u, "role", "") or "").strip().lower()
         return (
@@ -20316,9 +19865,9 @@ def receiving_toggle(batch_id: int):
             or getattr(u, "is_super_admin", False)
         )
 
-    # Ð•ÑÐ»Ð¸ Ð¿Ð°Ñ€Ñ‚Ð¸Ñ ÑƒÐ¶Ðµ "Ð¿Ð¾Ñ‚Ñ€ÐµÐ±Ð»ÐµÐ½Ð°" (Ð¸Ð· Ð½ÐµÑ‘ Ñ‡Ñ‚Ð¾-Ñ‚Ð¾ Ð²Ñ‹Ð´Ð°Ð»Ð¸ Ñ‚ÐµÑ…Ð½Ð¸ÐºÑƒ Ð¿Ð¾ÑÐ»Ðµ Ð¿Ð¾ÑÑ‚Ð¸Ð½Ð³Ð°),
-    # Ñ‚Ð¾ Ð¼Ñ‹ Ð½Ðµ Ð´Ð°Ñ‘Ð¼ Ð¾Ð±Ñ‹Ñ‡Ð½Ð¾Ð¼Ñƒ Ð°Ð´Ð¼Ð¸Ð½Ñƒ ÑÐ½Ð¸Ð¼Ð°Ñ‚ÑŒ ÑÐºÐ»Ð°Ð´, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ ÑƒÐ¹Ñ‚Ð¸ Ð² Ð¼Ð¸Ð½ÑƒÑ.
-    # superadmin Ð¼Ð¾Ð¶ÐµÑ‚ ÑÐ´ÐµÐ»Ð°Ñ‚ÑŒ Ñ„Ð¾Ñ€Ñ-Ñ‡Ð¸ÑÑ‚ÐºÑƒ Ñ‡ÐµÑ€ÐµÐ· Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½ÑƒÑŽ ÐºÐ½Ð¾Ð¿ÐºÑƒ /receiving/<id>/unpost.
+    # Если партия уже "потреблена" (из неё что-то выдали технику после постинга),
+    # то мы не даём обычному админу снимать склад, чтобы не уйти в минус.
+    # superadmin может сделать форс-чистку через отдельную кнопку /receiving/<id>/unpost.
     if _batch_consumed_forbid_unpost(batch):
         log.debug(
             "[RECEIVING_TOGGLE] Blocked UNPOST for batch %s: already consumed.",
@@ -20332,16 +19881,16 @@ def receiving_toggle(batch_id: int):
             )
             return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
-        # ÑÑƒÐ¿ÐµÑ€-Ð°Ð´Ð¼Ð¸Ð½Ñƒ Ð½Ðµ Ð´ÐµÐ»Ð°ÐµÐ¼ Ð°Ð²Ñ‚Ð¾-rollback Ñ‚ÑƒÑ‚,
-        # Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ ÑÐ»Ð¾Ð²Ð¸Ñ‚ÑŒ Ð½ÐµÐ¾Ð¶Ð¸Ð´Ð°Ð½Ð½Ñ‹Ð¹ Ð¼Ð¸Ð½ÑƒÑ: Ð¾Ð½ Ð´Ð¾Ð»Ð¶ÐµÐ½ Ð½Ð°Ð¶Ð°Ñ‚ÑŒ ÑÐ²Ð¾ÑŽ Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½ÑƒÑŽ Unpost ÐºÐ½Ð¾Ð¿ÐºÑƒ,
-        # ÐºÐ¾Ñ‚Ð¾Ñ€Ð°Ñ Ð¸Ð´Ñ‘Ñ‚ Ð½Ð° /receiving/<id>/unpost (Ñ‚Ð°Ð¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ superadmin).
+        # супер-админу не делаем авто-rollback тут,
+        # чтобы не словить неожиданный минус: он должен нажать свою отдельную Unpost кнопку,
+        # которая идёт на /receiving/<id>/unpost (там только superadmin).
         flash(
             "This batch was already consumed. Use SUPERADMIN Unpost button instead.",
             "warning"
         )
         return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
-    # Ð½Ð¾Ñ€Ð¼Ð°Ð»ÑŒÐ½Ð¾: Ð¿Ð°Ñ€Ñ‚Ð¸Ñ posted Ð¸ Ð½Ðµ Ð±Ñ‹Ð»Ð° Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð° -> Ð¼Ð¾Ð¶Ð½Ð¾ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾ ÑÐ½ÑÑ‚ÑŒ ÑÐ¾ ÑÐºÐ»Ð°Ð´Ð°
+    # нормально: партия posted и не была использована -> можно безопасно снять со склада
     try:
         unpost_receiving_batch(
             batch.id,
@@ -20369,33 +19918,13 @@ def receiving_new():
 
     role = (getattr(current_user, "role", "") or "").lower()
 
-    # ERP ACCESS 03A - RECEIVING NEW
-    legacy_create_allowed = (
-        role in ("admin", "superadmin")
-    )
+    # Разрешаем admin и superadmin заходить на страницу создания НОВОГО батча
+    if role not in ("admin", "superadmin"):
+        flash("Access denied. only admin or superadmin can create Receiving batch.", "danger")
+        return redirect(url_for("inventory.receiving_list"))
 
-    if not (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.access",
-            default_allowed=True,
-        )
-        and ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.create",
-            default_allowed=legacy_create_allowed,
-        )
-    ):
-        flash(
-            "Access denied: you cannot create Receiving batches.",
-            "danger",
-        )
-        return redirect(
-            url_for("inventory.receiving_list")
-        )
-
-    # ÐÐ˜Ð§Ð•Ð“Ðž Ð½Ðµ Ñ„Ð»ÑÑˆÐ¸Ñ‚ÑŒ Ð¿Ñ€Ð¾ "only superadmin can edit Receiving"
-    # Ð¿Ð¾Ñ‚Ð¾Ð¼Ñƒ Ñ‡Ñ‚Ð¾ ÑÑ‚Ð¾ Ð½Ðµ Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰ÐµÐ³Ð¾, ÑÑ‚Ð¾ ÐÐžÐ’Ð«Ð™ (batch=None)
+    # НИЧЕГО не флэшить про "only superadmin can edit Receiving"
+    # потому что это не редактирование существующего, это НОВЫЙ (batch=None)
 
     return render_template(
         "receiving_edit.html",
@@ -20422,13 +19951,13 @@ def receiving_unpost(batch_id: int):
 @login_required
 def receiving_save():
     """
-    Ð¡Ð¾Ð·Ð´Ð°Ñ‘Ñ‚ Ð¸Ð»Ð¸ Ð¾Ð±Ð½Ð¾Ð²Ð»ÑÐµÑ‚ ReceivingBatch (GoodsReceipt) + ÑÑ‚Ñ€Ð¾ÐºÐ¸.
-    Ð”Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¾:
-      - extra_expenses (shipping/etc) Ð»ÐµÐ¶Ð¸Ñ‚ Ð² batch.extra_expenses
-      - unit_cost ÑÑ‚Ñ€Ð¾Ðº Ð¿ÐµÑ€ÐµÑÑ‡Ð¸Ñ‚Ñ‹Ð²Ð°ÐµÑ‚ÑÑ Ñ ÑƒÑ‡Ñ‘Ñ‚Ð¾Ð¼ Ñ€Ð°ÑÐ¿Ñ€ÐµÐ´ÐµÐ»ÐµÐ½Ð¸Ñ extra_expenses
-        Ð¿Ñ€Ð¾Ð¿Ð¾Ñ€Ñ†Ð¸Ð¾Ð½Ð°Ð»ÑŒÐ½Ð¾ (qty * base_cost).
-    Ð•ÑÐ»Ð¸ action == "post", Ð²Ñ‹Ð·Ñ‹Ð²Ð°ÐµÐ¼ post_receiving_batch() Ñ‡Ñ‚Ð¾Ð±Ñ‹
-    ÑÐ¿Ð¸ÑÐ°Ñ‚ÑŒ Ð² ÑÐºÐ»Ð°Ð´ Ð¸ Ð¿Ð¾Ð¼ÐµÑ‚Ð¸Ñ‚ÑŒ batch ÐºÐ°Ðº posted.
+    Создаёт или обновляет ReceivingBatch (GoodsReceipt) + строки.
+    Добавлено:
+      - extra_expenses (shipping/etc) лежит в batch.extra_expenses
+      - unit_cost строк пересчитывается с учётом распределения extra_expenses
+        пропорционально (qty * base_cost).
+    Если action == "post", вызываем post_receiving_batch() чтобы
+    списать в склад и пометить batch как posted.
     """
     from flask import request, redirect, url_for, flash
     from datetime import datetime
@@ -20456,7 +19985,7 @@ def receiving_save():
     action = (f.get("action") or "").strip().lower()
     force_existing = (f.get("force_existing") or "").strip() == "1"
 
-    # Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼ extra_expenses ÐºÐ°Ðº float
+    # читаем extra_expenses как float
     try:
         extra_expenses_total = float(f.get("extra_expenses") or 0.0)
     except Exception:
@@ -20496,152 +20025,13 @@ def receiving_save():
     is_new_batch = (not batch_id) and (not force_existing)
 
     # ------------- ACCESS CONTROL -------------
-    # 1) Ð½Ð¾Ð²Ñ‹Ð¹ Ð±Ð°Ñ‚Ñ‡ Ð¼Ð¾Ð¶ÐµÑ‚ ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ admin / superadmin
-    # 2) ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰Ð¸Ð¹ Ð±Ð°Ñ‚Ñ‡:
-    #    - draft: admin Ð¸Ð»Ð¸ superadmin Ð¼Ð¾Ð¶ÐµÑ‚ Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ
+    # 1) новый батч может создать admin / superadmin
+    # 2) существующий батч:
+    #    - draft: admin или superadmin может редактировать
     #    - posted:
-    #         Ð¾Ð±Ñ‹Ñ‡Ð½Ñ‹Ðµ Ð°Ð´Ð¼Ð¸Ð½Ñ‹ Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð½Ðµ Ð¼Ð¾Ð³ÑƒÑ‚;
-    #         superadmin Ð¼Ð¾Ð¶ÐµÑ‚ Ð¿Ñ€Ð°Ð²Ð¸Ñ‚ÑŒ Ð¢ÐžÐ›Ð¬ÐšÐž ÑˆÐ°Ð¿ÐºÑƒ (supplier, invoice, date, notes, currency)
-    #         Ð±ÐµÐ· Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ ÑÑ‚Ñ€Ð¾Ðº.
-    # ========================================================
-    # ERP ACCESS 03A - RECEIVING SAVE
-    # ========================================================
-
-    legacy_role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).strip().lower()
-
-    legacy_adminish = (
-        legacy_role_low in ("admin", "superadmin")
-        or getattr(current_user, "is_admin", False)
-        or getattr(current_user, "is_superadmin", False)
-        or getattr(current_user, "is_super_admin", False)
-    )
-
-    legacy_super = (
-        legacy_role_low == "superadmin"
-        or getattr(current_user, "is_superadmin", False)
-        or getattr(current_user, "is_super_admin", False)
-    )
-
-    module_allowed = ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    )
-
-    access_batch = None
-    access_status = ""
-
-    if not is_new_batch:
-        try:
-            access_batch = db.session.get(
-                ReceivingBatch,
-                int(batch_id),
-            )
-        except Exception:
-            access_batch = None
-
-        if access_batch is not None:
-            access_status = (
-                getattr(
-                    access_batch,
-                    "status",
-                    "",
-                )
-                or ""
-            ).strip().lower()
-
-    if is_new_batch:
-        save_permission = (
-            "erp.receiving.create"
-        )
-        save_default = legacy_adminish
-
-    elif access_status == "posted":
-        save_permission = (
-            "erp.receiving.edit_posted"
-        )
-        save_default = legacy_super
-
-    else:
-        # Current registry intentionally treats editing a
-        # DRAFT Receiving as part of Create Receiving.
-        save_permission = (
-            "erp.receiving.create"
-        )
-        save_default = legacy_adminish
-
-    save_allowed = ErpAccessService.is_allowed(
-        current_user,
-        save_permission,
-        default_allowed=save_default,
-    )
-
-    if not (
-        module_allowed
-        and save_allowed
-    ):
-        flash(
-            "Access denied for this Receiving change.",
-            "danger",
-        )
-
-        if access_batch is not None:
-            return redirect(
-                url_for(
-                    "inventory.receiving_detail",
-                    batch_id=access_batch.id,
-                )
-            )
-
-        return redirect(
-            url_for("inventory.receiving_list")
-        )
-
-    # Legacy guards later in this function must recognize
-    # an explicit ERP ALLOW as authorized.
-    if is_new_batch and save_allowed:
-        user_is_adminish = True
-
-    if (
-        (not is_new_batch)
-        and access_status == "posted"
-        and save_allowed
-    ):
-        user_is_super = True
-
-    # Receive & Post Stock requires BOTH save/create permission
-    # and explicit POST permission.
-    if action == "post":
-        post_allowed = ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.post",
-            default_allowed=legacy_adminish,
-        )
-
-        if not (
-            module_allowed
-            and post_allowed
-        ):
-            flash(
-                "Access denied: you cannot Post Receiving.",
-                "danger",
-            )
-
-            if access_batch is not None:
-                return redirect(
-                    url_for(
-                        "inventory.receiving_detail",
-                        batch_id=access_batch.id,
-                    )
-                )
-
-            return redirect(
-                url_for("inventory.receiving_list")
-            )
-
+    #         обычные админы редактировать не могут;
+    #         superadmin может править ТОЛЬКО шапку (supplier, invoice, date, notes, currency)
+    #         без изменения строк.
     if is_new_batch:
         if not user_is_adminish:
             flash("Access denied. Only admin or superadmin can create receiving.", "danger")
@@ -20655,7 +20045,7 @@ def receiving_save():
         batch.supplier_name = (f.get("supplier_name") or "").strip() or "UNKNOWN"
         batch.invoice_number = (f.get("invoice_number") or "").strip() or None
 
-        # --- Ð’Ð°Ð»Ð¸Ð´Ð°Ñ†Ð¸Ñ Ð´Ð°Ñ‚Ñ‹: Ð½Ðµ Ð¿Ð¾Ð·Ð²Ð¾Ð»ÑÐµÐ¼ Ð±ÑƒÐ´ÑƒÑ‰ÐµÐµ ---
+        # --- Валидация даты: не позволяем будущее ---
         inv_date_val = _parse_invoice_date(f.get("invoice_date"))
         if inv_date_val and inv_date_val > today:
             flash("Invoice date cannot be in the future.", "danger")
@@ -20678,7 +20068,7 @@ def receiving_save():
 
         status_low = (getattr(batch, "status", "") or "").strip().lower()
 
-        # Ñ€ÐµÐ¶Ð¸Ð¼ "Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÑˆÐ°Ð¿ÐºÐ°" Ð´Ð»Ñ superadmin, ÐºÐ¾Ð³Ð´Ð° Ð¿Ð°Ñ€Ñ‚Ð¸Ñ ÑƒÐ¶Ðµ posted
+        # режим "только шапка" для superadmin, когда партия уже posted
         header_only_mode = False
         if status_low == "posted":
             if not user_is_super:
@@ -20690,7 +20080,7 @@ def receiving_save():
         batch.supplier_name  = (f.get("supplier_name") or "").strip() or (batch.supplier_name or "UNKNOWN")
         batch.invoice_number = (f.get("invoice_number") or "").strip() or None
 
-        # --- Ð’Ð°Ð»Ð¸Ð´Ð°Ñ†Ð¸Ñ Ð´Ð°Ñ‚Ñ‹: Ð½Ðµ Ð¿Ð¾Ð·Ð²Ð¾Ð»ÑÐµÐ¼ Ð±ÑƒÐ´ÑƒÑ‰ÐµÐµ ---
+        # --- Валидация даты: не позволяем будущее ---
         inv_date_val = _parse_invoice_date(f.get("invoice_date"))
         if inv_date_val and inv_date_val > today:
             flash("Invoice date cannot be in the future.", "danger")
@@ -20700,18 +20090,18 @@ def receiving_save():
         batch.currency = ((f.get("currency") or "USD").strip()[:8] or "USD")
         batch.notes    = (f.get("notes") or "").strip() or None
 
-        # Ð•ÑÐ»Ð¸ superadmin Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€ÑƒÐµÑ‚ ÑƒÐ¶Ðµ posted Ð¿Ð°Ñ€Ñ‚Ð¸ÑŽ â€” Ð¼ÐµÐ½ÑÐµÐ¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÑˆÐ°Ð¿ÐºÑƒ,
-        # ÑÑ‚Ñ€Ð¾ÐºÐ¸ ÐÐ• Ñ‚Ñ€Ð¾Ð³Ð°ÐµÐ¼.
+        # Если superadmin редактирует уже posted партию — меняем только шапку,
+        # строки НЕ трогаем.
         if header_only_mode:
             db.session.add(batch)
             db.session.commit()
             flash("Batch header updated.", "success")
             return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
-        # draft-Ñ€ÐµÐ¶Ð¸Ð¼: Ð¼Ð¾Ð¶Ð½Ð¾ Ð¿Ñ€Ð°Ð²Ð¸Ñ‚ÑŒ Ð²ÑÑ‘, Ð¿ÐµÑ€ÐµÑÑ‚Ñ€Ð°Ð¸Ð²Ð°ÐµÐ¼ ÑÑ‚Ñ€Ð¾ÐºÐ¸
+        # draft-режим: можно править всё, перестраиваем строки
         batch.items.clear()
 
-    # ------------- ÐŸÐÐ Ð¡Ð˜Ðœ Ð¡Ð¢Ð ÐžÐšÐ˜ Ð˜ Ð¡Ð§Ð˜Ð¢ÐÐ•Ðœ Ð ÐÐ¡ÐŸÐ Ð•Ð”Ð•Ð›Ð•ÐÐ˜Ð• ----------------
+    # ------------- ПАРСИМ СТРОКИ И СЧИТАЕМ РАСПРЕДЕЛЕНИЕ ----------------
     tmp_rows = []
     idx = 0
     while True:
@@ -20727,7 +20117,7 @@ def receiving_save():
             except Exception:
                 qty_val = 0
 
-            # âœ… base cost must come from unit_cost_base (invoice/base)
+            # ✅ base cost must come from unit_cost_base (invoice/base)
             raw_base = f.get(f"{basekey}[unit_cost_base]")
             if raw_base is None:
                 # safe fallback for older forms
@@ -20774,7 +20164,7 @@ def receiving_save():
     # write header extra_expenses
     batch.extra_expenses = float(extra_expenses_total or 0.0)
 
-    # âœ… create lines with full cost provenance
+    # ✅ create lines with full cost provenance
     for r in tmp_rows:
         if not r["part_number"]:
             continue
@@ -20809,11 +20199,11 @@ def receiving_save():
                 if old_name != new_name and new_name:
                     part_obj.name = new_name
 
-    # ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ draft (Ñ extra_expenses Ð¸ Ñ adj_cost Ð² ÑÑ‚Ñ€Ð¾ÐºÐ°Ñ…)
+    # сохранить draft (с extra_expenses и с adj_cost в строках)
     db.session.add(batch)
     db.session.commit()
 
-    # ÐµÑÐ»Ð¸ Ð½Ð°Ð¶Ð°Ð»Ð¸ "Receive & Post Stock"
+    # если нажали "Receive & Post Stock"
     if action == "post":
         from services.receiving import post_receiving_batch
         post_receiving_batch(batch.id, getattr(current_user, "id", None))
@@ -20826,20 +20216,6 @@ def receiving_save():
 @inventory_bp.get("/receiving/<int:batch_id>", endpoint="receiving_detail")
 @login_required
 def receiving_detail(batch_id):
-    # ERP ACCESS 03A - RECEIVING DETAIL
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Receiving access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for("inventory.dashboard")
-        )
-
     from models import ReceivingBatch, Part, IssuedPartRecord
     from sqlalchemy import func
     from flask import current_app
@@ -20851,7 +20227,7 @@ def receiving_detail(batch_id):
         flash("Batch not found.", "warning")
         return redirect(url_for("inventory.receiving_list"))
 
-    # ÑÐ¾Ð±Ñ€Ð°Ñ‚ÑŒ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð±Ð°Ñ‚Ñ‡Ð°
+    # собрать строки батча
     lines = (
         getattr(batch, "lines", None)
         or getattr(batch, "items", None)
@@ -20888,16 +20264,16 @@ def receiving_detail(batch_id):
     # ---------- detect "consumed" ----------
     def _batch_has_been_consumed(_batch):
         """
-        ÐŸÑ€Ð¾Ð²ÐµÑ€ÑÐµÑ‚, Ð±Ñ‹Ð»Ð° Ð»Ð¸ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð° Ñ…Ð¾Ñ‚Ñ Ð±Ñ‹ Ð¾Ð´Ð½Ð° Ð´ÐµÑ‚Ð°Ð»ÑŒ
-        ÐŸÐžÐ¡Ð›Ð• ÑÐ¾Ð·Ð´Ð°Ð½Ð¸Ñ/Ð¿ÑƒÐ±Ð»Ð¸ÐºÐ°Ñ†Ð¸Ð¸ Ñ‚ÐµÐºÑƒÑ‰ÐµÐ³Ð¾ receiving batch.
+        Проверяет, была ли использована хотя бы одна деталь
+        ПОСЛЕ создания/публикации текущего receiving batch.
 
-        Ð’Ð°Ð¶Ð½Ð¾:
-        - ÑÑ‚Ð°Ñ€Ñ‹Ðµ Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ Ñ‚Ð¾Ð¹ Ð¶Ðµ Part ÐÐ• ÑÑ‡Ð¸Ñ‚Ð°ÑŽÑ‚ÑÑ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð¸ÐµÐ¼ Ð½Ð¾Ð²Ð¾Ð³Ð¾ batch;
-        - Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ñ‹ quantity < 0 ÑÐ°Ð¼Ð¸ Ð¿Ð¾ ÑÐµÐ±Ðµ Ð½Ðµ ÑÑ‡Ð¸Ñ‚Ð°ÑŽÑ‚ÑÑ consumption;
-        - Ð¿Ñ€Ð¾Ð²ÐµÑ€ÑÐµÐ¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ñ€ÐµÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ð²Ñ‹Ð´Ð°Ñ‡Ð¸ quantity > 0.
+        Важно:
+        - старые выдачи той же Part НЕ считаются использованием нового batch;
+        - возвраты quantity < 0 сами по себе не считаются consumption;
+        - проверяем только реальные выдачи quantity > 0.
 
-        Ð­Ñ‚Ð¾ Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ñ‹Ð¹ Ð¿Ñ€Ð¾Ð¼ÐµÐ¶ÑƒÑ‚Ð¾Ñ‡Ð½Ñ‹Ð¹ Ð²Ð°Ñ€Ð¸Ð°Ð½Ñ‚ Ð´Ð¾ Ð¿ÐµÑ€ÐµÑ…Ð¾Ð´Ð°
-        Ð½Ð° Ñ‚Ð¾Ñ‡Ð½ÑƒÑŽ ÑÐ²ÑÐ·ÑŒ IssuedPartRecord -> GoodsReceiptLine.
+        Это безопасный промежуточный вариант до перехода
+        на точную связь IssuedPartRecord -> GoodsReceiptLine.
         """
 
         status_low_local = (
@@ -21072,10 +20448,10 @@ def receiving_detail(batch_id):
     status_low = (getattr(batch, "status", "") or "").strip().lower()
     is_posted = (status_low == "posted")
 
-    # can_edit: ÑÑƒÐ¿ÐµÑ€ + Ð½Ðµ consumed
+    # can_edit: супер + не consumed
     can_edit = bool(is_super and (not consumed))
 
-    # can_unpost: ÑÑƒÐ¿ÐµÑ€ + posted + Ð½Ðµ consumed
+    # can_unpost: супер + posted + не consumed
     can_unpost = bool(is_super and is_posted and (not consumed))
 
     log.warning(
@@ -21104,42 +20480,6 @@ def receiving_detail(batch_id):
 @inventory_bp.post("/receiving/<int:batch_id>/post", endpoint="receiving_post")
 @login_required
 def receiving_post(batch_id):
-    # ERP ACCESS 03A - RECEIVING POST
-    role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).strip().lower()
-
-    legacy_post_allowed = (
-        role_low in ("admin", "superadmin")
-        or getattr(current_user, "is_admin", False)
-        or getattr(current_user, "is_superadmin", False)
-        or getattr(current_user, "is_super_admin", False)
-    )
-
-    if not (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.access",
-            default_allowed=True,
-        )
-        and ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.post",
-            default_allowed=legacy_post_allowed,
-        )
-    ):
-        flash(
-            "Access denied: you cannot Post Receiving.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.receiving_detail",
-                batch_id=batch_id,
-            )
-        )
-
     from extensions import db
     from models import ReceivingBatch
 
@@ -21150,30 +20490,30 @@ def receiving_post(batch_id):
 
     status_now = (batch.status or "").strip().lower()
 
-    # ÐšÐ Ð˜Ð¢Ð˜Ð§Ð•Ð¡ÐšÐ˜Ð™ Ð¤Ð˜Ð›Ð¬Ð¢Ð :
-    # ÐµÑÐ»Ð¸ Ð¿Ð°Ñ€Ñ‚Ð¸ÑŽ ÑƒÐ¶Ðµ ÐºÐ¾Ð³Ð´Ð°-Ñ‚Ð¾ Ñ„Ð°ÐºÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸ Ð¾Ð¿Ñ€Ð¸Ñ…Ð¾Ð´Ð¾Ð²Ð°Ð»Ð¸ (Ñ‚Ð²Ð¾Ð¹ "Ð¿Ñ€Ð¸Ð·Ñ€Ð°Ðº"),
-    # Ñ‚Ð¾ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¾ ÑÐºÐ»Ð°Ð´ Ñ‚Ñ€Ð¾Ð³Ð°Ñ‚ÑŒ Ð½ÐµÐ»ÑŒÐ·Ñ.
+    # КРИТИЧЕСКИЙ ФИЛЬТР:
+    # если партию уже когда-то фактически оприходовали (твой "призрак"),
+    # то повторно склад трогать нельзя.
     #
-    # ÐŸÑ€Ð¾ÑÑ‚Ð°Ñ Ð·Ð°Ñ‰Ð¸Ñ‚Ð°: ÐµÑÐ»Ð¸ status ÑƒÐ¶Ðµ 'posted' -> Ð½Ðµ Ð·Ð¾Ð²Ñ‘Ð¼ post_receiving_batch
-    # (ÑÑ‚Ð¾ ÑƒÐ¶Ðµ Ð±Ñ‹Ð»Ð¾), ÐÐž Ñ‚Ð°ÐºÐ¶Ðµ ÐµÑÐ»Ð¸ status == 'draft', ÐÐž batch.posted_at ÑƒÐ¶Ðµ Ð½Ðµ Ð¿ÑƒÑÑ‚Ð¾Ð¹,
-    # Ð·Ð½Ð°Ñ‡Ð¸Ñ‚ ÐµÑ‘ ÑƒÐ¶Ðµ Ð¿Ñ€Ð¾Ð²Ð¾Ð´Ð¸Ð»Ð¸ Ð¸ Ð¿Ð¾Ñ‚Ð¾Ð¼ ÐºÑ‚Ð¾-Ñ‚Ð¾ Ð¾Ñ‚ÐºÐ°Ñ‚Ð¸Ð» Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿Ð¾Ð»Ðµ status.
+    # Простая защита: если status уже 'posted' -> не зовём post_receiving_batch
+    # (это уже было), НО также если status == 'draft', НО batch.posted_at уже не пустой,
+    # значит её уже проводили и потом кто-то откатил только поле status.
     #
     already_posted_once = False
     if status_now == "posted":
         already_posted_once = True
     else:
-        # Ð¸Ð½Ð¾Ð³Ð´Ð° Ð±Ð°Ð³ Ð¾Ñ‚ÐºÐ°Ñ‚Ñ‹Ð²Ð°ÐµÑ‚ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿Ð¾Ð»Ðµ status, Ð½Ð¾ Ð¾ÑÑ‚Ð°Ð²Ð»ÑÐµÑ‚ posted_at
+        # иногда баг откатывает только поле status, но оставляет posted_at
         if getattr(batch, "posted_at", None):
             already_posted_once = True
 
     if already_posted_once:
         flash("Batch already applied to stock. Status updated to POSTED.", "info")
-        # Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð²Ñ‹ÑÑ‚Ð°Ð²Ð¸Ð¼ ÑÑ‚Ð°Ñ‚ÑƒÑ Ð² Ð‘Ð”, Ð±ÐµÐ· Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¾Ð³Ð¾ Ð¿Ñ€Ð¸Ñ…Ð¾Ð´Ð°
+        # просто выставим статус в БД, без повторного прихода
         batch.status = "posted"
         db.session.commit()
         return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
-    # Ð½Ð¾Ñ€Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¿ÑƒÑ‚ÑŒ: Ñ€ÐµÐ°Ð»ÑŒÐ½Ð¾ ÐµÑ‰Ñ‘ Ð½Ðµ Ð¿Ñ€Ð¸Ñ…Ð¾Ð´Ð¸Ð»Ð¸ -> Ð´ÐµÐ»Ð°ÐµÐ¼ Ð¿Ñ€Ð¸Ñ…Ð¾Ð´
+    # нормальный путь: реально ещё не приходили -> делаем приход
     post_receiving_batch(batch_id, getattr(current_user, "id", None))
     flash("Batch posted", "success")
     return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
@@ -21192,20 +20532,20 @@ def create_receiving_from_rows(
 ) -> ReceivingBatch:
 
     """
-    Ð”ÐµÐ»Ð°ÐµÑ‚ Ñ‚Ð°Ðº:
-      1. ÑÐ¾Ð·Ð´Ð°Ñ‘Ñ‚ ReceivingBatch ÐºÐ°Ðº draft + ÑÑ‚Ñ€Ð¾ÐºÐ¸
-      2. commit (Ñ‡Ñ‚Ð¾Ð± Ð±Ñ‹Ð» id)
-      3. ÐµÑÐ»Ð¸ auto_post == True:
-            - Ð²Ñ‹Ð·Ñ‹Ð²Ð°ÐµÑ‚ post_receiving_batch(batch.id)
-              (ÑÑ‚Ð¾ Ð¿Ð»ÑŽÑÐ°Ð½Ñ‘Ñ‚ ÑÐºÐ»Ð°Ð´ Ð¸ Ð¿Ð¾ÑÑ‚Ð°Ð²Ð¸Ñ‚ status='posted')
-            - Ð¿ÐµÑ€ÐµÑ‡Ð¸Ñ‚Ñ‹Ð²Ð°ÐµÑ‚ batch Ð¸Ð· Ð±Ð°Ð·Ñ‹ (ÑƒÐ¶Ðµ posted)
-            - expunge() ÑÑ‚Ñƒ ÑÐ²ÐµÐ¶ÑƒÑŽ Ð²ÐµÑ€ÑÐ¸ÑŽ, Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÑÑ‚Ð°Ñ‚ÑƒÑ 'posted' Ð½Ðµ Ð·Ð°Ñ‚Ñ‘Ñ€ÑÑ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾
-         Ð¸ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ Ð¸Ð¼ÐµÐ½Ð½Ð¾ Ð­Ð¢Ð£ Ð²ÐµÑ€ÑÐ¸ÑŽ
-      4. ÐµÑÐ»Ð¸ auto_post == False:
-            - Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÑ‚ draft, Ñ‚Ð¾Ð¶Ðµ expunge, Ñ‡Ñ‚Ð¾Ð± Ð½Ðµ Ð·Ð°Ñ‚Ð¸Ñ€Ð°Ð» Ð¿Ð¾Ñ‚Ð¾Ð¼
+    Делает так:
+      1. создаёт ReceivingBatch как draft + строки
+      2. commit (чтоб был id)
+      3. если auto_post == True:
+            - вызывает post_receiving_batch(batch.id)
+              (это плюсанёт склад и поставит status='posted')
+            - перечитывает batch из базы (уже posted)
+            - expunge() эту свежую версию, чтобы статус 'posted' не затёрся обратно
+         и возвращает именно ЭТУ версию
+      4. если auto_post == False:
+            - просто возвращает draft, тоже expunge, чтоб не затирал потом
     """
 
-    # 1. Ð¡ÐžÐ—Ð”ÐÐ¢Ð¬ batch ÐºÐ°Ðº draft
+    # 1. СОЗДАТЬ batch как draft
     batch = ReceivingBatch(
         supplier_name=(supplier_name or "").strip(),
         invoice_number=(invoice_number or "").strip() or None,
@@ -21217,9 +20557,9 @@ def create_receiving_from_rows(
         created_by=created_by,
     )
     db.session.add(batch)
-    db.session.flush()  # batch.id Ñ‚ÐµÐ¿ÐµÑ€ÑŒ ÐµÑÑ‚ÑŒ
+    db.session.flush()  # batch.id теперь есть
 
-    # 1.5. Ð¡ÐžÐ—Ð”ÐÐ¢Ð¬ ÑÑ‚Ñ€Ð¾ÐºÐ¸
+    # 1.5. СОЗДАТЬ строки
     line_no = 1
     for r in rows:
         pn = (r.get("part_number") or r.get("pn") or "").strip()
@@ -21269,7 +20609,7 @@ def create_receiving_from_rows(
             # compatibility: unit_cost stays ACTUAL (as before)
             unit_cost=actual_cost,
 
-            # âœ… new lot fields (already exist in GoodsReceiptLine)
+            # ✅ new lot fields (already exist in GoodsReceiptLine)
             base_unit_cost=base_cost,
             extra_alloc_per_unit=extra_per_unit,
             actual_unit_cost=actual_cost,
@@ -21281,9 +20621,9 @@ def create_receiving_from_rows(
         # (you have alias ReceivingItem = GoodsReceiptLine)
         line_kwargs["goods_receipt_id"] = batch.id
 
-        # Ð’ÐÐ–ÐÐž: Ñƒ Ñ‚ÐµÐ±Ñ ReceivingItem ÑÐµÐ¹Ñ‡Ð°Ñ ÑÐ¾Ð·Ð´Ð°Ñ‘Ñ‚ÑÑ Ñ batch_id=gr.id
-        # ÐµÑÐ»Ð¸ Ñƒ Ñ‚Ð²Ð¾ÐµÐ¹ Ð¼Ð¾Ð´ÐµÐ»Ð¸ ÑÑ‚Ñ€Ð¾Ðº Ñ€ÐµÐ°Ð»ÑŒÐ½Ð¾ Ð¿Ð¾Ð»Ðµ Ð½Ð°Ð·Ñ‹Ð²Ð°ÐµÑ‚ÑÑ goods_receipt_id,
-        # Ñ‚Ð¾ Ð·Ð°Ð¼ÐµÐ½Ð¸ Ð·Ð´ÐµÑÑŒ Ð½Ð° goods_receipt_id=batch.id
+        # ВАЖНО: у тебя ReceivingItem сейчас создаётся с batch_id=gr.id
+        # если у твоей модели строк реально поле называется goods_receipt_id,
+        # то замени здесь на goods_receipt_id=batch.id
         line_kwargs["batch_id"] = batch.id
 
         line = ReceivingItem(**line_kwargs)
@@ -21291,10 +20631,10 @@ def create_receiving_from_rows(
 
         line_no += 1
 
-    # 2. commit draft+ÑÑ‚Ñ€Ð¾ÐºÐ¸, Ñ‚ÐµÐ¿ÐµÑ€ÑŒ batch Ð¸ items Ð² Ð±Ð°Ð·Ðµ
+    # 2. commit draft+строки, теперь batch и items в базе
     db.session.commit()
 
-    # 3. ÐµÑÐ»Ð¸ ÐÐ• Ð½ÑƒÐ¶Ð½Ð¾ Ð°Ð²Ñ‚Ð¾Ð¿Ð¾ÑÑ‚Ð¸Ñ‚ÑŒ â†’ Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð²ÐµÑ€Ð½ÑƒÑ‚ÑŒ draft (Ð½Ð¾ Ð²Ñ‹Ð½ÐµÑÑ‚Ð¸ Ð¸Ð· ÑÐµÑÑÐ¸Ð¸)
+    # 3. если НЕ нужно автопостить → просто вернуть draft (но вынести из сессии)
     if not auto_post:
         fresh_draft = db.session.get(ReceivingBatch, batch.id)
         try:
@@ -21310,10 +20650,10 @@ def create_receiving_from_rows(
         db.session.expunge(fresh_draft)
         return fresh_draft
 
-    # 4. auto_post == True â†’ Ð¿Ñ€Ð¾Ð²Ð¾Ð´Ð¸Ð¼ Ð½Ð° ÑÐºÐ»Ð°Ð´ Ð¸ ÑÑ‚Ð°Ð²Ð¸Ð¼ posted
+    # 4. auto_post == True → проводим на склад и ставим posted
     post_receiving_batch(batch.id, current_user_id=created_by)
 
-    # Ð¿ÐµÑ€ÐµÑ‡Ð¸Ñ‚Ñ‹Ð²Ð°ÐµÐ¼ ÑƒÐ¶Ðµ ÐŸÐžÐ¡Ð¢ÐÐ£Ð¢Ð£Ð® Ð²ÐµÑ€ÑÐ¸ÑŽ
+    # перечитываем уже ПОСТНУТУЮ версию
     posted_batch = db.session.get(ReceivingBatch, batch.id)
 
     try:
@@ -21326,9 +20666,9 @@ def create_receiving_from_rows(
     except Exception:
         pass
 
-    # ÐšÐ Ð˜Ð¢Ð˜Ð§Ð•Ð¡ÐšÐ˜Ð™ ÐœÐžÐœÐ•ÐÐ¢:
-    # Ð²Ñ‹Ð½Ð¸Ð¼Ð°ÐµÐ¼ Ð¾Ð±ÑŠÐµÐºÑ‚ Ð¸Ð· ÑÐµÑÑÐ¸Ð¸, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ð¸ÐºÐ°ÐºÐ¾Ð¹ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¹ commit Ð² ÑÑ‚Ð¾Ð¼ Ð¶Ðµ request
-    # Ð½Ðµ ÑÐ¼Ð¾Ð³ ÑÐ»ÑƒÑ‡Ð°Ð¹Ð½Ð¾ Ð·Ð°Ð»Ð¸Ñ‚ÑŒ Ð¾Ð±Ñ€Ð°Ñ‚Ð½Ð¾ ÑÑ‚Ð°Ñ€Ñ‹Ð¹ ÑÑ‚Ð°Ñ‚ÑƒÑ 'draft'
+    # КРИТИЧЕСКИЙ МОМЕНТ:
+    # вынимаем объект из сессии, чтобы никакой следующий commit в этом же request
+    # не смог случайно залить обратно старый статус 'draft'
     db.session.expunge(posted_batch)
 
     try:
@@ -21348,9 +20688,9 @@ def create_receiving_from_rows(
 
 def _norm_cols(df):
     """
-    ÐÐ¾Ñ€Ð¼Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ ÐºÐ¾Ð»Ð¾Ð½Ð¾Ðº DF Ðº Ð¸Ð¼ÐµÐ½Ð°Ð¼: part_number, part_name, quantity, unit_cost, supplier, location.
-    + Ð¤Ð¸ÐºÑ: Ñ€Ð°Ð·Ð»ÐµÐ¿Ð¸Ñ‚ÑŒ 'PN DESCRIPTION' -> PN Ð¸ DESCRIPTION Ð¿Ð¾ Ð¿ÐµÑ€Ð²Ð¾Ð¼Ñƒ Ð¿Ñ€Ð¾Ð±ÐµÐ»Ñƒ.
-    + ÐžÑ‚ÑÐµÐ²: 'Shipment marking/Shipmentmarking' Ð¸ Ð¸Ñ‚Ð¾Ð³Ð¾Ð²Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ (Order total/Subtotal/...).
+    Нормализация колонок DF к именам: part_number, part_name, quantity, unit_cost, supplier, location.
+    + Фикс: разлепить 'PN DESCRIPTION' -> PN и DESCRIPTION по первому пробелу.
+    + Отсев: 'Shipment marking/Shipmentmarking' и итоговые строки (Order total/Subtotal/...).
     """
     import re
     cols = {c.lower().strip(): c for c in df.columns}
@@ -21360,7 +20700,7 @@ def _norm_cols(df):
             for key, orig in cols.items():
                 if key == n.lower():
                     return orig
-        # Â«ÑƒÐ¼Ð½Ñ‹ÐµÂ» ÑÐ¾Ð²Ð¿Ð°Ð´ÐµÐ½Ð¸Ñ
+        # «умные» совпадения
         for key, orig in cols.items():
             if any(k in key for k in names):
                 return orig
@@ -21373,14 +20713,14 @@ def _norm_cols(df):
     c_sup = pick("SUPPLIER","VENDOR","FROM","supplier")
     c_loc = pick("LOCATION","BIN","SHELF","location")
 
-    # --- Ð ÐµÐ³ÑÐºÑÐ¿Ñ‹ Ð¸ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€Ñ‹ ---
+    # --- Регэкспы и фильтры ---
     marker_rx = re.compile(r'^\s*shipment\s*mark(?:ing)?\s*[:\-]?', re.I)
     totals_rx = re.compile(r'^\s*(order\s*total|orderinetot|ordertot|subtotal|total)\b', re.I)
-    # Ð´Ð¾Ð¿ÑƒÑÑ‚Ð¸Ð¼Ñ‹Ð¹ Ñ‚Ð¾ÐºÐµÐ½ PN: Ð±ÑƒÐºÐ²Ñ‹/Ñ†Ð¸Ñ„Ñ€Ñ‹ Ð¸ Ñ‡Ð°ÑÑ‚Ð¾ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÐ¼Ñ‹Ðµ ÑÐ¸Ð¼Ð²Ð¾Ð»Ñ‹ ('-','/','.', '_')
+    # допустимый токен PN: буквы/цифры и часто используемые символы ('-','/','.', '_')
     pn_token_rx = re.compile(r'^[A-Z0-9][A-Z0-9\-\/\._]*$', re.I)
 
     def split_pn_desc(text: str):
-        """Ð Ð°Ð·Ð´ÐµÐ»Ð¸Ñ‚ÑŒ 'PN rest...' -> (PN, 'rest...') ÐµÑÐ»Ð¸ Ð¿ÐµÑ€Ð²Ñ‹Ð¹ Ñ‚Ð¾ÐºÐµÐ½ Ð¿Ð¾Ñ…Ð¾Ð¶ Ð½Ð° PN."""
+        """Разделить 'PN rest...' -> (PN, 'rest...') если первый токен похож на PN."""
         s = (text or "").strip()
         if not s:
             return "", ""
@@ -21390,43 +20730,43 @@ def _norm_cols(df):
         first, rest = parts[0], " ".join(parts[1:])
         if pn_token_rx.match(first):
             return first, rest
-        return "", s  # Ð¿ÐµÑ€Ð²Ñ‹Ð¹ Ñ‚Ð¾ÐºÐµÐ½ Ð½Ðµ Ð¿Ð¾Ñ…Ð¾Ð¶ Ð½Ð° PN â€” ÑÑ‡Ð¸Ñ‚Ð°ÐµÐ¼ Ð²ÑÑ‘ Ð¾Ð¿Ð¸ÑÐ°Ð½Ð¸ÐµÐ¼
+        return "", s  # первый токен не похож на PN — считаем всё описанием
 
     out = []
     for _, row in df.iterrows():
         raw_pn = str(row.get(c_pn, "")).strip() if c_pn else ""
         raw_nm = str(row.get(c_nm, "")).strip() if c_nm else ""
 
-        # 1) ÐžÑ‚ÑÐµÐ² Ð¼ÑƒÑÐ¾Ñ€Ð°: Shipment marking, Order total Ð¸ Ñ‚.Ð¿.
+        # 1) Отсев мусора: Shipment marking, Order total и т.п.
         if (raw_pn and marker_rx.match(raw_pn)) or (raw_nm and marker_rx.match(raw_nm)):
             continue
         if totals_rx.match(raw_pn) or totals_rx.match(raw_nm):
             continue
 
-        # 2) ÐŸÑ€Ð¸Ð²ÐµÐ´ÐµÐ½Ð¸Ðµ PN/NAME
+        # 2) Приведение PN/NAME
         pn, nm = raw_pn, raw_nm
 
-        # a) ÑÐ»ÑƒÑ‡Ð°Ð¹: PN ÑÐºÐ»ÐµÐµÐ½ Ñ Ð¾Ð¿Ð¸ÑÐ°Ð½Ð¸ÐµÐ¼ Ð² ÑÐ°Ð¼Ð¾Ð¼ PN (ÐµÑÑ‚ÑŒ Ð¿Ñ€Ð¾Ð±ÐµÐ»)
+        # a) случай: PN склеен с описанием в самом PN (есть пробел)
         if pn and " " in pn:
             p_guess, rest = split_pn_desc(pn)
             if p_guess:
                 pn = p_guess
-                # ÐµÑÐ»Ð¸ Ð¾Ð¿Ð¸ÑÐ°Ð½Ð¸Ñ Ð½Ðµ Ð±Ñ‹Ð»Ð¾ â€” Ð±ÐµÑ€Ñ‘Ð¼ Ð¾ÑÑ‚Ð°Ñ‚Ð¾Ðº; ÐµÑÐ»Ð¸ Ð±Ñ‹Ð»Ð¾ â€” Ð¿Ñ€Ð¸Ð¿Ð¸ÑÑ‹Ð²Ð°ÐµÐ¼ ÑÐ¿Ñ€Ð°Ð²Ð°
+                # если описания не было — берём остаток; если было — приписываем справа
                 nm = (nm or "").strip()
                 nm = (rest if not nm else f"{nm} {rest}").strip()
 
-        # b) ÑÐ»ÑƒÑ‡Ð°Ð¹: PN Ð¿ÑƒÑÑ‚, Ð° Ð² DESCRIPTION Ð»ÐµÐ¶Ð¸Ñ‚ "PN rest..."
+        # b) случай: PN пуст, а в DESCRIPTION лежит "PN rest..."
         if not pn and nm:
             p_guess, rest = split_pn_desc(nm)
             if p_guess:
                 pn = p_guess
                 nm = rest
 
-        # c) Ð¸Ð½Ð¾Ð³Ð´Ð° Ð¾Ð±Ðµ ÐºÐ¾Ð»Ð¾Ð½ÐºÐ¸ Ð¾Ð´Ð¸Ð½Ð°ÐºÐ¾Ð²Ñ‹Ðµ (Ð´ÑƒÐ±Ð»Ð¸ÐºÐ°Ñ‚) â€” Ð¾Ñ‡Ð¸ÑÑ‚Ð¸Ð¼ Ð¾Ð¿Ð¸ÑÐ°Ð½Ð¸Ðµ
+        # c) иногда обе колонки одинаковые (дубликат) — очистим описание
         if nm and pn and nm.strip().upper() == pn.strip().upper():
             nm = ""
 
-        # 3) Ð§Ð¸ÑÐ»Ð°
+        # 3) Числа
         qty_raw = str(row.get(c_qty, "")).replace(",", "") if c_qty else ""
         uc_raw  = str(row.get(c_uc, "")).replace("$", "").replace(",", "") if c_uc else ""
         try:
@@ -21438,7 +20778,7 @@ def _norm_cols(df):
         except Exception:
             uc = 0.0
 
-        # 4) ÐŸÑƒÑÑ‚Ñ‹Ðµ ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð²Ñ‹ÐºÐ¸Ð´Ñ‹Ð²Ð°ÐµÐ¼
+        # 4) Пустые строки выкидываем
         if not pn and not nm and qty == 0 and uc == 0.0:
             continue
 
@@ -21455,7 +20795,7 @@ def _norm_cols(df):
 # @inventory_bp.get("/receiving/import")
 # @login_required
 # def receiving_import_form():
-#     """Ð¤Ð¾Ñ€Ð¼Ð° Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸ PDF (Ð¸Ð»Ð¸ CSV, ÐµÑÐ»Ð¸ Ð·Ð°Ñ…Ð¾Ñ‡ÐµÑˆÑŒ)."""
+#     """Форма загрузки PDF (или CSV, если захочешь)."""
 #     return render_template("receiving_import_upload.html")
 
 @inventory_bp.route("/receiving/import", methods=["GET", "POST"])
@@ -21468,14 +20808,6 @@ def receiving_import_upload():
 @inventory_bp.get("/receiving/<int:batch_id>/attachment")
 @login_required
 def download_receiving_attachment(batch_id):
-    # ERP ACCESS 03A - RECEIVING ATTACHMENT
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        return ("Forbidden", 403)
-
     import os
     from flask import send_file, abort
     from models import GoodsReceipt
@@ -21496,30 +20828,9 @@ def download_receiving_attachment(batch_id):
 def add_part_batch_form():
     """
     Scan / Add Multiple Parts UI.
-    ÐŸÐ¾ÐºÐ°Ð·Ñ‹Ð²Ð°ÐµÐ¼ ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ†Ñƒ Ñ Ð¿Ð¾Ð»ÐµÐ¼ ÑÐºÐ°Ð½ÐµÑ€Ð° Ð¸ Ñ‚Ð°Ð±Ð»Ð¸Ñ†ÐµÐ¹ batchItems (JS).
+    Показываем страницу с полем сканера и таблицей batchItems (JS).
     """
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_create",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Add Part permission is disabled.",
-        )
-
-    # Ð´Ð¾ÑÑ‚ÑƒÐ¿Ñ‹ Ð¼Ð¾Ð¶Ð½Ð¾ Ð¾Ð³Ñ€Ð°Ð½Ð¸Ñ‡Ð¸Ñ‚ÑŒ ÐµÑÐ»Ð¸ Ñ…Ð¾Ñ‡ÐµÑˆÑŒ:
+    # доступы можно ограничить если хочешь:
     # if (current_user.role or '').lower() not in ('admin','superadmin'):
     #     flash("Access denied", "danger")
     #     return redirect(url_for("inventory.dashboard"))
@@ -21529,61 +20840,12 @@ def add_part_batch_form():
 @inventory_bp.post("/add-batch", endpoint="add_part_batch")
 @login_required
 def add_part_batch():
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
     role_low = (getattr(current_user, "role", "") or "").lower()
-    legacy_admin_allowed = role_low in ("admin", "superadmin")
+    if role_low not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.dashboard"))
 
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_create",
-        default_allowed=legacy_admin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Add Part permission is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Receiving access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.create",
-        default_allowed=legacy_admin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Receiving create permission is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.post",
-        default_allowed=legacy_admin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Receiving post permission is disabled.",
-        )
-
-    # --- Ð½Ð°Ð´Ñ‘Ð¶Ð½Ð¾Ðµ Ñ‡Ñ‚ÐµÐ½Ð¸Ðµ payload ---
+    # --- надёжное чтение payload ---
     payload_raw = (request.form.get("batch_payload") or "").strip()
     if not payload_raw:
         current_app.logger.debug("Empty batch_payload in POST form")
@@ -21601,7 +20863,7 @@ def add_part_batch():
         flash("Invalid batch data: expected non-empty list", "danger")
         return redirect(url_for("inventory.dashboard"))
 
-    # ---------- 1. ÑÐ¾Ð·Ð´Ð°Ñ‘Ð¼ batch (draft) ----------
+    # ---------- 1. создаём batch (draft) ----------
     supplier_hint = "ADD-BATCH"
     invoice_hint  = datetime.utcnow().strftime("BULK-%Y%m%d-%H%M%S")
 
@@ -21618,7 +20880,7 @@ def add_part_batch():
     db.session.add(batch)
     db.session.flush()  # batch.id
 
-    # ---------- 2. ÑÑ‚Ñ€Ð¾ÐºÐ¸ ----------
+    # ---------- 2. строки ----------
     line_no = 1
     for row in items:
         pn  = (row.get("part_number") or "").strip().upper()
@@ -21638,7 +20900,7 @@ def add_part_batch():
             continue
 
         line = ReceivingItem(
-            goods_receipt_id = batch.id,   # Ð²Ð°Ð¶Ð½Ð¾: Ð½Ð¾Ð²Ð¾Ðµ Ð¸Ð¼Ñ FK
+            goods_receipt_id = batch.id,   # важно: новое имя FK
             line_no          = line_no,
             part_number      = pn,
             part_name        = nm or None,
@@ -21658,7 +20920,7 @@ def add_part_batch():
         flash(f"Failed to save new batch: {e}", "danger")
         return redirect(url_for("inventory.dashboard"))
 
-    # ---------- 4. post (Ð¾Ð±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ ÑÐºÐ»Ð°Ð´Ð°) ----------
+    # ---------- 4. post (обновление склада) ----------
     from services.receiving import post_receiving_batch
     try:
         post_receiving_batch(batch.id, getattr(current_user, "id", None))
@@ -21671,7 +20933,6 @@ def add_part_batch():
 
     flash(f"Stock received and posted. Batch #{batch.id}", "success")
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
-
 
 
 

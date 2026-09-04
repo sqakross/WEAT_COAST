@@ -1,4 +1,4 @@
-﻿# models.py (Ð³Ð¾Ñ‚Ð¾Ð²Ñ‹Ð¹ Ñ„Ð°Ð¹Ð»)
+# models.py (готовый файл)
 from __future__ import annotations
 
 from datetime import datetime, date, timezone
@@ -17,8 +17,8 @@ PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
 def utc_to_local(dt: datetime | None) -> datetime | None:
     """
-    DB Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ naive UTC (datetime.utcnow()).
-    Ð”Ð»Ñ UI Ð¿ÐµÑ€ÐµÐ²Ð¾Ð´Ð¸Ð¼ Ð² America/Los_Angeles.
+    DB хранит naive UTC (datetime.utcnow()).
+    Для UI переводим в America/Los_Angeles.
     """
     if not dt:
         return None
@@ -546,162 +546,6 @@ class UserPermissionAudit(db.Model):
             f"by={self.actor_username!r}>"
         )
 
-
-
-# ============================================================
-# ERP Access Overrides
-# ============================================================
-#
-# Separate from UserPermission.
-#
-# UserPermission:
-#     Appliance / warehouse explicit grants
-#
-# ErpAccessOverride:
-#     compatibility overrides for existing ERP authorization
-#
-# no row = DEFAULT
-# ALLOW  = explicitly allow
-# DENY   = explicitly deny
-#
-# ============================================================
-
-class ErpAccessOverride(db.Model):
-
-    __tablename__ = "erp_access_override"
-
-    __table_args__ = (
-
-        db.UniqueConstraint(
-            "user_id",
-            "permission_code",
-            name="uq_erp_access_override_user_permission",
-        ),
-
-        db.Index(
-            "ix_erp_access_override_user",
-            "user_id",
-        ),
-
-        db.Index(
-            "ix_erp_access_override_permission",
-            "permission_code",
-        ),
-
-        {"extend_existing": True},
-    )
-
-    id = db.Column(
-        db.Integer,
-        primary_key=True,
-    )
-
-    user_id = db.Column(
-        db.Integer,
-        db.ForeignKey(
-            "user.id",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
-        index=True,
-    )
-
-    permission_code = db.Column(
-        db.String(120),
-        nullable=False,
-        index=True,
-    )
-
-    effect = db.Column(
-        db.String(10),
-        nullable=False,
-    )
-
-    created_at = db.Column(
-        db.DateTime,
-        nullable=False,
-        default=datetime.utcnow,
-    )
-
-    created_by_id = db.Column(
-        db.Integer,
-        db.ForeignKey(
-            "user.id",
-            ondelete="SET NULL",
-        ),
-        nullable=True,
-        index=True,
-    )
-
-    updated_at = db.Column(
-        db.DateTime,
-        nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
-
-    updated_by_id = db.Column(
-        db.Integer,
-        db.ForeignKey(
-            "user.id",
-            ondelete="SET NULL",
-        ),
-        nullable=True,
-        index=True,
-    )
-
-    user = db.relationship(
-        "User",
-        foreign_keys=[user_id],
-        lazy="select",
-        backref=db.backref(
-            "erp_access_overrides",
-            lazy="select",
-            cascade="all, delete-orphan",
-        ),
-    )
-
-    created_by = db.relationship(
-        "User",
-        foreign_keys=[created_by_id],
-        lazy="select",
-    )
-
-    updated_by = db.relationship(
-        "User",
-        foreign_keys=[updated_by_id],
-        lazy="select",
-    )
-
-    @validates("effect")
-    def _validate_effect(
-        self,
-        key,
-        value,
-    ):
-
-        effect = (
-            value or ""
-        ).strip().upper()
-
-        if effect not in {
-            "ALLOW",
-            "DENY",
-        }:
-            raise ValueError(
-                "ERP override must be ALLOW or DENY."
-            )
-
-        return effect
-
-    def __repr__(self):
-
-        return (
-            f"<ErpAccessOverride "
-            f"user_id={self.user_id} "
-            f"permission={self.permission_code!r} "
-            f"effect={self.effect!r}>"
-        )
 
 class JobReservation(db.Model):
     __tablename__ = "job_reservation"
@@ -2174,7 +2018,7 @@ class IssuedBatch(db.Model):
 
 
 # --------------------------------
-# Goods Receipts (Ð¿Ñ€Ð¸Ñ…Ð¾Ð´)
+# Goods Receipts (приход)
 # --------------------------------
 class GoodsReceipt(db.Model):
     __tablename__ = "goods_receipts"
@@ -2662,7 +2506,7 @@ class SupplierStatementLineComponent(db.Model):
 
         if record is None:
             return (
-                f"RETURN â€¢ "
+                f"RETURN • "
                 f"${float(self.amount or 0):,.2f}"
             )
 
@@ -2680,7 +2524,7 @@ class SupplierStatementLineComponent(db.Model):
             job_number = job_number[7:].strip()
 
         label = (
-            f"RETURN â€¢ "
+            f"RETURN • "
             f"${float(self.amount or 0):,.2f}"
         )
 
@@ -2854,7 +2698,7 @@ class SupplierStatementInvoiceComponent(db.Model):
         )
 
         label = (
-            f"INVOICE â€¢ "
+            f"INVOICE • "
             f"${float(self.amount or 0):,.2f}"
         )
 
@@ -5070,6 +4914,5 @@ class ApplianceMovement(db.Model):
             f"unit_id={self.appliance_unit_id} "
             f"type={self.movement_type!r}>"
         )
-
 
 

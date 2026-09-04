@@ -790,6 +790,139 @@
 
                   </select>
 
+                  <select name="repair_type"
+                          id="repair-type"
+                          class="form-select form-select-sm mb-2"
+                          required
+                          onchange="toggleRepairExecutorFields();">
+
+                    <option value="">
+                      Repair Performed By *
+                    </option>
+
+                    <option value="vendor">
+                      Vendor
+                    </option>
+
+                    <option value="internal">
+                      Internal Technician
+                    </option>
+
+                  </select>
+
+                  <div id="repair-vendor-fields"
+                       style="display:none;">
+
+                    <input name="repair_vendor"
+                           id="repair-vendor"
+                           class="form-control form-control-sm mb-2"
+                           maxlength="160"
+                           autocomplete="off"
+                           placeholder="Repair Vendor *">
+
+                  </div>
+
+                  <div id="repair-technician-fields"
+                       style="display:none;">
+
+                    <select name="repair_technician_id"
+                            id="repair-technician"
+                            class="form-select form-select-sm mb-2">
+
+                      <option value="">
+                        Select Internal Technician *
+                      </option>
+
+                      {% for technician in repair_technicians %}
+
+                        <option value="{{ technician.id }}">
+                          {{ technician.username|upper }}
+                        </option>
+
+                      {% endfor %}
+
+                    </select>
+
+                  </div>
+
+                  <script>
+                    function toggleRepairExecutorFields() {
+                      const typeField =
+                        document.getElementById(
+                          'repair-type'
+                        );
+
+                      const vendorFields =
+                        document.getElementById(
+                          'repair-vendor-fields'
+                        );
+
+                      const technicianFields =
+                        document.getElementById(
+                          'repair-technician-fields'
+                        );
+
+                      const vendorInput =
+                        document.getElementById(
+                          'repair-vendor'
+                        );
+
+                      const technicianInput =
+                        document.getElementById(
+                          'repair-technician'
+                        );
+
+                      if (
+                        !typeField ||
+                        !vendorFields ||
+                        !technicianFields ||
+                        !vendorInput ||
+                        !technicianInput
+                      ) {
+                        return;
+                      }
+
+                      const repairType =
+                        typeField.value;
+
+                      const isVendor =
+                        repairType === 'vendor';
+
+                      const isInternal =
+                        repairType === 'internal';
+
+                      vendorFields.style.display =
+                        isVendor
+                          ? ''
+                          : 'none';
+
+                      technicianFields.style.display =
+                        isInternal
+                          ? ''
+                          : 'none';
+
+                      vendorInput.required =
+                        isVendor;
+
+                      technicianInput.required =
+                        isInternal;
+
+                      if (!isVendor) {
+                        vendorInput.value = '';
+
+                      }
+
+                      if (!isInternal) {
+                        technicianInput.value = '';
+                      }
+                    }
+
+                    document.addEventListener(
+                      'DOMContentLoaded',
+                      toggleRepairExecutorFields
+                    );
+                  </script>
+
                   <input name="notes"
                          class="form-control form-control-sm mb-2"
                          placeholder="Notes">
@@ -948,13 +1081,20 @@
 
             <div class="small text-muted mb-2">
 
-              Choose what happens to this physical appliance
-              after repair / inspection.
+              Repair lifecycle is managed through the
+              Repair Order shown below.
 
             </div>
 
 
             {% if repair_event.item %}
+
+              {% set repair_meta = (
+                  movement_meta_by_id.get(
+                      repair_event.item.id,
+                      {}
+                  )
+              ) %}
 
               <div class="small">
 
@@ -975,6 +1115,84 @@
                   <div>
                     <strong>Sent By:</strong>
                     {{ repair_event.item.actor.username|upper }}
+                  </div>
+
+                {% endif %}
+
+
+                {% if repair_meta.get('repair_number') %}
+
+                  <div>
+                    <strong>Repair Order:</strong>
+
+                    {% if repair_meta.get('repair_order_id') %}
+
+                      <a href="{{ url_for(
+                          'appliance.repair_order_detail',
+                          repair_id=repair_meta.get('repair_order_id')
+                      ) }}">
+                        {{ repair_meta.get('repair_number') }}
+                      </a>
+
+                    {% else %}
+
+                      {{ repair_meta.get('repair_number') }}
+
+                    {% endif %}
+
+                  </div>
+
+                {% endif %}
+
+
+                {% if repair_meta.get('repair_type') %}
+
+                  <div>
+                    <strong>Repair Performed By:</strong>
+
+                    {% if repair_meta.get('repair_type') == 'vendor' %}
+                      Vendor
+                    {% elif repair_meta.get('repair_type') == 'internal' %}
+                      Internal Technician
+                    {% else %}
+                      {{ repair_meta.get('repair_type')
+                         |replace('_', ' ')
+                         |title }}
+                    {% endif %}
+                  </div>
+
+                {% endif %}
+
+
+                {% if repair_meta.get('repair_vendor') %}
+
+                  <div>
+                    <strong>Repair Vendor:</strong>
+                    {{ repair_meta.get('repair_vendor') }}
+                  </div>
+
+                {% elif repair_meta.get('repair_technician_username') %}
+
+                  <div>
+                    <strong>Internal Technician:</strong>
+                    {{ repair_meta.get('repair_technician_username')|upper }}
+                  </div>
+
+                {% elif repair_meta.get('repair_provider') %}
+
+                  <div>
+                    <strong>Repair Vendor / Technician:</strong>
+                    {{ repair_meta.get('repair_provider') }}
+                  </div>
+
+                {% endif %}
+
+
+                {% if repair_meta.get('repair_reference') %}
+
+                  <div>
+                    <strong>Vendor Reference:</strong>
+                    {{ repair_meta.get('repair_reference') }}
                   </div>
 
                 {% endif %}
@@ -1008,253 +1226,9 @@
           </div>
 
 
-          <div class="row g-3">
-
-
-            <!-- =============================================
-                 1. RETURN AS NEW
-                 ============================================= -->
-
-            <div class="col-lg-6 col-xl-3">
-
-              <div class="action-card h-100">
-
-                <div class="fw-bold mb-1">
-                  Return to New Stock
-                </div>
-
-                <div class="small text-muted mb-2">
-                  Use only when no actual repair was needed
-                  and appliance can still be treated as NEW.
-                </div>
-
-                <form method="post"
-                      action="{{ url_for(
-                          'appliance.inventory_disposition',
-                          unit_id=unit.id
-                      ) }}"
-                      onsubmit="return confirm(
-                        'RETURN THIS APPLIANCE TO NEW STOCK?\n\n' +
-                        'Use this only if no actual repair was required.'
-                      );">
-
-                  <input type="hidden"
-                         name="action"
-                         value="RETURN_FROM_REPAIR_TO_NEW">
-
-                  <input type="hidden"
-                         name="reason_code"
-                         value="NO_REPAIR_REQUIRED">
-
-                  <input name="notes"
-                         class="form-control form-control-sm mb-2"
-                         placeholder="Inspection / notes">
-
-                  <button class="btn btn-outline-primary btn-sm">
-                    RETURN TO NEW STOCK
-                  </button>
-
-                </form>
-
-              </div>
-
-            </div>
-
-
-            <!-- =============================================
-                 2. MOVE TO LOANER
-                 ============================================= -->
-
-            <div class="col-lg-6 col-xl-3">
-
-              <div class="action-card h-100">
-
-                <div class="fw-bold mb-1">
-                  Move to Loaner Stock
-                </div>
-
-                <div class="small text-muted mb-2">
-
-                  Repaired appliance enters the
-                  replacement / loaner pool.
-
-                  <br>
-
-                  <strong>
-                    LOANER · REPAIRED · AVAILABLE
-                  </strong>
-
-                </div>
-
-                <form method="post"
-                      action="{{ url_for(
-                          'appliance.inventory_disposition',
-                          unit_id=unit.id
-                      ) }}"
-                      onsubmit="return confirm(
-                        'MOVE THIS REPAIRED APPLIANCE TO LOANER STOCK?'
-                      );">
-
-                  <input type="hidden"
-                         name="action"
-                         value="RETURN_FROM_REPAIR_TO_LOANER">
-
-                  <input type="hidden"
-                         name="reason_code"
-                         value="REPAIR_COMPLETED">
-
-                  <input name="notes"
-                         class="form-control form-control-sm mb-2"
-                         placeholder="Repair completed / notes">
-
-                  <button class="btn btn-success btn-sm">
-                    MOVE TO LOANER
-                  </button>
-
-                </form>
-
-              </div>
-
-            </div>
-
-
-            <!-- =============================================
-                 3. VENDOR RETURN
-                 ============================================= -->
-
-            <div class="col-lg-6 col-xl-3">
-
-              <div class="action-card h-100">
-
-                <div class="fw-bold mb-1">
-                  Vendor Return
-                </div>
-
-                <div class="small text-muted mb-2">
-                  Repair failed or unit should go back
-                  to supplier.
-                </div>
-
-                <form method="post"
-                      action="{{ url_for(
-                          'appliance.inventory_disposition',
-                          unit_id=unit.id
-                      ) }}"
-                      onsubmit="return confirm(
-                        'MOVE THIS APPLIANCE TO VENDOR RETURN PENDING?'
-                      );">
-
-                  <input type="hidden"
-                         name="action"
-                         value="REPAIR_TO_VENDOR_RETURN">
-
-                  <select name="reason_code"
-                          class="form-select form-select-sm mb-2">
-
-                    <option value="REPAIR_FAILED_VENDOR_RETURN">
-                      REPAIR FAILED
-                    </option>
-
-                    <option value="DEFECTIVE">
-                      DEFECTIVE
-                    </option>
-
-                    <option value="PARTS_NOT_AVAILABLE">
-                      PARTS NOT AVAILABLE
-                    </option>
-
-                    <option value="OTHER">
-                      OTHER
-                    </option>
-
-                  </select>
-
-                  <input name="notes"
-                         class="form-control form-control-sm mb-2"
-                         placeholder="Vendor / RMA / notes">
-
-                  <button class="btn btn-outline-dark btn-sm">
-                    VENDOR RETURN
-                  </button>
-
-                </form>
-
-              </div>
-
-            </div>
-
-
-            <!-- =============================================
-                 4. SCRAP
-                 ============================================= -->
-
-            <div class="col-lg-6 col-xl-3">
-
-              <div class="action-card h-100">
-
-                <div class="fw-bold mb-1">
-                  Scrap / Write Off
-                </div>
-
-                <div class="small text-muted mb-2">
-                  Appliance cannot be repaired or is not
-                  economically worth repairing.
-                </div>
-
-                <form method="post"
-                      action="{{ url_for(
-                          'appliance.inventory_disposition',
-                          unit_id=unit.id
-                      ) }}"
-                      onsubmit="return confirm(
-                        'SCRAP THIS APPLIANCE?\n\n' +
-                        'This appliance will be WRITTEN OFF.'
-                      );">
-
-                  <input type="hidden"
-                         name="action"
-                         value="REPAIR_TO_SCRAP">
-
-                  <select name="reason_code"
-                          class="form-select form-select-sm mb-2">
-
-                    <option value="UNREPAIRABLE">
-                      UNREPAIRABLE
-                    </option>
-
-                    <option value="REPAIR_TOO_EXPENSIVE">
-                      REPAIR TOO EXPENSIVE
-                    </option>
-
-                    <option value="PARTS_NOT_AVAILABLE">
-                      PARTS NOT AVAILABLE
-                    </option>
-
-                    <option value="DAMAGED">
-                      DAMAGED
-                    </option>
-
-                    <option value="OTHER">
-                      OTHER
-                    </option>
-
-                  </select>
-
-                  <input name="notes"
-                         class="form-control form-control-sm mb-2"
-                         placeholder="Write-off notes">
-
-                  <button class="btn btn-outline-danger btn-sm">
-                    SCRAP / WRITE OFF
-                  </button>
-
-                </form>
-
-              </div>
-
-            </div>
-
-
+          <div class="alert alert-light border mb-0">
+            Complete or change the repair outcome from the corresponding
+            REP-... record in REPAIR ORDERS.
           </div>
 
 
@@ -1471,6 +1445,106 @@
 
 
               <div class="movement-detail">
+
+                {% set movement_meta = (
+                    movement_meta_by_id.get(
+                        movement.id,
+                        {}
+                    )
+                ) %}
+
+                {% if movement.movement_type == 'SEND_TO_REPAIR' %}
+
+
+                  {% if movement_meta.get('repair_number') %}
+
+                    <div>
+                      <strong>Repair Order:</strong>
+
+                      {% if movement_meta.get('repair_order_id') %}
+
+                        <a href="{{ url_for(
+                            'appliance.repair_order_detail',
+                            repair_id=movement_meta.get('repair_order_id')
+                        ) }}">
+                          {{ movement_meta.get('repair_number') }}
+                        </a>
+
+                      {% else %}
+
+                        {{ movement_meta.get('repair_number') }}
+
+                      {% endif %}
+
+                    </div>
+
+                  {% endif %}
+
+
+                  {% if movement_meta.get('repair_type') == 'vendor' %}
+
+                    <div>
+                      <strong>Repair Performed By:</strong>
+                      VENDOR
+                    </div>
+
+                    {% if movement_meta.get('repair_vendor') %}
+
+                      <div>
+                        <strong>Repair Vendor:</strong>
+                        {{ movement_meta.get('repair_vendor') }}
+                      </div>
+
+                    {% endif %}
+
+
+                  {% elif movement_meta.get('repair_type') == 'internal' %}
+
+                    <div>
+                      <strong>Repair Performed By:</strong>
+                      INTERNAL TECHNICIAN
+                    </div>
+
+                    {% if movement_meta.get(
+                        'repair_technician_username'
+                    ) %}
+
+                      <div>
+                        <strong>Internal Technician:</strong>
+                        {{
+                          movement_meta.get(
+                            'repair_technician_username'
+                          )
+                        }}
+                      </div>
+
+                    {% endif %}
+
+
+                  {% elif movement_meta.get('repair_provider') %}
+
+                    {# Legacy Repair movement #}
+
+                    <div>
+                      <strong>Repair Vendor / Technician:</strong>
+                      {{ movement_meta.get('repair_provider') }}
+                    </div>
+
+                  {% endif %}
+
+
+                  {% if movement_meta.get('repair_reference') %}
+
+                    <div>
+                      <strong>Vendor Reference:</strong>
+                      {{ movement_meta.get('repair_reference') }}
+                    </div>
+
+                  {% endif %}
+
+
+                {% endif %}
+
 
                 {% if movement.issue %}
 

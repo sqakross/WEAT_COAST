@@ -10043,46 +10043,9 @@ def wo_list():
 @login_required
 def wo_issue_instock(wo_id):
     # Ð´Ð¾ÑÑ‚ÑƒÐ¿
-    # ERP ACCESS PATCH 04A-v2 STEP 4 - WO INVENTORY ISSUE
-    # This endpoint mutates Inventory from inside a Work Order.
-    # Module DENY always wins.
-    # DEFAULT for the action preserves the old admin/superadmin rule.
-    legacy_admin_allowed = (
-        (getattr(current_user, "role", "") or "").strip().lower()
-        in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Inventory access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        flash(
-            "Access denied: Issue Parts permission is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     import re
     from urllib.parse import urlencode
@@ -13309,46 +13272,9 @@ def api_part_lookup():
 @inventory_bp.post("/work_orders/<int:wo_id>/units/<int:unit_id>/issue_instock")
 @login_required
 def wo_issue_instock_unit(wo_id, unit_id):
-    # ERP ACCESS PATCH 04A-v2 STEP 4 - WO UNIT INVENTORY ISSUE
-    # This endpoint mutates Inventory from inside a Work Order unit.
-    # Module DENY always wins.
-    # DEFAULT for the action preserves the old admin/superadmin rule.
-    legacy_admin_allowed = (
-        (getattr(current_user, "role", "") or "").strip().lower()
-        in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Inventory access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        flash(
-            "Access denied: Issue Parts permission is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     from datetime import datetime, timedelta
     from sqlalchemy import and_, func
@@ -13746,40 +13672,8 @@ def wo_set_status(wo_id):
 @login_required
 def issue_batch():
     # ðŸ” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ admin/superadmin
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).lower()
-
-    legacy_admin_allowed = (
-        role_low in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Access denied: Inventory access is disabled.",
-            }
-        ), 403
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Access denied: Issue Parts permission is disabled.",
-            }
-        ), 403
-
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        return jsonify({"ok": False, "error": "Access denied"}), 403
     try:
         payload = request.get_json(force=True, silent=False) or {}
         issued_to = (payload.get("issued_to") or "").strip()
@@ -13842,60 +13736,12 @@ def issue_line(part_id):
       - redirect Ð½Ð° /reports_grouped Ð´Ð»Ñ Ñ„Ð¾Ñ€Ð¼
     """
     # ðŸ” Ð Ð°Ð·Ñ€ÐµÑˆÐ°ÐµÐ¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ admin / superadmin
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).lower()
-
-    legacy_admin_allowed = (
-        role_low in ("admin", "superadmin")
-    )
-
-    inventory_access_allowed = (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.inventory.access",
-            default_allowed=True,
-        )
-    )
-
-    issue_allowed = (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.inventory.issue",
-            default_allowed=legacy_admin_allowed,
-        )
-    )
-
-    if not inventory_access_allowed or not issue_allowed:
-
-        if not inventory_access_allowed:
-            error_message = (
-                "Access denied: Inventory access is disabled."
-            )
-        else:
-            error_message = (
-                "Access denied: Issue Parts permission is disabled."
-            )
-
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        # Ð”Ð»Ñ JSON-Ð·Ð°Ð¿Ñ€Ð¾ÑÐ¾Ð² â€” JSON, Ð´Ð»Ñ Ñ„Ð¾Ñ€Ð¼ â€” flash + Ñ€ÐµÐ´Ð¸Ñ€ÐµÐºÑ‚
         if request.is_json:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": error_message,
-                }
-            ), 403
-
-        flash(
-            error_message,
-            "danger",
-        )
-
-        return redirect(
-            url_for("inventory.dashboard")
-        )
-
+            return jsonify({"ok": False, "error": "Access denied"}), 403
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.dashboard"))
 
     try:
         # Ð£Ð½Ð¸Ð²ÐµÑ€ÑÐ°Ð»ÑŒÐ½Ð¾ Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼ Ð´Ð°Ð½Ð½Ñ‹Ðµ (JSON Ð¸Ð»Ð¸ Ñ„Ð¾Ñ€Ð¼Ð°)
@@ -14342,27 +14188,6 @@ def issue_part():
 
     # âœ… lot costing helpers
     from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Issue Parts permission is disabled.",
-        )
-
 
     # ---------- helper: touch Work Order updated_by/updated_at ----------
     def _invoice_available_qty_for_part(pn: str, inv_ref: str) -> tuple[int, int, int]:
@@ -14689,27 +14514,6 @@ def issue_part():
 def issue_ui():
     from flask_login import current_user
     from models import Part
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Issue Parts permission is disabled.",
-        )
-
 
     parts = Part.query.order_by(Part.part_number).limit(50).all()
     technician_name = getattr(current_user, "username", "TECH")

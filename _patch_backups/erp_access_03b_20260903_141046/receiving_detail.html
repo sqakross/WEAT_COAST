@@ -65,100 +65,35 @@
     </div>
   </div>
 
-  {# ERP ACCESS PATCH 03B - RECEIVING UI #}
   {% set role = (current_user.role if current_user.is_authenticated else '')|lower %}
-
-  {% set erp_recv_legacy_admin = current_user.is_authenticated and (
+  {% set can_super = current_user.is_authenticated and (
     role in ['admin','superadmin']
     or (current_user.is_admin|default(false))
     or (current_user.is_superadmin|default(false))
     or (current_user.is_super_admin|default(false))
   ) %}
 
-  {% set erp_recv_legacy_super = current_user.is_authenticated and (
-    role == 'superadmin'
-    or (current_user.is_superadmin|default(false))
-    or (current_user.is_super_admin|default(false))
-  ) %}
-
-  {% set erp_recv_access = current_user.is_authenticated and
-    erp_access_allowed(
-      current_user,
-      'erp.receiving.access',
-      true
-    )
-  %}
-
-  {% set erp_recv_create = erp_recv_access and
-    erp_access_allowed(
-      current_user,
-      'erp.receiving.create',
-      erp_recv_legacy_admin
-    )
-  %}
-
-  {% set erp_recv_post = erp_recv_access and
-    erp_access_allowed(
-      current_user,
-      'erp.receiving.post',
-      erp_recv_legacy_admin
-    )
-  %}
-
-  {% set erp_recv_unpost = erp_recv_access and
-    erp_access_allowed(
-      current_user,
-      'erp.receiving.unpost',
-      erp_recv_legacy_admin
-    )
-  %}
-
-  {% set erp_recv_edit_posted = erp_recv_access and
-    erp_access_allowed(
-      current_user,
-      'erp.receiving.edit_posted',
-      erp_recv_legacy_super
-    )
-  %}
-
-  {% set can_super = erp_recv_legacy_admin %}
-
-  {% set can_edit_header =
-    erp_recv_edit_posted if is_posted else erp_recv_create
-  %}
+  {% set can_edit_header = can_super or can_edit %}
 
   <div class="text-end">
     <a class="btn btn-outline-secondary me-2" href="{{ url_for('inventory.receiving_list') }}">‹ Back</a>
 
-    {% if is_posted %}
-
-      {% if erp_recv_unpost and can_unpost %}
-        <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
-              method="post"
-              class="d-inline">
-          <button class="btn btn-warning"
-                  type="submit">
-            Unpost
-          </button>
-        </form>
-
-      {% elif erp_recv_unpost and (not can_unpost) %}
-        <button class="btn btn-warning"
-                type="button"
-                disabled
-                title="Batch already issued to technicians. Cannot unpost.">
-          Unpost
-        </button>
-      {% endif %}
-
-    {% elif erp_recv_post %}
+    {% if can_super and can_unpost %}
       <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
-            method="post"
-            class="d-inline">
-        <button class="btn btn-primary"
-                type="submit">
-          Post
+            method="post" class="d-inline">
+        <button class="btn {{ 'btn-warning' if is_posted else 'btn-primary' }}" type="submit">
+          {{ 'Unpost' if is_posted else 'Post' }}
         </button>
+      </form>
+    {% elif can_super and (not can_unpost) and is_posted %}
+      <button class="btn btn-warning" type="button" disabled
+              title="Batch already issued to technicians. Cannot unpost.">
+        Unpost
+      </button>
+    {% elif can_super and (not is_posted) %}
+      <form action="{{ url_for('inventory.receiving_toggle', batch_id=batch.id) }}"
+            method="post" class="d-inline">
+        <button class="btn btn-primary" type="submit">Post</button>
       </form>
     {% endif %}
 
@@ -267,8 +202,7 @@
   {% endif %}
 </div>
 
-{% if (is_posted and erp_recv_edit_posted)
-      or ((not is_posted) and erp_recv_create) %}
+{% if can_super %}
 <div class="card shadow-sm">
   <div class="card-header d-flex justify-content-between align-items-center py-2">
     <div class="d-flex flex-column">
@@ -385,26 +319,10 @@
       </div>
 
       <div class="d-flex flex-wrap gap-2">
-
-        {% if (is_posted and erp_recv_edit_posted)
-              or ((not is_posted) and erp_recv_create) %}
-          <button class="btn btn-outline-primary btn-sm"
-                  type="submit"
-                  name="action"
-                  value="save">
-            {{ 'Save Changes' if is_posted else 'Save Draft' }}
-          </button>
+        <button class="btn btn-outline-primary btn-sm" type="submit" name="action" value="save">Save Draft</button>
+        {% if not is_posted %}
+          <button class="btn btn-success btn-sm" type="submit" name="action" value="post">Post &amp; Update Stock</button>
         {% endif %}
-
-        {% if (not is_posted) and erp_recv_post %}
-          <button class="btn btn-success btn-sm"
-                  type="submit"
-                  name="action"
-                  value="post">
-            Post &amp; Update Stock
-          </button>
-        {% endif %}
-
       </div>
     </form>
   </div>

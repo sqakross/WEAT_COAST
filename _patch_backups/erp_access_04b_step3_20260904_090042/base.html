@@ -281,65 +281,28 @@
 
       <div class="collapse navbar-collapse mt-3 mt-lg-0" id="navbarMain">
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-          {# ERP ACCESS PATCH 04B STEP 3 - INVENTORY NAVBAR UI #}
-          {% set nav_can_inventory =
-              current_user.is_authenticated
-              and erp_access_allowed(
-                  current_user,
-                  'erp.inventory.access',
-                  true
-              )
-          %}
-
-          {% set nav_can_part_create =
-              nav_can_inventory
-              and erp_access_allowed(
-                  current_user,
-                  'erp.inventory.part_create',
-                  true
-              )
-          %}
-
-          {% set nav_can_issue =
-              nav_can_inventory
-              and erp_access_allowed(
-                  current_user,
-                  'erp.inventory.issue',
-                  true
-              )
-          %}
-
-          {% if nav_can_inventory %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.location_report' %} active{% endif %}"
                href="{{ url_for('inventory.location_report') }}">INVENTORY</a>
           </li>
-          {% endif %}
-          {# ERP ACCESS PATCH 04B STEP 3A - DASHBOARD NAV #}
-          {% if nav_can_inventory %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.dashboard' %} active{% endif %}"
                href="{{ url_for('inventory.dashboard') }}">DASHBOARD</a>
           </li>
-          {% endif %}
           <li class="nav-item">
               <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.tools') %} active{% endif %}"
                  href="{{ url_for('inventory.tools_list') }}">
                 TOOLS
               </a>
             </li>
-          {% if nav_can_part_create %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.add_part' %} active{% endif %}"
                href="{{ url_for('inventory.add_part') }}">ADD PART</a>
           </li>
-          {% endif %}
-          {% if nav_can_issue %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.issue_part' %} active{% endif %}"
                href="{{ url_for('inventory.issue_part') }}">ISSUE PART</a>
           </li>
-          {% endif %}
 
           {% set is_wo = request.endpoint and request.endpoint.startswith('inventory.wo_') %}
             <li class="nav-item">

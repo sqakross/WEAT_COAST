@@ -1,60 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
 
-{# ERP ACCESS PATCH 03B - RECEIVING UI #}
-{% set erp_recv_role = (current_user.role or '')|lower if current_user.is_authenticated else '' %}
-
-{% set erp_recv_legacy_admin = current_user.is_authenticated and (
-  erp_recv_role in ['admin', 'superadmin']
-  or (current_user.is_admin|default(false))
-  or (current_user.is_superadmin|default(false))
-  or (current_user.is_super_admin|default(false))
-) %}
-
-{% set erp_recv_legacy_super = current_user.is_authenticated and (
-  erp_recv_role == 'superadmin'
-  or (current_user.is_superadmin|default(false))
-  or (current_user.is_super_admin|default(false))
-) %}
-
-{% set erp_recv_access = current_user.is_authenticated and
-  erp_access_allowed(
-    current_user,
-    'erp.receiving.access',
-    true
-  )
-%}
-
-{% set erp_recv_create = erp_recv_access and
-  erp_access_allowed(
-    current_user,
-    'erp.receiving.create',
-    erp_recv_legacy_admin
-  )
-%}
-
-{% set erp_recv_post = erp_recv_access and
-  erp_access_allowed(
-    current_user,
-    'erp.receiving.post',
-    erp_recv_legacy_admin
-  )
-%}
-
-{% set erp_recv_unpost = erp_recv_access and
-  erp_access_allowed(
-    current_user,
-    'erp.receiving.unpost',
-    erp_recv_legacy_admin
-  )
-%}
-
-{% set can_super = erp_recv_legacy_super %}
-
-{% set erp_recv_show_actions =
-  can_super or erp_recv_post or erp_recv_unpost
-%}
-
 <h3>Receiving Batches</h3>
 
 <form class="row g-2 mb-3" method="get" id="filterForm">
@@ -89,12 +35,16 @@
 
   <div class="col-auto d-flex gap-2">
     <button type="submit" class="btn btn-primary">Search</button>
-    {% if erp_recv_create %}
-      <a class="btn btn-outline-secondary"
-         href="{{ url_for('inventory.receiving_new') }}">+ New Batch</a>
-    {% endif %}
+    <a class="btn btn-outline-secondary" href="{{ url_for('inventory.receiving_new') }}">+ New Batch</a>
   </div>
 </form>
+
+{% set role = (current_user.role or '')|lower if current_user.is_authenticated else '' %}
+{% set can_super = current_user.is_authenticated and (
+  role == 'superadmin'
+  or (current_user.is_superadmin|default(false))
+  or (current_user.is_super_admin|default(false))
+) %}
 
 <div class="table-responsive">
   <table class="table table-sm table-hover align-middle">
@@ -109,7 +59,7 @@
         <th style="width:80px;" class="text-end">Qty</th>
         <th style="width:140px;" class="text-end">Total Cost</th>
         <th style="width:180px;">Audit</th>
-        {% if erp_recv_show_actions %}
+        {% if can_super %}
           <th style="width:260px;">Actions</th>
         {% endif %}
       </tr>
@@ -177,59 +127,40 @@
             {% endif %}
           </td>
 
-          {% if erp_recv_show_actions %}
+          {% if can_super %}
             <td class="js-actions-cell">
+              <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}"
+                    method="post"
+                    class="d-inline js-action-form">
+                <button class="btn btn-sm {{ 'btn-warning' if is_posted else 'btn-primary' }}"
+                        type="submit">
+                  {{ 'Unpost' if is_posted else 'Post' }}
+                </button>
+              </form>
 
-              {% if is_posted and erp_recv_unpost %}
-                <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}"
-                      method="post"
-                      class="d-inline js-action-form">
-                  <button class="btn btn-sm btn-warning"
-                          type="submit">
-                    Unpost
-                  </button>
-                </form>
+              <form action="{{ url_for('inventory.receiving_clear_keys', batch_id=b.id) }}"
+                    method="post"
+                    class="d-inline js-action-form"
+                    data-confirm="Clear import keys for batch #{{ b.id }}? This allows re-import from the same file.">
+                <button class="btn btn-sm btn-outline-secondary" type="submit">Clear keys</button>
+              </form>
 
-              {% elif (not is_posted) and erp_recv_post %}
-                <form action="{{ url_for('inventory.receiving_toggle', batch_id=b.id) }}"
-                      method="post"
-                      class="d-inline js-action-form">
-                  <button class="btn btn-sm btn-primary"
-                          type="submit">
-                    Post
-                  </button>
-                </form>
-              {% endif %}
-
-              {% if can_super %}
-                <form action="{{ url_for('inventory.receiving_clear_keys', batch_id=b.id) }}"
-                      method="post"
-                      class="d-inline js-action-form"
-                      data-confirm="Clear import keys for batch #{{ b.id }}? This allows re-import from the same file.">
-                  <button class="btn btn-sm btn-outline-secondary"
-                          type="submit">
-                    Clear keys
-                  </button>
-                </form>
-
-                <form action="{{ url_for('inventory.receiving_delete', batch_id=b.id) }}"
-                      method="post"
-                      class="d-inline js-action-form"
-                      data-confirm="Delete batch #{{ b.id }}? This will also clear its import keys.">
-                  <button class="btn btn-sm btn-danger"
-                          type="submit"
-                          {% if stock_applied %}disabled title="Unpost first to remove from stock before deleting."{% endif %}>
-                    Delete
-                  </button>
-                </form>
-              {% endif %}
-
+              <form action="{{ url_for('inventory.receiving_delete', batch_id=b.id) }}"
+                    method="post"
+                    class="d-inline js-action-form"
+                    data-confirm="Delete batch #{{ b.id }}? This will also clear its import keys.">
+                <button class="btn btn-sm btn-danger"
+                        type="submit"
+                        {% if stock_applied %}disabled title="Unpost first to remove from stock before deleting."{% endif %}>
+                  Delete
+                </button>
+              </form>
             </td>
           {% endif %}
         </tr>
       {% else %}
         <tr>
-          <td colspan="{{ 10 if erp_recv_show_actions else 9 }}" class="text-center text-muted py-4">
+          <td colspan="{{ 10 if can_super else 9 }}" class="text-center text-muted py-4">
             No receiving batches found.
           </td>
         </tr>

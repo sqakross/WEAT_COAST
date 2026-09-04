@@ -50,76 +50,6 @@
           action="{{ url_for('inventory.user_access', user_id=user.id) }}"
           id="accessForm">
 
-      <!-- ===================================================
-           ACCESS / PERMISSIONS AREA SELECTOR
-           =================================================== -->
-
-      <div class="card shadow-sm border-0 mb-3"
-           data-access-area-tabs
-           style="border-radius:1rem;
-                  overflow:hidden;">
-
-        <div class="card-body py-2 px-2">
-
-          <div class="d-flex flex-wrap gap-2"
-               role="tablist"
-               aria-label="Access permission sections">
-
-            <button type="button"
-                    id="access-tab-main"
-                    class="btn btn-primary flex-grow-1
-                           access-area-tab"
-                    data-access-tab="main"
-                    onclick="showAccessArea('main')"
-                    style="min-width:260px;
-                           border-radius:.7rem;
-                           font-weight:600;">
-
-              <span class="me-1">?</span>
-              Main Warehouse / Appliance
-
-            </button>
-
-
-            <button type="button"
-                    id="access-tab-erp"
-                    class="btn btn-outline-primary flex-grow-1
-                           access-area-tab"
-                    data-access-tab="erp"
-                    onclick="showAccessArea('erp')"
-                    style="min-width:260px;
-                           border-radius:.7rem;
-                           font-weight:600;">
-
-              <span class="me-1">?</span>
-              ERP Access Overrides
-
-            </button>
-
-          </div>
-
-
-          <div class="text-muted text-center mt-2"
-               style="font-size:.68rem;">
-
-            Choose which access area you want to configure.
-
-          </div>
-
-        </div>
-
-      </div>
-
-
-      <!-- ===================================================
-           MAIN WAREHOUSE / APPLIANCE AREA
-           =================================================== -->
-
-      <div id="access-area-main"
-           data-access-area="main">
-
-
-
       <div class="row g-4">
 
         <div class="col-lg-4">
@@ -341,29 +271,12 @@
 
       </div>
 
-
-
-      </div>
-
-
-      <!-- ===================================================
-           ERP ACCESS AREA WRAPPER
-           =================================================== -->
-
-      <div id="access-area-erp"
-           data-access-area="erp"
-           style="display:none;">
-
       <!-- ===================================================
            ERP ACCESS OVERRIDES
            =================================================== -->
 
       <div class="card shadow-sm border-0 mt-4"
            style="border-radius:1rem; overflow:hidden;">
-
-        <!-- =================================================
-             HEADER
-             ================================================= -->
 
         <div class="card-header bg-white border-0
                     d-flex flex-wrap justify-content-between
@@ -374,8 +287,7 @@
             <div class="d-flex align-items-center gap-2">
 
               <div class="fw-semibold text-uppercase"
-                   style="font-size:.82rem;
-                          letter-spacing:.05em;">
+                   style="font-size:.82rem; letter-spacing:.05em;">
                 ERP Access Overrides
               </div>
 
@@ -388,12 +300,11 @@
 
             <div class="text-muted mt-1"
                  style="font-size:.72rem;">
-              Per-user exceptions to the existing ERP role
-              permissions. DEFAULT keeps the current role behavior.
+              Per-user exceptions to the existing ERP role permissions.
+              DEFAULT keeps the current role behavior.
             </div>
 
           </div>
-
 
           {% if not is_target_superadmin %}
 
@@ -401,7 +312,7 @@
                     class="btn btn-outline-secondary btn-sm"
                     onclick="resetAllErpOverrides()"
                     style="border-radius:.6rem;">
-              Reset ALL ERP to Default
+              Reset ERP to Default
             </button>
 
           {% endif %}
@@ -411,394 +322,203 @@
 
         <div class="card-body">
 
-          <!-- ===============================================
-               LEGEND
-               =============================================== -->
-
-          <div class="alert alert-light border mb-3"
-               style="font-size:.74rem;
-                      border-radius:.7rem;">
+          <div class="alert alert-light border mb-4"
+               style="font-size:.76rem; border-radius:.7rem;">
 
             <strong>DEFAULT</strong>
-            = use normal role access
+            = use the existing hard-coded ERP permission for this role.
 
             <span class="mx-2">?</span>
 
             <strong>ALLOW</strong>
-            = explicitly allow
+            = explicitly grant this user access.
 
             <span class="mx-2">?</span>
 
             <strong>DENY</strong>
-            = explicitly block
-
-            <span class="mx-2">?</span>
-
-            Module buttons change every permission
-            in that section at once.
+            = explicitly block this user.
 
           </div>
 
 
-          <!-- ===============================================
-               MODULES
-               =============================================== -->
+          {% for erp_group in erp_permission_groups %}
 
-          <div class="erp-module-list">
+            <div class="erp-module-group mb-4">
 
-            {% for erp_group in erp_permission_groups %}
+              <div class="d-flex flex-wrap
+                          justify-content-between
+                          align-items-center
+                          border-bottom pb-2 mb-2">
 
-              <div class="border rounded mb-2
-                          erp-module-section"
-                   data-erp-module-section
-                   data-erp-module="{{ loop.index0 }}"
-                   style="overflow:hidden;">
+                <div>
 
+                  <div class="fw-semibold text-uppercase"
+                       style="font-size:.76rem;
+                              letter-spacing:.055em;">
 
-                <!-- =========================================
-                     MODULE HEADER
-                     ========================================= -->
+                    {{ erp_group.label }}
 
-                <div class="erp-module-header
-                            d-flex flex-wrap
-                            align-items-center
-                            justify-content-between
-                            gap-2 px-3 py-2 bg-light"
-                     role="button"
-                     tabindex="0"
-                     onclick="toggleErpModule(
-                       '{{ loop.index0 }}'
-                     )"
-                     onkeydown="
-                       if (
-                         event.key === 'Enter' ||
-                         event.key === ' '
-                       ) {
-                         event.preventDefault();
-                         toggleErpModule(
-                           '{{ loop.index0 }}'
-                         );
-                       }
-                     "
-                     style="cursor:pointer;
-                            user-select:none;">
-
-
-                  <!-- LEFT -->
-
-                  <div class="d-flex align-items-center
-                              gap-2 flex-grow-1"
-                       style="min-width:260px;">
-
-                    <span id="erp-arrow-{{ loop.index0 }}"
-                          class="fw-bold"
-                          style="width:14px;
-                                 font-size:.8rem;">
-                      ?
+                    <span class="badge bg-light text-dark border ms-1"
+                          style="font-size:.58rem;">
+                      ERP MODULE
                     </span>
-
-                    <div>
-
-                      <div class="d-flex flex-wrap
-                                  align-items-center gap-2">
-
-                        <span class="fw-semibold text-uppercase"
-                              style="font-size:.76rem;
-                                     letter-spacing:.05em;">
-                          {{ erp_group.label }}
-                        </span>
-
-                        <span class="badge bg-white
-                                     text-dark border"
-                              style="font-size:.57rem;">
-                          ERP MODULE
-                        </span>
-
-                        <span class="badge bg-white
-                                     text-secondary border"
-                              style="font-size:.57rem;">
-                          {{ erp_group.permissions|length }}
-                          permissions
-                        </span>
-
-                        <span id="erp-status-{{ loop.index0 }}"
-                              class="badge bg-secondary"
-                              style="font-size:.57rem;">
-                          DEFAULT
-                        </span>
-
-                      </div>
-
-                      {% if erp_group.description %}
-
-                        <div class="text-muted mt-1"
-                             style="font-size:.66rem;">
-                          {{ erp_group.description }}
-                        </div>
-
-                      {% endif %}
-
-                    </div>
 
                   </div>
 
+                  {% if erp_group.description %}
 
-                  <!-- RIGHT: WHOLE MODULE CONTROLS -->
-
-                  {% if not is_target_superadmin %}
-
-                    <div class="d-flex align-items-center
-                                gap-1"
-                         onclick="event.stopPropagation();">
-
-                      <button type="button"
-                              class="btn btn-sm
-                                     btn-outline-secondary
-                                     erp-bulk-button"
-                              onclick="
-                                setErpModule(
-                                  '{{ loop.index0 }}',
-                                  'DEFAULT'
-                                )
-                              "
-                              title="Set entire module to DEFAULT"
-                              style="font-size:.64rem;
-                                     min-width:68px;">
-                        DEFAULT
-                      </button>
-
-                      <button type="button"
-                              class="btn btn-sm
-                                     btn-outline-success
-                                     erp-bulk-button"
-                              onclick="
-                                setErpModule(
-                                  '{{ loop.index0 }}',
-                                  'ALLOW'
-                                )
-                              "
-                              title="Allow entire module"
-                              style="font-size:.64rem;
-                                     min-width:58px;">
-                        ALLOW
-                      </button>
-
-                      <button type="button"
-                              class="btn btn-sm
-                                     btn-outline-danger
-                                     erp-bulk-button"
-                              onclick="
-                                setErpModule(
-                                  '{{ loop.index0 }}',
-                                  'DENY'
-                                )
-                              "
-                              title="Deny entire module"
-                              style="font-size:.64rem;
-                                     min-width:55px;">
-                        DENY
-                      </button>
-
+                    <div class="text-muted mt-1"
+                         style="font-size:.68rem;">
+                      {{ erp_group.description }}
                     </div>
 
                   {% endif %}
 
                 </div>
 
-
-                <!-- =========================================
-                     MODULE DETAILS
-                     COLLAPSED BY DEFAULT
-                     ========================================= -->
-
-                <div id="erp-module-body-{{ loop.index0 }}"
-                     class="erp-module-body"
-                     style="display:none;">
-
-                  <div class="table-responsive">
-
-                    <table class="table table-sm
-                                  table-hover
-                                  align-middle mb-0"
-                           style="font-size:.77rem;">
-
-                      <thead>
-
-                        <tr class="text-muted"
-                            style="font-size:.64rem;">
-
-                          <th class="ps-3"
-                              style="min-width:300px;">
-                            Permission
-                          </th>
-
-                          <th class="text-center"
-                              style="width:95px;">
-                            Default
-                          </th>
-
-                          <th class="text-center"
-                              style="width:95px;">
-                            Allow
-                          </th>
-
-                          <th class="text-center"
-                              style="width:95px;">
-                            Deny
-                          </th>
-
-                        </tr>
-
-                      </thead>
+              </div>
 
 
-                      <tbody>
+              <div class="table-responsive">
 
-                        {% for erp_permission
-                              in erp_group.permissions %}
+                <table class="table table-sm
+                              align-middle mb-0"
+                       style="font-size:.78rem;">
 
-                          {% set current_effect =
-                              erp_override_map.get(
-                                  erp_permission.code,
-                                  'DEFAULT'
-                              )
-                          %}
+                  <thead>
 
-                          <tr>
+                    <tr class="text-muted"
+                        style="font-size:.66rem;">
 
-                            <td class="ps-3">
+                      <th style="min-width:300px;">
+                        Permission
+                      </th>
 
-                              <div class="fw-semibold"
-                                   style="font-size:.78rem;">
-                                {{ erp_permission.name }}
-                              </div>
+                      <th class="text-center"
+                          style="width:105px;">
+                        Default
+                      </th>
 
-                              {% if erp_permission.description %}
+                      <th class="text-center"
+                          style="width:105px;">
+                        Allow
+                      </th>
 
-                                <div class="text-muted"
-                                     style="font-size:.64rem;
-                                            line-height:1.2;">
-                                  {{ erp_permission.description }}
-                                </div>
+                      <th class="text-center"
+                          style="width:105px;">
+                        Deny
+                      </th>
 
-                              {% endif %}
+                    </tr>
 
-                              <code style="font-size:.58rem;">
-                                {{ erp_permission.code }}
-                              </code>
+                  </thead>
 
-                            </td>
+                  <tbody>
 
+                    {% for erp_permission in erp_group.permissions %}
 
-                            <!-- DEFAULT -->
+                      {% set current_effect =
+                          erp_override_map.get(
+                              erp_permission.code,
+                              'DEFAULT'
+                          )
+                      %}
 
-                            <td class="text-center">
+                      <tr>
 
-                              <input
-                                class="form-check-input
-                                       erp-override-radio"
-                                type="radio"
-                                data-erp-module-radio="{{ loop.index0 }}"
-                                name="erp_override__{{ erp_permission.code }}"
-                                value="DEFAULT"
+                        <td>
 
-                                {% if current_effect == 'DEFAULT' %}
-                                  checked
-                                {% endif %}
+                          <div class="fw-semibold"
+                               style="font-size:.8rem;">
+                            {{ erp_permission.name }}
+                          </div>
 
-                                {% if is_target_superadmin %}
-                                  disabled
-                                {% endif %}
+                          {% if erp_permission.description %}
 
-                                onchange="
-                                  updateErpModuleStatus(
-                                    this.closest(
-                                      '[data-erp-module-section]'
-                                    )
-                                  )
-                                ">
+                            <div class="text-muted"
+                                 style="font-size:.66rem;
+                                        line-height:1.25;">
+                              {{ erp_permission.description }}
+                            </div>
 
-                            </td>
+                          {% endif %}
 
+                          <code style="font-size:.6rem;">
+                            {{ erp_permission.code }}
+                          </code>
 
-                            <!-- ALLOW -->
-
-                            <td class="text-center">
-
-                              <input
-                                class="form-check-input
-                                       erp-override-radio"
-                                type="radio"
-                                data-erp-module-radio="{{ loop.index0 }}"
-                                name="erp_override__{{ erp_permission.code }}"
-                                value="ALLOW"
-
-                                {% if current_effect == 'ALLOW' %}
-                                  checked
-                                {% endif %}
-
-                                {% if is_target_superadmin %}
-                                  disabled
-                                {% endif %}
-
-                                onchange="
-                                  updateErpModuleStatus(
-                                    this.closest(
-                                      '[data-erp-module-section]'
-                                    )
-                                  )
-                                ">
-
-                            </td>
+                        </td>
 
 
-                            <!-- DENY -->
+                        <td class="text-center">
 
-                            <td class="text-center">
+                          <input class="form-check-input
+                                        erp-override-radio"
+                                 type="radio"
+                                 name="erp_override__{{ erp_permission.code }}"
+                                 value="DEFAULT"
 
-                              <input
-                                class="form-check-input
-                                       erp-override-radio"
-                                type="radio"
-                                data-erp-module-radio="{{ loop.index0 }}"
-                                name="erp_override__{{ erp_permission.code }}"
-                                value="DENY"
+                                 {% if current_effect == 'DEFAULT' %}
+                                   checked
+                                 {% endif %}
 
-                                {% if current_effect == 'DENY' %}
-                                  checked
-                                {% endif %}
+                                 {% if is_target_superadmin %}
+                                   disabled
+                                 {% endif %}>
 
-                                {% if is_target_superadmin %}
-                                  disabled
-                                {% endif %}
+                        </td>
 
-                                onchange="
-                                  updateErpModuleStatus(
-                                    this.closest(
-                                      '[data-erp-module-section]'
-                                    )
-                                  )
-                                ">
 
-                            </td>
+                        <td class="text-center">
 
-                          </tr>
+                          <input class="form-check-input
+                                        erp-override-radio"
+                                 type="radio"
+                                 name="erp_override__{{ erp_permission.code }}"
+                                 value="ALLOW"
 
-                        {% endfor %}
+                                 {% if current_effect == 'ALLOW' %}
+                                   checked
+                                 {% endif %}
 
-                      </tbody>
+                                 {% if is_target_superadmin %}
+                                   disabled
+                                 {% endif %}>
 
-                    </table>
+                        </td>
 
-                  </div>
 
-                </div>
+                        <td class="text-center">
+
+                          <input class="form-check-input
+                                        erp-override-radio"
+                                 type="radio"
+                                 name="erp_override__{{ erp_permission.code }}"
+                                 value="DENY"
+
+                                 {% if current_effect == 'DENY' %}
+                                   checked
+                                 {% endif %}
+
+                                 {% if is_target_superadmin %}
+                                   disabled
+                                 {% endif %}>
+
+                        </td>
+
+                      </tr>
+
+                    {% endfor %}
+
+                  </tbody>
+
+                </table>
 
               </div>
 
-            {% endfor %}
+            </div>
 
-          </div>
+          {% endfor %}
 
         </div>
 
@@ -830,11 +550,7 @@
 
       </div>
 
-    
-
-      </div>
-
-</form>
+    </form>
 
     <div class="card shadow-sm border-0 mt-4"
          style="border-radius:1rem; overflow:hidden;">
@@ -1124,182 +840,17 @@
   }
 
 
-  // =========================================================
-  // ERP ACCESS UI
-  // =========================================================
-
-  window.toggleErpModule = function (moduleIndex) {
-
-    const body = document.getElementById(
-      `erp-module-body-${moduleIndex}`
-    );
-
-    const arrow = document.getElementById(
-      `erp-arrow-${moduleIndex}`
-    );
-
-    if (!body) {
-      return;
-    }
-
-    const isOpen = (
-      body.style.display !== 'none'
-    );
-
-    body.style.display = (
-      isOpen
-        ? 'none'
-        : 'block'
-    );
-
-    if (arrow) {
-      arrow.textContent = (
-        isOpen
-          ? '?'
-          : '?'
-      );
-    }
-
-  };
-
-
-  window.updateErpModuleStatus = function (section) {
-
-    if (!section) {
-      return;
-    }
-
-    const moduleIndex = (
-      section.dataset.erpModule
-    );
-
-    const statusBadge = document.getElementById(
-      `erp-status-${moduleIndex}`
-    );
-
-    if (!statusBadge) {
-      return;
-    }
-
-    const checkedRadios = Array.from(
-      section.querySelectorAll(
-        '.erp-override-radio:checked'
-      )
-    );
-
-    if (!checkedRadios.length) {
-      statusBadge.textContent = 'DEFAULT';
-      statusBadge.className =
-        'badge bg-secondary';
-      return;
-    }
-
-    const values = new Set(
-      checkedRadios.map(
-        radio => radio.value
-      )
-    );
-
-    if (values.size > 1) {
-      statusBadge.textContent = 'MIXED';
-      statusBadge.className =
-        'badge bg-warning text-dark';
-      return;
-    }
-
-    const value = (
-      checkedRadios[0].value
-    );
-
-    statusBadge.textContent = value;
-
-    if (value === 'ALLOW') {
-      statusBadge.className =
-        'badge bg-success';
-    }
-    else if (value === 'DENY') {
-      statusBadge.className =
-        'badge bg-danger';
-    }
-    else {
-      statusBadge.className =
-        'badge bg-secondary';
-    }
-
-  };
-
-
-  window.setErpModule = function (
-    moduleIndex,
-    effect
-  ) {
-
-    const section = document.querySelector(
-      `[data-erp-module="${moduleIndex}"]`
-    );
-
-    if (!section) {
-      return;
-    }
-
-    const radios = section.querySelectorAll(
-      `.erp-override-radio[value="${effect}"]`
-    );
-
-    radios.forEach(
-      radio => {
-        if (!radio.disabled) {
-          radio.checked = true;
-        }
-      }
-    );
-
-    updateErpModuleStatus(section);
-
-  };
-
-
   window.resetAllErpOverrides = function () {
 
     document
       .querySelectorAll(
         '.erp-override-radio[value="DEFAULT"]'
       )
-      .forEach(
-        radio => {
-          if (!radio.disabled) {
-            radio.checked = true;
-          }
-        }
-      );
-
-    document
-      .querySelectorAll(
-        '[data-erp-module-section]'
-      )
-      .forEach(
-        section => {
-          updateErpModuleStatus(section);
-        }
-      );
+      .forEach(radio => {
+        radio.checked = true;
+      });
 
   };
-
-
-  window.initializeErpModuleStatus = function () {
-
-    document
-      .querySelectorAll(
-        '[data-erp-module-section]'
-      )
-      .forEach(
-        section => {
-          updateErpModuleStatus(section);
-        }
-      );
-
-  };
-
 
   window.clearAllPermissions = function () {
 
@@ -1399,206 +950,6 @@
   });
 
 })();
-
-
-  document.addEventListener(
-    'DOMContentLoaded',
-    function () {
-      initializeErpModuleStatus();
-    }
-  );
-
-
-
-  // =========================================================
-  // ACCESS / PERMISSIONS TOP-LEVEL AREAS
-  // =========================================================
-
-  window.showAccessArea = function (
-    area,
-    remember = true
-  ) {
-
-    const mainArea = document.getElementById(
-      'access-area-main'
-    );
-
-    const erpArea = document.getElementById(
-      'access-area-erp'
-    );
-
-    const mainTab = document.getElementById(
-      'access-tab-main'
-    );
-
-    const erpTab = document.getElementById(
-      'access-tab-erp'
-    );
-
-    if (
-      !mainArea ||
-      !erpArea ||
-      !mainTab ||
-      !erpTab
-    ) {
-      return;
-    }
-
-
-    const selected = (
-      area === 'erp'
-        ? 'erp'
-        : 'main'
-    );
-
-
-    // -------------------------------------------------------
-    // PANEL VISIBILITY
-    // -------------------------------------------------------
-
-    mainArea.style.display = (
-      selected === 'main'
-        ? ''
-        : 'none'
-    );
-
-    erpArea.style.display = (
-      selected === 'erp'
-        ? ''
-        : 'none'
-    );
-
-
-    // -------------------------------------------------------
-    // TAB STYLE
-    // -------------------------------------------------------
-
-    if (selected === 'main') {
-
-      mainTab.classList.remove(
-        'btn-outline-primary'
-      );
-
-      mainTab.classList.add(
-        'btn-primary'
-      );
-
-      erpTab.classList.remove(
-        'btn-primary'
-      );
-
-      erpTab.classList.add(
-        'btn-outline-primary'
-      );
-
-    }
-    else {
-
-      erpTab.classList.remove(
-        'btn-outline-primary'
-      );
-
-      erpTab.classList.add(
-        'btn-primary'
-      );
-
-      mainTab.classList.remove(
-        'btn-primary'
-      );
-
-      mainTab.classList.add(
-        'btn-outline-primary'
-      );
-
-    }
-
-
-    // -------------------------------------------------------
-    // ACCESSIBILITY
-    // -------------------------------------------------------
-
-    mainTab.setAttribute(
-      'aria-selected',
-      selected === 'main'
-        ? 'true'
-        : 'false'
-    );
-
-    erpTab.setAttribute(
-      'aria-selected',
-      selected === 'erp'
-        ? 'true'
-        : 'false'
-    );
-
-
-    // -------------------------------------------------------
-    // REMEMBER SELECTED TAB
-    // -------------------------------------------------------
-
-    if (remember) {
-
-      try {
-
-        localStorage.setItem(
-          'wccr_user_access_active_area',
-          selected
-        );
-
-      }
-      catch (error) {
-
-        // Browser storage is optional.
-        // Access page still works without it.
-
-      }
-
-    }
-
-  };
-
-
-  window.initializeAccessArea = function () {
-
-    let selected = 'main';
-
-    try {
-
-      const stored = localStorage.getItem(
-        'wccr_user_access_active_area'
-      );
-
-      if (
-        stored === 'main' ||
-        stored === 'erp'
-      ) {
-        selected = stored;
-      }
-
-    }
-    catch (error) {
-
-      selected = 'main';
-
-    }
-
-    showAccessArea(
-      selected,
-      false
-    );
-
-  };
-
-
-  document.addEventListener(
-    'DOMContentLoaded',
-    function () {
-
-      initializeAccessArea();
-
-    }
-  );
-
 </script>
 {% endblock %}
 

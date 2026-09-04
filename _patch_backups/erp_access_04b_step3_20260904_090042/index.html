@@ -427,17 +427,6 @@
       )
   %}
 
-
-  {# ERP ACCESS PATCH 04B STEP 3 - INVENTORY ISSUE UI #}
-  {% set can_issue =
-      can_inventory_access
-      and erp_access_allowed(
-          current_user,
-          'erp.inventory.issue',
-          True
-      )
-  %}
-
   <div class="sticky-toolbar">
     <div class="toolbar-row-top">
       <h2>Inventory Dashboard</h2>
@@ -516,12 +505,10 @@
                 >
                   Trace
                 </a>
-              {% if can_issue %}
               <form method="GET" action="{{ url_for('inventory.issue_part') }}" onsubmit="return confirm('Issue part {{ part.part_number }}?');">
                 <input type="hidden" name="part" value="{{ part.part_number }}">
                 <button type="submit" class="action-btn action-issue">Issue</button>
               </form>
-              {% endif %}
 
               {% if can_part_edit %}
               <a href="{{ url_for('inventory.edit_part', part_id=part.id) }}" class="action-btn action-edit">Edit</a>

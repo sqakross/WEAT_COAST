@@ -1,0 +1,613 @@
+﻿============================================================================================
+WCCR - ERP ACCESS PATCH 05
+WORK ORDERS READ-ONLY AUDIT
+============================================================================================
+
+============================================================================================
+WORK ORDER ROUTES / FUNCTIONS
+============================================================================================
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_confirm_lines
+LINES: 4698-4813
+DECORATOR: inventory_bp.post('/work_orders/<int:wo_id>/confirm')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+  4722:             )
+  4723:         )
+  4724: 
+  4725:     is_admin_like = role in (
+  4726:         ROLE_ADMIN,
+  4727:         ROLE_SUPERADMIN,
+  4728:     )
+  4729: 
+  4730:     # ├É┬┐├æΓé¼├É┬╛├É┬▓├É┬╡├æΓé¼├É┬║├É┬░ ├é┬½├æ┬ü├É┬▓├É┬╛├É┬╣ ├É┬╗├É┬╕ WO├é┬╗ ├É┬┤├É┬╗├æ┬Å ├æΓÇÜ├É┬╡├æΓÇª├É┬╜├É┬╕├É┬║├É┬░
+    ...
+  4723:         )
+  4724: 
+  4725:     is_admin_like = role in (
+  4726:         ROLE_ADMIN,
+  4727:         ROLE_SUPERADMIN,
+  4728:     )
+  4729: 
+  4730:     # ├É┬┐├æΓé¼├É┬╛├É┬▓├É┬╡├æΓé¼├É┬║├É┬░ ├é┬½├æ┬ü├É┬▓├É┬╛├É┬╣ ├É┬╗├É┬╕ WO├é┬╗ ├É┬┤├É┬╗├æ┬Å ├æΓÇÜ├É┬╡├æΓÇª├É┬╜├É┬╕├É┬║├É┬░
+  4731:     if role == "technician":
+    ...
+  4724: 
+  4725:     is_admin_like = role in (
+  4726:         ROLE_ADMIN,
+  4727:         ROLE_SUPERADMIN,
+  4728:     )
+  4729: 
+  4730:     # ├É┬┐├æΓé¼├É┬╛├É┬▓├É┬╡├æΓé¼├É┬║├É┬░ ├é┬½├æ┬ü├É┬▓├É┬╛├É┬╣ ├É┬╗├É┬╕ WO├é┬╗ ├É┬┤├É┬╗├æ┬Å ├æΓÇÜ├É┬╡├æΓÇª├É┬╜├É┬╕├É┬║├É┬░
+  4731:     if role == "technician":
+  4732:         me_id = getattr(current_user, "id", None)
+    ...
+  4738:             or (me_name and wo_name and me_name == wo_name)
+  4739:         )
+  4740:         if not is_my_wo:
+  4741:             flash("Access denied", "danger")
+  4742:             return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+  4743: 
+  4744:     # ├É┬░├É┬╗├É┬╕├É┬░├æ┬ü├æΓÇ╣ ├É┬╕├É┬╝├É┬╡├É┬╜├É┬╕ ├æΓÇÜ├É┬╡├æΓÇª├É┬╜├É┬╕├É┬║├É┬░ ├óΓé¼ΓÇ¥ ├æΓÇí├æΓÇÜ├É┬╛├É┬▒├æΓÇ╣ ├æ┬ü├É┬╛├É┬▓├É┬┐├É┬░├É┬╗├É┬╛ ├æ┬ü issued_to
+  4745:     me_aliases = {
+  4746:         (current_user.username or "").strip().lower(),
+    ...
+  4782:         flash("Nothing to confirm (no IDs or invoice number).", "warning")
+  4783:         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+  4784: 
+  4785:     if not is_admin_like and me_aliases:
+  4786:         # ├æΓÇÜ├É┬╡├æΓÇª├É┬╜├É┬╕├É┬║ ├É┬┐├É┬╛├É┬┤├æΓÇÜ├É┬▓├É┬╡├æΓé¼├É┬╢├É┬┤├É┬░├É┬╡├æΓÇÜ ├æΓÇÜ├É┬╛├É┬╗├æ┼Æ├É┬║├É┬╛ ├æ┬ü├É┬▓├É┬╛├É┬╕ ├æ┬ü├æΓÇÜ├æΓé¼├É┬╛├É┬║├É┬╕ (├É┬▒├É┬╡├É┬╖ ├æΓé¼├É┬╡├É┬│├É┬╕├æ┬ü├æΓÇÜ├æΓé¼├É┬░)
+  4787:         q = q.filter(func.lower(func.trim(IssuedPartRecord.issued_to)).in_(list(me_aliases)))
+  4788: 
+  4789:     rows = q.all()
+  4790:     if not rows:
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_new
+LINES: 4885-4939
+DECORATOR: inventory_bp.get('/work_orders/new', endpoint='wo_new')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+  4885: def wo_new():
+  4886:     role = (getattr(current_user, "role", "") or "").strip().lower()
+  4887:     if role not in ("admin", "superadmin"):
+  4888:         flash("Access denied", "danger")
+  4889:         return redirect(url_for("inventory.wo_list"))
+  4890: 
+  4891:     # ├É┬╝├É┬╕├É┬╜├É┬╕├É┬╝├É┬░├É┬╗├æ┼Æ├É┬╜├æΓÇ╣├É┬╣ "├É┬┐├æ╞Æ├æ┬ü├æΓÇÜ├É┬╛├É┬╣" ├É┬╛├É┬▒├æ┼á├É┬╡├É┬║├æΓÇÜ, ├æΓÇí├æΓÇÜ├É┬╛├É┬▒├æΓÇ╣ ├æ╦å├É┬░├É┬▒├É┬╗├É┬╛├É┬╜ ├É┬╝├É┬╛├É┬│ ├É┬╛├æΓÇÜ├æΓé¼├É┬╕├æ┬ü├É┬╛├É┬▓├É┬░├æΓÇÜ├æ┼Æ ├É┬┐├É┬╛├É┬╗├æ┬Å
+    ...
+  4885: def wo_new():
+  4886:     role = (getattr(current_user, "role", "") or "").strip().lower()
+  4887:     if role not in ("admin", "superadmin"):
+  4888:         flash("Access denied", "danger")
+  4889:         return redirect(url_for("inventory.wo_list"))
+  4890: 
+  4891:     # ├É┬╝├É┬╕├É┬╜├É┬╕├É┬╝├É┬░├É┬╗├æ┼Æ├É┬╜├æΓÇ╣├É┬╣ "├É┬┐├æ╞Æ├æ┬ü├æΓÇÜ├É┬╛├É┬╣" ├É┬╛├É┬▒├æ┼á├É┬╡├É┬║├æΓÇÜ, ├æΓÇí├æΓÇÜ├É┬╛├É┬▒├æΓÇ╣ ├æ╦å├É┬░├É┬▒├É┬╗├É┬╛├É┬╜ ├É┬╝├É┬╛├É┬│ ├É┬╛├æΓÇÜ├æΓé¼├É┬╕├æ┬ü├É┬╛├É┬▓├É┬░├æΓÇÜ├æ┼Æ ├É┬┐├É┬╛├É┬╗├æ┬Å
+  4892:     class _WO:
+  4893:         id = None
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_toggle_ordered
+LINES: 5035-5083
+DECORATOR: inventory_bp.post('/work_orders/<int:wo_id>/parts/<int:wop_id>/toggle_ordered', endpoint='wo_toggle_ordered')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+  5046: 
+  5047:     wo = db.session.get(WorkOrder, wo_id)
+  5048:     me   = (getattr(current_user, "username", "") or "").strip().lower()
+  5049:     role = (getattr(current_user, "role", "") or "").strip().lower()
+  5050:     tech = (getattr(wo, "technician_name", "") or "").strip().lower()
+  5051: 
+  5052:     if not (role in ("admin", "superadmin") or (me and me == tech)):
+  5053:         flash("You are not allowed to change ordered status for this WO.", "danger")
+  5054:         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_detail
+LINES: 5315-5971
+DECORATOR: inventory_bp.get('/work_orders/<int:wo_id>', endpoint='wo_detail')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+  5355:             or ""
+  5356:     ).strip().lower()
+  5357: 
+  5358:     is_admin_like = role_raw in (
+  5359:         ROLE_ADMIN,
+  5360:         ROLE_SUPERADMIN,
+  5361:     )
+  5362: 
+  5363:     is_accounting_user = role_raw == ROLE_ACCOUNTING
+    ...
+  5356:     ).strip().lower()
+  5357: 
+  5358:     is_admin_like = role_raw in (
+  5359:         ROLE_ADMIN,
+  5360:         ROLE_SUPERADMIN,
+  5361:     )
+  5362: 
+  5363:     is_accounting_user = role_raw == ROLE_ACCOUNTING
+  5364:     is_technician_user = role_raw in (
+    ...
+  5357: 
+  5358:     is_admin_like = role_raw in (
+  5359:         ROLE_ADMIN,
+  5360:         ROLE_SUPERADMIN,
+  5361:     )
+  5362: 
+  5363:     is_accounting_user = role_raw == ROLE_ACCOUNTING
+  5364:     is_technician_user = role_raw in (
+  5365:         ROLE_TECHNICIAN,
+    ...
+  5377:         flash("You don't have access to this Work Order.", "danger")
+  5378:         return redirect(url_for("inventory.wo_list"))
+  5379: 
+  5380:     can_confirm_any = role_raw == ROLE_SUPERADMIN
+  5381: 
+  5382:     can_view_docs = (
+  5383:             is_admin_like
+  5384:             or is_accounting_user
+  5385:             or is_my_wo
+    ...
+  5380:     can_confirm_any = role_raw == ROLE_SUPERADMIN
+  5381: 
+  5382:     can_view_docs = (
+  5383:             is_admin_like
+  5384:             or is_accounting_user
+  5385:             or is_my_wo
+  5386:             or is_user
+  5387:     )
+  5388: 
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_alerts
+LINES: 6034-6263
+DECORATOR: inventory_bp.get('/work_orders/alerts', endpoint='wo_alerts')
+DECORATOR: login_required
+AUTH / ROLE MATCHES: NONE
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_create
+LINES: 8081-8182
+DECORATOR: inventory_bp.post('/work_orders/new', endpoint='wo_create')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+  8081: def wo_create():
+  8082:     role = (getattr(current_user, "role", "") or "").strip().lower()
+  8083:     if role not in ("admin", "superadmin"):
+  8084:         flash("Access denied", "danger")
+  8085:         return redirect(url_for("inventory.wo_list"))
+  8086: 
+  8087:     f = request.form
+    ...
+  8081: def wo_create():
+  8082:     role = (getattr(current_user, "role", "") or "").strip().lower()
+  8083:     if role not in ("admin", "superadmin"):
+  8084:         flash("Access denied", "danger")
+  8085:         return redirect(url_for("inventory.wo_list"))
+  8086: 
+  8087:     f = request.form
+  8088: 
+  8089:     # NEW: prefer technician_id; fallback to technician_name
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_newx
+LINES: 8265-8305
+DECORATOR: inventory_bp.get('/work_orders/newx', endpoint='wo_newx')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+  8266:     from flask import session, render_template
+  8267:     recent_suppliers = session.get("recent_suppliers", [])
+  8268: 
+  8269:     role_low = (getattr(current_user, "role", "") or "").lower()
+  8270:     if role_low not in ("admin", "superadmin"):
+  8271:         flash("Access denied", "danger")
+  8272:         return redirect(url_for("inventory.wo_list"))
+  8273: 
+  8274:     if prefill_wo is not None:
+    ...
+  8268: 
+  8269:     role_low = (getattr(current_user, "role", "") or "").lower()
+  8270:     if role_low not in ("admin", "superadmin"):
+  8271:         flash("Access denied", "danger")
+  8272:         return redirect(url_for("inventory.wo_list"))
+  8273: 
+  8274:     if prefill_wo is not None:
+  8275:         wo = prefill_wo
+  8276:     else:
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_save
+LINES: 8309-9650
+DECORATOR: inventory_bp.post('/work_orders/save', endpoint='wo_save')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+  8431:         now = datetime.utcnow()
+  8432: 
+  8433:         actor_username = (getattr(current_user, "username", None) or "").strip()
+  8434:         actor_role = (getattr(current_user, "role", None) or "").strip()
+  8435: 
+  8436:         _debug_write(
+  8437:             f"ACTOR: "
+  8438:             f"id={actor_id!r} "
+  8439:             f"user={actor_username!r} "
+    ...
+  8509:         return set(_parse_jobs(getattr(wo_obj, "job_numbers", "") or ""))
+  8510: 
+  8511:     # ---------- access control ----------
+  8512:     role_low = (getattr(current_user, "role", "") or "").strip().lower()
+  8513:     if role_low not in ("admin", "superadmin"):
+  8514:         flash("Access denied", "danger")
+  8515:         return redirect(url_for("inventory.wo_list"))
+  8516: 
+  8517: 
+    ...
+  8511:     # ---------- access control ----------
+  8512:     role_low = (getattr(current_user, "role", "") or "").strip().lower()
+  8513:     if role_low not in ("admin", "superadmin"):
+  8514:         flash("Access denied", "danger")
+  8515:         return redirect(url_for("inventory.wo_list"))
+  8516: 
+  8517: 
+  8518:     f = request.form
+  8519: 
+    ...
+  9398:         if issued_qty < qty:
+  9399:             all_issued = False
+  9400: 
+  9401:     is_superadmin = ((getattr(current_user, "role", "") or "").strip().lower() == "superadmin")
+  9402:     before_status = ((before or {}).get("status") or "").strip()
+  9403:     submitted_status = (f.get("status") or "").strip()
+  9404: 
+  9405:     superadmin_changed_status = (
+  9406:             is_superadmin
+    ...
+  9403:     submitted_status = (f.get("status") or "").strip()
+  9404: 
+  9405:     superadmin_changed_status = (
+  9406:             is_superadmin
+  9407:             and not is_new
+  9408:             and submitted_status
+  9409:             and submitted_status != before_status
+  9410:     )
+  9411: 
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_list
+LINES: 9654-10039
+DECORATOR: inventory_bp.get('/work_orders')
+DECORATOR: login_required
+AUTH / ROLE MATCHES: NONE
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_issue_instock
+LINES: 10044-10996
+DECORATOR: inventory_bp.post('/work_orders/<int:wo_id>/issue_instock', endpoint='wo_issue_instock')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+ 10048:     # Module DENY always wins.
+ 10049:     # DEFAULT for the action preserves the old admin/superadmin rule.
+ 10050:     legacy_admin_allowed = (
+ 10051:         (getattr(current_user, "role", "") or "").strip().lower()
+ 10052:         in ("admin", "superadmin")
+ 10053:     )
+ 10054: 
+ 10055:     if not ErpAccessService.is_allowed(
+ 10056:         current_user,
+    ...
+ 10052:         in ("admin", "superadmin")
+ 10053:     )
+ 10054: 
+ 10055:     if not ErpAccessService.is_allowed(
+ 10056:         current_user,
+ 10057:         "erp.inventory.access",
+ 10058:         default_allowed=True,
+ 10059:     ):
+ 10060:         flash(
+    ...
+ 10058:         default_allowed=True,
+ 10059:     ):
+ 10060:         flash(
+ 10061:             "Access denied: Inventory access is disabled.",
+ 10062:             "danger",
+ 10063:         )
+ 10064:         return redirect(
+ 10065:             url_for(
+ 10066:                 "inventory.wo_detail",
+    ...
+ 10068:             )
+ 10069:         )
+ 10070: 
+ 10071:     if not ErpAccessService.is_allowed(
+ 10072:         current_user,
+ 10073:         "erp.inventory.issue",
+ 10074:         default_allowed=legacy_admin_allowed,
+ 10075:     ):
+ 10076:         flash(
+    ...
+ 10074:         default_allowed=legacy_admin_allowed,
+ 10075:     ):
+ 10076:         flash(
+ 10077:             "Access denied: Issue Parts permission is disabled.",
+ 10078:             "danger",
+ 10079:         )
+ 10080:         return redirect(
+ 10081:             url_for(
+ 10082:                 "inventory.wo_detail",
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_edit
+LINES: 12762-13054
+DECORATOR: inventory_bp.get('/work_orders/<int:wo_id>/edit', endpoint='wo_edit')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+ 12774:         Part,
+ 12775:     )
+ 12776: 
+ 12777:     role = (getattr(current_user, "role", "") or "").strip().lower()
+ 12778:     readonly_param = request.args.get("readonly", type=int) == 1
+ 12779:     readonly = (role not in ("admin", "superadmin")) or readonly_param
+ 12780: 
+ 12781:     if not readonly and role not in ("admin", "superadmin"):
+ 12782:         flash("Access denied", "danger")
+    ...
+ 12779:     readonly = (role not in ("admin", "superadmin")) or readonly_param
+ 12780: 
+ 12781:     if not readonly and role not in ("admin", "superadmin"):
+ 12782:         flash("Access denied", "danger")
+ 12783:         return redirect(url_for("inventory.wo_list"))
+ 12784: 
+ 12785:     # ==================================================
+ 12786:     # WORK ORDER EDIT LOCK
+ 12787:     # IMPORTANT:
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_edit_heartbeat
+LINES: 13061-13103
+DECORATOR: inventory_bp.post('/work_orders/<int:wo_id>/edit-heartbeat', endpoint='wo_edit_heartbeat')
+DECORATOR: login_required
+AUTH / ROLE MATCHES: NONE
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_edit_release
+LINES: 13110-13139
+DECORATOR: inventory_bp.post('/work_orders/<int:wo_id>/edit-release', endpoint='wo_edit_release')
+DECORATOR: login_required
+AUTH / ROLE MATCHES: NONE
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_delete
+LINES: 13143-13185
+DECORATOR: inventory_bp.post('/work_orders/<int:wo_id>/delete', endpoint='wo_delete')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+ 13143: def wo_delete(wo_id: int):
+ 13144:     if getattr(current_user, "role", "") != "superadmin":
+ 13145:         flash("Access denied", "danger")
+ 13146:         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+ 13147: 
+ 13148:     def table_exists(name: str) -> bool:
+ 13149:         try:
+    ...
+ 13143: def wo_delete(wo_id: int):
+ 13144:     if getattr(current_user, "role", "") != "superadmin":
+ 13145:         flash("Access denied", "danger")
+ 13146:         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+ 13147: 
+ 13148:     def table_exists(name: str) -> bool:
+ 13149:         try:
+ 13150:             row = db.session.execute(
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_issue_instock_unit
+LINES: 13311-13725
+DECORATOR: inventory_bp.post('/work_orders/<int:wo_id>/units/<int:unit_id>/issue_instock')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+ 13314:     # Module DENY always wins.
+ 13315:     # DEFAULT for the action preserves the old admin/superadmin rule.
+ 13316:     legacy_admin_allowed = (
+ 13317:         (getattr(current_user, "role", "") or "").strip().lower()
+ 13318:         in ("admin", "superadmin")
+ 13319:     )
+ 13320: 
+ 13321:     if not ErpAccessService.is_allowed(
+ 13322:         current_user,
+    ...
+ 13318:         in ("admin", "superadmin")
+ 13319:     )
+ 13320: 
+ 13321:     if not ErpAccessService.is_allowed(
+ 13322:         current_user,
+ 13323:         "erp.inventory.access",
+ 13324:         default_allowed=True,
+ 13325:     ):
+ 13326:         flash(
+    ...
+ 13324:         default_allowed=True,
+ 13325:     ):
+ 13326:         flash(
+ 13327:             "Access denied: Inventory access is disabled.",
+ 13328:             "danger",
+ 13329:         )
+ 13330:         return redirect(
+ 13331:             url_for(
+ 13332:                 "inventory.wo_detail",
+    ...
+ 13334:             )
+ 13335:         )
+ 13336: 
+ 13337:     if not ErpAccessService.is_allowed(
+ 13338:         current_user,
+ 13339:         "erp.inventory.issue",
+ 13340:         default_allowed=legacy_admin_allowed,
+ 13341:     ):
+ 13342:         flash(
+    ...
+ 13340:         default_allowed=legacy_admin_allowed,
+ 13341:     ):
+ 13342:         flash(
+ 13343:             "Access denied: Issue Parts permission is disabled.",
+ 13344:             "danger",
+ 13345:         )
+ 13346:         return redirect(
+ 13347:             url_for(
+ 13348:                 "inventory.wo_detail",
+    ...
+
+--------------------------------------------------------------------------------------------
+FUNCTION: wo_set_status
+LINES: 13729-13741
+DECORATOR: inventory_bp.post('/work_orders/<int:wo_id>/status')
+DECORATOR: login_required
+
+AUTH / ROLE MATCHES:
+ 13729: def wo_set_status(wo_id):
+ 13730:     if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+ 13731:         flash("Access denied", "danger")
+ 13732:         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+ 13733:     new_status = (request.form.get("status") or "").strip()
+ 13734:     if new_status not in ("search_ordered","ordered","done"):
+ 13735:         flash("Invalid status", "warning")
+    ...
+ 13729: def wo_set_status(wo_id):
+ 13730:     if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+ 13731:         flash("Access denied", "danger")
+ 13732:         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+ 13733:     new_status = (request.form.get("status") or "").strip()
+ 13734:     if new_status not in ("search_ordered","ordered","done"):
+ 13735:         flash("Invalid status", "warning")
+ 13736:         return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+    ...
+
+============================================================================================
+KEY FUNCTION PRESENCE
+============================================================================================
+OK   wo_list
+OK   wo_detail
+OK   wo_new
+OK   wo_edit
+OK   wo_save
+OK   wo_delete
+OK   wo_issue_instock
+OK   wo_issue_instock_unit
+
+============================================================================================
+WORK ORDER TEMPLATE AUDIT
+============================================================================================
+
+--------------------------------------------------------------------------------------------
+templates\base.html
+--------------------------------------------------------------------------------------------
+   290:                   true
+   291:               )
+   292:           %}
+   293: 
+   294:           {% set nav_can_part_create =
+   295:               nav_can_inventory
+   296:               and erp_access_allowed(
+   297:                   current_user,
+   298:                   'erp.inventory.part_create',
+   299:                   true
+   300:               )
+   301:           %}
+   302: 
+   303:           {% set nav_can_issue =
+   304:               nav_can_inventory
+   305:               and erp_access_allowed(
+   306:                   current_user,
+   307:                   'erp.inventory.issue',
+   308:                   true
+   309:               )
+   310:           %}
+   311: 
+   312:           {% if nav_can_inventory %}
+   313:           <li class="nav-item">
+    ...
+   327:                  href="{{ url_for('inventory.tools_list') }}">
+   328:                 TOOLS
+   329:               </a>
+   330:             </li>
+   331:           {% if nav_can_part_create %}
+   332:           <li class="nav-item">
+   333:             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.add_part' %} active{% endif %}"
+   334:                href="{{ url_for('inventory.add_part') }}">ADD PART</a>
+   335:           </li>
+   336:           {% endif %}
+   337:           {% if nav_can_issue %}
+   338:           <li class="nav-item">
+   339:             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.issue_part' %} active{% endif %}"
+   340:                href="{{ url_for('inventory.issue_part') }}">ISSUE PART</a>
+   341:           </li>
+   342:           {% endif %}
+   343: 
+   344:           {% set is_wo = request.endpoint and request.endpoint.startswith('inventory.wo_') %}
+   345:             <li class="nav-item">
+   346:               <a class="nav-link{{ ' active' if is_wo and request.endpoint != 'inventory.wo_alerts' else '' }}"
+   347:                  href="{{ url_for('inventory.wo_list') }}">WORK ORDERS</a>
+   348:             </li>
+   349: 
+   350:             <li class="nav-item">
+   351:               <a class="nav-link{% if request.endpoint == 'inventory.wo_alerts' %} active{% endif %}"
+   352:                  href="{{ url_for('inventory.wo_alerts') }}">
+   353:                 ALERTS
+    ...
+   407:                   <hr class="dropdown-divider">
+   408:                 </li>
+   409: 
+   410:                 <li>
+   411:                   <a class="dropdown-item fw-semibold{% if request.endpoint and request.endpoint.startswith('appliance.issue') %} active{% endif %}"
+   412:                      href="{{ url_for('appliance.issue_new') }}">
+   413:                     NEW APPLIANCE ISSUE
+   414:                   </a>
+   415:                 </li>
+   416: 
+   417:                 <li>
+   418:                   <a class="dropdown-item{% if request.endpoint in ['appliance.repair_orders_registry', 'appliance.repair_order_detail'] %} active{% endif %}"
+   419:                      href="{{ url_for('appliance.repair_orders_registry') }}">
+    ...
+   545:   </nav>
+   546: 
+   547:   <div class="tech-toolbar">
+   548:     <div class="tech-toolbar-inner container-fluid">
+   549:       <a class="btn-tech-nav" href="{{ url_for('inventory.wo_list') }}">Work Orders</a>
+   550:       <a class="btn-tech-nav" href="{{ url_for('inventory.change_password', user_id=current_user.id if current_user.is_authenticated else 0) }}">Change Password</a>
+   551:       <a class="btn-tech-nav" href="{{ url_for('auth.logout') }}">Logout</a>
+   552:     </div>
+   553:   </div>
+   554: 
+   555:   <main class="container main-wrapper">
+
+============================================================================================
+REGISTRY CHECK
+============================================================================================
+OK   erp.work_orders.access
+OK   erp.work_orders.create
+OK   erp.work_orders.edit
+OK   erp.work_orders.cancel
+OK   erp.work_orders.issue_parts
+
+============================================================================================
+AUDIT COMPLETE - NO FILES CHANGED
+============================================================================================

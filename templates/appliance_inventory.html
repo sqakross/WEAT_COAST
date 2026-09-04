@@ -762,6 +762,11 @@
         Receiving
       </a>
 
+      <a class="btn btn-outline-primary btn-sm"
+         href="{{ url_for('appliance.repair_orders_registry') }}">
+        REPAIR ORDERS
+      </a>
+
       <a href="{{ url_for('appliance.vendor_returns_queue') }}"
          class="
            btn btn-sm
@@ -1127,6 +1132,7 @@
 
               {% set issued = issue_info.get(unit.id) %}
               {% set history = issue_history.get(unit.id, []) %}
+              {% set repairs = repair_history.get(unit.id, []) %}
 
               <tr class="unit-row {% if unit.status == 'issued' %}issued-row{% endif %}"
                   onclick="window.location.href='{{ url_for('appliance.inventory_detail', unit_id=unit.id) }}'">
@@ -1350,77 +1356,172 @@
                 </td>
 
 
-                <!-- COMPLETE AIS HISTORY -->
+                <!-- COMPLETE APPLIANCE HISTORY -->
 
                 <td onclick="event.stopPropagation();">
 
-                  {% if history %}
-
-                    <details>
-
-                      <summary style="
-                          cursor:pointer;
-                          font-weight:700;
-                          color:#0d6efd;
-                          white-space:nowrap;
-                      ">
-                        {{ history|length }}
-                        AIS
-                      </summary>
-
-                      <div style="
-                          min-width:185px;
-                          padding:.35rem 0;
-                      ">
-
-                        {% for h in history %}
-
-                          <div style="
-                              display:flex;
-                              align-items:center;
-                              justify-content:space-between;
-                              gap:.6rem;
-                              margin-bottom:.2rem;
-                          ">
-
-                            <a href="{{ url_for(
-                                   'appliance.issue_detail',
-                                   issue_id=h.issue_id
-                               ) }}"
-                               class="issue-link">
-
-                              {{ h.issue_number }}
-
-                            </a>
+                  {% if history or repairs %}
 
 
-                            {% if h.line_status == 'issued' %}
+                    {% if history %}
 
-                              <span class="badge bg-primary">
-                                ISSUED
-                              </span>
+                      <details>
 
-                            {% elif h.line_status == 'returned' %}
+                        <summary style="
+                            cursor:pointer;
+                            font-weight:700;
+                            color:#0d6efd;
+                            white-space:nowrap;
+                        ">
+                          {{ history|length }}
+                          AIS
+                        </summary>
 
-                              <span class="badge bg-success">
-                                RETURNED
-                              </span>
+                        <div style="
+                            min-width:185px;
+                            padding:.35rem 0;
+                        ">
 
-                            {% else %}
+                          {% for h in history %}
 
-                              <span class="badge bg-secondary">
-                                {{ (h.line_status or '')|replace('_', ' ')|upper }}
-                              </span>
+                            <div style="
+                                display:flex;
+                                align-items:center;
+                                justify-content:space-between;
+                                gap:.6rem;
+                                margin-bottom:.2rem;
+                            ">
 
-                            {% endif %}
+                              <a href="{{ url_for(
+                                     'appliance.issue_detail',
+                                     issue_id=h.issue_id
+                                 ) }}"
+                                 class="issue-link">
 
-                          </div>
+                                {{ h.issue_number }}
 
-                        {% endfor %}
+                              </a>
 
-                      </div>
 
-                    </details>
+                              {% if h.line_status == 'issued' %}
+
+                                <span class="badge bg-primary">
+                                  ISSUED
+                                </span>
+
+                              {% elif h.line_status == 'returned' %}
+
+                                <span class="badge bg-success">
+                                  RETURNED
+                                </span>
+
+                              {% else %}
+
+                                <span class="badge bg-secondary">
+                                  {{ (h.line_status or '')|replace('_', ' ')|upper }}
+                                </span>
+
+                              {% endif %}
+
+                            </div>
+
+                          {% endfor %}
+
+                        </div>
+
+                      </details>
+
+                    {% endif %}
+
+
+                    {% if repairs %}
+
+                      <details>
+
+                        <summary style="
+                            cursor:pointer;
+                            font-weight:700;
+                            color:#b26a00;
+                            white-space:nowrap;
+                        ">
+                          {{ repairs|length }}
+                          REP
+                        </summary>
+
+                        <div style="
+                            min-width:185px;
+                            padding:.35rem 0;
+                        ">
+
+                          {% for repair in repairs %}
+
+                            <div style="
+                                display:flex;
+                                align-items:center;
+                                justify-content:space-between;
+                                gap:.6rem;
+                                margin-bottom:.2rem;
+                            ">
+
+                              <a href="{{ url_for(
+                                     'appliance.repair_order_detail',
+                                     repair_id=repair.repair_id
+                                 ) }}"
+                                 class="issue-link">
+
+                                {{ repair.repair_number }}
+
+                              </a>
+
+
+                              {% if repair.status == 'open' %}
+
+                                <span class="badge bg-warning text-dark">
+                                  OPEN
+                                </span>
+
+                              {% elif repair.status == 'completed' %}
+
+                                <span class="badge bg-success">
+                                  COMPLETED
+                                </span>
+
+                              {% elif repair.status == 'vendor_return' %}
+
+                                <span class="badge bg-dark">
+                                  VENDOR RETURN
+                                </span>
+
+                              {% elif repair.status == 'scrapped' %}
+
+                                <span class="badge bg-danger">
+                                  SCRAPPED
+                                </span>
+
+                              {% elif repair.status == 'cancelled' %}
+
+                                <span class="badge bg-secondary">
+                                  CANCELLED
+                                </span>
+
+                              {% else %}
+
+                                <span class="badge bg-secondary">
+                                  {{ (repair.status or '')|replace('_', ' ')|upper }}
+                                </span>
+
+                              {% endif %}
+
+                            </div>
+
+                          {% endfor %}
+
+                        </div>
+
+                      </details>
+
+                    {% endif %}
+
 
                   {% else %}
 

@@ -315,13 +315,10 @@
                href="{{ url_for('inventory.location_report') }}">INVENTORY</a>
           </li>
           {% endif %}
-          {# ERP ACCESS PATCH 04B STEP 3A - DASHBOARD NAV #}
-          {% if nav_can_inventory %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.dashboard' %} active{% endif %}"
                href="{{ url_for('inventory.dashboard') }}">DASHBOARD</a>
           </li>
-          {% endif %}
           <li class="nav-item">
               <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.tools') %} active{% endif %}"
                  href="{{ url_for('inventory.tools_list') }}">

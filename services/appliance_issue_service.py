@@ -11,6 +11,7 @@ from models import (
     ApplianceIssue,
     ApplianceIssueLine,
     ApplianceMovement,
+    ApplianceRepairOrder,
     ApplianceUnit,
     User,
     Warehouse,
@@ -235,6 +236,37 @@ class ApplianceIssueService:
         )
 
         return f"AIS-{int(max_id) + 1:06d}"
+
+
+    @staticmethod
+    def _next_repair_number() -> str:
+        """
+        Human-readable internal WCCR Repair Order number.
+
+        Example:
+            REP-000001
+            REP-000002
+
+        The database UNIQUE constraint remains the final
+        protection against accidental duplicate numbers.
+
+        The current application uses the same single-writer
+        numbering approach already established for Issue
+        documents.
+        """
+
+        max_id = (
+            db.session.query(
+                func.coalesce(
+                    func.max(ApplianceRepairOrder.id),
+                    0,
+                )
+            )
+            .scalar()
+            or 0
+        )
+
+        return f"REP-{int(max_id) + 1:06d}"
 
 
     # =========================================================
@@ -3044,6 +3076,214 @@ class ApplianceIssueService:
                 reason_final,
         }
 
+        # ----------------------------------------------------
+        # SEND_TO_REPAIR custody metadata.
+        #
+        # A physical appliance must not enter REPAIR without
+        # recording who / what repair provider has custody.
+        #
+        # Validate here in the service, not only in the UI,
+        # so future/direct callers cannot bypass the rule.
+        # This block runs before the inventory UPDATE.
+        # ----------------------------------------------------
+
+        repair_number = None
+        repair_type = None
+        repair_vendor = None
+        repair_technician_id = None
+        repair_technician_username = None
+        repair_reference = None
+
+        if action_clean == "SEND_TO_REPAIR":
+
+            if extra_movement_meta is None:
+                extra_movement_meta = {}
+
+            if not isinstance(
+                extra_movement_meta,
+                dict,
+            ):
+                raise ApplianceIssueError(
+                    "Invalid movement metadata."
+                )
+
+            repair_type = str(
+                extra_movement_meta.get(
+                    "repair_type"
+                )
+                or ""
+            ).strip().lower()
+
+            repair_vendor = str(
+                extra_movement_meta.get(
+                    "repair_vendor"
+                )
+                or ""
+            ).strip()
+
+            repair_technician_raw = str(
+                extra_movement_meta.get(
+                    "repair_technician_id"
+                )
+                or ""
+            ).strip()
+
+            repair_reference = str(
+                extra_movement_meta.get(
+                    "repair_reference"
+                )
+                or ""
+            ).strip()
+
+            if repair_type not in (
+                "vendor",
+                "internal",
+            ):
+                raise ApplianceIssueError(
+                    "Repair Performed By must be "
+                    "Vendor or Internal Technician."
+                )
+
+            if len(repair_vendor) > 160:
+                raise ApplianceIssueError(
+                    "Repair Vendor is too long "
+                    "(maximum 160 characters)."
+                )
+
+            if len(repair_reference) > 120:
+                raise ApplianceIssueError(
+                    "Repair Ref / Ticket is too long "
+                    "(maximum 120 characters)."
+                )
+
+            if repair_type == "vendor":
+
+                if not repair_vendor:
+                    raise ApplianceIssueError(
+                        "Repair Vendor is required."
+                    )
+
+                if repair_technician_raw:
+                    raise ApplianceIssueError(
+                        "Vendor repair cannot also have "
+                        "an Internal Technician."
+                    )
+
+                repair_technician_id = None
+                repair_technician_username = None
+
+            else:
+
+                if repair_vendor:
+                    raise ApplianceIssueError(
+                        "Internal repair cannot also have "
+                        "a Repair Vendor."
+                    )
+
+                if not repair_technician_raw:
+                    raise ApplianceIssueError(
+                        "Internal Technician is required."
+                    )
+
+                try:
+                    repair_technician_id = int(
+                        repair_technician_raw
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    raise ApplianceIssueError(
+                        "Invalid Internal Technician."
+                    )
+
+                repair_technician = db.session.get(
+                    User,
+                    repair_technician_id,
+                )
+
+                if repair_technician is None:
+                    raise ApplianceIssueError(
+                        "Internal Technician was not found."
+                    )
+
+                technician_role = (
+                    getattr(
+                        repair_technician,
+                        "role",
+                        "",
+                    )
+                    or ""
+                ).strip().lower()
+
+                if technician_role != "technician":
+                    raise ApplianceIssueError(
+                        "Selected user is not a technician."
+                    )
+
+                repair_technician_username = (
+                    getattr(
+                        repair_technician,
+                        "username",
+                        "",
+                    )
+                    or ""
+                ).strip()
+
+                if not repair_technician_username:
+                    raise ApplianceIssueError(
+                        "Internal Technician has no username."
+                    )
+
+                repair_vendor = None
+
+            # Never mutate caller-owned metadata.
+            extra_movement_meta = dict(
+                extra_movement_meta
+            )
+
+            # Remove raw UI values first, then write only
+            # normalized immutable repair metadata.
+            extra_movement_meta.pop(
+                "repair_vendor",
+                None,
+            )
+
+            extra_movement_meta.pop(
+                "repair_technician_id",
+                None,
+            )
+
+            extra_movement_meta["repair_type"] = (
+                repair_type
+            )
+
+            extra_movement_meta["repair_vendor"] = (
+                repair_vendor
+            )
+
+            extra_movement_meta[
+                "repair_technician_id"
+            ] = repair_technician_id
+
+            extra_movement_meta[
+                "repair_technician_username"
+            ] = repair_technician_username
+
+            extra_movement_meta[
+                "repair_reference"
+            ] = repair_reference
+
+            # Internal WCCR Repair Order number.
+            repair_number = (
+                ApplianceIssueService
+                ._next_repair_number()
+            )
+
+            extra_movement_meta[
+                "repair_number"
+            ] = repair_number
+
         if extra_movement_meta is not None:
 
             if not isinstance(
@@ -3073,6 +3313,136 @@ class ApplianceIssueService:
 
             movement_meta.update(
                 extra_movement_meta
+            )
+
+        # ----------------------------------------------------
+        # Repair Order lifecycle closure.
+        #
+        # Any action that moves an appliance OUT of REPAIR
+        # must close exactly one existing OPEN Repair Order.
+        #
+        # Resolve and validate this BEFORE the physical
+        # ApplianceUnit UPDATE so broken repair history can
+        # never leave inventory partially changed.
+        # ----------------------------------------------------
+
+        repair_order_to_close = None
+        repair_close_status = None
+        repair_close_outcome = None
+
+        repair_close_rules = {
+            "RETURN_FROM_REPAIR_TO_NEW": {
+                "status": "completed",
+                "outcome": "returned_to_new",
+            },
+
+            "RETURN_FROM_REPAIR_TO_LOANER": {
+                "status": "completed",
+                "outcome": "returned_to_loaner",
+            },
+
+            "REPAIR_TO_VENDOR_RETURN": {
+                "status": "vendor_return",
+                "outcome": "vendor_return",
+            },
+
+            "REPAIR_TO_SCRAP": {
+                "status": "scrapped",
+                "outcome": "scrapped",
+            },
+        }
+
+        repair_close_rule = repair_close_rules.get(
+            action_clean
+        )
+
+        if repair_close_rule is not None:
+
+            open_repair_orders = (
+                ApplianceRepairOrder.query
+                .filter(
+                    ApplianceRepairOrder.appliance_unit_id
+                    == unit.id,
+
+                    ApplianceRepairOrder.status
+                    == "open",
+                )
+                .order_by(
+                    ApplianceRepairOrder.id.asc()
+                )
+                .all()
+            )
+
+            if len(open_repair_orders) == 0:
+                raise ApplianceIssueError(
+                    f"{unit.inventory_number} is in REPAIR "
+                    "but has no OPEN Repair Order."
+                )
+
+            if len(open_repair_orders) > 1:
+                repair_numbers = ", ".join(
+                    str(order.repair_number)
+                    for order in open_repair_orders
+                )
+
+                raise ApplianceIssueError(
+                    f"{unit.inventory_number} has multiple "
+                    f"OPEN Repair Orders: {repair_numbers}. "
+                    "Repair history must be corrected first."
+                )
+
+            repair_order_to_close = (
+                open_repair_orders[0]
+            )
+
+            if (
+                repair_order_to_close.warehouse_id
+                != warehouse.id
+            ):
+                raise ApplianceIssueError(
+                    f"{unit.inventory_number} Repair Order "
+                    "warehouse does not match the appliance "
+                    "warehouse."
+                )
+
+            repair_close_status = (
+                repair_close_rule["status"]
+            )
+
+            repair_close_outcome = (
+                repair_close_rule["outcome"]
+            )
+
+            # These are service-owned audit fields for repair
+            # outcome movements. A caller may not supply them.
+            repair_audit_conflicts = [
+                key
+                for key in (
+                    "repair_number",
+                    "repair_order_id",
+                )
+                if key in movement_meta
+            ]
+
+            if repair_audit_conflicts:
+                raise ApplianceIssueError(
+                    "Movement metadata cannot overwrite "
+                    "repair audit fields: "
+                    + ", ".join(
+                        repair_audit_conflicts
+                    )
+                )
+
+            movement_meta["repair_number"] = (
+                repair_order_to_close.repair_number
+            )
+
+            movement_meta["repair_order_id"] = (
+                repair_order_to_close.id
+            )
+
+            movement_meta["repair_outcome"] = (
+                repair_close_outcome
             )
 
         try:
@@ -3161,6 +3531,89 @@ class ApplianceIssueService:
                     f"{unit.inventory_number} was changed "
                     "by another user. Refresh and try again."
                 )
+
+            # ------------------------------------------------
+            # First-class Repair Order.
+            #
+            # Transitional compatibility:
+            # the current UI still supplies one text field
+            # named repair_provider. Until the UI selector is
+            # upgraded, that legacy field represents an
+            # external vendor.
+            #
+            # The Repair Order, ApplianceUnit update and
+            # ApplianceMovement all remain in ONE transaction.
+            # ------------------------------------------------
+
+            if action_clean == "SEND_TO_REPAIR":
+
+                if not repair_number:
+                    raise ApplianceIssueError(
+                        "Internal Repair Order number "
+                        "was not generated."
+                    )
+
+                repair_order = ApplianceRepairOrder(
+                    repair_number=repair_number,
+
+                    appliance_unit_id=unit.id,
+                    warehouse_id=warehouse.id,
+
+                    repair_type=repair_type,
+                    repair_vendor=repair_vendor,
+                    repair_technician_id=(
+                        repair_technician_id
+                    ),
+
+                    provider_reference=(
+                        repair_reference
+                        or None
+                    ),
+
+                    status="open",
+
+                    reason_code=reason_final,
+                    notes=notes_clean,
+
+                    sent_at=now,
+                    sent_by_id=actor.id,
+
+                    completed_at=None,
+                    completed_by_id=None,
+                    outcome=None,
+
+                    created_at=now,
+                    updated_at=now,
+                )
+
+                db.session.add(
+                    repair_order
+                )
+
+            # ------------------------------------------------
+            # Close the SAME Repair Order that was validated
+            # before the ApplianceUnit UPDATE.
+            #
+            # This remains inside the same database
+            # transaction as ApplianceUnit + Movement.
+            # ------------------------------------------------
+
+            if repair_order_to_close is not None:
+
+                repair_order_to_close.status = (
+                    repair_close_status
+                )
+
+                repair_order_to_close.outcome = (
+                    repair_close_outcome
+                )
+
+                repair_order_to_close.completed_at = now
+                repair_order_to_close.completed_by_id = (
+                    actor.id
+                )
+
+                repair_order_to_close.updated_at = now
 
             movement = ApplianceMovement(
                 appliance_unit_id=unit.id,

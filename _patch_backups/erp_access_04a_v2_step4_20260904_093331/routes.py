@@ -10043,46 +10043,9 @@ def wo_list():
 @login_required
 def wo_issue_instock(wo_id):
     # Ð´Ð¾ÑÑ‚ÑƒÐ¿
-    # ERP ACCESS PATCH 04A-v2 STEP 4 - WO INVENTORY ISSUE
-    # This endpoint mutates Inventory from inside a Work Order.
-    # Module DENY always wins.
-    # DEFAULT for the action preserves the old admin/superadmin rule.
-    legacy_admin_allowed = (
-        (getattr(current_user, "role", "") or "").strip().lower()
-        in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Inventory access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        flash(
-            "Access denied: Issue Parts permission is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     import re
     from urllib.parse import urlencode
@@ -13309,46 +13272,9 @@ def api_part_lookup():
 @inventory_bp.post("/work_orders/<int:wo_id>/units/<int:unit_id>/issue_instock")
 @login_required
 def wo_issue_instock_unit(wo_id, unit_id):
-    # ERP ACCESS PATCH 04A-v2 STEP 4 - WO UNIT INVENTORY ISSUE
-    # This endpoint mutates Inventory from inside a Work Order unit.
-    # Module DENY always wins.
-    # DEFAULT for the action preserves the old admin/superadmin rule.
-    legacy_admin_allowed = (
-        (getattr(current_user, "role", "") or "").strip().lower()
-        in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Inventory access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        flash(
-            "Access denied: Issue Parts permission is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     from datetime import datetime, timedelta
     from sqlalchemy import and_, func

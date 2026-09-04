@@ -589,13 +589,6 @@ def _clear_dedup_keys_for_batch(batch_id: int, supplier: str | None = None, invo
 
     return int(deleted or 0)
 
-
-# ============================================================
-# ERP ACCESS - GLOBAL SERVICE IMPORT
-# Required by ERP route authorization guards.
-# ============================================================
-from services.erp_access_service import ErpAccessService
-
 @inventory_bp.get("/parts/model-research", endpoint="model_research")
 @login_required
 def model_research():
@@ -10043,46 +10036,9 @@ def wo_list():
 @login_required
 def wo_issue_instock(wo_id):
     # Ð´Ð¾ÑÑ‚ÑƒÐ¿
-    # ERP ACCESS PATCH 04A-v2 STEP 4 - WO INVENTORY ISSUE
-    # This endpoint mutates Inventory from inside a Work Order.
-    # Module DENY always wins.
-    # DEFAULT for the action preserves the old admin/superadmin rule.
-    legacy_admin_allowed = (
-        (getattr(current_user, "role", "") or "").strip().lower()
-        in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Inventory access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        flash(
-            "Access denied: Issue Parts permission is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     import re
     from urllib.parse import urlencode
@@ -13224,19 +13180,6 @@ def api_part_lookup():
     from sqlalchemy import func
     from extensions import db
     from models import Part
-    # ERP ACCESS PATCH 04A-V2 STEP 1 - INVENTORY MODULE ACCESS
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        return jsonify(
-            {
-                "found": False,
-                "error": "Access denied: Inventory access is disabled.",
-            }
-        ), 403
-
 
     pn = (request.args.get("pn") or "").strip().upper()
     if not pn:
@@ -13309,46 +13252,9 @@ def api_part_lookup():
 @inventory_bp.post("/work_orders/<int:wo_id>/units/<int:unit_id>/issue_instock")
 @login_required
 def wo_issue_instock_unit(wo_id, unit_id):
-    # ERP ACCESS PATCH 04A-v2 STEP 4 - WO UNIT INVENTORY ISSUE
-    # This endpoint mutates Inventory from inside a Work Order unit.
-    # Module DENY always wins.
-    # DEFAULT for the action preserves the old admin/superadmin rule.
-    legacy_admin_allowed = (
-        (getattr(current_user, "role", "") or "").strip().lower()
-        in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Inventory access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        flash(
-            "Access denied: Issue Parts permission is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.wo_detail",
-                wo_id=wo_id,
-            )
-        )
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
 
     from datetime import datetime, timedelta
     from sqlalchemy import and_, func
@@ -13746,40 +13652,8 @@ def wo_set_status(wo_id):
 @login_required
 def issue_batch():
     # ðŸ” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ admin/superadmin
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).lower()
-
-    legacy_admin_allowed = (
-        role_low in ("admin", "superadmin")
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Access denied: Inventory access is disabled.",
-            }
-        ), 403
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=legacy_admin_allowed,
-    ):
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Access denied: Issue Parts permission is disabled.",
-            }
-        ), 403
-
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        return jsonify({"ok": False, "error": "Access denied"}), 403
     try:
         payload = request.get_json(force=True, silent=False) or {}
         issued_to = (payload.get("issued_to") or "").strip()
@@ -13842,60 +13716,12 @@ def issue_line(part_id):
       - redirect Ð½Ð° /reports_grouped Ð´Ð»Ñ Ñ„Ð¾Ñ€Ð¼
     """
     # ðŸ” Ð Ð°Ð·Ñ€ÐµÑˆÐ°ÐµÐ¼ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ admin / superadmin
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).lower()
-
-    legacy_admin_allowed = (
-        role_low in ("admin", "superadmin")
-    )
-
-    inventory_access_allowed = (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.inventory.access",
-            default_allowed=True,
-        )
-    )
-
-    issue_allowed = (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.inventory.issue",
-            default_allowed=legacy_admin_allowed,
-        )
-    )
-
-    if not inventory_access_allowed or not issue_allowed:
-
-        if not inventory_access_allowed:
-            error_message = (
-                "Access denied: Inventory access is disabled."
-            )
-        else:
-            error_message = (
-                "Access denied: Issue Parts permission is disabled."
-            )
-
+    if getattr(current_user, "role", "") not in ("admin", "superadmin"):
+        # Ð”Ð»Ñ JSON-Ð·Ð°Ð¿Ñ€Ð¾ÑÐ¾Ð² â€” JSON, Ð´Ð»Ñ Ñ„Ð¾Ñ€Ð¼ â€” flash + Ñ€ÐµÐ´Ð¸Ñ€ÐµÐºÑ‚
         if request.is_json:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": error_message,
-                }
-            ), 403
-
-        flash(
-            error_message,
-            "danger",
-        )
-
-        return redirect(
-            url_for("inventory.dashboard")
-        )
-
+            return jsonify({"ok": False, "error": "Access denied"}), 403
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.dashboard"))
 
     try:
         # Ð£Ð½Ð¸Ð²ÐµÑ€ÑÐ°Ð»ÑŒÐ½Ð¾ Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼ Ð´Ð°Ð½Ð½Ñ‹Ðµ (JSON Ð¸Ð»Ð¸ Ñ„Ð¾Ñ€Ð¼Ð°)
@@ -14059,17 +13885,6 @@ def dashboard():
 @inventory_bp.route('/dashboard/location_report', methods=['GET'], endpoint='location_report')
 @login_required
 def location_report():
-    # ERP ACCESS PATCH 04A-V2 STEP 1 - INVENTORY MODULE ACCESS
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
     current_location_raw = (request.args.get('loc') or '').strip()
     norm = current_location_raw.lower()
 
@@ -14143,17 +13958,6 @@ def location_report():
 @inventory_bp.route('/dashboard/location_report/print')
 @login_required
 def print_location_report():
-    # ERP ACCESS PATCH 04A-V2 STEP 1 - INVENTORY MODULE ACCESS
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
     parts = Part.query.filter(Part.quantity > 0).all()
 
     locations = defaultdict(lambda: {
@@ -14277,27 +14081,6 @@ def print_inventory_summary():
 @inventory_bp.route('/add', methods=['GET', 'POST'])
 @login_required
 def add_part():
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_create",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Add Part permission is disabled.",
-        )
-
     if request.method == 'POST':
         part_number = request.form['part_number'].strip().upper()
         name = request.form['name'].strip().upper()
@@ -14342,27 +14125,6 @@ def issue_part():
 
     # âœ… lot costing helpers
     from services.lot_costing import pick_receipt_line_for_issue, receipt_line_cost
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Issue Parts permission is disabled.",
-        )
-
 
     # ---------- helper: touch Work Order updated_by/updated_at ----------
     def _invoice_available_qty_for_part(pn: str, inv_ref: str) -> tuple[int, int, int]:
@@ -14689,27 +14451,6 @@ def issue_part():
 def issue_ui():
     from flask_login import current_user
     from models import Part
-    # ERP ACCESS PATCH 04A-V2 STEP 3 - INVENTORY ISSUE
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.issue",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Issue Parts permission is disabled.",
-        )
-
 
     parts = Part.query.order_by(Part.part_number).limit(50).all()
     technician_name = getattr(current_user, "username", "TECH")
@@ -17601,31 +17342,9 @@ def clear_issued_records():
 @inventory_bp.route('/update_part/<int:part_id>', methods=['POST'])
 @login_required
 def update_part_field(part_id):
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    legacy_superadmin_allowed = (
-        (getattr(current_user, "role", "") or "").lower()
-        == "superadmin"
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_edit",
-        default_allowed=legacy_superadmin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Edit Part permission is disabled.",
-        )
+    if current_user.role != 'superadmin':
+        flash("Access denied", "danger")
+        return redirect(url_for('inventory.dashboard'))
 
     part = Part.query.get_or_404(part_id)
 
@@ -17653,31 +17372,9 @@ def update_part_field(part_id):
 @inventory_bp.route('/delete/<int:part_id>', methods=['POST'])
 @login_required
 def delete_part(part_id):
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    legacy_superadmin_allowed = (
-        (getattr(current_user, "role", "") or "").lower()
-        == "superadmin"
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_delete",
-        default_allowed=legacy_superadmin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Delete Part permission is disabled.",
-        )
+    if current_user.role != 'superadmin':
+        flash('Only Superadmin can delete parts.', 'danger')
+        return redirect(url_for('inventory.dashboard'))
 
     part = Part.query.get_or_404(part_id)
 
@@ -17712,31 +17409,9 @@ def delete_part(part_id):
 @inventory_bp.route('/edit/<int:part_id>', methods=['GET', 'POST'])
 @login_required
 def edit_part(part_id):
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    legacy_superadmin_allowed = (
-        (getattr(current_user, "role", "") or "").lower()
-        == "superadmin"
-    )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_edit",
-        default_allowed=legacy_superadmin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Edit Part permission is disabled.",
-        )
+    if current_user.role != 'superadmin':
+        flash("Access denied", "danger")
+        return redirect(url_for('inventory.dashboard'))
 
     part = Part.query.get_or_404(part_id)
 
@@ -19641,20 +19316,6 @@ def _already_returned_qty_for_source(src) -> int:
 @inventory_bp.get("/receiving/by-invoice/<path:inv>", endpoint="receiving_by_invoice")
 @login_required
 def receiving_by_invoice(inv):
-    # ERP ACCESS 03A - RECEIVING BY INVOICE
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Receiving access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for("inventory.dashboard")
-        )
-
     from flask import redirect, url_for, flash, request
     from sqlalchemy import func
     from extensions import db
@@ -19687,22 +19348,6 @@ def receiving_by_invoice(inv):
 @inventory_bp.get("/receiving", endpoint="receiving_list")
 @login_required
 def receiving_list():
-    # ERP ACCESS 03A - RECEIVING LIST
-    # DEFAULT preserves legacy behavior:
-    # any authenticated user may view Receiving.
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Receiving access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for("inventory.dashboard")
-        )
-
     import time
 
     from sqlalchemy import func, inspect as sa_inspect
@@ -20220,10 +19865,9 @@ def receiving_toggle(batch_id: int):
         or getattr(current_user, "is_superadmin", False)
         or getattr(current_user, "is_super_admin", False)
     )
-    # ERP ACCESS 03A - RECEIVING TOGGLE
-    # Authorization is evaluated after we know whether this
-    # request is POST or UNPOST. Existing business guards below
-    # remain unchanged.
+    if not is_adminish:
+        flash("Access denied. Admin only.", "danger")
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
     batch = db.session.get(ReceivingBatch, batch_id)
     if not batch:
@@ -20232,39 +19876,6 @@ def receiving_toggle(batch_id: int):
 
     status_now = (getattr(batch, "status", "") or "").strip().lower()
     was_posted_at = getattr(batch, "posted_at", None)
-
-    receiving_action_permission = (
-        "erp.receiving.unpost"
-        if status_now == "posted"
-        else "erp.receiving.post"
-    )
-
-    receiving_module_allowed = ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    )
-
-    receiving_action_allowed = ErpAccessService.is_allowed(
-        current_user,
-        receiving_action_permission,
-        default_allowed=is_adminish,
-    )
-
-    if not (
-        receiving_module_allowed
-        and receiving_action_allowed
-    ):
-        flash(
-            "Access denied for this Receiving operation.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.receiving_detail",
-                batch_id=batch_id,
-            )
-        )
 
     # =========================================================
     # CASE 1: ÑÐµÐ¹Ñ‡Ð°Ñ Ð½Ðµ POSTED -> Ñ…Ð¾Ñ‚Ð¸Ð¼ POST (Ð¿Ñ€Ð¸Ñ…Ð¾Ð´ Ð½Ð° ÑÐºÐ»Ð°Ð´)
@@ -20369,30 +19980,10 @@ def receiving_new():
 
     role = (getattr(current_user, "role", "") or "").lower()
 
-    # ERP ACCESS 03A - RECEIVING NEW
-    legacy_create_allowed = (
-        role in ("admin", "superadmin")
-    )
-
-    if not (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.access",
-            default_allowed=True,
-        )
-        and ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.create",
-            default_allowed=legacy_create_allowed,
-        )
-    ):
-        flash(
-            "Access denied: you cannot create Receiving batches.",
-            "danger",
-        )
-        return redirect(
-            url_for("inventory.receiving_list")
-        )
+    # Ð Ð°Ð·Ñ€ÐµÑˆÐ°ÐµÐ¼ admin Ð¸ superadmin Ð·Ð°Ñ…Ð¾Ð´Ð¸Ñ‚ÑŒ Ð½Ð° ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ†Ñƒ ÑÐ¾Ð·Ð´Ð°Ð½Ð¸Ñ ÐÐžÐ’ÐžÐ“Ðž Ð±Ð°Ñ‚Ñ‡Ð°
+    if role not in ("admin", "superadmin"):
+        flash("Access denied. only admin or superadmin can create Receiving batch.", "danger")
+        return redirect(url_for("inventory.receiving_list"))
 
     # ÐÐ˜Ð§Ð•Ð“Ðž Ð½Ðµ Ñ„Ð»ÑÑˆÐ¸Ñ‚ÑŒ Ð¿Ñ€Ð¾ "only superadmin can edit Receiving"
     # Ð¿Ð¾Ñ‚Ð¾Ð¼Ñƒ Ñ‡Ñ‚Ð¾ ÑÑ‚Ð¾ Ð½Ðµ Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰ÐµÐ³Ð¾, ÑÑ‚Ð¾ ÐÐžÐ’Ð«Ð™ (batch=None)
@@ -20503,145 +20094,6 @@ def receiving_save():
     #         Ð¾Ð±Ñ‹Ñ‡Ð½Ñ‹Ðµ Ð°Ð´Ð¼Ð¸Ð½Ñ‹ Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð½Ðµ Ð¼Ð¾Ð³ÑƒÑ‚;
     #         superadmin Ð¼Ð¾Ð¶ÐµÑ‚ Ð¿Ñ€Ð°Ð²Ð¸Ñ‚ÑŒ Ð¢ÐžÐ›Ð¬ÐšÐž ÑˆÐ°Ð¿ÐºÑƒ (supplier, invoice, date, notes, currency)
     #         Ð±ÐµÐ· Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ ÑÑ‚Ñ€Ð¾Ðº.
-    # ========================================================
-    # ERP ACCESS 03A - RECEIVING SAVE
-    # ========================================================
-
-    legacy_role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).strip().lower()
-
-    legacy_adminish = (
-        legacy_role_low in ("admin", "superadmin")
-        or getattr(current_user, "is_admin", False)
-        or getattr(current_user, "is_superadmin", False)
-        or getattr(current_user, "is_super_admin", False)
-    )
-
-    legacy_super = (
-        legacy_role_low == "superadmin"
-        or getattr(current_user, "is_superadmin", False)
-        or getattr(current_user, "is_super_admin", False)
-    )
-
-    module_allowed = ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    )
-
-    access_batch = None
-    access_status = ""
-
-    if not is_new_batch:
-        try:
-            access_batch = db.session.get(
-                ReceivingBatch,
-                int(batch_id),
-            )
-        except Exception:
-            access_batch = None
-
-        if access_batch is not None:
-            access_status = (
-                getattr(
-                    access_batch,
-                    "status",
-                    "",
-                )
-                or ""
-            ).strip().lower()
-
-    if is_new_batch:
-        save_permission = (
-            "erp.receiving.create"
-        )
-        save_default = legacy_adminish
-
-    elif access_status == "posted":
-        save_permission = (
-            "erp.receiving.edit_posted"
-        )
-        save_default = legacy_super
-
-    else:
-        # Current registry intentionally treats editing a
-        # DRAFT Receiving as part of Create Receiving.
-        save_permission = (
-            "erp.receiving.create"
-        )
-        save_default = legacy_adminish
-
-    save_allowed = ErpAccessService.is_allowed(
-        current_user,
-        save_permission,
-        default_allowed=save_default,
-    )
-
-    if not (
-        module_allowed
-        and save_allowed
-    ):
-        flash(
-            "Access denied for this Receiving change.",
-            "danger",
-        )
-
-        if access_batch is not None:
-            return redirect(
-                url_for(
-                    "inventory.receiving_detail",
-                    batch_id=access_batch.id,
-                )
-            )
-
-        return redirect(
-            url_for("inventory.receiving_list")
-        )
-
-    # Legacy guards later in this function must recognize
-    # an explicit ERP ALLOW as authorized.
-    if is_new_batch and save_allowed:
-        user_is_adminish = True
-
-    if (
-        (not is_new_batch)
-        and access_status == "posted"
-        and save_allowed
-    ):
-        user_is_super = True
-
-    # Receive & Post Stock requires BOTH save/create permission
-    # and explicit POST permission.
-    if action == "post":
-        post_allowed = ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.post",
-            default_allowed=legacy_adminish,
-        )
-
-        if not (
-            module_allowed
-            and post_allowed
-        ):
-            flash(
-                "Access denied: you cannot Post Receiving.",
-                "danger",
-            )
-
-            if access_batch is not None:
-                return redirect(
-                    url_for(
-                        "inventory.receiving_detail",
-                        batch_id=access_batch.id,
-                    )
-                )
-
-            return redirect(
-                url_for("inventory.receiving_list")
-            )
-
     if is_new_batch:
         if not user_is_adminish:
             flash("Access denied. Only admin or superadmin can create receiving.", "danger")
@@ -20826,20 +20278,6 @@ def receiving_save():
 @inventory_bp.get("/receiving/<int:batch_id>", endpoint="receiving_detail")
 @login_required
 def receiving_detail(batch_id):
-    # ERP ACCESS 03A - RECEIVING DETAIL
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Receiving access is disabled.",
-            "danger",
-        )
-        return redirect(
-            url_for("inventory.dashboard")
-        )
-
     from models import ReceivingBatch, Part, IssuedPartRecord
     from sqlalchemy import func
     from flask import current_app
@@ -21104,42 +20542,6 @@ def receiving_detail(batch_id):
 @inventory_bp.post("/receiving/<int:batch_id>/post", endpoint="receiving_post")
 @login_required
 def receiving_post(batch_id):
-    # ERP ACCESS 03A - RECEIVING POST
-    role_low = (
-        getattr(current_user, "role", "")
-        or ""
-    ).strip().lower()
-
-    legacy_post_allowed = (
-        role_low in ("admin", "superadmin")
-        or getattr(current_user, "is_admin", False)
-        or getattr(current_user, "is_superadmin", False)
-        or getattr(current_user, "is_super_admin", False)
-    )
-
-    if not (
-        ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.access",
-            default_allowed=True,
-        )
-        and ErpAccessService.is_allowed(
-            current_user,
-            "erp.receiving.post",
-            default_allowed=legacy_post_allowed,
-        )
-    ):
-        flash(
-            "Access denied: you cannot Post Receiving.",
-            "danger",
-        )
-        return redirect(
-            url_for(
-                "inventory.receiving_detail",
-                batch_id=batch_id,
-            )
-        )
-
     from extensions import db
     from models import ReceivingBatch
 
@@ -21468,14 +20870,6 @@ def receiving_import_upload():
 @inventory_bp.get("/receiving/<int:batch_id>/attachment")
 @login_required
 def download_receiving_attachment(batch_id):
-    # ERP ACCESS 03A - RECEIVING ATTACHMENT
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        return ("Forbidden", 403)
-
     import os
     from flask import send_file, abort
     from models import GoodsReceipt
@@ -21498,27 +20892,6 @@ def add_part_batch_form():
     Scan / Add Multiple Parts UI.
     ÐŸÐ¾ÐºÐ°Ð·Ñ‹Ð²Ð°ÐµÐ¼ ÑÑ‚Ñ€Ð°Ð½Ð¸Ñ†Ñƒ Ñ Ð¿Ð¾Ð»ÐµÐ¼ ÑÐºÐ°Ð½ÐµÑ€Ð° Ð¸ Ñ‚Ð°Ð±Ð»Ð¸Ñ†ÐµÐ¹ batchItems (JS).
     """
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_create",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Add Part permission is disabled.",
-        )
-
     # Ð´Ð¾ÑÑ‚ÑƒÐ¿Ñ‹ Ð¼Ð¾Ð¶Ð½Ð¾ Ð¾Ð³Ñ€Ð°Ð½Ð¸Ñ‡Ð¸Ñ‚ÑŒ ÐµÑÐ»Ð¸ Ñ…Ð¾Ñ‡ÐµÑˆÑŒ:
     # if (current_user.role or '').lower() not in ('admin','superadmin'):
     #     flash("Access denied", "danger")
@@ -21529,59 +20902,10 @@ def add_part_batch_form():
 @inventory_bp.post("/add-batch", endpoint="add_part_batch")
 @login_required
 def add_part_batch():
-    # ERP ACCESS PATCH 04A-V2 STEP 2 - INVENTORY ACTION
     role_low = (getattr(current_user, "role", "") or "").lower()
-    legacy_admin_allowed = role_low in ("admin", "superadmin")
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Inventory access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.part_create",
-        default_allowed=legacy_admin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Add Part permission is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.access",
-        default_allowed=True,
-    ):
-        abort(
-            403,
-            description="Access denied: Receiving access is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.create",
-        default_allowed=legacy_admin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Receiving create permission is disabled.",
-        )
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.receiving.post",
-        default_allowed=legacy_admin_allowed,
-    ):
-        abort(
-            403,
-            description="Access denied: Receiving post permission is disabled.",
-        )
+    if role_low not in ("admin", "superadmin"):
+        flash("Access denied", "danger")
+        return redirect(url_for("inventory.dashboard"))
 
     # --- Ð½Ð°Ð´Ñ‘Ð¶Ð½Ð¾Ðµ Ñ‡Ñ‚ÐµÐ½Ð¸Ðµ payload ---
     payload_raw = (request.form.get("batch_payload") or "").strip()

@@ -1,0 +1,554 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="container py-3"
+     style="max-width: 980px;">
+
+  <!-- =====================================================
+       HEADER
+       ===================================================== -->
+
+  <div class="d-flex justify-content-between
+              align-items-start mb-3">
+
+    <div>
+
+      <div class="d-flex align-items-center gap-2">
+
+        <h3 class="mb-0">
+          {{ repair.repair_number }}
+        </h3>
+
+        {% if repair.status == 'open' %}
+          <span class="badge bg-warning text-dark">
+            OPEN
+          </span>
+
+        {% elif repair.status == 'completed' %}
+          <span class="badge bg-success">
+            COMPLETED
+          </span>
+
+        {% elif repair.status == 'vendor_return' %}
+          <span class="badge bg-primary">
+            VENDOR RETURN
+          </span>
+
+        {% elif repair.status == 'scrapped' %}
+          <span class="badge bg-danger">
+            SCRAPPED
+          </span>
+
+        {% elif repair.status == 'cancelled' %}
+          <span class="badge bg-secondary">
+            CANCELLED
+          </span>
+
+        {% else %}
+          <span class="badge bg-secondary">
+            {{ repair.status|upper }}
+          </span>
+        {% endif %}
+
+      </div>
+
+      <div class="text-muted small mt-1">
+        Appliance Repair Order
+      </div>
+
+    </div>
+
+    <div class="d-flex gap-2">
+
+      <a class="btn btn-outline-secondary btn-sm"
+         href="{{ url_for(
+             'appliance.repair_orders_registry'
+         ) }}">
+        ← Repair Orders
+      </a>
+
+      {% if repair.appliance_unit %}
+        <a class="btn btn-outline-primary btn-sm"
+           href="{{ url_for(
+               'appliance.inventory_detail',
+               unit_id=repair.appliance_unit.id
+           ) }}">
+          Appliance
+        </a>
+      {% endif %}
+
+    </div>
+
+  </div>
+
+
+  <!-- =====================================================
+       APPLIANCE
+       ===================================================== -->
+
+  <div class="card shadow-sm mb-3">
+
+    <div class="card-header fw-bold">
+      Appliance
+    </div>
+
+    <div class="card-body">
+
+      {% if repair.appliance_unit %}
+
+        <div class="row g-3">
+
+          <div class="col-md-3">
+            <div class="small text-muted">
+              AP #
+            </div>
+            <div class="fw-bold">
+              {{ repair.appliance_unit.inventory_number }}
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small text-muted">
+              Brand
+            </div>
+            <div>
+              {{ repair.appliance_unit.brand or '—' }}
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small text-muted">
+              Model
+            </div>
+            <div>
+              {{ repair.appliance_unit.model_number or '—' }}
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small text-muted">
+              Serial
+            </div>
+            <div>
+              {{ repair.appliance_unit.serial_number or '—' }}
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small text-muted">
+              Warehouse
+            </div>
+            <div>
+              {% if repair.warehouse %}
+                {{ repair.warehouse.code
+                   if repair.warehouse.code
+                   else repair.warehouse.name }}
+              {% else %}
+                —
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small text-muted">
+              Current AP Status
+            </div>
+            <div>
+              {{ repair.appliance_unit.status|upper }}
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small text-muted">
+              Stock Class
+            </div>
+            <div>
+              {{ repair.appliance_unit.stock_class|upper }}
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="small text-muted">
+              Condition
+            </div>
+            <div>
+              {{ repair.appliance_unit.condition|upper }}
+            </div>
+          </div>
+
+        </div>
+
+      {% else %}
+
+        <div class="text-muted">
+          Appliance record is unavailable.
+        </div>
+
+      {% endif %}
+
+    </div>
+  </div>
+
+
+  <!-- =====================================================
+       REPAIR INFORMATION
+       ===================================================== -->
+
+  <div class="card shadow-sm mb-3">
+
+    <div class="card-header fw-bold">
+      Repair
+    </div>
+
+    <div class="card-body">
+
+      <div class="row g-3">
+
+        <div class="col-md-4">
+
+          <div class="small text-muted">
+            Repair Performed By
+          </div>
+
+          <div class="fw-bold">
+
+            {% if repair.repair_type == 'vendor' %}
+              Vendor
+
+            {% elif repair.repair_type == 'internal' %}
+              Internal Technician
+
+            {% else %}
+              {{ repair.repair_type or '—' }}
+            {% endif %}
+
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          {% if repair.repair_type == 'vendor' %}
+
+            <div class="small text-muted">
+              Vendor
+            </div>
+
+            <div class="fw-bold">
+              {{ repair.repair_vendor or '—' }}
+            </div>
+
+          {% elif repair.repair_type == 'internal' %}
+
+            <div class="small text-muted">
+              Technician
+            </div>
+
+            <div class="fw-bold">
+              {% if repair.repair_technician %}
+                {{ repair.repair_technician.username }}
+              {% else %}
+                —
+              {% endif %}
+            </div>
+
+          {% else %}
+
+            <div class="small text-muted">
+              Repair Provider
+            </div>
+
+            <div>
+              —
+            </div>
+
+          {% endif %}
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="small text-muted">
+            Provider Reference
+          </div>
+
+          <div>
+            {{ repair.provider_reference or '—' }}
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="small text-muted">
+            Sent
+          </div>
+
+          <div>
+            {% if repair.sent_at_local %}
+              {{ repair.sent_at_local.strftime(
+                  '%m/%d/%Y %I:%M %p'
+              ) }}
+            {% else %}
+              —
+            {% endif %}
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="small text-muted">
+            Sent By
+          </div>
+
+          <div>
+            {% if repair.sent_by %}
+              {{ repair.sent_by.username }}
+            {% else %}
+              —
+            {% endif %}
+          </div>
+
+        </div>
+
+
+        <div class="col-md-4">
+
+          <div class="small text-muted">
+            Reason
+          </div>
+
+          <div>
+            {{ repair.reason_code or '—' }}
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <hr>
+
+
+      <div class="small text-muted mb-1">
+        Notes
+      </div>
+
+      <div style="white-space: pre-wrap;">{{ repair.notes or '—' }}</div>
+
+    </div>
+  </div>
+
+
+  <!-- =====================================================
+       COMPLETION / OUTCOME
+       READ ONLY FOR NOW
+       ===================================================== -->
+
+  <div class="card shadow-sm mb-3">
+
+    <div class="card-header fw-bold">
+      Repair Outcome
+    </div>
+
+    <div class="card-body">
+
+      {% if repair.status == 'open' %}
+
+        <!-- REPAIR ORDER LIFECYCLE ACTIONS -->
+
+        <div class="alert alert-warning py-2">
+          This Repair Order is still open.
+          Select the final repair outcome below.
+        </div>
+
+        <div class="row g-3">
+
+          <div class="col-md-6">
+
+            <form method="post"
+                  action="{{ url_for(
+                      'appliance.repair_order_action',
+                      repair_id=repair.id
+                  ) }}"
+                  onsubmit="return confirm(
+                      'Return appliance to NEW stock and close this Repair Order?'
+                  );">
+
+              <input type="hidden"
+                     name="action"
+                     value="RETURN_FROM_REPAIR_TO_NEW">
+
+              <button type="submit"
+                      class="btn btn-success w-100">
+                RETURN TO NEW STOCK
+              </button>
+
+            </form>
+
+          </div>
+
+
+          <div class="col-md-6">
+
+            <form method="post"
+                  action="{{ url_for(
+                      'appliance.repair_order_action',
+                      repair_id=repair.id
+                  ) }}"
+                  onsubmit="return confirm(
+                      'Move appliance to LOANER stock and close this Repair Order?'
+                  );">
+
+              <input type="hidden"
+                     name="action"
+                     value="RETURN_FROM_REPAIR_TO_LOANER">
+
+              <button type="submit"
+                      class="btn btn-outline-success w-100">
+                MOVE TO LOANER
+              </button>
+
+            </form>
+
+          </div>
+
+
+          <div class="col-md-6">
+
+            <form method="post"
+                  action="{{ url_for(
+                      'appliance.repair_order_action',
+                      repair_id=repair.id
+                  ) }}"
+                  onsubmit="return confirm(
+                      'Send appliance to Vendor Return and close this Repair Order?'
+                  );">
+
+              <input type="hidden"
+                     name="action"
+                     value="REPAIR_TO_VENDOR_RETURN">
+
+              <button type="submit"
+                      class="btn btn-outline-primary w-100">
+                SEND TO VENDOR RETURN
+              </button>
+
+            </form>
+
+          </div>
+
+
+          <div class="col-md-6">
+
+            <form method="post"
+                  action="{{ url_for(
+                      'appliance.repair_order_action',
+                      repair_id=repair.id
+                  ) }}"
+                  onsubmit="return confirm(
+                      'SCRAP this appliance and close this Repair Order?'
+                  );">
+
+              <input type="hidden"
+                     name="action"
+                     value="REPAIR_TO_SCRAP">
+
+              <button type="submit"
+                      class="btn btn-outline-danger w-100">
+                SCRAP
+              </button>
+
+            </form>
+
+          </div>
+
+        </div>
+
+      {% else %}
+
+        <div class="row g-3">
+
+          <div class="col-md-4">
+            <div class="small text-muted">
+              Status
+            </div>
+            <div class="fw-bold">
+              {{ repair.status|upper }}
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="small text-muted">
+              Outcome
+            </div>
+            <div>
+              {{ repair.outcome or '—' }}
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="small text-muted">
+              Completed
+            </div>
+            <div>
+              {% if repair.completed_at_local %}
+                {{ repair.completed_at_local.strftime(
+                    '%m/%d/%Y %I:%M %p'
+                ) }}
+              {% else %}
+                —
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="small text-muted">
+              Completed By
+            </div>
+            <div>
+              {% if repair.completed_by %}
+                {{ repair.completed_by.username }}
+              {% else %}
+                —
+              {% endif %}
+            </div>
+          </div>
+
+        </div>
+
+      {% endif %}
+
+    </div>
+  </div>
+
+
+  <div class="text-muted small">
+    Created:
+    {% if repair.created_at_local %}
+      {{ repair.created_at_local.strftime(
+          '%m/%d/%Y %I:%M %p'
+      ) }}
+    {% else %}
+      —
+    {% endif %}
+
+    · Updated:
+    {% if repair.updated_at_local %}
+      {{ repair.updated_at_local.strftime(
+          '%m/%d/%Y %I:%M %p'
+      ) }}
+    {% else %}
+      —
+    {% endif %}
+  </div>
+
+</div>
+
+{% endblock %}

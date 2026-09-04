@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="container-fluid py-3">
+
+  <div class="d-flex justify-content-between
+              align-items-start mb-3">
+
+    <div>
+      <h3 class="mb-1">
+        Appliance Repair Orders
+      </h3>
+
+      <div class="text-muted small">
+        Repair control center and history.
+      </div>
+    </div>
+
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('appliance.inventory_list') }}">
+      ← Inventory
+    </a>
+
+  </div>
+
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body py-3">
+
+      <form method="get"
+            action="{{ url_for('appliance.repair_orders_registry') }}"
+            class="row g-2 align-items-end">
+
+        <div class="col-md-6">
+          <label class="form-label small fw-bold">
+            Search
+          </label>
+
+          <input type="search"
+                 name="q"
+                 class="form-control form-control-sm"
+                 value="{{ q or '' }}"
+                 placeholder="REP # / Vendor / Provider Ref">
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label small fw-bold">
+            Status
+          </label>
+
+          <select name="status"
+                  class="form-select form-select-sm">
+
+            <option value="all"
+              {% if status == 'all' %}selected{% endif %}>
+              All
+            </option>
+
+            <option value="open"
+              {% if status == 'open' %}selected{% endif %}>
+              Open
+            </option>
+
+            <option value="completed"
+              {% if status == 'completed' %}selected{% endif %}>
+              Completed
+            </option>
+
+            <option value="vendor_return"
+              {% if status == 'vendor_return' %}selected{% endif %}>
+              Vendor Return
+            </option>
+
+            <option value="scrapped"
+              {% if status == 'scrapped' %}selected{% endif %}>
+              Scrapped
+            </option>
+
+            <option value="cancelled"
+              {% if status == 'cancelled' %}selected{% endif %}>
+              Cancelled
+            </option>
+
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <button type="submit"
+                  class="btn btn-primary btn-sm">
+            Apply
+          </button>
+
+          <a class="btn btn-outline-secondary btn-sm"
+             href="{{ url_for('appliance.repair_orders_registry') }}">
+            Reset
+          </a>
+        </div>
+
+      </form>
+
+    </div>
+  </div>
+
+
+  <div class="d-flex gap-2 mb-3">
+
+    <span class="badge bg-warning text-dark">
+      OPEN · {{ open_count }}
+    </span>
+
+    <span class="badge bg-secondary">
+      DISPLAYED · {{ repair_orders|length }}
+    </span>
+
+  </div>
+
+
+  <div class="card shadow-sm">
+
+    <div class="table-responsive">
+
+      <table class="table table-sm table-hover
+                    align-middle mb-0">
+
+        <thead class="table-light">
+
+          <tr>
+            <th>Repair Order</th>
+            <th>Appliance</th>
+            <th>Repair Performed By</th>
+            <th>Provider Ref</th>
+            <th>Sent</th>
+            <th>Status</th>
+            <th>Days</th>
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+        {% for repair in repair_orders %}
+
+          <tr>
+
+            <td>
+              <strong>
+                <a href="{{ url_for(
+                    'appliance.repair_order_detail',
+                    repair_id=repair.id
+                ) }}">
+                  {{ repair.repair_number }}
+                </a>
+              </strong>
+            </td>
+
+            <td>
+              {% if repair.appliance_unit %}
+
+                <a href="{{ url_for(
+                    'appliance.inventory_detail',
+                    unit_id=repair.appliance_unit.id
+                ) }}">
+                  {{ repair.appliance_unit.inventory_number }}
+                </a>
+
+                <div class="small text-muted">
+                  {{ repair.appliance_unit.brand or '' }}
+                  {{ repair.appliance_unit.model_number or '' }}
+                </div>
+
+              {% else %}
+                —
+              {% endif %}
+            </td>
+
+            <td>
+
+              {% if repair.repair_type == 'vendor' %}
+
+                <span class="badge bg-light text-dark border">
+                  Vendor
+                </span>
+
+                <div class="mt-1">
+                  {{ repair.repair_vendor or '—' }}
+                </div>
+
+              {% elif repair.repair_type == 'internal' %}
+
+                <span class="badge bg-info text-dark">
+                  Internal
+                </span>
+
+                <div class="mt-1">
+                  {% if repair.repair_technician %}
+                    {{ repair.repair_technician.username }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </div>
+
+              {% else %}
+
+                {{ repair.repair_type or '—' }}
+
+              {% endif %}
+
+            </td>
+
+            <td>
+              {{ repair.provider_reference or '—' }}
+            </td>
+
+            <td>
+              {% if repair.sent_at_local %}
+                {{ repair.sent_at_local.strftime(
+                    '%m/%d/%Y %I:%M %p'
+                ) }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+
+            <td>
+
+              {% if repair.status == 'open' %}
+                <span class="badge bg-warning text-dark">
+                  OPEN
+                </span>
+
+              {% elif repair.status == 'completed' %}
+                <span class="badge bg-success">
+                  COMPLETED
+                </span>
+
+              {% elif repair.status == 'vendor_return' %}
+                <span class="badge bg-primary">
+                  VENDOR RETURN
+                </span>
+
+              {% elif repair.status == 'scrapped' %}
+                <span class="badge bg-danger">
+                  SCRAPPED
+                </span>
+
+              {% elif repair.status == 'cancelled' %}
+                <span class="badge bg-secondary">
+                  CANCELLED
+                </span>
+
+              {% else %}
+                <span class="badge bg-secondary">
+                  {{ repair.status|upper }}
+                </span>
+              {% endif %}
+
+            </td>
+
+            <td>
+              {% if repair.days_in_repair is not none %}
+                {{ repair.days_in_repair }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+
+          </tr>
+
+        {% else %}
+
+          <tr>
+            <td colspan="7"
+                class="text-center text-muted py-4">
+              No Repair Orders found.
+            </td>
+          </tr>
+
+        {% endfor %}
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+
+</div>
+
+{% endblock %}

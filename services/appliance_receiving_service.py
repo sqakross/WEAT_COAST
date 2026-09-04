@@ -1637,6 +1637,36 @@ class ApplianceReceivingService:
                 )
 
             # ------------------------------------------------
+            # Repair Order history is always business history.
+            #
+            # Do not rely only on movement history here.
+            # ApplianceRepairOrder has its own direct FK to the
+            # physical ApplianceUnit and must independently block
+            # Emergency Purge.
+            # ------------------------------------------------
+
+            from models import ApplianceRepairOrder
+
+            repair_orders = (
+                ApplianceRepairOrder.query
+                .filter_by(
+                    appliance_unit_id=unit.id
+                )
+                .order_by(
+                    ApplianceRepairOrder.id.asc()
+                )
+                .all()
+            )
+
+            for repair_order in repair_orders:
+                unit_blockers.append(
+                    "Repair Order history exists: "
+                    f"{repair_order.repair_number} "
+                    f"(RepairOrder #{repair_order.id}, "
+                    f"status={repair_order.status!r})."
+                )
+
+            # ------------------------------------------------
             # Movements owned by this AP.
             # ------------------------------------------------
 

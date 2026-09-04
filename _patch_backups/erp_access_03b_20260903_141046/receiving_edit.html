@@ -3,55 +3,6 @@
 
 {# ----- статус батча + флаг супер-админа из контекста ----- #}
 {% set is_posted = batch and (batch.status or '')|lower == 'posted' %}
-
-{# ERP ACCESS PATCH 03B - RECEIVING UI #}
-{% set erp_recv_role = (current_user.role or '')|lower if current_user.is_authenticated else '' %}
-
-{% set erp_recv_legacy_admin = current_user.is_authenticated and (
-  erp_recv_role in ['admin', 'superadmin']
-  or (current_user.is_admin|default(false))
-  or (current_user.is_superadmin|default(false))
-  or (current_user.is_super_admin|default(false))
-) %}
-
-{% set erp_recv_legacy_super = current_user.is_authenticated and (
-  erp_recv_role == 'superadmin'
-  or (current_user.is_superadmin|default(false))
-  or (current_user.is_super_admin|default(false))
-) %}
-
-{% set erp_recv_access = current_user.is_authenticated and
-  erp_access_allowed(
-    current_user,
-    'erp.receiving.access',
-    true
-  )
-%}
-
-{% set erp_recv_create = erp_recv_access and
-  erp_access_allowed(
-    current_user,
-    'erp.receiving.create',
-    erp_recv_legacy_admin
-  )
-%}
-
-{% set erp_recv_post = erp_recv_access and
-  erp_access_allowed(
-    current_user,
-    'erp.receiving.post',
-    erp_recv_legacy_admin
-  )
-%}
-
-{% set erp_recv_edit_posted = erp_recv_access and
-  erp_access_allowed(
-    current_user,
-    'erp.receiving.edit_posted',
-    erp_recv_legacy_super
-  )
-%}
-
 {% set is_superadmin = IS_SUPERADMIN %}
 
 <div class="container-fluid py-4 d-flex justify-content-center">
@@ -110,7 +61,7 @@
                    class="form-control form-control-sm"
                    required
                    value="{{ batch.supplier_name if batch else '' }}"
-                   {% if is_posted and not erp_recv_edit_posted %}readonly{% endif %}>
+                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
           </div>
 
           <div class="col-md-4">
@@ -121,7 +72,7 @@
                    class="form-control form-control-sm"
                    required
                    value="{{ batch.invoice_number if batch else '' }}"
-                   {% if is_posted and not erp_recv_edit_posted %}readonly{% endif %}>
+                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
           </div>
 
           <div class="col-md-4">
@@ -134,7 +85,7 @@
                      max="{{ today }}"
                      value="{{ batch.invoice_date if batch else '' }}"
                      required
-                     {% if is_posted and not erp_recv_edit_posted %}readonly{% endif %}>
+                     {% if is_posted and not is_superadmin %}readonly{% endif %}>
             </div>
 
           <div class="col-md-2">
@@ -142,7 +93,7 @@
             <input name="currency"
                    class="form-control form-control-sm"
                    value="{{ batch.currency if batch else 'USD' }}"
-                   {% if is_posted and not erp_recv_edit_posted %}readonly{% endif %}>
+                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
           </div>
 
           <div class="col-md-5">
@@ -152,7 +103,7 @@
             <input name="notes"
                    class="form-control form-control-sm"
                    value="{{ batch.notes if batch else '' }}"
-                   {% if is_posted and not erp_recv_edit_posted %}readonly{% endif %}>
+                   {% if is_posted and not is_superadmin %}readonly{% endif %}>
           </div>
 
           <div class="col-md-5">
@@ -169,7 +120,7 @@
                    step="0.01"
                    class="form-control form-control-sm text-end"
                    value="{{ '%.2f' % (batch.extra_expenses or 0) if batch else '0.00' }}"
-                   {% if is_posted and not erp_recv_edit_posted %}readonly{% endif %}>
+                   {% if is_posted %}readonly{% endif %}>
           </div>
 
         </div>
@@ -356,29 +307,22 @@
         <div class="d-flex flex-wrap gap-2 mt-4">
 
           {% if not is_posted %}
+            <button class="btn btn-primary"
+                    type="submit"
+                    name="action"
+                    value="post"
+                    style="min-width:180px; font-weight:500;">
+              Receive &amp; Post Stock
+            </button>
 
-            {% if erp_recv_post %}
-              <button class="btn btn-primary"
-                      type="submit"
-                      name="action"
-                      value="post"
-                      style="min-width:180px; font-weight:500;">
-                Receive &amp; Post Stock
-              </button>
-            {% endif %}
-
-            {% if erp_recv_create %}
-              <button class="btn btn-outline-secondary"
-                      type="submit"
-                      name="action"
-                      value="draft"
-                      style="min-width:140px; font-weight:500;">
-                Save Draft (do not post)
-              </button>
-            {% endif %}
-
-          {% elif erp_recv_edit_posted %}
-
+            <button class="btn btn-outline-secondary"
+                    type="submit"
+                    name="action"
+                    value="draft"
+                    style="min-width:140px; font-weight:500;">
+              Save Draft (do not post)
+            </button>
+          {% else %}
             <button class="btn btn-outline-secondary"
                     type="submit"
                     name="action"
@@ -386,7 +330,6 @@
                     style="min-width:160px; font-weight:500;">
               Save Changes
             </button>
-
           {% endif %}
 
           <a class="btn btn-outline-secondary"

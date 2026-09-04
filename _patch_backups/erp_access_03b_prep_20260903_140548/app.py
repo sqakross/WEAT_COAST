@@ -376,33 +376,6 @@ def inject_role_flags():
         "IS_VIEWER": role == "viewer",
     }
 
-
-# -------------------------------------------------------------------
-# ERP ACCESS 03B PREP - JINJA HELPER
-# -------------------------------------------------------------------
-def erp_access_allowed(user, permission_code, default_allowed=False):
-    from services.erp_access_service import ErpAccessService
-
-    try:
-        is_authenticated = bool(
-            getattr(user, "is_authenticated", False)
-        )
-    except Exception:
-        is_authenticated = False
-
-    if not is_authenticated:
-        return False
-
-    return ErpAccessService.is_allowed(
-        user,
-        permission_code,
-        default_allowed=bool(default_allowed),
-    )
-
-
-app.jinja_env.globals["erp_access_allowed"] = erp_access_allowed
-
-
 # -------------------------------------------------------------------
 # 8) Blueprints
 # -------------------------------------------------------------------

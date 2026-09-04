@@ -2044,6 +2044,7 @@ def inventory_list():
             vendor_return_pending_count=0,
             issue_info={},
             issue_history={},
+            repair_history={},
         )
 
     # --------------------------------------------------------
@@ -2384,6 +2385,61 @@ def inventory_list():
                 }
 
     # --------------------------------------------------------
+    # Repair Order history for each visible physical appliance.
+    #
+    # RepairOrder is historical domain data and must remain
+    # visible even after the appliance returns to AVAILABLE.
+    #
+    # One bulk query for all visible units; no N+1 queries.
+    # --------------------------------------------------------
+
+    repair_history = {}
+
+    if visible_unit_ids:
+
+        from models import ApplianceRepairOrder
+
+        repair_rows = (
+            ApplianceRepairOrder.query
+            .filter(
+                ApplianceRepairOrder.appliance_unit_id.in_(
+                    visible_unit_ids
+                )
+            )
+            .order_by(
+                ApplianceRepairOrder.appliance_unit_id.asc(),
+                ApplianceRepairOrder.sent_at.desc(),
+                ApplianceRepairOrder.id.desc(),
+            )
+            .all()
+        )
+
+        for repair in repair_rows:
+
+            unit_id = int(
+                repair.appliance_unit_id
+            )
+
+            repair_history.setdefault(
+                unit_id,
+                [],
+            ).append(
+                {
+                    "repair_id":
+                        repair.id,
+
+                    "repair_number":
+                        repair.repair_number,
+
+                    "status":
+                        (
+                            repair.status
+                            or ""
+                        ).strip().lower(),
+                }
+            )
+
+    # --------------------------------------------------------
     # Group visible units by category.
     # Keep existing UI grouping.
     # --------------------------------------------------------
@@ -2494,6 +2550,7 @@ def inventory_list():
 
         issue_info=issue_info,
         issue_history=issue_history,
+        repair_history=repair_history,
     )
 
 
@@ -2504,7 +2561,9 @@ def inventory_list():
 @login_required
 def inventory_detail(unit_id):
 
-    from models import ApplianceMovement
+    import json
+
+    from models import ApplianceMovement, User
 
     unit = db.session.get(
         ApplianceUnit,
@@ -2565,6 +2624,42 @@ def inventory_detail(unit_id):
         .all()
     )
 
+    # --------------------------------------------------------
+    # Parsed immutable movement metadata for presentation.
+    #
+    # Keep JSON parsing out of Jinja. Legacy or malformed
+    # metadata must not break Appliance Inventory Detail.
+    # --------------------------------------------------------
+
+    movement_meta_by_id = {}
+
+    for movement in movements:
+
+        meta = {}
+
+        if movement.meta_json:
+
+            try:
+                loaded = json.loads(
+                    movement.meta_json
+                )
+
+                if isinstance(
+                    loaded,
+                    dict,
+                ):
+                    meta = loaded
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                meta = {}
+
+        movement_meta_by_id[
+            movement.id
+        ] = meta
+
     # Categories available for descriptive correction.
     #
     # Normally only active categories are offered. If a legacy
@@ -2589,13 +2684,31 @@ def inventory_detail(unit_id):
             )
         )
 
+    # Internal repair executors.
+    #
+    # Internal repair must reference a real User whose canonical
+    # application role is technician. Store the User.id in the
+    # Repair Order; username is presentation/audit metadata only.
+    repair_technicians = (
+        User.query
+        .filter(
+            User.role == "technician"
+        )
+        .order_by(
+            User.username.asc()
+        )
+        .all()
+    )
+
     return render_template(
         "appliance_inventory_detail.html",
         unit=unit,
         can_pricing=can_pricing,
         can_receive=can_receive,
         movements=movements,
+        movement_meta_by_id=movement_meta_by_id,
         categories=categories,
+        repair_technicians=repair_technicians,
     )
 
 
@@ -4244,6 +4357,38 @@ def inventory_find_specs(unit_id):
 @login_required
 def inventory_disposition(unit_id):
 
+    action = (
+        request.form.get("action")
+        or ""
+    ).strip().upper()
+
+    extra_movement_meta = None
+
+    if action == "SEND_TO_REPAIR":
+
+        extra_movement_meta = {
+            "repair_type": (
+                request.form.get(
+                    "repair_type"
+                )
+                or ""
+            ).strip().lower(),
+
+            "repair_vendor": (
+                request.form.get(
+                    "repair_vendor"
+                )
+                or ""
+            ).strip(),
+
+            "repair_technician_id": (
+                request.form.get(
+                    "repair_technician_id"
+                )
+                or ""
+            ).strip(),
+        }
+
     try:
 
         unit = (
@@ -4251,10 +4396,7 @@ def inventory_disposition(unit_id):
             .change_inventory_disposition(
                 actor=current_user,
                 appliance_unit_id=unit_id,
-                action=(
-                    request.form.get("action")
-                    or ""
-                ),
+                action=action,
                 reason_code=(
                     request.form.get("reason_code")
                     or None
@@ -4262,6 +4404,9 @@ def inventory_disposition(unit_id):
                 notes=(
                     request.form.get("notes")
                     or None
+                ),
+                extra_movement_meta=(
+                    extra_movement_meta
                 ),
             )
         )
@@ -5314,6 +5459,310 @@ def issue_delete(issue_id):
         url_for(
             "appliance.issue_detail",
             issue_id=issue_id,
+        )
+    )
+
+
+# ============================================================
+# APPLIANCE REPAIR ORDERS
+# Read-only Repair control center.
+# ============================================================
+
+@appliance_bp.get("/repair-orders")
+@login_required
+def repair_orders_registry():
+    """
+    Read-only Repair Order registry.
+
+    Access is warehouse-scoped through appliance.view.
+    No Repair lifecycle mutation is performed here.
+    """
+
+    from datetime import datetime
+
+    from models import ApplianceRepairOrder
+
+    allowed_warehouse_ids = _warehouse_ids_for(
+        "appliance.view"
+    )
+
+    status = (
+        request.args.get("status")
+        or "open"
+    ).strip().lower()
+
+    if status not in (
+        "all",
+        "open",
+        "completed",
+        "vendor_return",
+        "scrapped",
+        "cancelled",
+    ):
+        status = "open"
+
+    q = (
+        request.args.get("q")
+        or ""
+    ).strip()
+
+    if not allowed_warehouse_ids:
+        return render_template(
+            "appliance_repair_orders.html",
+            repair_orders=[],
+            q=q,
+            status=status,
+            open_count=0,
+        )
+
+    query = (
+        ApplianceRepairOrder.query
+        .filter(
+            ApplianceRepairOrder.warehouse_id.in_(
+                allowed_warehouse_ids
+            )
+        )
+    )
+
+    if status != "all":
+        query = query.filter(
+            ApplianceRepairOrder.status == status
+        )
+
+    if q:
+        like = f"%{q}%"
+
+        query = query.filter(
+            db.or_(
+                ApplianceRepairOrder.repair_number.ilike(
+                    like
+                ),
+                ApplianceRepairOrder.repair_vendor.ilike(
+                    like
+                ),
+                ApplianceRepairOrder.provider_reference.ilike(
+                    like
+                ),
+            )
+        )
+
+    repair_orders = (
+        query
+        .order_by(
+            ApplianceRepairOrder.sent_at.desc(),
+            ApplianceRepairOrder.id.desc(),
+        )
+        .all()
+    )
+
+    open_count = (
+        ApplianceRepairOrder.query
+        .filter(
+            ApplianceRepairOrder.warehouse_id.in_(
+                allowed_warehouse_ids
+            ),
+            ApplianceRepairOrder.status == "open",
+        )
+        .count()
+    )
+
+    now = datetime.utcnow()
+
+    for repair in repair_orders:
+        if (
+            repair.status == "open"
+            and repair.sent_at is not None
+        ):
+            delta = now - repair.sent_at
+            repair.days_in_repair = max(
+                0,
+                delta.days,
+            )
+        else:
+            repair.days_in_repair = None
+
+    return render_template(
+        "appliance_repair_orders.html",
+        repair_orders=repair_orders,
+        q=q,
+        status=status,
+        open_count=open_count,
+    )
+
+
+# ============================================================
+# APPLIANCE REPAIR ORDER DETAIL
+# Read-only.
+# ============================================================
+
+@appliance_bp.get("/repair-orders/<int:repair_id>")
+@login_required
+def repair_order_detail(repair_id):
+    """
+    Read-only detail for one Repair Order.
+
+    Access is warehouse-scoped through appliance.view.
+    No Repair lifecycle mutation is performed here.
+    """
+
+    from models import ApplianceRepairOrder
+
+    repair = db.session.get(
+        ApplianceRepairOrder,
+        repair_id,
+    )
+
+    if repair is None:
+        flash(
+            "Repair Order not found.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.repair_orders_registry"
+            )
+        )
+
+    if not AccessControlService.can(
+        current_user,
+        "appliance.view",
+        warehouse_id=repair.warehouse_id,
+    ):
+        flash(
+            "Access denied.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.repair_orders_registry"
+            )
+        )
+
+    return render_template(
+        "appliance_repair_order_detail.html",
+        repair=repair,
+    )
+
+
+# ============================================================
+# APPLIANCE REPAIR ORDER LIFECYCLE ACTION
+# ============================================================
+
+@appliance_bp.post(
+    "/repair-orders/<int:repair_id>/action"
+)
+@login_required
+def repair_order_action(repair_id):
+    """
+    Execute a lifecycle outcome for one OPEN Repair Order.
+
+    Business rules and atomic mutation remain inside
+    ApplianceIssueService.change_inventory_disposition().
+    """
+    from models import ApplianceRepairOrder
+
+    from services.appliance_issue_service import (
+        ApplianceIssueAccessDenied,
+        ApplianceIssueError,
+        ApplianceIssueService,
+    )
+
+    repair = db.session.get(
+        ApplianceRepairOrder,
+        repair_id,
+    )
+
+    if repair is None:
+        flash(
+            "Repair Order not found.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.repair_orders_registry"
+            )
+        )
+
+    if not AccessControlService.can(
+        current_user,
+        "appliance.view",
+        warehouse_id=repair.warehouse_id,
+    ):
+        flash(
+            "Access denied.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.repair_orders_registry"
+            )
+        )
+
+    if repair.status != "open":
+        flash(
+            f"{repair.repair_number} is not OPEN.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.repair_order_detail",
+                repair_id=repair.id,
+            )
+        )
+
+    action = (
+        request.form.get("action")
+        or ""
+    ).strip().upper()
+
+    allowed_actions = {
+        "RETURN_FROM_REPAIR_TO_NEW",
+        "RETURN_FROM_REPAIR_TO_LOANER",
+        "REPAIR_TO_VENDOR_RETURN",
+        "REPAIR_TO_SCRAP",
+    }
+
+    if action not in allowed_actions:
+        flash(
+            "Unsupported Repair Order action.",
+            "danger",
+        )
+        return redirect(
+            url_for(
+                "appliance.repair_order_detail",
+                repair_id=repair.id,
+            )
+        )
+
+    try:
+        ApplianceIssueService.change_inventory_disposition(
+            actor=current_user,
+            appliance_unit_id=repair.appliance_unit_id,
+            action=action,
+        )
+
+        flash(
+            f"{repair.repair_number} updated successfully.",
+            "success",
+        )
+
+    except (
+        ApplianceIssueAccessDenied,
+        ApplianceIssueError,
+        ValueError,
+        TypeError,
+    ) as exc:
+        db.session.rollback()
+
+        flash(
+            str(exc),
+            "danger",
+        )
+
+    return redirect(
+        url_for(
+            "appliance.repair_order_detail",
+            repair_id=repair.id,
         )
     )
 
