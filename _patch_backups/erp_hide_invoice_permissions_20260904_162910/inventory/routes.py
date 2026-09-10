@@ -8653,15 +8653,10 @@ def wo_save():
             return None
 
     def _wo_audit(wo_id: int, action: str, message: str, meta: dict | None = None):
-        if isinstance(message, str):
-            audit_message = message
-        else:
-            audit_message = json.dumps(message, ensure_ascii=False)
-
         a = WorkOrderAudit(
             work_order_id=wo_id,
             action=(action or "note")[:40],
-            message=audit_message[:4000],
+            message=json.dumps(message, ensure_ascii=False)[:4000],
             meta_json=json.dumps(meta or {}, ensure_ascii=False),
             actor_user_id=getattr(current_user, "id", None),
             actor_username=((getattr(current_user, "username", None) or "").strip()[:64] or None),
@@ -9821,7 +9816,7 @@ def wo_save():
 
             def fmt_audit_val(v):
                 if v is None or v == "":
-                    return "\u2014"
+                    return "â€”"
                 if v is True:
                     return "YES"
                 if v is False:
@@ -9845,7 +9840,7 @@ def wo_save():
                 for k, diff in header_changed.items():
                     label = header_labels.get(k, k)
                     header_text.append(
-                        f"{label}: {fmt_audit_val(diff.get('from'))} \u2192 {fmt_audit_val(diff.get('to'))}"
+                        f"{label}: {fmt_audit_val(diff.get('from'))} â†’ {fmt_audit_val(diff.get('to'))}"
                     )
 
                 msg_bits.append({
@@ -17961,17 +17956,10 @@ def user_access(user_id):
     for group in ERP_PERMISSION_GROUPS:
         ui_group = dict(group)
 
-        # ERP ACCESS UI - HIDE INVOICE PERMISSIONS
-        hidden_erp_permissions = {
-            "erp.users.manage_access",
-            "erp.invoices.access",
-            "erp.invoices.delete",
-        }
-
         ui_group["permissions"] = [
             dict(permission)
             for permission in group.get("permissions", [])
-            if permission.get("code") not in hidden_erp_permissions
+            if permission.get("code") != "erp.users.manage_access"
         ]
 
         erp_permission_groups.append(ui_group)

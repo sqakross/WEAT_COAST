@@ -1951,6 +1951,122 @@
         await refreshModelSuggestions(
           row
         );
+
+        /*
+          Current Receiving learning.
+
+          Once this row has:
+              Model + Category + Brand
+
+          copy that classification to other rows with the
+          same Model, but NEVER overwrite contradictory
+          manually entered data.
+        */
+
+        const learnedModel =
+          modelInput.value
+            .trim()
+            .toUpperCase();
+
+        const learnedBrand =
+          brandInput.value
+            .trim()
+            .toUpperCase();
+
+        const learnedCategory =
+          categoryInput.value;
+
+        if (
+          learnedModel
+          && learnedBrand
+          && learnedCategory
+        ) {
+
+          [
+            ...body.querySelectorAll("tr")
+          ].forEach(
+            otherRow => {
+
+              if (otherRow === row) {
+                return;
+              }
+
+              const otherModel =
+                otherRow.querySelector(
+                  '[data-field="model_number"]'
+                );
+
+              const otherBrand =
+                otherRow.querySelector(
+                  '[data-field="brand"]'
+                );
+
+              const otherCategory =
+                otherRow.querySelector(
+                  '[data-field="category_id"]'
+                );
+
+              if (
+                !otherModel
+                || !otherBrand
+                || !otherCategory
+              ) {
+                return;
+              }
+
+              if (
+                otherModel.value
+                  .trim()
+                  .toUpperCase()
+                !== learnedModel
+              ) {
+                return;
+              }
+
+              const existingBrand =
+                otherBrand.value
+                  .trim()
+                  .toUpperCase();
+
+              const existingCategory =
+                otherCategory.value;
+
+              /*
+                Contradictory manual data:
+                do not overwrite.
+              */
+
+              if (
+                existingBrand
+                && existingBrand !== learnedBrand
+              ) {
+                return;
+              }
+
+              if (
+                existingCategory
+                && existingCategory
+                   !== learnedCategory
+              ) {
+                return;
+              }
+
+              otherCategory.value =
+                learnedCategory;
+
+              otherBrand.value =
+                learnedBrand;
+
+              refreshBrandSuggestions(
+                otherRow
+              );
+
+              refreshModelSuggestions(
+                otherRow
+              );
+            }
+          );
+        }
       }
     );
 
@@ -1991,6 +2107,111 @@
         refreshModelSuggestions(
           row
         );
+
+        /*
+          Learn Model -> Brand + Category immediately inside
+          the current Receiving.
+
+          Existing contradictory manual values are preserved.
+        */
+
+        const learnedModel =
+          modelInput.value
+            .trim()
+            .toUpperCase();
+
+        const learnedBrand =
+          brandInput.value;
+
+        const learnedCategory =
+          categoryInput.value;
+
+        if (
+          learnedModel
+          && learnedBrand
+          && learnedCategory
+        ) {
+
+          [
+            ...body.querySelectorAll("tr")
+          ].forEach(
+            otherRow => {
+
+              if (otherRow === row) {
+                return;
+              }
+
+              const otherModel =
+                otherRow.querySelector(
+                  '[data-field="model_number"]'
+                );
+
+              const otherBrand =
+                otherRow.querySelector(
+                  '[data-field="brand"]'
+                );
+
+              const otherCategory =
+                otherRow.querySelector(
+                  '[data-field="category_id"]'
+                );
+
+              if (
+                !otherModel
+                || !otherBrand
+                || !otherCategory
+              ) {
+                return;
+              }
+
+              if (
+                otherModel.value
+                  .trim()
+                  .toUpperCase()
+                !== learnedModel
+              ) {
+                return;
+              }
+
+              const existingBrand =
+                otherBrand.value
+                  .trim()
+                  .toUpperCase();
+
+              const existingCategory =
+                otherCategory.value;
+
+              if (
+                existingBrand
+                && existingBrand !== learnedBrand
+              ) {
+                return;
+              }
+
+              if (
+                existingCategory
+                && existingCategory
+                   !== learnedCategory
+              ) {
+                return;
+              }
+
+              otherCategory.value =
+                learnedCategory;
+
+              otherBrand.value =
+                learnedBrand;
+
+              refreshBrandSuggestions(
+                otherRow
+              );
+
+              refreshModelSuggestions(
+                otherRow
+              );
+            }
+          );
+        }
       }
     );
 
@@ -2104,7 +2325,12 @@
     body.appendChild(row);
     renumberRows();
 
-    if (options.focusSerial) {
+    if (options.focusModel) {
+      row.querySelector(
+        '[data-field="model_number"]'
+      ).focus();
+    }
+    else if (options.focusSerial) {
       row.querySelector(
         '[data-field="serial_number"]'
       ).focus();
@@ -2711,23 +2937,358 @@
       const target =
         event.target;
 
-      if (
-        event.key !== "Enter"
-        || target?.dataset?.field
-           !== "serial_number"
-      ) {
+      if (event.key !== "Enter") {
         return;
       }
 
+      const field =
+        target?.dataset?.field;
+
       /*
-        Barcode scanners normally send:
+        Scanner workflow:
 
-            SERIAL VALUE
-            ENTER
+            MODEL + ENTER
+            SERIAL + ENTER
+            MODEL + ENTER
+            SERIAL + ENTER
+            ...
 
-        Stop normal form behavior and validate the
-        scanned Serial before creating the next row.
+        MODEL Enter moves directly to Serial.
+        SERIAL Enter validates the Serial, creates a fresh
+        appliance row, and returns focus to Model.
       */
+
+      if (field === "model_number") {
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        target.value =
+          target.value
+            .trim()
+            .toUpperCase();
+
+        if (!target.value) {
+          target.focus();
+          return;
+        }
+
+        const currentRow =
+          target.closest("tr");
+
+        if (!currentRow) {
+          return;
+        }
+
+        const serialInput =
+          currentRow.querySelector(
+            '[data-field="serial_number"]'
+          );
+
+        const brandInput =
+          currentRow.querySelector(
+            '[data-field="brand"]'
+          );
+
+        const categoryInput =
+          currentRow.querySelector(
+            '[data-field="category_id"]'
+          );
+
+        if (
+          !serialInput
+          || !brandInput
+          || !categoryInput
+        ) {
+          return;
+        }
+
+        if (
+          target.dataset.modelRecognizing
+          === "1"
+        ) {
+          return;
+        }
+
+        target.dataset.modelRecognizing =
+          "1";
+
+        try {
+
+          /*
+            FIRST SOURCE:
+            already-classified rows in this current Receiving.
+
+            This allows immediate learning before Save / POST.
+          */
+
+          const currentMatches =
+            new Map();
+
+          [
+            ...body.querySelectorAll("tr")
+          ].forEach(
+            otherRow => {
+
+              if (otherRow === currentRow) {
+                return;
+              }
+
+              const otherModel =
+                otherRow.querySelector(
+                  '[data-field="model_number"]'
+                );
+
+              const otherBrand =
+                otherRow.querySelector(
+                  '[data-field="brand"]'
+                );
+
+              const otherCategory =
+                otherRow.querySelector(
+                  '[data-field="category_id"]'
+                );
+
+              if (
+                !otherModel
+                || !otherBrand
+                || !otherCategory
+              ) {
+                return;
+              }
+
+              const modelValue =
+                otherModel.value
+                  .trim()
+                  .toUpperCase();
+
+              const brandValue =
+                otherBrand.value
+                  .trim()
+                  .toUpperCase();
+
+              const categoryValue =
+                otherCategory.value;
+
+              if (
+                modelValue !== target.value
+                || !brandValue
+                || !categoryValue
+              ) {
+                return;
+              }
+
+              const key =
+                brandValue
+                + "|"
+                + categoryValue;
+
+              currentMatches.set(
+                key,
+                {
+                  brand: brandValue,
+                  category_id: categoryValue
+                }
+              );
+            }
+          );
+
+          if (currentMatches.size === 1) {
+
+            const learned =
+              [
+                ...currentMatches.values()
+              ][0];
+
+            const categoryExists =
+              [
+                ...categoryInput.options
+              ].some(
+                option =>
+                  option.value
+                  === learned.category_id
+              );
+
+            if (categoryExists) {
+
+              categoryInput.value =
+                learned.category_id;
+
+              brandInput.value =
+                learned.brand;
+
+              refreshBrandSuggestions(
+                currentRow
+              );
+
+              refreshModelSuggestions(
+                currentRow
+              );
+
+              await loadModelSpecsFromCache(
+                currentRow
+              );
+
+              serialInput.focus();
+
+              showStatus(
+                "MODEL RECOGNIZED IN CURRENT RECEIVING — "
+                + "BRAND/CATEGORY FILLED — SCAN SERIAL."
+              );
+
+              return;
+            }
+          }
+
+          if (currentMatches.size > 1) {
+
+            /*
+              Contradictory classifications inside the same
+              Receiving. Never guess, but also do not interrupt
+              scanner flow.
+            */
+
+            serialInput.focus();
+
+            showStatus(
+              "MODEL CONFLICT IN CURRENT RECEIVING — "
+              + "SCAN SERIAL."
+            );
+
+            return;
+          }
+
+          /*
+            SECOND SOURCE:
+            historical ApplianceUnit recognition.
+          */
+
+          const params =
+            new URLSearchParams();
+
+          params.set(
+            "model_number",
+            target.value
+          );
+
+          const response =
+            await fetch(
+              "/appliances/receiving/recognize-model?"
+              + params.toString(),
+              {
+                headers:{
+                  "Accept":"application/json"
+                }
+              }
+            );
+
+          const payload =
+            await response.json();
+
+          if (
+            response.ok
+            && payload
+            && payload.ok === true
+            && payload.hit === true
+            && payload.conflict !== true
+            && payload.result
+          ) {
+
+            const categoryValue =
+              String(
+                payload.result.category_id
+                ?? ""
+              );
+
+            const categoryExists =
+              [
+                ...categoryInput.options
+              ].some(
+                option =>
+                  option.value === categoryValue
+              );
+
+            if (categoryExists) {
+
+              categoryInput.value =
+                categoryValue;
+
+              brandInput.value =
+                (
+                  payload.result.brand
+                  || ""
+                )
+                  .trim()
+                  .toUpperCase();
+
+              refreshBrandSuggestions(
+                currentRow
+              );
+
+              refreshModelSuggestions(
+                currentRow
+              );
+
+              await loadModelSpecsFromCache(
+                currentRow
+              );
+
+              serialInput.focus();
+
+              showStatus(
+                "MODEL RECOGNIZED — "
+                + "BRAND/CATEGORY FILLED — "
+                + "SCAN SERIAL."
+              );
+
+              return;
+            }
+          }
+
+          if (
+            payload
+            && payload.conflict === true
+          ) {
+
+            showStatus(
+              "MODEL CONFLICT — "
+              + "CONFIRM BRAND/CATEGORY MANUALLY."
+            );
+
+            target.focus();
+            return;
+          }
+
+          serialInput.focus();
+
+          showStatus(
+            "NEW MODEL — SCAN SERIAL."
+          );
+
+        }
+        catch (error) {
+
+          serialInput.focus();
+
+          showStatus(
+            "MODEL ACCEPTED — "
+            + "RECOGNITION UNAVAILABLE — "
+            + "SCAN SERIAL."
+          );
+
+        }
+        finally {
+
+          target.dataset.modelRecognizing =
+            "0";
+        }
+
+        return;
+      }
+
+      if (field !== "serial_number") {
+        return;
+      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -2760,27 +3321,23 @@
           return;
         }
 
-        const data =
-          rowData(
-            currentRow
-          );
-
         /*
-          Preserve all current appliance information.
-          Only Serial is cleared for the next physical unit.
+          A completed Serial represents one physical appliance.
+
+          Do NOT copy the previous Model / Brand / Category into
+          the next scanner row because the next physical appliance
+          may be a completely different model.
         */
 
-        data.serial_number = "";
-
         addRow(
-          data,
+          {},
           {
-            focusSerial:true
+            focusModel:true
           }
         );
 
         showStatus(
-          "SERIAL ACCEPTED — READY FOR NEXT SCAN."
+          "SERIAL ACCEPTED — SCAN NEXT MODEL."
         );
 
       } finally {

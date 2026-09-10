@@ -931,6 +931,192 @@ def receiving_autocomplete():
 
 
 # ============================================================
+# Receiving Model Recognition
+#
+# Reverse lookup for barcode scanner:
+#
+#     MODEL -> Brand + Category
+#
+# LOCAL DB ONLY:
+# - no OpenAI;
+# - no Web Search;
+# - read-only;
+# - historical ApplianceUnit registry;
+# - respects appliance.receive warehouse access;
+# - returns a hit only when Brand + Category are unambiguous.
+# ============================================================
+
+@appliance_bp.get(
+    "/receiving/recognize-model"
+)
+@login_required
+def receiving_recognize_model():
+
+    from sqlalchemy import func
+
+    model_number = (
+        request.args.get("model_number")
+        or ""
+    )
+
+    normalized_model = " ".join(
+        model_number.strip().upper().split()
+    )
+
+    if not normalized_model:
+        return jsonify(
+            {
+                "ok": True,
+                "hit": False,
+                "conflict": False,
+            }
+        )
+
+    # --------------------------------------------------------
+    # Access
+    # --------------------------------------------------------
+
+    allowed_warehouse_ids = _warehouse_ids_for(
+        "appliance.receive"
+    )
+
+    if not allowed_warehouse_ids:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Access denied.",
+            }
+        ), 403
+
+    # --------------------------------------------------------
+    # Historical exact Model matches
+    #
+    # Ignore incomplete historical rows because they cannot
+    # safely identify Brand + Category.
+    # --------------------------------------------------------
+
+    rows = (
+        db.session.query(
+            ApplianceUnit.brand,
+            ApplianceUnit.category_id,
+        )
+        .filter(
+            ApplianceUnit.warehouse_id.in_(
+                allowed_warehouse_ids
+            ),
+
+            ApplianceUnit.model_number.isnot(
+                None
+            ),
+
+            func.upper(
+                func.trim(
+                    ApplianceUnit.model_number
+                )
+            )
+            == normalized_model,
+
+            ApplianceUnit.brand.isnot(
+                None
+            ),
+
+            func.trim(
+                ApplianceUnit.brand
+            ) != "",
+
+            ApplianceUnit.category_id.isnot(
+                None
+            ),
+        )
+        .distinct()
+        .all()
+    )
+
+    # --------------------------------------------------------
+    # Normalize unique Brand + Category combinations
+    # --------------------------------------------------------
+
+    combinations = {
+        (
+            " ".join(
+                (brand or "")
+                .strip()
+                .upper()
+                .split()
+            ),
+            category_id,
+        )
+        for brand, category_id in rows
+        if (
+            (brand or "").strip()
+            and category_id is not None
+        )
+    }
+
+    if not combinations:
+        return jsonify(
+            {
+                "ok": True,
+                "hit": False,
+                "conflict": False,
+            }
+        )
+
+    if len(combinations) > 1:
+        return jsonify(
+            {
+                "ok": True,
+                "hit": False,
+                "conflict": True,
+                "matches": len(combinations),
+            }
+        )
+
+    brand, category_id = next(
+        iter(combinations)
+    )
+
+    category = db.session.get(
+        ApplianceCategory,
+        category_id,
+    )
+
+    if category is None:
+        return jsonify(
+            {
+                "ok": True,
+                "hit": False,
+                "conflict": True,
+                "message": (
+                    "Historical model points to "
+                    "a missing category."
+                ),
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "hit": True,
+            "conflict": False,
+            "result": {
+                "model_number":
+                    normalized_model,
+
+                "brand":
+                    brand,
+
+                "category_id":
+                    category.id,
+
+                "category_name":
+                    category.name,
+            },
+        }
+    )
+
+
+# ============================================================
 # Receiving Serial duplicate check
 #
 # Used by barcode scanner / Batch Entry before moving to

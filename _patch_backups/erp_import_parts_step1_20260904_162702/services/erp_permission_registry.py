@@ -51,15 +51,6 @@ ERP_PERMISSION_GROUPS = [
                 "name": "Issue Parts",
                 "description": "Issue parts from inventory.",
             },
-            {
-                # ERP ACCESS IMPORT PARTS STEP 1 - REGISTRY
-                "code": "erp.inventory.import_parts",
-                "name": "Import Parts",
-                "description": (
-                    "Open and use Import Parts. DENY hides the menu "
-                    "and blocks direct access to the import route."
-                ),
-            },
         ],
     },
 

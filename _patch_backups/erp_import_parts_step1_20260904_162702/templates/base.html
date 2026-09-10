@@ -533,18 +533,10 @@
                href="{{ url_for('inventory.reports_grouped') }}">REPORTS</a>
           </li>
           {% endif %}
-          {# ERP ACCESS IMPORT PARTS STEP 1 - NAVBAR #}
-          {% if current_user.is_authenticated
-                and erp_access_allowed(
-                    current_user,
-                    'erp.inventory.import_parts',
-                    true
-                ) %}
           <li class="nav-item">
             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.import_parts') %} active{% endif %}"
                href="{{ url_for('inventory.import_parts_upload') }}">IMPORT PARTS</a>
           </li>
-          {% endif %}
 
           {# ERP ACCESS ACCOUNTING STEP 1 - NAVBAR #}
           {% set nav_accounting_role = (current_user.role or '')|lower %}
