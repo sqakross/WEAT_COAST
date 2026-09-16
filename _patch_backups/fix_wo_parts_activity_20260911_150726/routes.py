@@ -9466,7 +9466,7 @@ def wo_save():
 
         if added:
             added_txt = ", ".join(
-                f"{x.get('pn')} x{x.get('qty')} \u2014 {x.get('name')}"
+                f"{x.get('pn')} x{x.get('qty')} â€” {x.get('name')}"
                 for x in added[:3]
             )
 
@@ -9480,7 +9480,7 @@ def wo_save():
 
         if removed:
             removed_txt = ", ".join(
-                f"{x.get('pn')} x{x.get('qty')} \u2014 {x.get('name')}"
+                f"{x.get('pn')} x{x.get('qty')} â€” {x.get('name')}"
                 for x in removed[:3]
             )
 
@@ -9511,7 +9511,7 @@ def wo_save():
 
             def fmt_val(v):
                 if v is None or v == "":
-                    return "\u2014"
+                    return "â€”"
 
                 if v is True:
                     return "YES"
@@ -9542,7 +9542,7 @@ def wo_save():
                     label = field_labels.get(field_name, field_name)
                     old = fmt_val(diff.get("from"))
                     new = fmt_val(diff.get("to"))
-                    part_changes.append(f"{label}: {old} \u2192 {new}")
+                    part_changes.append(f"{label}: {old} â†’ {new}")
 
                 changed_txt.append(f"{pn}: " + "; ".join(part_changes))
 
@@ -11069,7 +11069,7 @@ def wo_issue_instock(wo_id):
                     pn = getattr(getattr(r, "part", None), "part_number", None) or getattr(r, "part_number",
                                                                                            None) or str(r.part_id)
                     name = getattr(getattr(r, "part", None), "name", None) or getattr(r, "name_at_issue", None) or ""
-                    issued_summary.append(f"{pn} x{r.quantity}" + (f" \u2014 {name}" if name else ""))
+                    issued_summary.append(f"{pn} x{r.quantity}" + (f" â€” {name}" if name else ""))
 
                 _add_wo_audit(
                     action="issued",
@@ -11286,7 +11286,7 @@ def wo_issue_instock(wo_id):
     for r in created_records:
         pn = getattr(getattr(r, "part", None), "part_number", None) or str(r.part_id)
         name = getattr(getattr(r, "part", None), "name", None) or ""
-        issued_summary.append(f"{pn} x{r.quantity}" + (f" \u2014 {name}" if name else ""))
+        issued_summary.append(f"{pn} x{r.quantity}" + (f" â€” {name}" if name else ""))
 
     _add_wo_audit(
         action="issued",
@@ -14137,7 +14137,7 @@ def wo_issue_instock_unit(wo_id, unit_id):
         for r in new_records:
             pn = getattr(getattr(r, "part", None), "part_number", None) or str(r.part_id)
             name = getattr(getattr(r, "part", None), "name", None) or ""
-            issued_summary.append(f"{pn} x{r.quantity}" + (f" \u2014 {name}" if name else ""))
+            issued_summary.append(f"{pn} x{r.quantity}" + (f" â€” {name}" if name else ""))
 
         db.session.add(WorkOrderAudit(
             work_order_id=wo.id,
@@ -16693,77 +16693,14 @@ def update_invoice():
                             wo_id = wo.id
 
                     if wo_id and pn:
-                        # IMPORTANT:
-                        # A WO may contain the same PN more than once,
-                        # each row tied to a different supplier invoice.
-                        #
-                        # When deleting an issued invoice, roll back
-                        # issued_qty on the exact WO row that was used
-                        # for that issue. Matching only by PN and using
-                        # .first() can reset the wrong duplicate row.
-                        #
-                        # Prefer exact supplier invoice (r.inv_ref).
-                        # Fall back to legacy PN-only matching only when
-                        # an exact invoice match cannot be resolved.
-                        inv_ref_norm = (
-                            str(getattr(r, "inv_ref", "") or "")
-                            .strip()
-                            .upper()
-                            .lstrip("0")
-                            or "0"
-                        )
-
-                        candidate_lines = (
+                        line = (
                             WorkOrderPart.query
                             .filter(
                                 WorkOrderPart.work_order_id == wo_id,
                                 WorkOrderPart.part_number == pn,
                             )
-                            .order_by(WorkOrderPart.id.asc())
-                            .all()
+                            .first()
                         )
-
-                        line = None
-
-                        if inv_ref_norm and inv_ref_norm != "0":
-                            for candidate in candidate_lines:
-                                candidate_inv_norm = (
-                                    str(
-                                        getattr(
-                                            candidate,
-                                            "invoice_number",
-                                            "",
-                                        )
-                                        or ""
-                                    )
-                                    .strip()
-                                    .upper()
-                                    .lstrip("0")
-                                    or "0"
-                                )
-
-                                if candidate_inv_norm == inv_ref_norm:
-                                    line = candidate
-                                    break
-
-                        # Legacy fallback:
-                        # Prefer a row that actually has issued qty.
-                        if line is None:
-                            for candidate in candidate_lines:
-                                if int(
-                                    getattr(
-                                        candidate,
-                                        "issued_qty",
-                                        0,
-                                    )
-                                    or 0
-                                ) > 0:
-                                    line = candidate
-                                    break
-
-                        # Last-resort compatibility fallback.
-                        if line is None and candidate_lines:
-                            line = candidate_lines[0]
 
                         if line:
                             old_issued = int(getattr(line, "issued_qty", 0) or 0)

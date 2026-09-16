@@ -3003,16 +3003,38 @@
           return;
         }
 
+        /*
+          SCANNER MODEL TRACE V1
+          Temporary diagnostics only.
+        */
+        console.log(
+          "[SCANNER TRACE] MODEL ENTER",
+          {
+            model: target.value,
+            recognizing: target.dataset.modelRecognizing || "",
+            brand: brandInput.value,
+            category: categoryInput.value
+          }
+        );
+
         if (
           target.dataset.modelRecognizing
           === "1"
         ) {
+          console.log(
+            "[SCANNER TRACE] EXIT: already recognizing",
+            target.value
+          );
           return;
         }
 
         target.dataset.modelRecognizing =
           "1";
 
+        console.log(
+          "[SCANNER TRACE] recognition lock SET",
+          target.value
+        );
 
         /*
           MODEL RECOGNITION BLOCKING FLOW V1
@@ -3192,6 +3214,11 @@
             target.value
           );
 
+          console.log(
+            "[SCANNER TRACE] historical fetch START",
+            target.value
+          );
+
           const response =
             await fetch(
               "/appliances/receiving/recognize-model?"
@@ -3206,6 +3233,14 @@
           const payload =
             await response.json();
 
+          console.log(
+            "[SCANNER TRACE] historical fetch RESULT",
+            {
+              status: response.status,
+              ok: response.ok,
+              payload: payload
+            }
+          );
 
           if (
             response.ok
@@ -3230,6 +3265,16 @@
                   option.value === categoryValue
               );
 
+            console.log(
+              "[SCANNER TRACE] historical HIT",
+              {
+                categoryValue: categoryValue,
+                categoryExists: categoryExists,
+                brandFromServer:
+                  payload.result.brand
+              }
+            );
+
             if (categoryExists) {
 
               categoryInput.value =
@@ -3243,6 +3288,13 @@
                   .trim()
                   .toUpperCase();
 
+              console.log(
+                "[SCANNER TRACE] VALUES ASSIGNED",
+                {
+                  brand: brandInput.value,
+                  category: categoryInput.value
+                }
+              );
 
               /*
                 Propagate historical recognition backward

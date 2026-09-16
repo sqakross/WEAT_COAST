@@ -3013,17 +3013,24 @@
         target.dataset.modelRecognizing =
           "1";
 
-
         /*
-          MODEL RECOGNITION BLOCKING FLOW V1
+          NON-BLOCKING SCANNER RECOGNITION
 
-          Resolve Brand / Category first, then move scanner focus
-          to Serial. Recognition is local DB / current Receiving,
-          never AI/Web.
+          The warehouse scanner must never wait for historical
+          model recognition.
+
+          MODEL + ENTER immediately moves to SERIAL.
+
+          Recognition may finish while the operator is already
+          scanning Serial or working on the next row. The original
+          currentRow remains in the DOM, so its Brand / Category /
+          Model Specs can still be populated safely.
         */
 
+        serialInput.focus();
+
         showStatus(
-          "RECOGNIZING MODEL..."
+          "MODEL ACCEPTED — SCAN SERIAL."
         );
 
         try {
@@ -3152,7 +3159,6 @@
                 + "BRAND/CATEGORY FILLED."
               );
 
-              serialInput.focus();
               return;
             }
           }
@@ -3175,7 +3181,6 @@
               + "CONFIRM BRAND/CATEGORY MANUALLY."
             );
 
-            serialInput.focus();
             return;
           }
 
@@ -3205,7 +3210,6 @@
 
           const payload =
             await response.json();
-
 
           if (
             response.ok
@@ -3242,7 +3246,6 @@
                 )
                   .trim()
                   .toUpperCase();
-
 
               /*
                 Propagate historical recognition backward
@@ -3386,7 +3389,6 @@
                 + "BRAND/CATEGORY FILLED."
               );
 
-              serialInput.focus();
               return;
             }
           }
@@ -3401,15 +3403,16 @@
               + "CONFIRM BRAND/CATEGORY MANUALLY."
             );
 
-            serialInput.focus();
+            /*
+              Do not steal scanner focus.
+            */
+
             return;
           }
 
           showStatus(
             "NEW MODEL — SCAN SERIAL."
           );
-
-          serialInput.focus();
 
         }
         catch (error) {
@@ -3422,8 +3425,6 @@
             "MODEL ACCEPTED — "
             + "RECOGNITION UNAVAILABLE."
           );
-
-          serialInput.focus();
 
         }
         finally {
