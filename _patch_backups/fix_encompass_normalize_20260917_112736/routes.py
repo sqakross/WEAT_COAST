@@ -20049,33 +20049,11 @@ def import_parts_upload():
             flash(msg, "warning")
 
         norm = _ensure_norm_columns(norm, default_loc, path)
-
-        # Graceful reject for unsupported/non-receiving documents.
-        # Do not use iloc[0] unless an actual error row exists.
+        # graceful reject for non-receiving documents
         if "__import_error__" in norm.columns:
-            error_values = (
-                norm["__import_error__"]
-                .dropna()
-                .astype(str)
-                .str.strip()
-            )
-            error_values = error_values[error_values.ne("")]
-
-            if not error_values.empty:
-                msg = error_values.iloc[0]
-            else:
-                msg = "No receiving line items were recognized in this file."
-
+            msg = str(norm["__import_error__"].iloc[0])
             flash(msg, "warning")
             return redirect(request.referrer or url_for("inventory.import_parts_upload"))
-
-        if norm is None or norm.empty:
-            flash(
-                "No receiving line items were recognized in this file.",
-                "warning",
-            )
-            return redirect(request.referrer or url_for("inventory.import_parts_upload"))
-
         norm, subtotal_base, grand_total = _distribute_extra_and_adjust_costs(norm, 0.0)
 
         import pandas as pd

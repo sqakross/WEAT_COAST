@@ -828,39 +828,8 @@ def _looks_like_part_number(s: str) -> bool:
 def _is_noise_row(pn: str, name: str) -> bool:
     pn = (pn or "").strip().upper()
     name = (name or "").strip().upper()
-
-    def _matches_noise_prefix(value: str, prefix: str) -> bool:
-        value = (value or "").strip().upper()
-        prefix = (prefix or "").strip().upper()
-
-        if not value or not prefix:
-            return False
-
-        if not value.startswith(prefix):
-            return False
-
-        # Exact marker is noise.
-        if value == prefix:
-            return True
-
-        # Prefix must end on a token boundary.
-        # Example:
-        #   "REF: 123"       -> noise
-        #   "REF # 123"      -> noise
-        #   "REF 123"        -> noise
-        #   "REFRIG SEAL"    -> NOT noise
-        #
-        # This prevents short markers such as REF from swallowing
-        # legitimate descriptions that merely begin with the same letters.
-        next_char = value[len(prefix)]
-        return not next_char.isalnum()
-
-    if any(_matches_noise_prefix(name, p) for p in _NOISE_PREFIXES):
-        return True
-
-    if any(_matches_noise_prefix(pn, p) for p in _NOISE_PREFIXES):
-        return True
-
+    if any(name.startswith(p) for p in _NOISE_PREFIXES): return True
+    if any(pn.startswith(p) for p in _NOISE_PREFIXES):   return True
     return False
 
 def _guess_unit_cost_col(df: pd.DataFrame) -> str | None:
@@ -1515,36 +1484,6 @@ def normalize_table(df: pd.DataFrame, supplier_hint=None, *, source_file: str = 
 
     # --- Generic path (other vendors)
     m = {k: _find_col(df, v) for k, v in COLUMN_SYNONYMS.items()}
-
-    # A preprocessing helper may add canonical columns such as
-    # part_number / part_name while leaving them empty.
-    # In that case _find_col() can prefer the empty canonical column
-    # over a populated vendor column such as "PART #" or "DESCR.".
-    # Prefer a populated synonym when the selected source is empty.
-    def _column_has_real_values(col):
-        if col is None or col not in df.columns:
-            return False
-
-        s = (
-            df[col]
-            .astype(str)
-            .str.strip()
-            .str.lower()
-        )
-
-        return (~s.isin(["", "nan", "none", "nat"])).any()
-
-    for field in ("part_number", "part_name"):
-        selected = m.get(field)
-
-        if not _column_has_real_values(selected):
-            wanted = {_normh(v) for v in COLUMN_SYNONYMS[field]}
-
-            for candidate in df.columns:
-                if _normh(candidate) in wanted and _column_has_real_values(candidate):
-                    m[field] = candidate
-                    break
-
     if not m.get("unit_cost"): m["unit_cost"] = _guess_unit_cost_col(df)
     if not m.get("quantity"):  m["quantity"]  = _guess_qty_col(df)
 

@@ -828,39 +828,8 @@ def _looks_like_part_number(s: str) -> bool:
 def _is_noise_row(pn: str, name: str) -> bool:
     pn = (pn or "").strip().upper()
     name = (name or "").strip().upper()
-
-    def _matches_noise_prefix(value: str, prefix: str) -> bool:
-        value = (value or "").strip().upper()
-        prefix = (prefix or "").strip().upper()
-
-        if not value or not prefix:
-            return False
-
-        if not value.startswith(prefix):
-            return False
-
-        # Exact marker is noise.
-        if value == prefix:
-            return True
-
-        # Prefix must end on a token boundary.
-        # Example:
-        #   "REF: 123"       -> noise
-        #   "REF # 123"      -> noise
-        #   "REF 123"        -> noise
-        #   "REFRIG SEAL"    -> NOT noise
-        #
-        # This prevents short markers such as REF from swallowing
-        # legitimate descriptions that merely begin with the same letters.
-        next_char = value[len(prefix)]
-        return not next_char.isalnum()
-
-    if any(_matches_noise_prefix(name, p) for p in _NOISE_PREFIXES):
-        return True
-
-    if any(_matches_noise_prefix(pn, p) for p in _NOISE_PREFIXES):
-        return True
-
+    if any(name.startswith(p) for p in _NOISE_PREFIXES): return True
+    if any(pn.startswith(p) for p in _NOISE_PREFIXES):   return True
     return False
 
 def _guess_unit_cost_col(df: pd.DataFrame) -> str | None:
