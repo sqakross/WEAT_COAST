@@ -216,16 +216,13 @@ def pick_receipt_line_for_issue(
     # remaining = GoodsReceiptLine.quantity - SUM(IssuedPartRecord.quantity where source_receipt_line_id=line.id)
     # ------------------------------------------------------------
     IssuedPartRecord = None
-    PartForIssuedLink = None
     issued_sum = None
     try:
-        from models import IssuedPartRecord as _IPR, Part as _Part
+        from models import IssuedPartRecord as _IPR
         IssuedPartRecord = _IPR
-        PartForIssuedLink = _Part
         issued_sum = func.coalesce(func.sum(IssuedPartRecord.quantity), 0)
     except Exception:
         IssuedPartRecord = None
-        PartForIssuedLink = None
         issued_sum = None
 
     def _apply_remaining_filter_goodsreceipt(q):
@@ -238,60 +235,19 @@ def pick_receipt_line_for_issue(
 
         if (
             IssuedPartRecord is not None
-            and PartForIssuedLink is not None
             and issued_sum is not None
             and hasattr(GoodsReceiptLine, "quantity")
             and hasattr(IssuedPartRecord, "source_receipt_line_id")
         ):
-            # SAFE LOT LINK:
-            # source_receipt_line_id alone is not sufficient because
-            # SQLite can reuse deleted integer row IDs.
-            #
-            # First join candidate issued records by receipt-line ID,
-            # then accept their quantity only when the issued Part
-            # number matches the GoodsReceiptLine part number.
             q = q.outerjoin(
                 IssuedPartRecord,
-                IssuedPartRecord.source_receipt_line_id
-                == GoodsReceiptLine.id,
-            ).outerjoin(
-                PartForIssuedLink,
-                PartForIssuedLink.id == IssuedPartRecord.part_id,
+                IssuedPartRecord.source_receipt_line_id == GoodsReceiptLine.id,
             )
-
-            safe_issued_sum = func.coalesce(
-                func.sum(
-                    db.case(
-                        (
-                            func.upper(
-                                func.trim(
-                                    func.coalesce(
-                                        PartForIssuedLink.part_number,
-                                        "",
-                                    )
-                                )
-                            )
-                            == func.upper(
-                                func.trim(
-                                    func.coalesce(
-                                        GoodsReceiptLine.part_number,
-                                        "",
-                                    )
-                                )
-                            ),
-                            IssuedPartRecord.quantity,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            )
-
             q = q.group_by(GoodsReceiptLine.id, GoodsReceipt.id)
             q = q.having(
                 (
                         func.coalesce(GoodsReceiptLine.quantity, 0)
-                        - safe_issued_sum
+                        - issued_sum
                 ) > 0
             )
             return q
@@ -305,17 +261,9 @@ def pick_receipt_line_for_issue(
         qg = (
             db.session.query(GoodsReceiptLine)
             .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
-            .filter(func.upper(func.coalesce(GoodsReceiptLine.part_number, "")) == pn)
+            .filter(GoodsReceiptLine.part_number == pn)
             .filter(_is_posted(GoodsReceipt.status))
-            .filter(
-                func.ltrim(
-                    func.upper(
-                        func.coalesce(GoodsReceipt.invoice_number, "")
-                    ),
-                    "0",
-                )
-                == inv
-            )
+            .filter(func.ltrim(func.coalesce(GoodsReceipt.invoice_number, ""), "0") == inv)
         )
 
         qg = _apply_remaining_filter_goodsreceipt(qg)
@@ -342,22 +290,9 @@ def pick_receipt_line_for_issue(
             qr = (
                 db.session.query(ReceivingItem)
                 .join(ReceivingBatch, fk == ReceivingBatch.id)
-                .filter(
-                    func.upper(
-                        func.coalesce(ReceivingItem.part_number, "")
-                    )
-                    == pn
-                )
+                .filter(func.upper(ReceivingItem.part_number) == pn)
                 .filter(_is_posted(ReceivingBatch.status))
-                .filter(
-                    func.ltrim(
-                        func.upper(
-                            func.coalesce(ReceivingBatch.invoice_number, "")
-                        ),
-                        "0",
-                    )
-                    == inv
-                )
+                .filter(func.ltrim(func.coalesce(ReceivingBatch.invoice_number, ""), "0") == inv)
             )
 
             rem2 = RECEIVING_ITEM_REMAINING_FIELD

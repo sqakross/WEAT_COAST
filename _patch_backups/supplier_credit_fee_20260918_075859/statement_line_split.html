@@ -100,7 +100,13 @@
                     Return Amounts
                 </span>
 
-                
+                <button
+                    type="button"
+                    id="addReturnAmountButton"
+                    class="btn btn-sm btn-outline-primary"
+                >
+                    + Add Return Amount
+                </button>
 
             </div>
 
@@ -116,37 +122,10 @@
 
                                 <div class="row align-items-end g-3">
 
-                                    <div class="col-md-2">
+                                    <div class="col-md-4">
 
                                         <label class="form-label fw-semibold">
-                                            Type
-                                        </label>
-
-                                        <select
-                                            name="component_type"
-                                            class="form-select component-type-select"
-                                        >
-                                            <option
-                                                value="RETURN"
-                                                {% if (component.component_type or "RETURN")|upper == "RETURN" %}selected{% endif %}
-                                            >
-                                                Return
-                                            </option>
-
-                                            <option
-                                                value="FEE"
-                                                {% if (component.component_type or "RETURN")|upper == "FEE" %}selected{% endif %}
-                                            >
-                                                Return Fee
-                                            </option>
-                                        </select>
-
-                                    </div>
-
-                                    <div class="col-md-3">
-
-                                        <label class="form-label fw-semibold">
-                                            Amount
+                                            Return Amount
                                         </label>
 
                                         <div class="input-group">
@@ -169,29 +148,13 @@
 
                                     </div>
 
-                                    <div class="col-md-5">
+                                    <div class="col-md-6">
 
                                         <div class="text-muted small mb-1">
                                             Match
                                         </div>
 
-                                        {% if (component.component_type or "RETURN")|upper == "FEE" %}
-
-                                            <input
-                                                type="hidden"
-                                                name="component_record_id"
-                                                value=""
-                                            >
-
-                                            <div class="fw-semibold text-primary">
-                                                Return fee / deduction
-                                            </div>
-
-                                            <div class="small text-muted">
-                                                No supplier return match is required.
-                                            </div>
-
-                                        {% elif component.matched_record %}
+                                        {% if component.matched_record %}
 
                                             <div class="fw-semibold text-success mb-2">
                                                 {{ component.display_match }}
@@ -311,30 +274,10 @@
 
                             <div class="row align-items-end g-3">
 
-                                <div class="col-md-2">
+                                <div class="col-md-4">
 
                                     <label class="form-label fw-semibold">
-                                        Type
-                                    </label>
-
-                                    <select
-                                        name="component_type"
-                                        class="form-select component-type-select"
-                                    >
-                                        <option value="RETURN" selected>
-                                            Return
-                                        </option>
-                                        <option value="FEE">
-                                            Return Fee
-                                        </option>
-                                    </select>
-
-                                </div>
-
-                                <div class="col-md-3">
-
-                                    <label class="form-label fw-semibold">
-                                        Amount
+                                        Return Amount
                                     </label>
 
                                     <div class="input-group">
@@ -362,10 +305,10 @@
 
                                 </div>
 
-                                <div class="col-md-5">
+                                <div class="col-md-6">
 
                                     <div class="text-muted">
-                                        Return adds to the credit. Return Fee subtracts from it.
+                                        Enter the amount from the supplier credit details.
                                     </div>
 
                                 </div>
@@ -396,18 +339,7 @@
 
         <div class="card shadow-sm border-0">
 
-            
-            <div class="d-flex justify-content-end mb-3">
-                <button
-                    type="button"
-                    id="addReturnAmountButton"
-                    class="btn btn-sm btn-outline-primary"
-                >
-                    + Add Return Amount
-                </button>
-            </div>
-
-<div class="card-body">
+            <div class="card-body">
 
                 <div class="row g-3">
 
@@ -423,7 +355,7 @@
 
                     <div class="col-md-4">
                         <div class="text-muted small">
-                            Net Credit Total
+                            Return Amounts Total
                         </div>
 
                         <div
@@ -507,30 +439,10 @@
         wrapper.innerHTML = `
             <div class="row align-items-end g-3">
 
-                <div class="col-md-2">
+                <div class="col-md-4">
 
                     <label class="form-label fw-semibold">
-                        Type
-                    </label>
-
-                    <select
-                        name="component_type"
-                        class="form-select component-type-select"
-                    >
-                        <option value="RETURN" selected>
-                            Return
-                        </option>
-                        <option value="FEE">
-                            Return Fee
-                        </option>
-                    </select>
-
-                </div>
-
-                <div class="col-md-3">
-
-                    <label class="form-label fw-semibold">
-                        Amount
+                        Return Amount
                     </label>
 
                     <div class="input-group">
@@ -556,10 +468,10 @@
 
                 </div>
 
-                <div class="col-md-5">
+                <div class="col-md-6">
 
                     <div class="text-muted">
-                        Return adds to the credit. Return Fee subtracts from it.
+                        Enter the amount from the supplier credit details.
                     </div>
 
                 </div>
@@ -589,29 +501,9 @@
         let total = 0;
 
         rowsContainer
-            .querySelectorAll(".return-amount-row")
-            .forEach((row) => {
-                const input = row.querySelector(
-                    ".return-amount-input"
-                );
-
-                const typeSelect = row.querySelector(
-                    ".component-type-select"
-                );
-
-                const amount = Number(
-                    input?.value || 0
-                );
-
-                const componentType = (
-                    typeSelect?.value || "RETURN"
-                ).toUpperCase();
-
-                if (componentType === "FEE") {
-                    total -= amount;
-                } else {
-                    total += amount;
-                }
+            .querySelectorAll(".return-amount-input")
+            .forEach((input) => {
+                total += Number(input.value || 0);
             });
 
         total = Math.round(total * 100) / 100;
@@ -621,7 +513,7 @@
         ) / 100;
 
         totalElement.textContent =
-            `${total < 0 ? "-" : ""}$${Math.abs(total).toFixed(2)}`;
+            `$${total.toFixed(2)}`;
 
         differenceElement.textContent =
             `${difference < 0 ? "-" : ""}$${Math.abs(difference).toFixed(2)}`;
@@ -657,9 +549,6 @@
             if (
                 event.target.classList.contains(
                     "return-amount-input"
-                )
-                || event.target.classList.contains(
-                    "component-type-select"
                 )
             ) {
                 recalculate();

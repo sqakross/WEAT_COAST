@@ -2176,24 +2176,6 @@ class IssuedBatch(db.Model):
 # --------------------------------
 # Goods Receipts (Ð¿Ñ€Ð¸Ñ…Ð¾Ð´)
 # --------------------------------
-# WCCR RECEIVING KEY NORMALIZATION
-def _wccr_upper_key(value):
-    """
-    Normalize receiving identifiers.
-    Descriptive fields such as part_name and notes are intentionally
-    NOT passed through this function.
-    """
-    if value is None:
-        return None
-
-    value = str(value).strip()
-
-    if not value:
-        return None
-
-    return value.upper()
-
-
 class GoodsReceipt(db.Model):
     __tablename__ = "goods_receipts"
     __table_args__ = (
@@ -2307,40 +2289,6 @@ class GoodsReceiptLine(db.Model):
 # --------------------------------
 # Supplier Returns
 # --------------------------------
-# ---------------------------------------------------------
-# WCCR: normalize Receiving identifiers before DB write
-# ---------------------------------------------------------
-
-@db.event.listens_for(GoodsReceipt, "before_insert")
-@db.event.listens_for(GoodsReceipt, "before_update")
-def _normalize_goods_receipt_keys(mapper, connection, target):
-    target.supplier_name = (
-        _wccr_upper_key(target.supplier_name) or "UNKNOWN"
-    )
-
-    target.invoice_number = _wccr_upper_key(
-        target.invoice_number
-    )
-
-    if target.currency:
-        target.currency = (
-            str(target.currency).strip().upper()[:8]
-            or "USD"
-        )
-
-
-@db.event.listens_for(GoodsReceiptLine, "before_insert")
-@db.event.listens_for(GoodsReceiptLine, "before_update")
-def _normalize_goods_receipt_line_keys(mapper, connection, target):
-    target.part_number = (
-        _wccr_upper_key(target.part_number) or ""
-    )
-
-    target.location = _wccr_upper_key(
-        target.location
-    )
-
-
 class SupplierReturnBatch(db.Model):
     __tablename__ = "supplier_return_batch"
     __table_args__ = {"extend_existing": True}
@@ -2667,13 +2615,6 @@ class SupplierStatementLineComponent(db.Model):
         default=0.0,
     )
 
-    component_type = db.Column(
-        db.String(20),
-        nullable=False,
-        default="RETURN",
-        server_default="RETURN",
-    )
-
     matched_issued_part_record_id = db.Column(
         db.Integer,
         db.ForeignKey(
@@ -2717,21 +2658,11 @@ class SupplierStatementLineComponent(db.Model):
 
     @property
     def display_match(self) -> str:
-        component_type = (
-            self.component_type or "RETURN"
-        ).strip().upper()
-
-        if component_type == "FEE":
-            return (
-                f"RETURN FEE • "
-                f"${float(self.amount or 0):,.2f}"
-            )
-
         record = self.matched_record
 
         if record is None:
             return (
-                f"RETURN \u2022 "
+                f"RETURN â€¢ "
                 f"${float(self.amount or 0):,.2f}"
             )
 
@@ -2749,7 +2680,7 @@ class SupplierStatementLineComponent(db.Model):
             job_number = job_number[7:].strip()
 
         label = (
-            f"RETURN \u2022 "
+            f"RETURN â€¢ "
             f"${float(self.amount or 0):,.2f}"
         )
 
@@ -2923,7 +2854,7 @@ class SupplierStatementInvoiceComponent(db.Model):
         )
 
         label = (
-            f"INVOICE \u2022 "
+            f"INVOICE â€¢ "
             f"${float(self.amount or 0):,.2f}"
         )
 
@@ -5139,7 +5070,6 @@ class ApplianceMovement(db.Model):
             f"unit_id={self.appliance_unit_id} "
             f"type={self.movement_type!r}>"
         )
-
 
 
 

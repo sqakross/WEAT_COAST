@@ -880,18 +880,8 @@ def build_statement_view(
         if components:
             components_total = round(
                 sum(
-                    (
-                        float(
-                            component.amount or 0.0
-                        )
-                        if (
-                            component.component_type
-                            or "RETURN"
-                        ).strip().upper()
-                        == "RETURN"
-                        else -float(
-                            component.amount or 0.0
-                        )
+                    float(
+                        component.amount or 0.0
                     )
                     for component in components
                 ),
@@ -923,14 +913,7 @@ def build_statement_view(
             )
 
             all_matched = all(
-                (
-                    (
-                        component.component_type
-                        or "RETURN"
-                    ).strip().upper()
-                    == "FEE"
-                )
-                or component
+                component
                 .matched_issued_part_record_id
                 for component in components
             )

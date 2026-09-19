@@ -1255,76 +1255,18 @@ def receiving_delete(batch_id: int):
     #    ÐŸÐ¾Ñ‡ÐµÐ¼Ñƒ? draft Ð½Ðµ Ð´Ð¾Ð»Ð¶ÐµÐ½ Ð±Ñ‹Ñ‚ÑŒ Ð² Ð¸Ð½Ð²ÐµÐ½Ñ‚Ð°Ñ€Ðµ. Ð•ÑÐ»Ð¸ Ð¾Ð½ ÐºÐ°Ðº-Ñ‚Ð¾ Ð¿Ð¾Ð¿Ð°Ð» Ñ‚ÑƒÐ´Ð° Ñ€Ð°Ð½Ð½Ð¸Ð¼ Ð±Ð°Ð³Ð¾Ð¼ â€”
     #    Ð¼Ñ‹ Ð½Ðµ Ð±ÑƒÐ´ÐµÐ¼ Ð´ÐµÐ»Ð°Ñ‚ÑŒ Ð²Ñ‚Ð¾Ñ€Ð¾Ð¹ Ð¼Ð¸Ð½ÑƒÑ. Ð­Ñ‚Ð¾ Ð»ÑƒÑ‡ÑˆÐµ, Ñ‡ÐµÐ¼ ÑÐ»ÑƒÑ‡Ð°Ð¹Ð½Ð¾ Ð¾Ð±Ð½ÑƒÐ»Ð¸Ñ‚ÑŒ ÑÑ‚Ð¾Ðº.
 
-    # 3. Safely detach receipt-lot links before deleting Receiving.
-    #
-    # SQLite FK enforcement may be disabled. Therefore we cannot rely
-    # only on ON DELETE SET NULL: an old source_receipt_line_id could
-    # survive deletion and later point to a reused SQLite row ID.
+    # 3. Ð¢ÐµÐ¿ÐµÑ€ÑŒ ÑƒÐ´Ð°Ð»ÑÐµÐ¼ ÑÐ°Ð¼ batch.
     try:
-        from models import GoodsReceiptLine, IssuedPartRecord
-
         batch = db.session.get(ReceivingBatch, batch_id)
-
         if batch:
-            receipt_line_ids = [
-                row[0]
-                for row in (
-                    db.session.query(GoodsReceiptLine.id)
-                    .filter(
-                        GoodsReceiptLine.goods_receipt_id == batch_id
-                    )
-                    .all()
-                )
-            ]
-
-            detached_count = 0
-
-            if receipt_line_ids:
-                detached_count = (
-                    db.session.query(IssuedPartRecord)
-                    .filter(
-                        IssuedPartRecord.source_receipt_line_id.in_(
-                            receipt_line_ids
-                        )
-                    )
-                    .update(
-                        {
-                            IssuedPartRecord.source_receipt_line_id: None
-                        },
-                        synchronize_session=False,
-                    )
-                )
-
-            current_app.logger.info(
-                "[DELETE RECEIVING] detached source receipt links: "
-                "batch_id=%s, line_ids=%s, detached=%s",
-                batch_id,
-                receipt_line_ids,
-                detached_count,
-            )
-
             db.session.delete(batch)
-
         db.session.commit()
-
-        current_app.logger.info(
-            "[DELETE RECEIVING] batch deleted batch_id=%s",
-            batch_id,
-        )
-
+        current_app.logger.info("[DELETE RECEIVING] batch deleted batch_id=%s", batch_id)
     except Exception as e:
         db.session.rollback()
-        current_app.logger.exception(
-            "[DELETE RECEIVING] delete failed for batch_id=%s",
-            batch_id,
-        )
+        current_app.logger.exception("[DELETE RECEIVING] delete failed for batch_id=%s", batch_id)
         flash(f"Failed to delete batch: {e}", "danger")
-        return redirect(
-            url_for(
-                "inventory.receiving_detail",
-                batch_id=batch_id,
-            )
-        )
+        return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
 
     # 4. Ð§Ð¸ÑÑ‚Ð¸Ð¼ dedup-ÐºÐ»ÑŽÑ‡Ð¸ (Ñ‡Ñ‚Ð¾Ð± Ð¼Ð¾Ð¶Ð½Ð¾ Ð±Ñ‹Ð»Ð¾ ÑÐ½Ð¾Ð²Ð° Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚Ð½ÑƒÑ‚ÑŒ Ñ‚Ð¾Ñ‚ Ð¶Ðµ invoice/file).
     keys_removed = 0
@@ -15175,21 +15117,6 @@ def issue_part():
                 # ðŸ”¥ STRICT RULE:
                 # if inv_ref is set (and not STOCK) â†’ MUST match a posted receipt invoice AND return a line
                 if inv_ref and line is None:
-                    received_qty, already_issued_qty, available_qty = _invoice_available_qty_for_part(
-                        pn=pn,
-                        inv_ref=inv_ref,
-                    )
-
-                    if received_qty > 0 and available_qty <= 0:
-                        raise ValueError(
-                            f"INV# '{inv_ref}' was found for part '{pn}', "
-                            f"but no quantity remains available. "
-                            f"Received: {received_qty}; "
-                            f"already issued: {already_issued_qty}; "
-                            f"available: {available_qty}. "
-                            f"Nothing was issued."
-                        )
-
                     raise ValueError(
                         f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
                         f"Nothing was issued."

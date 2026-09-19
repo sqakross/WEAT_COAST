@@ -700,6 +700,7 @@ def statement_line_split(line_id):
 
     from services.statement_matching_helper import (
         find_return_candidates,
+        validate_component_total,
     )
 
     line = (
@@ -708,11 +709,13 @@ def statement_line_split(line_id):
     )
 
     supplier_name = (
-        line.supplier_name
-        or line.statement.supplier_name
-        or ""
+            line.supplier_name
+            or line.statement.supplier_name
+            or ""
     ).strip().lower()
 
+    # Convert statement supplier name to the exact
+    # ReturnDestination name stored in our database.
     supplier_lookup_name = supplier_name
 
     if supplier_name in {
@@ -731,6 +734,7 @@ def statement_line_split(line_id):
 
     # ========================================================
     # GET
+    # Show existing split components and possible candidates.
     # ========================================================
     if request.method == "GET":
 
@@ -759,15 +763,6 @@ def statement_line_split(line_id):
 
         for component in line.components or []:
 
-            component_type = (
-                component.component_type
-                or "RETURN"
-            ).strip().upper()
-
-            if component_type == "FEE":
-                candidate_map[component.id] = []
-                continue
-
             candidate_results = (
                 find_return_candidates(
                     supplier_name=supplier_lookup_name,
@@ -778,6 +773,8 @@ def statement_line_split(line_id):
                 )
             )
 
+            # statement_line_split.html currently expects
+            # IssuedPartRecord objects, not ReturnCandidate DTOs.
             candidate_map[component.id] = [
                 candidate.record
                 for candidate in candidate_results
@@ -791,13 +788,10 @@ def statement_line_split(line_id):
 
     # ========================================================
     # POST
+    # Validate, replace and save split components.
     # ========================================================
     amount_values = request.form.getlist(
         "component_amount"
-    )
-
-    type_values = request.form.getlist(
-        "component_type"
     )
 
     selected_record_values = request.form.getlist(
@@ -805,20 +799,9 @@ def statement_line_split(line_id):
     )
 
     try:
-        while len(type_values) < len(amount_values):
-            type_values.append("RETURN")
+        amounts: list[float] = []
 
-        while (
-            len(selected_record_values)
-            < len(amount_values)
-        ):
-            selected_record_values.append("")
-
-        entries = []
-
-        for index, raw_value in enumerate(
-            amount_values
-        ):
+        for raw_value in amount_values:
             value = (
                 raw_value or ""
             ).strip()
@@ -833,39 +816,15 @@ def statement_line_split(line_id):
 
             if amount <= 0:
                 raise ValueError(
-                    "Every component amount must be "
+                    "Every return amount must be "
                     "greater than zero."
                 )
 
-            component_type = (
-                type_values[index]
-                or "RETURN"
-            ).strip().upper()
+            amounts.append(amount)
 
-            if component_type not in {
-                "RETURN",
-                "FEE",
-            }:
-                raise ValueError(
-                    "Invalid split component type."
-                )
-
-            selected_raw = (
-                selected_record_values[index]
-                or ""
-            ).strip()
-
-            entries.append(
-                (
-                    component_type,
-                    amount,
-                    selected_raw,
-                )
-            )
-
-        if not entries:
+        if not amounts:
             raise ValueError(
-                "Add at least one return or fee amount."
+                "Add at least one return amount."
             )
 
         statement_amount = round(
@@ -877,31 +836,16 @@ def statement_line_split(line_id):
             2,
         )
 
-        signed_total = round(
-            sum(
-                amount
-                if component_type == "RETURN"
-                else -amount
-                for (
-                    component_type,
-                    amount,
-                    selected_raw,
-                ) in entries
-            ),
-            2,
+        validate_component_total(
+            statement_amount=statement_amount,
+            component_amounts=amounts,
         )
 
-        difference = round(
-            statement_amount - signed_total,
-            2,
-        )
-
-        if abs(difference) > 0.009:
-            raise ValueError(
-                "Split amounts do not match the "
-                f"statement credit. Difference "
-                f"${difference:,.2f}."
-            )
+        while (
+            len(selected_record_values)
+            < len(amounts)
+        ):
+            selected_record_values.append("")
 
         used_by_other_lines = {
             int(record_id)
@@ -924,6 +868,8 @@ def statement_line_split(line_id):
             if record_id is not None
         }
 
+        # Replace existing components only after all basic
+        # validation has passed.
         for component in list(
             line.components or []
         ):
@@ -933,89 +879,80 @@ def statement_line_split(line_id):
 
         selected_in_current_split: set[int] = set()
 
-        for (
-            component_type,
-            amount,
-            selected_raw,
-        ) in entries:
+        for index, amount in enumerate(amounts):
+
+            selected_raw = (
+                selected_record_values[index]
+                or ""
+            ).strip()
+
+            excluded_ids = (
+                used_by_other_lines
+                | selected_in_current_split
+            )
+
+            candidate_results = (
+                find_return_candidates(
+                    supplier_name=supplier_lookup_name,
+                    amount=amount,
+                    excluded_ids=excluded_ids,
+                )
+            )
+
+            candidate_ids = {
+                candidate.record.id
+                for candidate in candidate_results
+            }
 
             matched_record_id = None
             note = None
 
-            if component_type == "FEE":
+            if selected_raw:
+                selected_id = int(
+                    selected_raw
+                )
+
+                if selected_id not in candidate_ids:
+                    raise ValueError(
+                        "The selected return for "
+                        f"${amount:,.2f} is no longer "
+                        "available."
+                    )
+
+                matched_record_id = selected_id
+
+                selected_in_current_split.add(
+                    selected_id
+                )
+
+            elif len(candidate_results) == 1:
+                matched_record_id = (
+                    candidate_results[0]
+                    .record
+                    .id
+                )
+
+                selected_in_current_split.add(
+                    matched_record_id
+                )
+
+            elif len(candidate_results) == 0:
                 note = (
-                    "Supplier return fee / deduction."
+                    "No matching supplier return "
+                    "was found."
                 )
 
             else:
-                excluded_ids = (
-                    used_by_other_lines
-                    | selected_in_current_split
+                note = (
+                    f"{len(candidate_results)} possible "
+                    "supplier returns were found for "
+                    f"${amount:,.2f}. "
+                    "Select the correct return."
                 )
-
-                candidate_results = (
-                    find_return_candidates(
-                        supplier_name=(
-                            supplier_lookup_name
-                        ),
-                        amount=amount,
-                        excluded_ids=excluded_ids,
-                    )
-                )
-
-                candidate_ids = {
-                    candidate.record.id
-                    for candidate in candidate_results
-                }
-
-                if selected_raw:
-                    selected_id = int(
-                        selected_raw
-                    )
-
-                    if selected_id not in candidate_ids:
-                        raise ValueError(
-                            "The selected return for "
-                            f"${amount:,.2f} is no "
-                            "longer available."
-                        )
-
-                    matched_record_id = selected_id
-
-                    selected_in_current_split.add(
-                        selected_id
-                    )
-
-                elif len(candidate_results) == 1:
-                    matched_record_id = (
-                        candidate_results[0]
-                        .record
-                        .id
-                    )
-
-                    selected_in_current_split.add(
-                        matched_record_id
-                    )
-
-                elif len(candidate_results) == 0:
-                    note = (
-                        "No matching supplier return "
-                        "was found."
-                    )
-
-                else:
-                    note = (
-                        f"{len(candidate_results)} "
-                        "possible supplier returns "
-                        f"were found for "
-                        f"${amount:,.2f}. "
-                        "Select the correct return."
-                    )
 
             db.session.add(
                 SupplierStatementLineComponent(
                     statement_line_id=line.id,
-                    component_type=component_type,
                     amount=amount,
                     matched_issued_part_record_id=(
                         matched_record_id
@@ -1031,22 +968,18 @@ def statement_line_split(line_id):
 
         db.session.commit()
 
+        # Reload so relationship reflects the committed rows.
         db.session.refresh(line)
 
         saved_components = list(
             line.components or []
         )
 
-        resolved_count = sum(
+        matched_count = sum(
             1
             for component in saved_components
             if (
-                (
-                    component.component_type
-                    or "RETURN"
-                ).strip().upper()
-                == "FEE"
-                or component
+                component
                 .matched_issued_part_record_id
             )
         )
@@ -1057,20 +990,19 @@ def statement_line_split(line_id):
 
         if (
             total_count > 0
-            and resolved_count == total_count
+            and matched_count == total_count
         ):
             flash(
-                "Split saved. All components "
-                "were matched.",
+                f"Split saved. All {matched_count} "
+                "return amounts were matched.",
                 "success",
             )
 
         else:
             flash(
-                f"Split saved. {resolved_count} of "
-                f"{total_count} components were "
-                "resolved. Select candidates for "
-                "the remaining returns.",
+                f"Split saved. {matched_count} of "
+                f"{total_count} return amounts were "
+                "matched. Select candidates for the rest.",
                 "warning",
             )
 
@@ -1096,7 +1028,6 @@ def statement_line_split(line_id):
                 line_id=line.id,
             )
         )
-
 
 @accounting_bp.route(
     "/statements/line/<int:line_id>/invoice-match",

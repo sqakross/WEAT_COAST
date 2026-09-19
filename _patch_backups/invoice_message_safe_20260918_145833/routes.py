@@ -15175,21 +15175,6 @@ def issue_part():
                 # ðŸ”¥ STRICT RULE:
                 # if inv_ref is set (and not STOCK) â†’ MUST match a posted receipt invoice AND return a line
                 if inv_ref and line is None:
-                    received_qty, already_issued_qty, available_qty = _invoice_available_qty_for_part(
-                        pn=pn,
-                        inv_ref=inv_ref,
-                    )
-
-                    if received_qty > 0 and available_qty <= 0:
-                        raise ValueError(
-                            f"INV# '{inv_ref}' was found for part '{pn}', "
-                            f"but no quantity remains available. "
-                            f"Received: {received_qty}; "
-                            f"already issued: {already_issued_qty}; "
-                            f"available: {available_qty}. "
-                            f"Nothing was issued."
-                        )
-
                     raise ValueError(
                         f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
                         f"Nothing was issued."
