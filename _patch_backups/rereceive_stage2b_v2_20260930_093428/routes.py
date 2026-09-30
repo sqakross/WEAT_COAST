@@ -487,14 +487,6 @@ def receiving_detail(receiving_id):
         warehouse_id=warehouse_id,
     )
 
-    # WCCR EMERGENCY PURGE TEMPLATE PERMISSION V5 START
-    can_emergency_purge = AccessControlService.can(
-        current_user,
-        "appliance.emergency_purge",
-        warehouse_id=warehouse_id,
-    )
-    # WCCR EMERGENCY PURGE TEMPLATE PERMISSION V5 END
-
     warehouses = (
         AccessControlService.accessible_warehouses(
             current_user
@@ -510,7 +502,6 @@ def receiving_detail(receiving_id):
         can_post=can_post,
         can_void=can_void,
         can_pricing=can_pricing,
-        can_emergency_purge=can_emergency_purge,
     )
 
 
@@ -1574,118 +1565,20 @@ def receiving_check_serial():
 
     if existing_unit is not None:
 
-        # WCCR RE-RECEIVE STAGE2B V2 BACKEND START
-
-        current_status = (
-            existing_unit.status
-            or ""
-        ).strip().lower()
-
-        # --------------------------------------------------------
-        # Confirmed Vendor Return
-        #
-        # This physical appliance already exists, but it has
-        # completed the vendor-return lifecycle and may therefore
-        # be received again using the SAME ApplianceUnit / AP-ID.
-        # --------------------------------------------------------
-
-        if current_status == "vendor_return":
-
-            existing_rereceive_line = (
-                ApplianceReceivingLine.query
-                .filter(
-                    ApplianceReceivingLine
-                    .existing_appliance_unit_id
-                    == existing_unit.id
-                )
-                .first()
-            )
-
-            # Do not allow the same physical appliance to be
-            # attached to another re-receive line.
-            if existing_rereceive_line is not None:
-
-                linked_receiving = db.session.get(
-                    ApplianceReceiving,
-                    existing_rereceive_line.receiving_id,
-                )
-
-                linked_number = (
-                    linked_receiving.receiving_number
-                    if linked_receiving is not None
-                    else ""
-                )
-
-                linked_status = (
-                    linked_receiving.status
-                    if linked_receiving is not None
-                    else ""
-                )
-
-                return jsonify(
-                    {
-                        "ok": True,
-                        "exists": True,
-                        "source": "rereceive",
-                        "rereceive_allowed": False,
-                        "unit_id": existing_unit.id,
-                        "inventory_number":
-                            existing_unit.inventory_number,
-                        "status": current_status,
-                        "message": (
-                            f"{existing_unit.inventory_number} "
-                            f"is already linked to Receiving "
-                            f"{linked_number or '#'+str(existing_rereceive_line.receiving_id)}"
-                            f"{' (' + linked_status.upper() + ')' if linked_status else ''}."
-                        ),
-                    }
-                )
-
-            return jsonify(
-                {
-                    "ok": True,
-                    "exists": True,
-                    "source": "inventory",
-                    "rereceive_allowed": True,
-                    "unit_id": existing_unit.id,
-                    "inventory_number":
-                        existing_unit.inventory_number,
-                    "status": current_status,
-                    "message": (
-                        f"SERIAL {serial} belongs to "
-                        f"{existing_unit.inventory_number}. "
-                        "This appliance was returned to the vendor "
-                        "and can be RE-RECEIVED using the SAME AP-ID."
-                    ),
-                }
-            )
-
-        # --------------------------------------------------------
-        # All other existing ApplianceUnits remain duplicates.
-        #
-        # Includes AVAILABLE, ISSUED, REPAIR,
-        # VENDOR_RETURN_PENDING, WRITTEN_OFF, etc.
-        # --------------------------------------------------------
-
         return jsonify(
             {
                 "ok": True,
                 "exists": True,
                 "source": "inventory",
-                "rereceive_allowed": False,
-                "unit_id": existing_unit.id,
-                "inventory_number":
-                    existing_unit.inventory_number,
-                "status": current_status,
                 "message": (
                     f"SERIAL {serial} already exists "
                     f"in Inventory as "
                     f"{existing_unit.inventory_number}."
                 ),
+                "inventory_number":
+                    existing_unit.inventory_number,
             }
         )
-
-        # WCCR RE-RECEIVE STAGE2B V2 BACKEND END
 
     # --------------------------------------------------------
     # 2. Already exists in a saved Receiving line
@@ -2107,8 +2000,8 @@ def receiving_delete_draft(receiving_id):
 # Emergency Purge Receiving
 #
 # BREAK-GLASS operation.
-# Requires appliance.emergency_purge.
-# Service repeats permission + dependency/safety checks.
+# SUPERADMIN only.
+# Not controlled by assignable Permission catalog.
 # ============================================================
 
 @appliance_bp.post(
@@ -2116,14 +2009,22 @@ def receiving_delete_draft(receiving_id):
 )
 @login_required
 def receiving_emergency_purge(receiving_id):
-    # WCCR EMERGENCY PURGE PERMISSION V2 ROUTE START
-    if not AccessControlService.can(
-        current_user,
-        "appliance.emergency_purge",
-    ):
+    # --------------------------------------------------------
+    # Defense in depth:
+    # route itself is SUPERADMIN-only.
+    #
+    # The service repeats this check and performs the full
+    # dependency / state / confirmation validation.
+    # --------------------------------------------------------
+
+    role = (
+        getattr(current_user, "role", "")
+        or ""
+    ).strip().lower()
+
+    if role != "superadmin":
         flash(
-            "You do not have permission to Emergency Purge "
-            "Appliance Receiving.",
+            "Emergency Purge is restricted to SUPERADMIN.",
             "danger",
         )
 
@@ -2133,7 +2034,6 @@ def receiving_emergency_purge(receiving_id):
                 receiving_id=receiving_id,
             )
         )
-    # WCCR EMERGENCY PURGE PERMISSION V2 ROUTE END
 
     try:
         result = (

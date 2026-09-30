@@ -487,14 +487,6 @@ def receiving_detail(receiving_id):
         warehouse_id=warehouse_id,
     )
 
-    # WCCR EMERGENCY PURGE TEMPLATE PERMISSION V5 START
-    can_emergency_purge = AccessControlService.can(
-        current_user,
-        "appliance.emergency_purge",
-        warehouse_id=warehouse_id,
-    )
-    # WCCR EMERGENCY PURGE TEMPLATE PERMISSION V5 END
-
     warehouses = (
         AccessControlService.accessible_warehouses(
             current_user
@@ -510,7 +502,6 @@ def receiving_detail(receiving_id):
         can_post=can_post,
         can_void=can_void,
         can_pricing=can_pricing,
-        can_emergency_purge=can_emergency_purge,
     )
 
 
@@ -2107,8 +2098,8 @@ def receiving_delete_draft(receiving_id):
 # Emergency Purge Receiving
 #
 # BREAK-GLASS operation.
-# Requires appliance.emergency_purge.
-# Service repeats permission + dependency/safety checks.
+# SUPERADMIN only.
+# Not controlled by assignable Permission catalog.
 # ============================================================
 
 @appliance_bp.post(
@@ -2116,14 +2107,22 @@ def receiving_delete_draft(receiving_id):
 )
 @login_required
 def receiving_emergency_purge(receiving_id):
-    # WCCR EMERGENCY PURGE PERMISSION V2 ROUTE START
-    if not AccessControlService.can(
-        current_user,
-        "appliance.emergency_purge",
-    ):
+    # --------------------------------------------------------
+    # Defense in depth:
+    # route itself is SUPERADMIN-only.
+    #
+    # The service repeats this check and performs the full
+    # dependency / state / confirmation validation.
+    # --------------------------------------------------------
+
+    role = (
+        getattr(current_user, "role", "")
+        or ""
+    ).strip().lower()
+
+    if role != "superadmin":
         flash(
-            "You do not have permission to Emergency Purge "
-            "Appliance Receiving.",
+            "Emergency Purge is restricted to SUPERADMIN.",
             "danger",
         )
 
@@ -2133,7 +2132,6 @@ def receiving_emergency_purge(receiving_id):
                 receiving_id=receiving_id,
             )
         )
-    # WCCR EMERGENCY PURGE PERMISSION V2 ROUTE END
 
     try:
         result = (

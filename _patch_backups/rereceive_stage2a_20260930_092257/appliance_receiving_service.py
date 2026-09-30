@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 from license_client.operation_gate import authorize_mutation as _authorize_mutation
 
 from datetime import date, datetime
@@ -1347,141 +1347,6 @@ class ApplianceReceivingService:
             raise
 
 
-    # WCCR RE-RECEIVE STAGE2A SERVICE START
-    @staticmethod
-    def add_rereceive_line(
-        *,
-        receiving_id: int,
-        actor: User,
-        appliance_unit_id: int,
-    ) -> ApplianceReceivingLine:
-        """
-        Add one Draft Receiving line for an EXISTING physical
-        ApplianceUnit.
-
-        No new ApplianceUnit is created here.
-
-        For Stage 2A this is intentionally restricted to units
-        whose current lifecycle status is vendor_return.
-        """
-        actor = ApplianceReceivingService._require_user(actor)
-
-        receiving = (
-            ApplianceReceivingService._get_receiving(
-                receiving_id
-            )
-        )
-
-        ApplianceReceivingService._require_draft(
-            receiving
-        )
-
-        ApplianceReceivingService._require_permission(
-            actor=actor,
-            permission_code="appliance.receive",
-            warehouse_id=receiving.warehouse_id,
-        )
-
-        unit = db.session.get(
-            ApplianceUnit,
-            appliance_unit_id,
-        )
-
-        if unit is None:
-            raise ApplianceReceivingError(
-                "Existing appliance not found."
-            )
-
-        current_status = (
-            unit.status
-            or ""
-        ).strip().lower()
-
-        if current_status != "vendor_return":
-            raise ApplianceReceivingError(
-                f"{unit.inventory_number} cannot be "
-                f"re-received from status "
-                f"{current_status or 'UNKNOWN'}. "
-                "Only VENDOR RETURN appliances may be "
-                "re-received."
-            )
-
-        if unit.current_work_order_id:
-            raise ApplianceReceivingError(
-                f"{unit.inventory_number} still has a "
-                "current Work Order and cannot be "
-                "re-received."
-            )
-
-        # Prevent the same AP from being attached to two
-        # Draft/Posted re-receive lines.
-        existing_link = (
-            ApplianceReceivingLine.query
-            .filter(
-                ApplianceReceivingLine
-                .existing_appliance_unit_id
-                == unit.id
-            )
-            .first()
-        )
-
-        if existing_link is not None:
-            linked_receiving = (
-                existing_link.receiving
-            )
-
-            linked_number = (
-                linked_receiving.receiving_number
-                if linked_receiving
-                else f"#{existing_link.receiving_id}"
-            )
-
-            linked_status = (
-                linked_receiving.status
-                if linked_receiving
-                else ""
-            )
-
-            raise ApplianceReceivingError(
-                f"{unit.inventory_number} is already linked "
-                f"to Receiving {linked_number} "
-                f"({(linked_status or 'unknown').upper()})."
-            )
-
-        line = ApplianceReceivingLine(
-            receiving_id=receiving.id,
-            line_no=(
-                ApplianceReceivingService
-                ._next_line_number(receiving)
-            ),
-            category_id=unit.category_id,
-            existing_appliance_unit_id=unit.id,
-            brand=unit.brand,
-            model_number=unit.model_number,
-            serial_number=unit.serial_number,
-            description=unit.description,
-            size_value=unit.size_value,
-            size_unit=unit.size_unit,
-            color=unit.color,
-            condition=unit.condition,
-            unit_cost=unit.unit_cost,
-            selling_price=unit.selling_price,
-            notes=(
-                f"RE-RECEIVE EXISTING "
-                f"{unit.inventory_number}"
-            ),
-            created_by_id=actor.id,
-            updated_by_id=actor.id,
-        )
-
-        db.session.add(line)
-        db.session.commit()
-        db.session.refresh(line)
-
-        return line
-
-    # WCCR RE-RECEIVE STAGE2A SERVICE END
-
     # --------------------------------------------------------
     # Posting
     # --------------------------------------------------------
@@ -1548,114 +1413,6 @@ class ApplianceReceivingService:
                         f"{existing_unit.inventory_number}."
                     )
 
-                # ------------------------------------------------
-                # RE-RECEIVE EXISTING APPLIANCE
-                # ------------------------------------------------
-                if line.existing_appliance_unit_id:
-
-                    unit = db.session.get(
-                        ApplianceUnit,
-                        line.existing_appliance_unit_id,
-                    )
-
-                    if unit is None:
-                        raise ApplianceReceivingError(
-                            f"Receiving line {line.line_no} "
-                            "references a missing existing "
-                            "ApplianceUnit."
-                        )
-
-                    current_status = (
-                        unit.status
-                        or ""
-                    ).strip().lower()
-
-                    if current_status != "vendor_return":
-                        raise ApplianceReceivingError(
-                            f"{unit.inventory_number} cannot be "
-                            f"re-received from status "
-                            f"{current_status or 'UNKNOWN'}."
-                        )
-
-                    # Serial identity must still match.
-                    unit_serial = (
-                        unit.serial_number
-                        or ""
-                    ).strip().upper()
-
-                    line_serial = (
-                        line.serial_number
-                        or ""
-                    ).strip().upper()
-
-                    if unit_serial != line_serial:
-                        raise ApplianceReceivingError(
-                            f"Serial mismatch for "
-                            f"{unit.inventory_number}."
-                        )
-
-                    old_warehouse_id = unit.warehouse_id
-
-                    unit.warehouse_id = (
-                        receiving.warehouse_id
-                    )
-
-                    unit.status = (
-                        ApplianceReceivingService
-                        .UNIT_STATUS_AVAILABLE
-                    )
-
-                    unit.current_work_order_id = None
-                    unit.current_work_order_number = None
-
-                    unit.updated_at = datetime.utcnow()
-                    unit.updated_by_id = actor.id
-
-                    # Keep immutable original
-                    # ApplianceUnit.receiving_line_id.
-                    #
-                    # New Receiving relation is preserved by:
-                    #   line.existing_appliance_unit_id
-                    # and movement meta_json.
-                    from models import ApplianceMovement
-                    import json
-
-                    movement = ApplianceMovement(
-                        appliance_unit_id=unit.id,
-                        movement_type="RE_RECEIVE",
-                        from_warehouse_id=old_warehouse_id,
-                        to_warehouse_id=receiving.warehouse_id,
-                        reason_code="RETURNED_FROM_VENDOR",
-                        notes=(
-                            f"Re-received through "
-                            f"{receiving.receiving_number}"
-                        ),
-                        meta_json=json.dumps(
-                            {
-                                "receiving_id":
-                                    receiving.id,
-                                "receiving_number":
-                                    receiving.receiving_number,
-                                "receiving_line_id":
-                                    line.id,
-                                "source":
-                                    "APPLIANCE_RECEIVING",
-                                "previous_status":
-                                    current_status,
-                            },
-                            sort_keys=True,
-                        ),
-                        actor_id=actor.id,
-                    )
-
-                    db.session.add(movement)
-                    db.session.flush()
-
-                    continue
-
-                # ------------------------------------------------
-                # NORMAL FIRST-TIME RECEIVING
-                # ------------------------------------------------
                 if line.serial_number:
                     serial_exists = (
                         ApplianceUnit.query
@@ -1740,7 +1497,7 @@ class ApplianceReceivingService:
 
         This method NEVER deletes or modifies data.
 
-        Emergency Purge is a break-glass permission-controlled operation.
+        Emergency Purge is a break-glass SUPERADMIN operation.
         It may eventually remove an erroneous Receiving and its
         technical inventory history only when no downstream
         business dependency exists.
@@ -1755,12 +1512,16 @@ class ApplianceReceivingService:
         """
         actor = ApplianceReceivingService._require_user(actor)
 
-        # WCCR EMERGENCY PURGE PERMISSION - ANALYSIS START
-        ApplianceReceivingService._require_permission(
-            actor=actor,
-            permission_code="appliance.emergency_purge",
-        )
-        # WCCR EMERGENCY PURGE PERMISSION - ANALYSIS END
+        role = (
+            getattr(actor, "role", "")
+            or ""
+        ).strip().lower()
+
+        if role != "superadmin":
+            raise ApplianceAccessDenied(
+                "Only SUPERADMIN can perform "
+                "Emergency Purge analysis."
+            )
 
         receiving = (
             ApplianceReceivingService._get_receiving(
@@ -2098,22 +1859,26 @@ class ApplianceReceivingService:
         Physically remove an erroneous POSTED / VOIDED Receiving.
 
         BREAK-GLASS operation:
-            - appliance.emergency_purge permission required
+            - SUPERADMIN only
             - exact confirmation phrase required
             - dependency checker must report SAFE
             - only technical/audit movements may be removed
             - downstream business history always blocks purge
 
-        Permission is enforced before any purge analysis or deletion.
+        This is intentionally NOT controlled by the normal
+        Permission catalog.
         """
         actor = ApplianceReceivingService._require_user(actor)
 
-        # WCCR EMERGENCY PURGE PERMISSION - EXECUTE START
-        ApplianceReceivingService._require_permission(
-            actor=actor,
-            permission_code="appliance.emergency_purge",
-        )
-        # WCCR EMERGENCY PURGE PERMISSION - EXECUTE END
+        role = (
+            getattr(actor, "role", "")
+            or ""
+        ).strip().lower()
+
+        if role != "superadmin":
+            raise ApplianceAccessDenied(
+                "Only SUPERADMIN can perform Emergency Purge."
+            )
 
         receiving = (
             ApplianceReceivingService._get_receiving(
@@ -2655,33 +2420,13 @@ class ApplianceReceivingService:
         # Find physical appliance created from this line.
         # ----------------------------------------------------
 
-        # ----------------------------------------------------
-        # Resolve physical appliance.
-        #
-        # Normal first-time Receiving:
-        #   ApplianceUnit.receiving_line_id -> this line
-        #
-        # RE-RECEIVE:
-        #   this line.existing_appliance_unit_id -> existing unit
-        #
-        # IMPORTANT:
-        # Never rewrite the original ApplianceUnit.receiving_line_id
-        # for a re-received appliance.
-        # ----------------------------------------------------
-
-        if line.existing_appliance_unit_id:
-            unit = db.session.get(
-                ApplianceUnit,
-                line.existing_appliance_unit_id,
+        unit = (
+            ApplianceUnit.query
+            .filter_by(
+                receiving_line_id=line.id
             )
-        else:
-            unit = (
-                ApplianceUnit.query
-                .filter_by(
-                    receiving_line_id=line.id
-                )
-                .first()
-            )
+            .first()
+        )
 
         if unit is None:
             raise ApplianceReceivingError(
@@ -2885,33 +2630,13 @@ class ApplianceReceivingService:
             selling_price
         )
 
-        # ----------------------------------------------------
-        # Resolve physical appliance.
-        #
-        # Normal first-time Receiving:
-        #   ApplianceUnit.receiving_line_id -> this line
-        #
-        # RE-RECEIVE:
-        #   this line.existing_appliance_unit_id -> existing unit
-        #
-        # IMPORTANT:
-        # Never rewrite the original ApplianceUnit.receiving_line_id
-        # for a re-received appliance.
-        # ----------------------------------------------------
-
-        if line.existing_appliance_unit_id:
-            unit = db.session.get(
-                ApplianceUnit,
-                line.existing_appliance_unit_id,
+        unit = (
+            ApplianceUnit.query
+            .filter_by(
+                receiving_line_id=line.id
             )
-        else:
-            unit = (
-                ApplianceUnit.query
-                .filter_by(
-                    receiving_line_id=line.id
-                )
-                .first()
-            )
+            .first()
+        )
 
         if unit is None:
             raise ApplianceReceivingError(

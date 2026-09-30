@@ -599,15 +599,6 @@ from services.erp_access_service import ErpAccessService
 @inventory_bp.get("/parts/model-research", endpoint="model_research")
 @login_required
 def model_research():
-    # MODEL RESEARCH ACCESS V1 - ROUTE START
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.inventory.model_research",
-        default_allowed=True,
-    ):
-        abort(403)
-    # MODEL RESEARCH ACCESS V1 - ROUTE END
-
     model_query = (request.args.get("model") or "").strip().upper()
     search_mode = (request.args.get("mode") or "contains").strip().lower()
 
@@ -18753,13 +18744,11 @@ def user_access(user_id):
     for group in ERP_PERMISSION_GROUPS:
         ui_group = dict(group)
 
-        # WCCR ERP ACCESS UI - ENABLE ISSUED PARTS / INVOICES DENY
-        # ERP ACCESS UI
-        # Keep only Manage Access hidden.
-        # Invoice permissions remain visible so administrators
-        # can explicitly set DEFAULT / ALLOW / DENY.
+        # ERP ACCESS UI - HIDE INVOICE PERMISSIONS
         hidden_erp_permissions = {
             "erp.users.manage_access",
+            "erp.invoices.access",
+            "erp.invoices.delete",
         }
 
         ui_group["permissions"] = [

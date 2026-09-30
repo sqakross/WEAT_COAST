@@ -3557,22 +3557,6 @@ class ApplianceReceivingLine(db.Model):
         index=True,
     )
 
-    # Re-receive support:
-    # This line represents a new physical receipt of an
-    # ApplianceUnit that already exists in inventory history.
-    #
-    # ApplianceUnit.receiving_line_id remains the ORIGINAL
-    # receiving line that created the physical appliance identity.
-    existing_appliance_unit_id = db.Column(
-        db.Integer,
-        db.ForeignKey(
-            "appliance_unit.id",
-            ondelete="RESTRICT",
-        ),
-        nullable=True,
-        index=True,
-    )
-
     brand = db.Column(
         db.String(100),
         nullable=True,
@@ -3680,14 +3664,6 @@ class ApplianceReceivingLine(db.Model):
         "ApplianceCategory",
         foreign_keys=[category_id],
         lazy="joined",
-    )
-
-    # Existing physical appliance referenced by a RE-RECEIVE line.
-    # This does NOT replace ApplianceUnit.receiving_line_id.
-    existing_appliance_unit = db.relationship(
-        "ApplianceUnit",
-        foreign_keys=[existing_appliance_unit_id],
-        lazy="select",
     )
 
     created_by = db.relationship(

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from extensions import db
 from models import Permission
@@ -151,19 +151,6 @@ APPLIANCE_PERMISSIONS = [
         "group_name": "Receiving",
         "sort_order": 156,
     },
-    # WCCR EMERGENCY PURGE PERMISSION V2 START
-    {
-        "code": "appliance.emergency_purge",
-        "name": "Emergency Purge Receiving",
-        "description": (
-            "Permanently purge an eligible POSTED or VOIDED "
-            "Appliance Receiving after all safety and dependency "
-            "checks pass."
-        ),
-        "group_name": "Receiving",
-        "sort_order": 157,
-    },
-    # WCCR EMERGENCY PURGE PERMISSION V2 END
     {
         "code": "access.manage_permissions",
         "name": "Manage Permissions",

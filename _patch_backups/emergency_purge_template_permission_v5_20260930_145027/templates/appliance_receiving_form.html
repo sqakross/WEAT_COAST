@@ -447,7 +447,10 @@
     {# WCCR EMERGENCY PURGE PERMISSION V2 UI START #}
     {% if receiving
           and (is_posted or is_voided)
-          and can_emergency_purge %}
+          and access_allowed(
+            current_user,
+            'appliance.emergency_purge'
+          ) %}
 
       <form method="post"
             action="{{ url_for(

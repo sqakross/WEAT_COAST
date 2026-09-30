@@ -54,59 +54,8 @@ def login():
             else:
                 session.pop("tech_last_activity", None)
 
-            # WCCR APPLIANCE PERMISSION-AWARE LANDING V2 START
             next_url = request.args.get("next")
-
-            # Preserve an explicit destination supplied by Flask-Login.
-            if next_url:
-                return redirect(next_url)
-
-            # Use the existing authorization engines.
-            #
-            # Rule:
-            #   Appliance access = YES
-            #   Legacy Parts Inventory access = NO
-            #       -> Appliance Inventory
-            #
-            # This is permission-based. No username or role is
-            # hard-coded here.
-            from services.access_control_service import (
-                AccessControlService,
-            )
-            from services.erp_access_service import (
-                ErpAccessService,
-            )
-
-            can_view_appliances = (
-                AccessControlService.can(
-                    user,
-                    "appliance.view",
-                )
-            )
-
-            can_access_parts_inventory = (
-                ErpAccessService.is_allowed(
-                    user,
-                    "erp.inventory.access",
-                    default_allowed=True,
-                )
-            )
-
-            if (
-                can_view_appliances
-                and not can_access_parts_inventory
-            ):
-                return redirect(
-                    url_for(
-                        "appliance.inventory_list"
-                    )
-                )
-
-            # Preserve the historical landing for everybody else.
-            return redirect(
-                url_for("inventory.wo_list")
-            )
-            # WCCR APPLIANCE PERMISSION-AWARE LANDING V2 END
+            return redirect(next_url or url_for("inventory.wo_list"))
 
         flash('Invalid username or password', 'danger')
     return render_template('login.html')

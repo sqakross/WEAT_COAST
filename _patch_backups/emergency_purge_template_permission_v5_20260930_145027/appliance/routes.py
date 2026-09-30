@@ -487,14 +487,6 @@ def receiving_detail(receiving_id):
         warehouse_id=warehouse_id,
     )
 
-    # WCCR EMERGENCY PURGE TEMPLATE PERMISSION V5 START
-    can_emergency_purge = AccessControlService.can(
-        current_user,
-        "appliance.emergency_purge",
-        warehouse_id=warehouse_id,
-    )
-    # WCCR EMERGENCY PURGE TEMPLATE PERMISSION V5 END
-
     warehouses = (
         AccessControlService.accessible_warehouses(
             current_user
@@ -510,7 +502,6 @@ def receiving_detail(receiving_id):
         can_post=can_post,
         can_void=can_void,
         can_pricing=can_pricing,
-        can_emergency_purge=can_emergency_purge,
     )
 
 

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 from license_client.operation_gate import authorize_mutation as _authorize_mutation
 
 from datetime import date, datetime
@@ -1740,7 +1740,7 @@ class ApplianceReceivingService:
 
         This method NEVER deletes or modifies data.
 
-        Emergency Purge is a break-glass permission-controlled operation.
+        Emergency Purge is a break-glass SUPERADMIN operation.
         It may eventually remove an erroneous Receiving and its
         technical inventory history only when no downstream
         business dependency exists.
@@ -1755,12 +1755,16 @@ class ApplianceReceivingService:
         """
         actor = ApplianceReceivingService._require_user(actor)
 
-        # WCCR EMERGENCY PURGE PERMISSION - ANALYSIS START
-        ApplianceReceivingService._require_permission(
-            actor=actor,
-            permission_code="appliance.emergency_purge",
-        )
-        # WCCR EMERGENCY PURGE PERMISSION - ANALYSIS END
+        role = (
+            getattr(actor, "role", "")
+            or ""
+        ).strip().lower()
+
+        if role != "superadmin":
+            raise ApplianceAccessDenied(
+                "Only SUPERADMIN can perform "
+                "Emergency Purge analysis."
+            )
 
         receiving = (
             ApplianceReceivingService._get_receiving(
@@ -2098,22 +2102,26 @@ class ApplianceReceivingService:
         Physically remove an erroneous POSTED / VOIDED Receiving.
 
         BREAK-GLASS operation:
-            - appliance.emergency_purge permission required
+            - SUPERADMIN only
             - exact confirmation phrase required
             - dependency checker must report SAFE
             - only technical/audit movements may be removed
             - downstream business history always blocks purge
 
-        Permission is enforced before any purge analysis or deletion.
+        This is intentionally NOT controlled by the normal
+        Permission catalog.
         """
         actor = ApplianceReceivingService._require_user(actor)
 
-        # WCCR EMERGENCY PURGE PERMISSION - EXECUTE START
-        ApplianceReceivingService._require_permission(
-            actor=actor,
-            permission_code="appliance.emergency_purge",
-        )
-        # WCCR EMERGENCY PURGE PERMISSION - EXECUTE END
+        role = (
+            getattr(actor, "role", "")
+            or ""
+        ).strip().lower()
+
+        if role != "superadmin":
+            raise ApplianceAccessDenied(
+                "Only SUPERADMIN can perform Emergency Purge."
+            )
 
         receiving = (
             ApplianceReceivingService._get_receiving(
@@ -2655,33 +2663,13 @@ class ApplianceReceivingService:
         # Find physical appliance created from this line.
         # ----------------------------------------------------
 
-        # ----------------------------------------------------
-        # Resolve physical appliance.
-        #
-        # Normal first-time Receiving:
-        #   ApplianceUnit.receiving_line_id -> this line
-        #
-        # RE-RECEIVE:
-        #   this line.existing_appliance_unit_id -> existing unit
-        #
-        # IMPORTANT:
-        # Never rewrite the original ApplianceUnit.receiving_line_id
-        # for a re-received appliance.
-        # ----------------------------------------------------
-
-        if line.existing_appliance_unit_id:
-            unit = db.session.get(
-                ApplianceUnit,
-                line.existing_appliance_unit_id,
+        unit = (
+            ApplianceUnit.query
+            .filter_by(
+                receiving_line_id=line.id
             )
-        else:
-            unit = (
-                ApplianceUnit.query
-                .filter_by(
-                    receiving_line_id=line.id
-                )
-                .first()
-            )
+            .first()
+        )
 
         if unit is None:
             raise ApplianceReceivingError(
@@ -2885,33 +2873,13 @@ class ApplianceReceivingService:
             selling_price
         )
 
-        # ----------------------------------------------------
-        # Resolve physical appliance.
-        #
-        # Normal first-time Receiving:
-        #   ApplianceUnit.receiving_line_id -> this line
-        #
-        # RE-RECEIVE:
-        #   this line.existing_appliance_unit_id -> existing unit
-        #
-        # IMPORTANT:
-        # Never rewrite the original ApplianceUnit.receiving_line_id
-        # for a re-received appliance.
-        # ----------------------------------------------------
-
-        if line.existing_appliance_unit_id:
-            unit = db.session.get(
-                ApplianceUnit,
-                line.existing_appliance_unit_id,
+        unit = (
+            ApplianceUnit.query
+            .filter_by(
+                receiving_line_id=line.id
             )
-        else:
-            unit = (
-                ApplianceUnit.query
-                .filter_by(
-                    receiving_line_id=line.id
-                )
-                .first()
-            )
+            .first()
+        )
 
         if unit is None:
             raise ApplianceReceivingError(

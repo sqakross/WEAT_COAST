@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 from license_client.operation_gate import authorize_mutation as _authorize_mutation
 
 from datetime import date, datetime
@@ -1740,7 +1740,7 @@ class ApplianceReceivingService:
 
         This method NEVER deletes or modifies data.
 
-        Emergency Purge is a break-glass permission-controlled operation.
+        Emergency Purge is a break-glass SUPERADMIN operation.
         It may eventually remove an erroneous Receiving and its
         technical inventory history only when no downstream
         business dependency exists.
@@ -2098,13 +2098,14 @@ class ApplianceReceivingService:
         Physically remove an erroneous POSTED / VOIDED Receiving.
 
         BREAK-GLASS operation:
-            - appliance.emergency_purge permission required
+            - SUPERADMIN only
             - exact confirmation phrase required
             - dependency checker must report SAFE
             - only technical/audit movements may be removed
             - downstream business history always blocks purge
 
-        Permission is enforced before any purge analysis or deletion.
+        This is intentionally NOT controlled by the normal
+        Permission catalog.
         """
         actor = ApplianceReceivingService._require_user(actor)
 

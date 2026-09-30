@@ -384,18 +384,10 @@
             </li>
             {% endif %}
 
-            {# MODEL RESEARCH ACCESS V1 - NAV START #}
-            {% if erp_access_allowed(
-                 current_user,
-                 'erp.inventory.model_research',
-                 True
-               ) %}
             <li class="nav-item">
-              <a class="nav-link{{ ' active' if request.endpoint and request.endpoint == 'inventory.model_research' else '' }}"
+              <a class="nav-link{% if request.endpoint and request.endpoint == 'inventory.model_research' %} active{% endif %}"
                  href="{{ url_for('inventory.model_research') }}">MODEL RESEARCH</a>
             </li>
-            {% endif %}
-            {# MODEL RESEARCH ACCESS V1 - NAV END #}
 
             {# ERP ACCESS PATCH 03B - RECEIVING UI #}
             {% if current_user.is_authenticated

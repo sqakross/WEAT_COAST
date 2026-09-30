@@ -31,16 +31,6 @@ ERP_PERMISSION_GROUPS = [
                 "name": "Access Inventory",
                 "description": "Open and use the Inventory module.",
             },
-            # MODEL RESEARCH ACCESS V1 - REGISTRY START
-            {
-                "code": "erp.inventory.model_research",
-                "name": "Access Model Research",
-                "description": (
-                    "Open and use Model Research. DENY hides the "
-                    "navbar link and blocks direct route access."
-                ),
-            },
-            # MODEL RESEARCH ACCESS V1 - REGISTRY END
             {
                 "code": "erp.inventory.part_create",
                 "name": "Create Parts",

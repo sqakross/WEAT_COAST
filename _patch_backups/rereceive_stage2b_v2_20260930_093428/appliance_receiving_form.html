@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 {% if can_receive %}
 
@@ -438,16 +438,15 @@
        Emergency Purge
 
        BREAK-GLASS action:
-       - requires appliance.emergency_purge
+       - SUPERADMIN only
        - POSTED / VOIDED only
        - physical deletion
        - backend repeats all safety checks
        ===================================================== #}
 
-    {# WCCR EMERGENCY PURGE PERMISSION V2 UI START #}
     {% if receiving
           and (is_posted or is_voided)
-          and can_emergency_purge %}
+          and (current_user.role or '')|trim|lower == 'superadmin' %}
 
       <form method="post"
             action="{{ url_for(
@@ -462,14 +461,13 @@
 
         <button class="btn btn-danger btn-sm"
                 type="submit"
-                title="Emergency Purge — permanently removes this Receiving and its safe-to-purge appliance records">
+                title="SUPERADMIN Emergency Purge — permanently removes this Receiving and its safe-to-purge appliance records">
           Emergency Purge
         </button>
 
       </form>
 
     {% endif %}
-    {# WCCR EMERGENCY PURGE PERMISSION V2 UI END #}
 
   </div>
 
@@ -2726,65 +2724,13 @@
 
       if (result.exists) {
 
-          // WCCR RE-RECEIVE STAGE2B V2 UI START
+        setSerialError(
+          input,
+          result.message
+          || `SERIAL ${serial} ALREADY EXISTS.`
+        );
 
-          if (
-              result.rereceive_allowed === true
-              && result.unit_id
-          ) {
-
-              const inventoryNumber =
-                  result.inventory_number
-                  || "Existing Appliance";
-
-              const confirmed = window.confirm(
-                  "Existing appliance found:\n\n"
-                  + inventoryNumber
-                  + "\nStatus: VENDOR RETURN\n\n"
-                  + "Re-Receive this physical appliance "
-                  + "using the SAME AP-ID?"
-              );
-
-              if (!confirmed) {
-                  setSerialError(
-                      input,
-                      result.message
-                      || "Re-Receive was not confirmed."
-                  );
-
-                  return false;
-              }
-
-              const form = document.createElement("form");
-
-              form.method = "POST";
-              form.action =
-                  "/appliances/receiving/"
-                  + encodeURIComponent(
-                      String(currentReceivingId)
-                  )
-                  + "/rereceive/"
-                  + encodeURIComponent(
-                      String(result.unit_id)
-                  );
-
-              form.style.display = "none";
-
-              document.body.appendChild(form);
-              form.submit();
-
-              return false;
-          }
-
-          // WCCR RE-RECEIVE STAGE2B V2 UI END
-
-          setSerialError(
-              input,
-              result.message
-              || "Duplicate Serial Number."
-          );
-
-          return false;
+        return false;
       }
 
       clearSerialError(
