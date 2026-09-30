@@ -175,7 +175,6 @@ from license_client.periodic import refresh_if_due
 def start_request_timer():
     g.request_started_at = time.perf_counter()
 
-
 @app.before_request
 def refresh_runtime_state_periodically():
     t0 = time.perf_counter()
@@ -312,7 +311,6 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 }
 
 db.init_app(app)          # <<< ЭТА СТРОКА ПРОПАЛА
-
 
 # Alembic / Flask-Migrate uses this same canonical Flask app.
 migrate = Migrate(app, db)

@@ -752,24 +752,6 @@
         </strong>
       </span>
 
-      <!-- APPLIANCE INVENTORY EXCEL EXPORT V1 -->
-      <a
-        class="btn btn-outline-success btn-sm"
-        href="{{ url_for(
-          'appliance.inventory_export_excel',
-          q=q,
-          warehouse_id=warehouse_id or '',
-          category_id=category_id or '',
-          status=status,
-          condition=condition,
-          stock_class=stock_class
-        ) }}"
-        title="Export the current filtered inventory to Excel"
-      >
-        EXPORT EXCEL
-      </a>
-
-
       <a class="btn btn-primary btn-sm"
          href="{{ url_for('appliance.issue_new') }}">
         + New Issue

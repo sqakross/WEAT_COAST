@@ -175,7 +175,6 @@ from license_client.periodic import refresh_if_due
 def start_request_timer():
     g.request_started_at = time.perf_counter()
 
-
 @app.before_request
 def refresh_runtime_state_periodically():
     t0 = time.perf_counter()
@@ -312,6 +311,195 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 }
 
 db.init_app(app)          # <<< ЭТА СТРОКА ПРОПАЛА
+
+
+# WCCR APPLIANCE SQL PROFILER V4 START
+#
+# TEMPORARY diagnostic instrumentation.
+#
+# Measures SQL only for:
+#   appliance.inventory_list
+#   appliance.issue_new
+#   appliance.issue_search_appliances
+#
+# Results are written to the EXISTING application log.
+#
+# NO database writes are introduced by this profiler.
+
+from sqlalchemy import event as _wccr_sql_event
+from sqlalchemy.engine import Engine as _WccrSqlEngine
+
+
+_WCCR_APPLIANCE_SQL_ENDPOINTS = {
+    "appliance.inventory_list",
+    "appliance.issue_new",
+    "appliance.issue_search_appliances",
+}
+
+
+def _wccr_sql_perf_target():
+    try:
+        return (
+            request.endpoint
+            in _WCCR_APPLIANCE_SQL_ENDPOINTS
+        )
+    except Exception:
+        return False
+
+
+@_wccr_sql_event.listens_for(
+    _WccrSqlEngine,
+    "before_cursor_execute",
+)
+def _wccr_sql_perf_before(
+    conn,
+    cursor,
+    statement,
+    parameters,
+    context,
+    executemany,
+):
+
+    if not _wccr_sql_perf_target():
+        return
+
+    try:
+        context._wccr_sql_started = (
+            time.perf_counter()
+        )
+    except Exception:
+        pass
+
+
+@_wccr_sql_event.listens_for(
+    _WccrSqlEngine,
+    "after_cursor_execute",
+)
+def _wccr_sql_perf_after(
+    conn,
+    cursor,
+    statement,
+    parameters,
+    context,
+    executemany,
+):
+
+    if not _wccr_sql_perf_target():
+        return
+
+    try:
+        started = getattr(
+            context,
+            "_wccr_sql_started",
+            None,
+        )
+
+        if started is None:
+            return
+
+        elapsed = (
+            time.perf_counter()
+            - started
+        )
+
+        entries = getattr(
+            g,
+            "_wccr_sql_perf_entries",
+            None,
+        )
+
+        if entries is None:
+            entries = []
+            g._wccr_sql_perf_entries = entries
+
+        sql = " ".join(
+            str(statement).split()
+        )
+
+        if len(sql) > 900:
+            sql = sql[:900] + " ..."
+
+        entries.append(
+            (
+                float(elapsed),
+                sql,
+            )
+        )
+
+    except Exception:
+        logging.exception(
+            "APPLIANCE_SQL_PROFILER_RECORD_ERROR"
+        )
+
+
+@app.before_request
+def _wccr_appliance_sql_perf_start():
+
+    if not _wccr_sql_perf_target():
+        return
+
+    g._wccr_sql_perf_entries = []
+
+
+@app.after_request
+def _wccr_appliance_sql_perf_finish(response):
+
+    if not _wccr_sql_perf_target():
+        return response
+
+    try:
+
+        entries = list(
+            getattr(
+                g,
+                "_wccr_sql_perf_entries",
+                [],
+            )
+            or []
+        )
+
+        total = sum(
+            elapsed
+            for elapsed, sql in entries
+        )
+
+        slowest = sorted(
+            entries,
+            key=lambda row: row[0],
+            reverse=True,
+        )[:12]
+
+        logging.warning(
+            "APPLIANCE_SQL_PERF total=%.3fs | "
+            "queries=%s | endpoint=%s | path=%s",
+            total,
+            len(entries),
+            request.endpoint,
+            request.path,
+        )
+
+        for index, (elapsed, sql) in enumerate(
+            slowest,
+            start=1,
+        ):
+
+            logging.warning(
+                "APPLIANCE_SQL #%02d %.3fs | %s",
+                index,
+                elapsed,
+                sql,
+            )
+
+    except Exception:
+
+        logging.exception(
+            "APPLIANCE_SQL_PROFILER_FINISH_ERROR"
+        )
+
+    return response
+
+
+# WCCR APPLIANCE SQL PROFILER V4 END
 
 
 # Alembic / Flask-Migrate uses this same canonical Flask app.

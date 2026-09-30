@@ -3604,22 +3604,10 @@ def inventory_list():
 
     if visible_unit_ids:
 
-        from sqlalchemy.orm import (
-            Load,
-            joinedload,
-        )
-
         issue_rows = (
             db.session.query(
                 ApplianceIssueLine,
                 ApplianceIssue,
-            )
-            .options(
-                Load(ApplianceIssueLine).noload("*"),
-                Load(ApplianceIssue).noload("*"),
-                joinedload(
-                    ApplianceIssue.technician
-                ).noload("*"),
             )
             .join(
                 ApplianceIssue,

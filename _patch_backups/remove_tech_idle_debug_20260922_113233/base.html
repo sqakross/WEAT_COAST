@@ -883,6 +883,69 @@
       );
     });
 
+    // WCCR_TECH_IDLE_DEBUG
+    let debugLastActivity = Date.now();
+    let debugEventCount = 0;
+    let debugLastEvent = "PAGE LOAD";
+
+    const debugBox = document.createElement("div");
+
+    debugBox.id = "wccr-tech-idle-debug";
+
+    debugBox.style.position = "fixed";
+    debugBox.style.top = "5px";
+    debugBox.style.right = "5px";
+    debugBox.style.zIndex = "999999";
+    debugBox.style.background = "black";
+    debugBox.style.color = "white";
+    debugBox.style.padding = "8px 10px";
+    debugBox.style.fontSize = "14px";
+    debugBox.style.fontFamily = "monospace";
+    debugBox.style.border = "2px solid white";
+    debugBox.style.borderRadius = "5px";
+    debugBox.style.pointerEvents = "none";
+
+    document.body.appendChild(debugBox);
+
+    [
+      "pointerdown",
+      "touchstart",
+      "mousedown",
+      "keydown",
+      "input",
+      "change",
+      "scroll"
+    ].forEach(function (debugEventName) {
+
+      window.addEventListener(
+        debugEventName,
+        function () {
+          debugLastActivity = Date.now();
+          debugEventCount++;
+          debugLastEvent = debugEventName;
+        },
+        {
+          passive: true,
+          capture: true
+        }
+      );
+
+    });
+
+    setInterval(function () {
+
+      const idleSeconds =
+        Math.floor(
+          (Date.now() - debugLastActivity) / 1000
+        );
+
+      debugBox.textContent =
+        "Idle: " + idleSeconds + " sec" +
+        " | Events: " + debugEventCount +
+        " | Last: " + debugLastEvent;
+
+    }, 1000);
+
     armTimer();
     signalActivity(true);
   })();

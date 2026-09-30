@@ -1,4 +1,4 @@
-# models.py (Ð³Ð¾Ñ‚Ð¾Ð²Ñ‹Ð¹ Ñ„Ð°Ð¹Ð»)
+﻿# models.py (Ð³Ð¾Ñ‚Ð¾Ð²Ñ‹Ð¹ Ñ„Ð°Ð¹Ð»)
 from __future__ import annotations
 
 from datetime import datetime, date, timezone
@@ -4896,100 +4896,6 @@ class ApplianceIssueLine(db.Model):
 #   WRITE_OFF
 #   SERIAL_CORRECTION
 # ============================================================
-
-
-
-# ============================================================
-# APPLIANCE PHOTOS V1 - MODEL
-#
-# One physical ApplianceUnit may have multiple photos.
-# Photos are linked by ApplianceUnit.id.
-# ============================================================
-
-class AppliancePhoto(db.Model):
-
-    __tablename__ = "appliance_photo"
-
-    id = db.Column(
-        db.Integer,
-        primary_key=True,
-    )
-
-    appliance_unit_id = db.Column(
-        db.Integer,
-        db.ForeignKey(
-            "appliance_unit.id",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
-        index=True,
-    )
-
-    stored_filename = db.Column(
-        db.String(255),
-        nullable=False,
-        unique=True,
-    )
-
-    original_filename = db.Column(
-        db.String(255),
-        nullable=True,
-    )
-
-    mime_type = db.Column(
-        db.String(80),
-        nullable=False,
-    )
-
-    file_size = db.Column(
-        db.Integer,
-        nullable=False,
-        default=0,
-    )
-
-    caption = db.Column(
-        db.String(255),
-        nullable=True,
-    )
-
-    created_at = db.Column(
-        db.DateTime,
-        nullable=False,
-        default=datetime.utcnow,
-        index=True,
-    )
-
-    created_by_id = db.Column(
-        db.Integer,
-        db.ForeignKey(
-            "user.id",
-            ondelete="SET NULL",
-        ),
-        nullable=True,
-        index=True,
-    )
-
-    unit = db.relationship(
-        "ApplianceUnit",
-        foreign_keys=[
-            appliance_unit_id
-        ],
-        backref=db.backref(
-            "photos",
-            lazy="select",
-            cascade="all, delete-orphan",
-            order_by="AppliancePhoto.created_at",
-        ),
-    )
-
-    created_by = db.relationship(
-        "User",
-        foreign_keys=[
-            created_by_id
-        ],
-        lazy="select",
-    )
-
 
 class ApplianceMovement(db.Model):
     __tablename__ = "appliance_movement"

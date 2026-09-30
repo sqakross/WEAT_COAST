@@ -1581,12 +1581,7 @@ function applyHintResult(tr, j){
 
   const nameGuess = flat.part_name || flat.name || flat.title || flat.description;
 
-    if (
-      nameInp &&
-      !nameInp.value.trim() &&
-      nameGuess &&
-      String(nameGuess).trim()
-    ) {
+    if (nameInp && nameGuess) {
       nameInp.value = String(nameGuess).trim().slice(0,120).toUpperCase();
     }
 
@@ -1951,17 +1946,12 @@ function clearHintCacheForRow(tr){
       const costInp = tr.querySelector('.unit-cost');
       const hintEl = tr.querySelector('.hint');
 
-      // Main Part # may represent a different part, so clear old data.
-      // ALT PN must preserve manually entered Part Name and Unit Cost.
-      if (e.target.classList.contains('pn')) {
-        if (nameInp) nameInp.value = '';
-        if (costInp) costInp.value = '0.00';
-
-        const card = tr.closest('.card');
-        if (card) recomputeUnitSubtotal(card);
-      }
-
+      if (nameInp) nameInp.value = '';
+      if (costInp) costInp.value = '0.00';
       if (hintEl) hintEl.textContent = '...';
+
+      const card = tr.closest('.card');
+      if (card) recomputeUnitSubtotal(card);
     }
 
       const pn = (

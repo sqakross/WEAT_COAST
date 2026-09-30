@@ -1,0 +1,530 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+.parts-sales-report {
+    max-width: 1500px;
+    margin: 0 auto;
+}
+
+.parts-sales-summary th,
+.parts-sales-summary td,
+.parts-sales-detail th,
+.parts-sales-detail td {
+    vertical-align: middle;
+}
+
+.parts-sales-detail {
+    font-size: 14px;
+}
+
+.parts-sales-money {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.parts-sales-qty {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.report-title {
+    font-weight: 700;
+}
+
+@media print {
+
+    /* Print only Summary. Keep Part Detail on screen only. */
+    .parts-sales-detail-section {
+        display: none !important;
+    }
+
+    @page {
+        size: landscape;
+        margin: 0.45in;
+    }
+
+    nav,
+    .navbar,
+    .report-actions,
+    .report-filter,
+    footer {
+        display: none !important;
+    }
+
+    body {
+        background: white !important;
+        font-size: 10pt;
+    }
+
+    .container,
+    .container-fluid,
+    .parts-sales-report {
+        width: 100% !important;
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .card {
+        border: 1px solid #777 !important;
+        box-shadow: none !important;
+    }
+
+    table {
+        width: 100% !important;
+    }
+
+    thead {
+        display: table-header-group;
+    }
+
+    tr {
+        page-break-inside: avoid;
+    }
+
+    .parts-sales-detail {
+        font-size: 9pt;
+    }
+
+    a {
+        color: black !important;
+        text-decoration: none !important;
+    }
+}
+</style>
+
+
+<div class="parts-sales-report">
+
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+
+        <div>
+            <h2 class="report-title mb-1">
+                Parts Sales Report
+            </h2>
+
+            <div class="text-muted">
+                Net actual parts sold — ISSUE minus RETURN
+            </div>
+        </div>
+
+        <div class="report-actions d-flex gap-2">
+
+            <a
+                href="{{ url_for('inventory.reports_grouped') }}"
+                class="btn btn-outline-secondary"
+            >
+                ← Issued Parts Report
+            </a>
+
+            <button
+                type="button"
+                class="btn btn-primary"
+                onclick="window.print()"
+            >
+                🖨 Print Report
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <div class="card mb-3 report-filter">
+        <div class="card-body">
+
+            <form method="GET">
+
+                <div class="row g-3 align-items-end">
+
+                    <div class="col-auto">
+
+                        <label
+                            for="start_date"
+                            class="form-label"
+                        >
+                            From
+                        </label>
+
+                        <input
+                            type="date"
+                            id="start_date"
+                            name="start_date"
+                            class="form-control"
+                            min="{{ min_date }}"
+                            value="{{ start_date }}"
+                            required
+                        >
+
+                    </div>
+
+
+                    <div class="col-auto">
+
+                        <label
+                            for="end_date"
+                            class="form-label"
+                        >
+                            To
+                        </label>
+
+                        <input
+                            type="date"
+                            id="end_date"
+                            name="end_date"
+                            class="form-control"
+                            min="{{ min_date }}"
+                            value="{{ end_date }}"
+                            required
+                        >
+
+                    </div>
+
+
+                    <div class="col-auto">
+
+                        <button
+                            type="submit"
+                            class="btn btn-success"
+                        >
+                            Generate Report
+                        </button>
+
+                    </div>
+
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+
+
+    <div class="mb-3">
+
+        <strong>Period:</strong>
+        {{ start_date }} — {{ end_date }}
+
+        <span class="ms-3">
+            <strong>Generated:</strong>
+            {{ generated_at.strftime('%Y-%m-%d %H:%M') }}
+        </span>
+
+    </div>
+
+
+    {% if unresolved_count %}
+
+    <div class="alert alert-warning">
+
+        <strong>Attention:</strong>
+
+        {{ unresolved_count }}
+        movement{% if unresolved_count != 1 %}s{% endif %}
+        could not be safely classified as STOCK or INVOICE.
+
+        They are included in TOTAL and shown separately as
+        UNCLASSIFIED so the report never silently puts a part
+        into the wrong source.
+
+    </div>
+
+    {% endif %}
+
+
+    <div class="card mb-4">
+
+        <div class="card-header">
+            <strong>Summary</strong>
+        </div>
+
+        <div class="table-responsive">
+
+            <table class="table table-bordered table-striped mb-0 parts-sales-summary">
+
+                <thead class="table-light">
+
+                    <tr>
+                        <th>Source</th>
+
+                        <th class="text-end">
+                            Issued Qty
+                        </th>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <th class="text-end">
+                            Issued $
+                        </th>
+                        {% endif %}
+
+                        <th class="text-end">
+                            Returned Qty
+                        </th>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <th class="text-end">
+                            Returned $
+                        </th>
+                        {% endif %}
+
+                        <th class="text-end">
+                            Net Sold Qty
+                        </th>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <th class="text-end">
+                            Net Cost
+                        </th>
+                        {% endif %}
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                    {% for source in ['INVOICE', 'STOCK'] %}
+
+                    {% set row = summary[source] %}
+
+                    <tr>
+
+                        <th>{{ source }}</th>
+
+                        <td class="parts-sales-qty">
+                            {{ row.issued_qty }}
+                        </td>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <td class="parts-sales-money">
+                            ${{ '%.2f'|format(row.issued_value) }}
+                        </td>
+                        {% endif %}
+
+                        <td class="parts-sales-qty">
+                            {{ row.returned_qty }}
+                        </td>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <td class="parts-sales-money">
+                            ${{ '%.2f'|format(row.returned_value) }}
+                        </td>
+                        {% endif %}
+
+                        <td class="parts-sales-qty">
+                            <strong>{{ row.net_qty }}</strong>
+                        </td>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <td class="parts-sales-money">
+                            <strong>
+                                ${{ '%.2f'|format(row.net_value) }}
+                            </strong>
+                        </td>
+                        {% endif %}
+
+                    </tr>
+
+                    {% endfor %}
+
+
+                    {% if unresolved_count %}
+
+                    {% set row = summary['UNCLASSIFIED'] %}
+
+                    <tr class="table-warning">
+
+                        <th>UNCLASSIFIED</th>
+
+                        <td class="parts-sales-qty">
+                            {{ row.issued_qty }}
+                        </td>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <td class="parts-sales-money">
+                            ${{ '%.2f'|format(row.issued_value) }}
+                        </td>
+                        {% endif %}
+
+                        <td class="parts-sales-qty">
+                            {{ row.returned_qty }}
+                        </td>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <td class="parts-sales-money">
+                            ${{ '%.2f'|format(row.returned_value) }}
+                        </td>
+                        {% endif %}
+
+                        <td class="parts-sales-qty">
+                            {{ row.net_qty }}
+                        </td>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <td class="parts-sales-money">
+                            ${{ '%.2f'|format(row.net_value) }}
+                        </td>
+                        {% endif %}
+
+                    </tr>
+
+                    {% endif %}
+
+
+                    <tr class="table-dark">
+
+                        <th>TOTAL</th>
+
+                        <th class="text-end">
+                            {{ total.issued_qty }}
+                        </th>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <th class="text-end">
+                            ${{ '%.2f'|format(total.issued_value) }}
+                        </th>
+                        {% endif %}
+
+                        <th class="text-end">
+                            {{ total.returned_qty }}
+                        </th>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <th class="text-end">
+                            ${{ '%.2f'|format(total.returned_value) }}
+                        </th>
+                        {% endif %}
+
+                        <th class="text-end">
+                            {{ total.net_qty }}
+                        </th>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <th class="text-end">
+                            ${{ '%.2f'|format(total.net_value) }}
+                        </th>
+                        {% endif %}
+
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+
+    <div class="card parts-sales-detail-section">
+
+        <div class="card-header">
+            <strong>Part Detail</strong>
+        </div>
+
+        <div class="table-responsive">
+
+            <table class="table table-bordered table-hover mb-0 parts-sales-detail">
+
+                <thead class="table-light">
+
+                    <tr>
+
+                        <th>Source</th>
+                        <th>Part #</th>
+                        <th>Part Name</th>
+
+                        <th class="text-end">
+                            Issued
+                        </th>
+
+                        <th class="text-end">
+                            Returned
+                        </th>
+
+                        <th class="text-end">
+                            Net Sold
+                        </th>
+
+                        {% if CAN_VIEW_COSTS %}
+                        <th class="text-end">
+                            Net Cost
+                        </th>
+                        {% endif %}
+
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                    {% for row in detail_rows %}
+
+                    <tr
+                        {% if row.source == 'UNCLASSIFIED' %}
+                        class="table-warning"
+                        {% endif %}
+                    >
+
+                        <td>
+                            {{ row.source }}
+                        </td>
+
+                        <td>
+                            <strong>
+                                {{ row.part_number }}
+                            </strong>
+                        </td>
+
+                        <td>
+                            {{ row.part_name }}
+                        </td>
+
+                        <td class="parts-sales-qty">
+                            {{ row.issued_qty }}
+                        </td>
+
+                        <td class="parts-sales-qty">
+                            {{ row.returned_qty }}
+                        </td>
+
+                        <td class="parts-sales-qty">
+                            <strong>
+                                {{ row.net_qty }}
+                            </strong>
+                        </td>
+
+                        {% if CAN_VIEW_COSTS %}
+
+                        <td class="parts-sales-money">
+                            ${{ '%.2f'|format(row.net_value) }}
+                        </td>
+
+                        {% endif %}
+
+                    </tr>
+
+                    {% else %}
+
+                    <tr>
+                        <td
+                            colspan="7"
+                            class="text-center text-muted py-4"
+                        >
+                            No part movements found for this period.
+                        </td>
+                    </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

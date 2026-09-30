@@ -2417,36 +2417,29 @@ def categories_toggle(category_id):
 # ============================================================
 
 # ============================================================
-# APPLIANCE INVENTORY EXCEL EXPORT V1.1
+# APPLIANCE INVENTORY CSV EXPORT V1
 #
-# Professional XLSX export of the complete filtered
-# Appliance Inventory registry.
-#
-# READ ONLY.
+# Exports the complete filtered registry.
+# The normal Inventory screen may limit visible rows,
+# but export intentionally does NOT use the 500-row UI limit.
 #
 # Security:
-# - appliance.view warehouse access enforced
-# - appliance.pricing controls Cost / Sell Price visibility
+# - appliance.view warehouse access is always enforced;
+# - pricing is included only for warehouses where the user
+#   has appliance.pricing permission.
 #
-# Export intentionally has NO UI 500-row limit.
+# This route is READ ONLY.
 # ============================================================
 
-@appliance_bp.get("/inventory/export.xlsx")
+@appliance_bp.get("/inventory/export.csv")
 @login_required
-def inventory_export_excel():
+def inventory_export_csv():
 
-    from io import BytesIO
+    import csv
+    import io
 
-    from flask import send_file
+    from flask import Response
     from sqlalchemy import or_
-
-    from openpyxl import Workbook
-    from openpyxl.styles import (
-        Alignment,
-        Font,
-        PatternFill,
-    )
-    from openpyxl.utils import get_column_letter
 
     from models import (
         ApplianceIssue,
@@ -2458,7 +2451,7 @@ def inventory_export_excel():
     )
 
     # --------------------------------------------------------
-    # ACCESS
+    # Warehouse access
     # --------------------------------------------------------
 
     allowed_warehouse_ids = _warehouse_ids_for(
@@ -2473,9 +2466,7 @@ def inventory_export_excel():
         )
 
         return redirect(
-            url_for(
-                "appliance.inventory_list"
-            )
+            url_for("appliance.inventory_list")
         )
 
     pricing_warehouse_ids = set(
@@ -2485,7 +2476,7 @@ def inventory_export_excel():
     )
 
     # --------------------------------------------------------
-    # FILTERS
+    # Same filters as Appliance Inventory
     # --------------------------------------------------------
 
     q = (
@@ -2554,7 +2545,7 @@ def inventory_export_excel():
         warehouse_id = None
 
     # --------------------------------------------------------
-    # BASE QUERY
+    # Base query
     # --------------------------------------------------------
 
     query = (
@@ -2605,7 +2596,7 @@ def inventory_export_excel():
         )
 
     # --------------------------------------------------------
-    # SAME SEARCH LOGIC AS INVENTORY
+    # Same search behavior as Inventory
     # --------------------------------------------------------
 
     if q:
@@ -2684,8 +2675,9 @@ def inventory_export_excel():
         )
 
     # --------------------------------------------------------
-    # ALL matching records.
-    # No screen .limit(500).
+    # IMPORTANT:
+    # No .limit(500) here.
+    # Export ALL matching accessible units.
     # --------------------------------------------------------
 
     units = (
@@ -2705,7 +2697,7 @@ def inventory_export_excel():
     ]
 
     # --------------------------------------------------------
-    # LATEST ISSUE
+    # Latest Issue for each unit
     # --------------------------------------------------------
 
     latest_issue_by_unit = {}
@@ -2737,15 +2729,15 @@ def inventory_export_excel():
 
         for line, issue in issue_rows:
 
-            uid = int(
+            unit_id = int(
                 line.appliance_unit_id
             )
 
-            if uid in latest_issue_by_unit:
+            if unit_id in latest_issue_by_unit:
                 continue
 
             latest_issue_by_unit[
-                uid
+                unit_id
             ] = {
                 "issue_number":
                     issue.issue_number
@@ -2764,13 +2756,14 @@ def inventory_export_excel():
                         or issue.work_order_number
                         or ""
                     ),
-
-                "issued_at":
-                    issue.issued_at,
             }
 
     # --------------------------------------------------------
-    # ORIGINAL RECEIVING / VENDOR
+    # Original Receiving / Vendor information
+    #
+    # ApplianceReceivingLine does not directly store Unit ID.
+    # Match the immutable source line using receiving_line_id
+    # from ApplianceUnit.
     # --------------------------------------------------------
 
     receiving_line_ids = [
@@ -2808,48 +2801,46 @@ def inventory_export_excel():
             ] = receiving
 
     # --------------------------------------------------------
-    # WORKBOOK
+    # CSV
+    #
+    # utf-8-sig gives Excel a BOM so normal Windows Excel
+    # opens UTF-8 text cleanly.
     # --------------------------------------------------------
 
-    workbook = Workbook()
-
-    sheet = workbook.active
-
-    sheet.title = "Appliance Inventory"
-
-    headers = [
-        "AP #",
-        "Appliance",
-        "Brand",
-        "Model",
-        "Serial",
-        "Warehouse",
-        "Size",
-        "Color",
-        "Condition",
-        "Stock Class",
-        "Status",
-        "Cost",
-        "Sell Price",
-        "Current Issue",
-        "Technician",
-        "W/O #",
-        "Issued Date",
-        "Received Date",
-        "Vendor",
-        "Vendor Invoice",
-        "Invoice Date",
-        "Receiving #",
-        "Notes",
-    ]
-
-    sheet.append(
-        headers
+    stream = io.StringIO(
+        newline=""
     )
 
-    # --------------------------------------------------------
-    # DATA
-    # --------------------------------------------------------
+    writer = csv.writer(
+        stream
+    )
+
+    writer.writerow(
+        [
+            "AP #",
+            "Appliance",
+            "Brand",
+            "Model",
+            "Serial",
+            "Warehouse",
+            "Size",
+            "Color",
+            "Condition",
+            "Stock Class",
+            "Status",
+            "Cost",
+            "Sell Price",
+            "Current Issue",
+            "Technician",
+            "W/O #",
+            "Received",
+            "Vendor",
+            "Vendor Invoice",
+            "Invoice Date",
+            "Receiving #",
+            "Notes",
+        ]
+    )
 
     for unit in units:
 
@@ -2902,19 +2893,23 @@ def inventory_export_excel():
             in pricing_warehouse_ids
         )
 
-        unit_cost = None
-        selling_price = None
+        unit_cost = ""
+
+        selling_price = ""
 
         if can_see_price:
 
-            unit_cost = unit.unit_cost
-            selling_price = unit.selling_price
+            if unit.unit_cost is not None:
+                unit_cost = unit.unit_cost
 
-        received_date = None
+            if unit.selling_price is not None:
+                selling_price = unit.selling_price
+
+        received_value = ""
 
         vendor = ""
         vendor_invoice = ""
-        invoice_date = None
+        invoice_date = ""
         receiving_number = ""
 
         if receiving is not None:
@@ -2934,19 +2929,22 @@ def inventory_export_excel():
                 or ""
             )
 
-            invoice_date = (
-                receiving.invoice_date
-                if receiving.invoice_date
-                else None
-            )
+            if receiving.invoice_date:
 
-            received_date = (
-                receiving.received_at
-                if receiving.received_at
-                else None
-            )
+                invoice_date = (
+                    receiving.invoice_date.isoformat()
+                )
 
-        sheet.append(
+            if receiving.received_at:
+
+                received_value = (
+                    receiving.received_at
+                    .strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                )
+
+        writer.writerow(
             [
                 unit.inventory_number or "",
                 category_name,
@@ -2978,10 +2976,7 @@ def inventory_export_excel():
                     unit.current_work_order_number
                     or ""
                 ),
-                issue.get(
-                    "issued_at"
-                ),
-                received_date,
+                received_value,
                 vendor,
                 vendor_invoice,
                 invoice_date,
@@ -2990,238 +2985,30 @@ def inventory_export_excel():
             ]
         )
 
-    # --------------------------------------------------------
-    # PROFESSIONAL EXCEL FORMATTING
-    # --------------------------------------------------------
-
-    header_fill = PatternFill(
-        fill_type="solid",
-        fgColor="1F4E78",
-    )
-
-    header_font = Font(
-        color="FFFFFF",
-        bold=True,
-    )
-
-    for cell in sheet[1]:
-
-        cell.fill = header_fill
-        cell.font = header_font
-
-        cell.alignment = Alignment(
-            horizontal="center",
-            vertical="center",
-        )
-
-    sheet.row_dimensions[1].height = 24
-
-    sheet.freeze_panes = "A2"
-
-    sheet.auto_filter.ref = (
-        f"A1:W{max(sheet.max_row, 1)}"
-    )
-
-    # --------------------------------------------------------
-    # COLUMN WIDTHS
-    # --------------------------------------------------------
-
-    widths = {
-        "A": 16,   # AP
-        "B": 18,   # Appliance
-        "C": 18,   # Brand
-        "D": 22,   # Model
-        "E": 22,   # Serial
-        "F": 14,   # Warehouse
-        "G": 14,   # Size
-        "H": 16,   # Color
-        "I": 14,   # Condition
-        "J": 14,   # Stock Class
-        "K": 18,   # Status
-        "L": 14,   # Cost
-        "M": 14,   # Sell
-        "N": 17,   # Issue
-        "O": 18,   # Technician
-        "P": 16,   # WO
-        "Q": 22,   # Issued Date
-        "R": 16,   # Received Date
-        "S": 20,   # Vendor
-        "T": 20,   # Vendor Invoice
-        "U": 16,   # Invoice Date
-        "V": 18,   # Receiving
-        "W": 55,   # Notes
-    }
-
-    for column, width in widths.items():
-
-        sheet.column_dimensions[
-            column
-        ].width = width
-
-    # --------------------------------------------------------
-    # FORMATS / ALIGNMENT
-    # --------------------------------------------------------
-
-    for row in range(
-        2,
-        sheet.max_row + 1,
-    ):
-
-        # Currency
-        sheet[f"L{row}"].number_format = (
-            '$#,##0.00'
-        )
-
-        sheet[f"M{row}"].number_format = (
-            '$#,##0.00'
-        )
-
-        # Date/time
-        sheet[f"Q{row}"].number_format = (
-            "mm/dd/yyyy hh:mm AM/PM"
-        )
-
-        sheet[f"R{row}"].number_format = (
-            "mm/dd/yyyy"
-        )
-
-        # Invoice date
-        sheet[f"U{row}"].number_format = (
-            "mm/dd/yyyy"
-        )
-
-        # Normal cells
-        for column in range(
-            1,
-            23,
-        ):
-
-            sheet.cell(
-                row=row,
-                column=column,
-            ).alignment = Alignment(
-                vertical="top",
-            )
-
-        # ------------------------------------------------
-        # Identifier / reference fields must remain TEXT.
-        #
-        # Prevent Excel from converting long invoice numbers,
-        # serials, work orders, AP numbers or receiving numbers
-        # into scientific notation or stripping leading zeros.
-        # ------------------------------------------------
-
-        for text_column in (
-            "A",   # AP #
-            "E",   # Serial
-            "P",   # W/O #
-            "T",   # Vendor Invoice
-            "V",   # Receiving #
-        ):
-            sheet[f"{text_column}{row}"].number_format = "@"
-
-        # Notes
-        sheet[f"W{row}"].alignment = Alignment(
-            vertical="top",
-            wrap_text=True,
-        )
-
-        # Keep Notes readable without creating
-        # enormous rows.
-        sheet.row_dimensions[row].height = 30
-
-    # --------------------------------------------------------
-    # Summary sheet
-    # --------------------------------------------------------
-
-    summary = workbook.create_sheet(
-        "Export Info"
-    )
-
-    summary["A1"] = "APPLIANCE INVENTORY EXPORT"
-
-    summary["A1"].font = Font(
-        bold=True,
-        size=14,
-    )
-
-    summary["A3"] = "Exported"
-    summary["B3"] = datetime.now()
-
-    summary["B3"].number_format = (
-        "mm/dd/yyyy hh:mm AM/PM"
-    )
-
-    summary["A4"] = "Records"
-    summary["B4"] = len(units)
-
-    summary["A6"] = "Search"
-    summary["B6"] = q or "ALL"
-
-    summary["A7"] = "Warehouse ID"
-    summary["B7"] = (
-        warehouse_id
-        if warehouse_id is not None
-        else "ALL"
-    )
-
-    summary["A8"] = "Appliance Category ID"
-    summary["B8"] = (
-        category_id
-        if category_id is not None
-        else "ALL"
-    )
-
-    summary["A9"] = "Status"
-    summary["B9"] = (
-        status
-        if status != "all"
-        else "ALL"
-    )
-
-    summary["A10"] = "Condition"
-    summary["B10"] = (
-        condition or "ALL"
-    )
-
-    summary["A11"] = "Stock Class"
-    summary["B11"] = (
-        stock_class or "ALL"
-    )
-
-    summary.column_dimensions["A"].width = 24
-    summary.column_dimensions["B"].width = 34
-
-    # --------------------------------------------------------
-    # DOWNLOAD
-    # --------------------------------------------------------
-
-    output = BytesIO()
-
-    workbook.save(
-        output
-    )
-
-    output.seek(0)
+    csv_text = stream.getvalue()
 
     filename = (
         "appliance_inventory_"
         + datetime.now().strftime(
             "%Y%m%d_%H%M%S"
         )
-        + ".xlsx"
+        + ".csv"
     )
 
-    return send_file(
-        output,
-        as_attachment=True,
-        download_name=filename,
+    response = Response(
+        "\ufeff" + csv_text,
         mimetype=(
-            "application/"
-            "vnd.openxmlformats-officedocument."
-            "spreadsheetml.sheet"
+            "text/csv; charset=utf-8"
         ),
     )
+
+    response.headers[
+        "Content-Disposition"
+    ] = (
+        f'attachment; filename="{filename}"'
+    )
+
+    return response
 
 
 @appliance_bp.get("/inventory")
@@ -3604,22 +3391,10 @@ def inventory_list():
 
     if visible_unit_ids:
 
-        from sqlalchemy.orm import (
-            Load,
-            joinedload,
-        )
-
         issue_rows = (
             db.session.query(
                 ApplianceIssueLine,
                 ApplianceIssue,
-            )
-            .options(
-                Load(ApplianceIssueLine).noload("*"),
-                Load(ApplianceIssue).noload("*"),
-                joinedload(
-                    ApplianceIssue.technician
-                ).noload("*"),
             )
             .join(
                 ApplianceIssue,
@@ -6333,13 +6108,8 @@ def issue_new():
             url_for("appliance.inventory_list")
         )
 
-    from sqlalchemy.orm import noload
-
     technicians = (
         User.query
-        .options(
-            noload("*")
-        )
         .filter(
             User.role == "technician"
         )

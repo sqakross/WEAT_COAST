@@ -680,8 +680,6 @@
                     </a>
 
 
-                    {# APPLIANCE PHOTOS V1.1 - CLEAN CARD #}
-
                     {% if photo.caption %}
 
                       <div class="mt-2 fw-semibold">
@@ -697,96 +695,56 @@
                       class="
                         small
                         text-muted
-                        mt-2
+                        mt-1
                       "
                     >
+
+                      {{
+                        photo.original_filename
+                        or "Appliance photo"
+                      }}
 
                       {% if photo.created_by %}
 
-                        Uploaded by
-                        {{ photo.created_by.username }}
-
-                      {% else %}
-
-                        Uploaded
-
-                      {% endif %}
-
-                      {% if photo.created_at %}
-
                         ·
-                        {{
-                          photo.created_at.strftime(
-                            "%m/%d/%Y %I:%M %p"
-                          )
-                        }}
+                        {{ photo.created_by.username }}
 
                       {% endif %}
 
                     </div>
 
 
-                    <div
-                      class="
-                        d-flex
-                        flex-wrap
-                        gap-2
-                        align-items-center
-                        mt-2
-                      "
-                    >
+                    {% if can_receive %}
 
-                      <a
-                        href="{{ url_for(
-                          'appliance.inventory_photo_view',
+                      <form
+                        method="POST"
+                        action="{{ url_for(
+                          'appliance.inventory_photo_delete',
                           unit_id=unit.id,
                           photo_id=photo.id
                         ) }}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="
-                          btn
-                          btn-outline-primary
-                          btn-sm
+                        class="mt-2"
+                        onsubmit="
+                          return confirm(
+                            'Delete this appliance photo?'
+                          );
                         "
                       >
-                        VIEW FULL SIZE
-                      </a>
 
-
-                      {% if can_receive %}
-
-                        <form
-                          method="POST"
-                          action="{{ url_for(
-                            'appliance.inventory_photo_delete',
-                            unit_id=unit.id,
-                            photo_id=photo.id
-                          ) }}"
-                          class="m-0"
-                          onsubmit="
-                            return confirm(
-                              'Delete this appliance photo?'
-                            );
+                        <button
+                          type="submit"
+                          class="
+                            btn
+                            btn-outline-danger
+                            btn-sm
                           "
                         >
+                          DELETE PHOTO
+                        </button>
 
-                          <button
-                            type="submit"
-                            class="
-                              btn
-                              btn-outline-danger
-                              btn-sm
-                            "
-                          >
-                            DELETE PHOTO
-                          </button>
+                      </form>
 
-                        </form>
-
-                      {% endif %}
-
-                    </div>
+                    {% endif %}
 
                   </div>
 

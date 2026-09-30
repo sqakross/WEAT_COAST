@@ -2417,6 +2417,602 @@ def categories_toggle(category_id):
 # ============================================================
 
 # ============================================================
+# APPLIANCE INVENTORY CSV EXPORT V1
+#
+# Exports the complete filtered registry.
+# The normal Inventory screen may limit visible rows,
+# but export intentionally does NOT use the 500-row UI limit.
+#
+# Security:
+# - appliance.view warehouse access is always enforced;
+# - pricing is included only for warehouses where the user
+#   has appliance.pricing permission.
+#
+# This route is READ ONLY.
+# ============================================================
+
+@appliance_bp.get("/inventory/export.csv")
+@login_required
+def inventory_export_csv():
+
+    import csv
+    import io
+
+    from flask import Response
+    from sqlalchemy import or_
+
+    from models import (
+        ApplianceIssue,
+        ApplianceIssueLine,
+        ApplianceReceiving,
+        ApplianceReceivingLine,
+        ApplianceUnit,
+        User,
+    )
+
+    # --------------------------------------------------------
+    # Warehouse access
+    # --------------------------------------------------------
+
+    allowed_warehouse_ids = _warehouse_ids_for(
+        "appliance.view"
+    )
+
+    if not allowed_warehouse_ids:
+
+        flash(
+            "You do not have Appliance Inventory access.",
+            "danger",
+        )
+
+        return redirect(
+            url_for("appliance.inventory_list")
+        )
+
+    pricing_warehouse_ids = set(
+        _warehouse_ids_for(
+            "appliance.pricing"
+        )
+    )
+
+    # --------------------------------------------------------
+    # Same filters as Appliance Inventory
+    # --------------------------------------------------------
+
+    q = (
+        request.args.get("q")
+        or ""
+    ).strip()
+
+    status = (
+        request.args.get("status")
+        or "all"
+    ).strip().lower()
+
+    condition = (
+        request.args.get("condition")
+        or ""
+    ).strip().lower()
+
+    stock_class = (
+        request.args.get("stock_class")
+        or ""
+    ).strip().lower()
+
+    allowed_stock_classes = {
+        "new",
+        "loaner",
+        "retail",
+    }
+
+    if stock_class not in allowed_stock_classes:
+        stock_class = ""
+
+    raw_warehouse_id = (
+        request.args.get("warehouse_id")
+        or ""
+    ).strip()
+
+    raw_category_id = (
+        request.args.get("category_id")
+        or ""
+    ).strip()
+
+    warehouse_id = None
+    category_id = None
+
+    try:
+        if raw_warehouse_id:
+            warehouse_id = int(
+                raw_warehouse_id
+            )
+    except (TypeError, ValueError):
+        warehouse_id = None
+
+    try:
+        if raw_category_id:
+            category_id = int(
+                raw_category_id
+            )
+    except (TypeError, ValueError):
+        category_id = None
+
+    if (
+        warehouse_id is not None
+        and warehouse_id
+        not in allowed_warehouse_ids
+    ):
+        warehouse_id = None
+
+    # --------------------------------------------------------
+    # Base query
+    # --------------------------------------------------------
+
+    query = (
+        ApplianceUnit.query
+        .filter(
+            ApplianceUnit.warehouse_id.in_(
+                allowed_warehouse_ids
+            )
+        )
+    )
+
+    if warehouse_id is not None:
+
+        query = query.filter(
+            ApplianceUnit.warehouse_id
+            == warehouse_id
+        )
+
+    if category_id is not None:
+
+        query = query.filter(
+            ApplianceUnit.category_id
+            == category_id
+        )
+
+    if condition:
+
+        query = query.filter(
+            ApplianceUnit.condition
+            == condition
+        )
+
+    if stock_class:
+
+        query = query.filter(
+            ApplianceUnit.stock_class
+            == stock_class
+        )
+
+    if (
+        status
+        and status != "all"
+    ):
+
+        query = query.filter(
+            ApplianceUnit.status
+            == status
+        )
+
+    # --------------------------------------------------------
+    # Same search behavior as Inventory
+    # --------------------------------------------------------
+
+    if q:
+
+        like = f"%{q}%"
+
+        issue_unit_ids = (
+            db.session.query(
+                ApplianceIssueLine.appliance_unit_id
+            )
+            .join(
+                ApplianceIssue,
+                ApplianceIssue.id
+                == ApplianceIssueLine.issue_id,
+            )
+            .filter(
+                or_(
+                    ApplianceIssue.issue_number.ilike(
+                        like
+                    ),
+                    ApplianceIssue.work_order_number.ilike(
+                        like
+                    ),
+                )
+            )
+        )
+
+        issue_unit_ids_by_tech = (
+            db.session.query(
+                ApplianceIssueLine.appliance_unit_id
+            )
+            .join(
+                ApplianceIssue,
+                ApplianceIssue.id
+                == ApplianceIssueLine.issue_id,
+            )
+            .outerjoin(
+                User,
+                User.id
+                == ApplianceIssue.technician_id,
+            )
+            .filter(
+                User.username.ilike(
+                    like
+                )
+            )
+        )
+
+        query = query.filter(
+            or_(
+                ApplianceUnit.inventory_number.ilike(
+                    like
+                ),
+                ApplianceUnit.serial_number.ilike(
+                    like
+                ),
+                ApplianceUnit.model_number.ilike(
+                    like
+                ),
+                ApplianceUnit.brand.ilike(
+                    like
+                ),
+                ApplianceUnit.description.ilike(
+                    like
+                ),
+                ApplianceUnit.current_work_order_number.ilike(
+                    like
+                ),
+                ApplianceUnit.id.in_(
+                    issue_unit_ids
+                ),
+                ApplianceUnit.id.in_(
+                    issue_unit_ids_by_tech
+                ),
+            )
+        )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # No .limit(500) here.
+    # Export ALL matching accessible units.
+    # --------------------------------------------------------
+
+    units = (
+        query
+        .order_by(
+            ApplianceUnit.category_id.asc(),
+            ApplianceUnit.brand.asc(),
+            ApplianceUnit.model_number.asc(),
+            ApplianceUnit.inventory_number.asc(),
+        )
+        .all()
+    )
+
+    unit_ids = [
+        unit.id
+        for unit in units
+    ]
+
+    # --------------------------------------------------------
+    # Latest Issue for each unit
+    # --------------------------------------------------------
+
+    latest_issue_by_unit = {}
+
+    if unit_ids:
+
+        issue_rows = (
+            db.session.query(
+                ApplianceIssueLine,
+                ApplianceIssue,
+            )
+            .join(
+                ApplianceIssue,
+                ApplianceIssue.id
+                == ApplianceIssueLine.issue_id,
+            )
+            .filter(
+                ApplianceIssueLine.appliance_unit_id.in_(
+                    unit_ids
+                )
+            )
+            .order_by(
+                ApplianceIssueLine.appliance_unit_id.asc(),
+                ApplianceIssue.issued_at.desc(),
+                ApplianceIssue.id.desc(),
+            )
+            .all()
+        )
+
+        for line, issue in issue_rows:
+
+            unit_id = int(
+                line.appliance_unit_id
+            )
+
+            if unit_id in latest_issue_by_unit:
+                continue
+
+            latest_issue_by_unit[
+                unit_id
+            ] = {
+                "issue_number":
+                    issue.issue_number
+                    or "",
+
+                "technician":
+                    (
+                        issue.technician.username
+                        if issue.technician
+                        else ""
+                    ),
+
+                "work_order":
+                    (
+                        line.current_work_order_number
+                        or issue.work_order_number
+                        or ""
+                    ),
+            }
+
+    # --------------------------------------------------------
+    # Original Receiving / Vendor information
+    #
+    # ApplianceReceivingLine does not directly store Unit ID.
+    # Match the immutable source line using receiving_line_id
+    # from ApplianceUnit.
+    # --------------------------------------------------------
+
+    receiving_line_ids = [
+        unit.receiving_line_id
+        for unit in units
+        if unit.receiving_line_id is not None
+    ]
+
+    receiving_by_line_id = {}
+
+    if receiving_line_ids:
+
+        receiving_rows = (
+            db.session.query(
+                ApplianceReceivingLine,
+                ApplianceReceiving,
+            )
+            .join(
+                ApplianceReceiving,
+                ApplianceReceiving.id
+                == ApplianceReceivingLine.receiving_id,
+            )
+            .filter(
+                ApplianceReceivingLine.id.in_(
+                    receiving_line_ids
+                )
+            )
+            .all()
+        )
+
+        for line, receiving in receiving_rows:
+
+            receiving_by_line_id[
+                line.id
+            ] = receiving
+
+    # --------------------------------------------------------
+    # CSV
+    #
+    # utf-8-sig gives Excel a BOM so normal Windows Excel
+    # opens UTF-8 text cleanly.
+    # --------------------------------------------------------
+
+    stream = io.StringIO(
+        newline=""
+    )
+
+    writer = csv.writer(
+        stream
+    )
+
+    writer.writerow(
+        [
+            "AP #",
+            "Appliance",
+            "Brand",
+            "Model",
+            "Serial",
+            "Warehouse",
+            "Size",
+            "Color",
+            "Condition",
+            "Stock Class",
+            "Status",
+            "Cost",
+            "Sell Price",
+            "Current Issue",
+            "Technician",
+            "W/O #",
+            "Received",
+            "Vendor",
+            "Vendor Invoice",
+            "Invoice Date",
+            "Receiving #",
+            "Notes",
+        ]
+    )
+
+    for unit in units:
+
+        issue = latest_issue_by_unit.get(
+            unit.id,
+            {},
+        )
+
+        receiving = None
+
+        if unit.receiving_line_id is not None:
+
+            receiving = receiving_by_line_id.get(
+                unit.receiving_line_id
+            )
+
+        category_name = (
+            unit.category.name
+            if unit.category
+            else ""
+        )
+
+        warehouse_name = ""
+
+        if unit.warehouse:
+
+            warehouse_name = (
+                unit.warehouse.code
+                or unit.warehouse.name
+                or ""
+            )
+
+        size_text = ""
+
+        if unit.size_value is not None:
+
+            size_text = str(
+                unit.size_value
+            )
+
+            if unit.size_unit:
+
+                size_text += (
+                    " "
+                    + str(unit.size_unit)
+                )
+
+        can_see_price = (
+            unit.warehouse_id
+            in pricing_warehouse_ids
+        )
+
+        unit_cost = ""
+
+        selling_price = ""
+
+        if can_see_price:
+
+            if unit.unit_cost is not None:
+                unit_cost = unit.unit_cost
+
+            if unit.selling_price is not None:
+                selling_price = unit.selling_price
+
+        received_value = ""
+
+        vendor = ""
+        vendor_invoice = ""
+        invoice_date = ""
+        receiving_number = ""
+
+        if receiving is not None:
+
+            receiving_number = (
+                receiving.receiving_number
+                or ""
+            )
+
+            vendor = (
+                receiving.supplier_name
+                or ""
+            )
+
+            vendor_invoice = (
+                receiving.invoice_number
+                or ""
+            )
+
+            if receiving.invoice_date:
+
+                invoice_date = (
+                    receiving.invoice_date.isoformat()
+                )
+
+            if receiving.received_at:
+
+                received_value = (
+                    receiving.received_at
+                    .strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                )
+
+        writer.writerow(
+            [
+                unit.inventory_number or "",
+                category_name,
+                unit.brand or "",
+                unit.model_number or "",
+                unit.serial_number or "",
+                warehouse_name,
+                size_text,
+                unit.color or "",
+                unit.condition or "",
+                unit.stock_class or "",
+                unit.status or "",
+                unit_cost,
+                selling_price,
+                issue.get(
+                    "issue_number",
+                    "",
+                ),
+                issue.get(
+                    "technician",
+                    "",
+                ),
+                (
+                    issue.get(
+                        "work_order",
+                        "",
+                    )
+                    or
+                    unit.current_work_order_number
+                    or ""
+                ),
+                received_value,
+                vendor,
+                vendor_invoice,
+                invoice_date,
+                receiving_number,
+                unit.notes or "",
+            ]
+        )
+
+    csv_text = stream.getvalue()
+
+    filename = (
+        "appliance_inventory_"
+        + datetime.now().strftime(
+            "%Y%m%d_%H%M%S"
+        )
+        + ".csv"
+    )
+
+    response = Response(
+        "\ufeff" + csv_text,
+        mimetype=(
+            "text/csv; charset=utf-8"
+        ),
+    )
+
+    response.headers[
+        "Content-Disposition"
+    ] = (
+        f'attachment; filename="{filename}"'
+    )
+
+    return response
+
+
+
+# ============================================================
 # APPLIANCE INVENTORY EXCEL EXPORT V1.1
 #
 # Professional XLSX export of the complete filtered
@@ -3604,22 +4200,10 @@ def inventory_list():
 
     if visible_unit_ids:
 
-        from sqlalchemy.orm import (
-            Load,
-            joinedload,
-        )
-
         issue_rows = (
             db.session.query(
                 ApplianceIssueLine,
                 ApplianceIssue,
-            )
-            .options(
-                Load(ApplianceIssueLine).noload("*"),
-                Load(ApplianceIssue).noload("*"),
-                joinedload(
-                    ApplianceIssue.technician
-                ).noload("*"),
             )
             .join(
                 ApplianceIssue,
@@ -6333,13 +6917,8 @@ def issue_new():
             url_for("appliance.inventory_list")
         )
 
-    from sqlalchemy.orm import noload
-
     technicians = (
         User.query
-        .options(
-            noload("*")
-        )
         .filter(
             User.role == "technician"
         )

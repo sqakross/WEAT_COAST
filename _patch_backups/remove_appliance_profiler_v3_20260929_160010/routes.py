@@ -3604,22 +3604,10 @@ def inventory_list():
 
     if visible_unit_ids:
 
-        from sqlalchemy.orm import (
-            Load,
-            joinedload,
-        )
-
         issue_rows = (
             db.session.query(
                 ApplianceIssueLine,
                 ApplianceIssue,
-            )
-            .options(
-                Load(ApplianceIssueLine).noload("*"),
-                Load(ApplianceIssue).noload("*"),
-                joinedload(
-                    ApplianceIssue.technician
-                ).noload("*"),
             )
             .join(
                 ApplianceIssue,
@@ -6279,6 +6267,375 @@ def inventory_disposition(unit_id):
     )
 
 
+
+# WCCR APPLIANCE PERFORMANCE PROFILER V3 START
+#
+# TEMPORARY runtime profiler.
+# Targets only:
+#   /appliances/inventory
+#   /appliances/issues/new
+#   /appliances/issues/search-appliances
+#
+# NO DB writes.
+# NO schema changes.
+# Remove after performance investigation.
+
+import time as _ap_perf_time
+from pathlib import Path as _ApPerfPath
+
+from flask import (
+    before_render_template as _ap_perf_before_render_template,
+    g as _ap_perf_g,
+    has_request_context as _ap_perf_has_request_context,
+    request as _ap_perf_request,
+    template_rendered as _ap_perf_template_rendered,
+)
+from sqlalchemy import event as _ap_perf_event
+from sqlalchemy.engine import Engine as _ApPerfEngine
+
+
+_AP_PERF_TARGET_PATHS = {
+    "/appliances/inventory",
+    "/appliances/issues/new",
+    "/appliances/issues/search-appliances",
+}
+
+_AP_PERF_LOG_NAME = "appliance_performance_v3_runtime.log"
+
+
+def _ap_perf_is_target_request():
+    if not _ap_perf_has_request_context():
+        return False
+
+    try:
+        return _ap_perf_request.path in _AP_PERF_TARGET_PATHS
+    except Exception:
+        return False
+
+
+def _ap_perf_log_path():
+    # Project root is parent of appliance package.
+    return (
+        _ApPerfPath(__file__).resolve().parent.parent
+        / _AP_PERF_LOG_NAME
+    )
+
+
+def _ap_perf_write(message):
+    try:
+        path = _ap_perf_log_path()
+
+        with path.open(
+            "a",
+            encoding="utf-8",
+        ) as fh:
+            fh.write(message.rstrip() + "\n")
+
+    except Exception:
+        # Performance logging must NEVER break production request.
+        pass
+
+
+@_ap_perf_event.listens_for(
+    _ApPerfEngine,
+    "before_cursor_execute",
+)
+def _ap_perf_before_cursor_execute(
+    conn,
+    cursor,
+    statement,
+    parameters,
+    context,
+    executemany,
+):
+    if not _ap_perf_is_target_request():
+        return
+
+    try:
+        context._wccr_ap_perf_started_at = (
+            _ap_perf_time.perf_counter()
+        )
+    except Exception:
+        pass
+
+
+@_ap_perf_event.listens_for(
+    _ApPerfEngine,
+    "after_cursor_execute",
+)
+def _ap_perf_after_cursor_execute(
+    conn,
+    cursor,
+    statement,
+    parameters,
+    context,
+    executemany,
+):
+    if not _ap_perf_is_target_request():
+        return
+
+    try:
+        started = getattr(
+            context,
+            "_wccr_ap_perf_started_at",
+            None,
+        )
+
+        if started is None:
+            return
+
+        elapsed = (
+            _ap_perf_time.perf_counter()
+            - started
+        )
+
+        entries = getattr(
+            _ap_perf_g,
+            "_wccr_ap_perf_sql_entries",
+            None,
+        )
+
+        if entries is None:
+            entries = []
+            _ap_perf_g._wccr_ap_perf_sql_entries = entries
+
+        statement_one_line = " ".join(
+            str(statement).split()
+        )
+
+        if len(statement_one_line) > 700:
+            statement_one_line = (
+                statement_one_line[:700]
+                + " ..."
+            )
+
+        entries.append(
+            (
+                float(elapsed),
+                statement_one_line,
+            )
+        )
+
+    except Exception:
+        pass
+
+
+def _ap_perf_before_template(
+    sender,
+    template,
+    context,
+    **extra,
+):
+    if not _ap_perf_is_target_request():
+        return
+
+    try:
+        _ap_perf_g._wccr_ap_perf_template_started_at = (
+            _ap_perf_time.perf_counter()
+        )
+
+        _ap_perf_g._wccr_ap_perf_template_name = (
+            getattr(template, "name", None)
+            or "<unknown>"
+        )
+    except Exception:
+        pass
+
+
+def _ap_perf_after_template(
+    sender,
+    template,
+    context,
+    **extra,
+):
+    if not _ap_perf_is_target_request():
+        return
+
+    try:
+        started = getattr(
+            _ap_perf_g,
+            "_wccr_ap_perf_template_started_at",
+            None,
+        )
+
+        if started is None:
+            return
+
+        elapsed = (
+            _ap_perf_time.perf_counter()
+            - started
+        )
+
+        current = float(
+            getattr(
+                _ap_perf_g,
+                "_wccr_ap_perf_template_total",
+                0.0,
+            )
+            or 0.0
+        )
+
+        _ap_perf_g._wccr_ap_perf_template_total = (
+            current + elapsed
+        )
+
+    except Exception:
+        pass
+
+
+_ap_perf_before_render_template.connect(
+    _ap_perf_before_template,
+    weak=False,
+)
+
+_ap_perf_template_rendered.connect(
+    _ap_perf_after_template,
+    weak=False,
+)
+
+
+@appliance_bp.before_request
+def _wccr_appliance_performance_v3_before_request():
+    if not _ap_perf_is_target_request():
+        return None
+
+    try:
+        _ap_perf_g._wccr_ap_perf_request_started_at = (
+            _ap_perf_time.perf_counter()
+        )
+        _ap_perf_g._wccr_ap_perf_sql_entries = []
+        _ap_perf_g._wccr_ap_perf_template_total = 0.0
+
+    except Exception:
+        pass
+
+    return None
+
+
+@appliance_bp.after_request
+def _wccr_appliance_performance_v3_after_request(response):
+    if not _ap_perf_is_target_request():
+        return response
+
+    try:
+        request_started = getattr(
+            _ap_perf_g,
+            "_wccr_ap_perf_request_started_at",
+            None,
+        )
+
+        if request_started is None:
+            return response
+
+        total_elapsed = (
+            _ap_perf_time.perf_counter()
+            - request_started
+        )
+
+        entries = list(
+            getattr(
+                _ap_perf_g,
+                "_wccr_ap_perf_sql_entries",
+                [],
+            )
+            or []
+        )
+
+        sql_total = sum(
+            row[0]
+            for row in entries
+        )
+
+        template_total = float(
+            getattr(
+                _ap_perf_g,
+                "_wccr_ap_perf_template_total",
+                0.0,
+            )
+            or 0.0
+        )
+
+        other_total = max(
+            0.0,
+            total_elapsed
+            - sql_total
+            - template_total,
+        )
+
+        slowest = sorted(
+            entries,
+            key=lambda row: row[0],
+            reverse=True,
+        )[:10]
+
+        timestamp = time.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        lines = [
+            "",
+            "=" * 110,
+            (
+                f"{timestamp} | "
+                f"{_ap_perf_request.method} "
+                f"{_ap_perf_request.path}"
+            ),
+            "-" * 110,
+            f"status           : {response.status_code}",
+            f"total_request_s  : {total_elapsed:.6f}",
+            f"sql_queries      : {len(entries)}",
+            f"sql_total_s      : {sql_total:.6f}",
+            f"template_total_s : {template_total:.6f}",
+            f"other_python_s   : {other_total:.6f}",
+        ]
+
+        if _ap_perf_request.query_string:
+            try:
+                qs = _ap_perf_request.query_string.decode(
+                    "utf-8",
+                    errors="replace",
+                )
+            except Exception:
+                qs = "<decode-error>"
+
+            # Query string can contain search text.
+            # Keep only length, not actual user-entered value.
+            lines.append(
+                f"query_string_len : {len(qs)}"
+            )
+
+        lines.append("")
+        lines.append(
+            "TOP SQL BY ELAPSED TIME"
+        )
+        lines.append("-" * 110)
+
+        if not slowest:
+            lines.append(
+                "No SQL statements recorded."
+            )
+
+        for index, (elapsed, statement) in enumerate(
+            slowest,
+            start=1,
+        ):
+            lines.append(
+                f"{index:02}. {elapsed:.6f}s | {statement}"
+            )
+
+        _ap_perf_write(
+            "\n".join(lines)
+        )
+
+    except Exception:
+        # Profiler must NEVER affect normal response.
+        pass
+
+    return response
+
+# WCCR APPLIANCE PERFORMANCE PROFILER V3 END
+
+
 # ============================================================
 # Appliance Issue UI
 # Warehouse Issue Slip - NO PRICES
@@ -6333,13 +6690,8 @@ def issue_new():
             url_for("appliance.inventory_list")
         )
 
-    from sqlalchemy.orm import noload
-
     technicians = (
         User.query
-        .options(
-            noload("*")
-        )
         .filter(
             User.role == "technician"
         )

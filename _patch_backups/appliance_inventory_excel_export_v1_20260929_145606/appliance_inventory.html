@@ -752,11 +752,11 @@
         </strong>
       </span>
 
-      <!-- APPLIANCE INVENTORY EXCEL EXPORT V1 -->
+      <!-- APPLIANCE INVENTORY CSV EXPORT V1 -->
       <a
         class="btn btn-outline-success btn-sm"
         href="{{ url_for(
-          'appliance.inventory_export_excel',
+          'appliance.inventory_export_csv',
           q=q,
           warehouse_id=warehouse_id or '',
           category_id=category_id or '',
@@ -764,9 +764,9 @@
           condition=condition,
           stock_class=stock_class
         ) }}"
-        title="Export the current filtered inventory to Excel"
+        title="Export the current filtered inventory to CSV"
       >
-        EXPORT EXCEL
+        EXPORT CSV
       </a>
 
 

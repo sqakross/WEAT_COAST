@@ -176,6 +176,180 @@ def start_request_timer():
     g.request_started_at = time.perf_counter()
 
 
+# WCCR APPLIANCE PHASE PROFILER V5 START
+#
+# TEMPORARY diagnostic only.
+# Measures request phases for:
+#   appliance.inventory_list
+#   appliance.issue_new
+#   appliance.issue_search_appliances
+#
+# Uses existing application log.
+
+from flask import before_render_template as _wccr_before_render_template
+from flask import template_rendered as _wccr_template_rendered
+
+
+_WCCR_PHASE_ENDPOINTS = {
+    "appliance.inventory_list",
+    "appliance.issue_new",
+    "appliance.issue_search_appliances",
+}
+
+
+def _wccr_phase_target():
+    try:
+        return request.endpoint in _WCCR_PHASE_ENDPOINTS
+    except Exception:
+        return False
+
+
+def _wccr_phase_before_template(sender, template, context, **extra):
+    if not _wccr_phase_target():
+        return
+
+    try:
+        g._wccr_template_started_at = time.perf_counter()
+    except Exception:
+        pass
+
+
+def _wccr_phase_after_template(sender, template, context, **extra):
+    if not _wccr_phase_target():
+        return
+
+    try:
+        started = getattr(g, "_wccr_template_started_at", None)
+
+        if started is None:
+            return
+
+        elapsed = time.perf_counter() - started
+
+        current = float(
+            getattr(g, "_wccr_template_total", 0.0) or 0.0
+        )
+
+        g._wccr_template_total = current + elapsed
+
+    except Exception:
+        pass
+
+
+_wccr_before_render_template.connect(
+    _wccr_phase_before_template,
+    weak=False,
+)
+
+_wccr_template_rendered.connect(
+    _wccr_phase_after_template,
+    weak=False,
+)
+
+
+@app.before_request
+def _wccr_phase_profiler_begin():
+    if not _wccr_phase_target():
+        return
+
+    now = time.perf_counter()
+
+    g._wccr_phase_begin = now
+    g._wccr_template_total = 0.0
+    g._wccr_after_license_refresh = None
+    g._wccr_after_license_verify = None
+
+
+@app.after_request
+def _wccr_phase_profiler_finish(response):
+    if not _wccr_phase_target():
+        return response
+
+    try:
+        begin = getattr(g, "_wccr_phase_begin", None)
+
+        if begin is None:
+            return response
+
+        now = time.perf_counter()
+
+        refresh_done = getattr(
+            g,
+            "_wccr_after_license_refresh",
+            None,
+        )
+
+        verify_done = getattr(
+            g,
+            "_wccr_after_license_verify",
+            None,
+        )
+
+        template_total = float(
+            getattr(
+                g,
+                "_wccr_template_total",
+                0.0,
+            )
+            or 0.0
+        )
+
+        total = now - begin
+
+        refresh_phase = (
+            refresh_done - begin
+            if refresh_done is not None
+            else None
+        )
+
+        verify_phase = (
+            verify_done - (refresh_done or begin)
+            if verify_done is not None
+            else None
+        )
+
+        route_plus_template = (
+            now - (verify_done or refresh_done or begin)
+        )
+
+        route_python_approx = max(
+            0.0,
+            route_plus_template - template_total,
+        )
+
+        logging.warning(
+            "APPLIANCE_PHASE_PERF total=%.3fs | "
+            "license_refresh=%s | license_verify=%s | "
+            "template=%.3fs | route_python_approx=%.3fs | "
+            "endpoint=%s | path=%s",
+            total,
+            (
+                f"{refresh_phase:.3f}s"
+                if refresh_phase is not None
+                else "n/a"
+            ),
+            (
+                f"{verify_phase:.3f}s"
+                if verify_phase is not None
+                else "n/a"
+            ),
+            template_total,
+            route_python_approx,
+            request.endpoint,
+            request.path,
+        )
+
+    except Exception:
+        logging.exception(
+            "APPLIANCE_PHASE_PROFILER_ERROR"
+        )
+
+    return response
+
+
+# WCCR APPLIANCE PHASE PROFILER V5 END
+
+
 @app.before_request
 def refresh_runtime_state_periodically():
     t0 = time.perf_counter()
@@ -185,6 +359,9 @@ def refresh_runtime_state_periodically():
     )
 
     elapsed = time.perf_counter() - t0
+
+    if _wccr_phase_target():
+        g._wccr_after_license_refresh = time.perf_counter()
 
     if elapsed >= 0.05:
         logging.warning(
@@ -205,6 +382,9 @@ def verify_runtime_state():
     )
 
     elapsed = time.perf_counter() - t0
+
+    if _wccr_phase_target():
+        g._wccr_after_license_verify = time.perf_counter()
 
     if elapsed >= 0.05:
         logging.warning(

@@ -1,5 +1,4 @@
-import time
-from flask import Blueprint, render_template, redirect, url_for, flash, request, session
+from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func
 from sqlalchemy.orm import lazyload
@@ -42,18 +41,6 @@ def login():
         if user and user.check_password(password):
             login_user(user)
 
-            # WCCR_TECH_INACTIVITY_LOGIN_RESET
-            if (
-                (getattr(user, "role", "") or "")
-                .strip()
-                .lower()
-                == "technician"
-            ):
-                session["tech_last_activity"] = time.time()
-                session.modified = True
-            else:
-                session.pop("tech_last_activity", None)
-
             next_url = request.args.get("next")
             return redirect(next_url or url_for("inventory.wo_list"))
 
@@ -66,7 +53,6 @@ def login():
 @login_required
 def logout():
     logout_user()
-    session.pop("tech_last_activity", None)
     return redirect(url_for('auth.login'))
 
 # Register new user (superadmin only)

@@ -8,14 +8,12 @@ from flask import (
     send_file,
     abort,
     g,
-    session,
-    jsonify,
 )
 from config import Config
 import os, sys, io, logging, time, ipaddress
 from logging.handlers import TimedRotatingFileHandler
 from extensions import db, login_manager
-from flask_login import current_user, logout_user
+from flask_login import current_user
 from flask_migrate import Migrate
 
 # Sentry
@@ -175,7 +173,6 @@ from license_client.periodic import refresh_if_due
 def start_request_timer():
     g.request_started_at = time.perf_counter()
 
-
 @app.before_request
 def refresh_runtime_state_periodically():
     t0 = time.perf_counter()
@@ -312,7 +309,6 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 }
 
 db.init_app(app)          # <<< ЭТА СТРОКА ПРОПАЛА
-
 
 # Alembic / Flask-Migrate uses this same canonical Flask app.
 migrate = Migrate(app, db)
@@ -531,82 +527,6 @@ ALLOWED_VIEWER_ENDPOINTS = {
     "auth.logout",
     "static",
 }
-
-# WCCR_TECH_INACTIVITY_BACKEND
-# Technician auto logout after 180 seconds of real inactivity.
-TECH_INACTIVITY_TIMEOUT_SECONDS = 180
-
-
-@app.route("/tech-session-activity", methods=["POST"])
-def tech_session_activity():
-    if not getattr(current_user, "is_authenticated", False):
-        return jsonify({"ok": False}), 401
-
-    role = (
-        getattr(current_user, "role", "") or ""
-    ).strip().lower()
-
-    if role != "technician":
-        return jsonify({
-            "ok": True,
-            "tracked": False,
-        })
-
-    session["tech_last_activity"] = time.time()
-    session.modified = True
-
-    return jsonify({
-        "ok": True,
-        "tracked": True,
-    })
-
-
-@app.before_request
-def enforce_technician_inactivity_timeout():
-    ep = (request.endpoint or "").strip()
-
-    if ep in {
-        "static",
-        "auth.login",
-        "auth.logout",
-        "tech_session_activity",
-    }:
-        return
-
-    if request.path.startswith("/static/"):
-        return
-
-    if not getattr(current_user, "is_authenticated", False):
-        return
-
-    role = (
-        getattr(current_user, "role", "") or ""
-    ).strip().lower()
-
-    if role != "technician":
-        return
-
-    now = time.time()
-    last_activity = session.get("tech_last_activity")
-
-    if last_activity is None:
-        session["tech_last_activity"] = now
-        session.modified = True
-        return
-
-    try:
-        idle_seconds = now - float(last_activity)
-    except (TypeError, ValueError):
-        session["tech_last_activity"] = now
-        session.modified = True
-        return
-
-    if idle_seconds >= TECH_INACTIVITY_TIMEOUT_SECONDS:
-        logout_user()
-        session.pop("tech_last_activity", None)
-        session.modified = True
-        return redirect(url_for("auth.login"))
-
 
 @app.before_request
 def restrict_role_routes():

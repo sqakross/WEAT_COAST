@@ -3604,22 +3604,10 @@ def inventory_list():
 
     if visible_unit_ids:
 
-        from sqlalchemy.orm import (
-            Load,
-            joinedload,
-        )
-
         issue_rows = (
             db.session.query(
                 ApplianceIssueLine,
                 ApplianceIssue,
-            )
-            .options(
-                Load(ApplianceIssueLine).noload("*"),
-                Load(ApplianceIssue).noload("*"),
-                joinedload(
-                    ApplianceIssue.technician
-                ).noload("*"),
             )
             .join(
                 ApplianceIssue,
@@ -6333,13 +6321,8 @@ def issue_new():
             url_for("appliance.inventory_list")
         )
 
-    from sqlalchemy.orm import noload
-
     technicians = (
         User.query
-        .options(
-            noload("*")
-        )
         .filter(
             User.role == "technician"
         )
