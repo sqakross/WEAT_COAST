@@ -45,7 +45,6 @@ from services.appliance_receiving_service import (
 # ============================================================
 
 _APPLIANCE_INVOICE_MAX_BYTES = 15 * 1024 * 1024
-from sqlalchemy.orm import noload
 
 
 def _appliance_invoice_dir() -> Path:
@@ -4034,15 +4033,12 @@ def inventory_detail(unit_id):
 
     import json
 
-
-
     from models import ApplianceMovement, User
 
     unit = db.session.get(
         ApplianceUnit,
         unit_id,
     )
-
 
     if unit is None:
         flash(
@@ -4066,13 +4062,11 @@ def inventory_detail(unit_id):
             url_for("appliance.inventory_list")
         )
 
-
     can_pricing = AccessControlService.can(
         current_user,
         "appliance.pricing",
         warehouse_id=unit.warehouse_id,
     )
-
 
     # Warehouse descriptive data may be corrected from the
     # physical Appliance Inventory record.
@@ -4081,7 +4075,6 @@ def inventory_detail(unit_id):
         "appliance.receive",
         warehouse_id=unit.warehouse_id,
     )
-
 
     # --------------------------------------------------------
     # Complete movement history for this physical appliance.
@@ -4100,7 +4093,6 @@ def inventory_detail(unit_id):
         )
         .all()
     )
-
 
     # --------------------------------------------------------
     # Parsed immutable movement metadata for presentation.
@@ -4138,7 +4130,6 @@ def inventory_detail(unit_id):
             movement.id
         ] = meta
 
-
     # Categories available for descriptive correction.
     #
     # Normally only active categories are offered. If a legacy
@@ -4146,7 +4137,6 @@ def inventory_detail(unit_id):
     # that category visible so the form can still be opened and
     # corrected without silently changing it.
     categories = list(_active_categories())
-
 
     if (
         unit.category is not None
@@ -4170,7 +4160,7 @@ def inventory_detail(unit_id):
     # application role is technician. Store the User.id in the
     # Repair Order; username is presentation/audit metadata only.
     repair_technicians = (
-        User.query.options(noload("*"))
+        User.query
         .filter(
             User.role == "technician"
         )
@@ -4179,9 +4169,6 @@ def inventory_detail(unit_id):
         )
         .all()
     )
-
-
-
 
     return render_template(
         "appliance_inventory_detail.html",

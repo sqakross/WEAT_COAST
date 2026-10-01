@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 
 from datetime import datetime
 from pathlib import Path
@@ -45,7 +46,6 @@ from services.appliance_receiving_service import (
 # ============================================================
 
 _APPLIANCE_INVOICE_MAX_BYTES = 15 * 1024 * 1024
-from sqlalchemy.orm import noload
 
 
 def _appliance_invoice_dir() -> Path:
@@ -4034,7 +4034,24 @@ def inventory_detail(unit_id):
 
     import json
 
+    # WCCR_RUNTIME_PROFILE_V3_START
+    _profile_started = time.perf_counter()
+    _profile_last = _profile_started
+    _profile_rows = []
 
+    def _profile_checkpoint(name):
+        nonlocal _profile_last
+
+        now = time.perf_counter()
+
+        _profile_rows.append(
+            f"{name}: "
+            f"{now - _profile_last:.6f}s | "
+            f"total={now - _profile_started:.6f}s"
+        )
+
+        _profile_last = now
+    # WCCR_RUNTIME_PROFILE_V3_END
 
     from models import ApplianceMovement, User
 
@@ -4043,6 +4060,7 @@ def inventory_detail(unit_id):
         unit_id,
     )
 
+    _profile_checkpoint("unit_load")
 
     if unit is None:
         flash(
@@ -4066,6 +4084,7 @@ def inventory_detail(unit_id):
             url_for("appliance.inventory_list")
         )
 
+    _profile_checkpoint("permission_view")
 
     can_pricing = AccessControlService.can(
         current_user,
@@ -4073,6 +4092,7 @@ def inventory_detail(unit_id):
         warehouse_id=unit.warehouse_id,
     )
 
+    _profile_checkpoint("permission_pricing")
 
     # Warehouse descriptive data may be corrected from the
     # physical Appliance Inventory record.
@@ -4082,6 +4102,7 @@ def inventory_detail(unit_id):
         warehouse_id=unit.warehouse_id,
     )
 
+    _profile_checkpoint("permission_receive")
 
     # --------------------------------------------------------
     # Complete movement history for this physical appliance.
@@ -4101,6 +4122,10 @@ def inventory_detail(unit_id):
         .all()
     )
 
+    _profile_checkpoint("movements_query")
+    _profile_rows.append(
+        f"movement_count: {len(movements)}"
+    )
 
     # --------------------------------------------------------
     # Parsed immutable movement metadata for presentation.
@@ -4138,6 +4163,7 @@ def inventory_detail(unit_id):
             movement.id
         ] = meta
 
+    _profile_checkpoint("movement_json_parse")
 
     # Categories available for descriptive correction.
     #
@@ -4147,6 +4173,10 @@ def inventory_detail(unit_id):
     # corrected without silently changing it.
     categories = list(_active_categories())
 
+    _profile_checkpoint("categories")
+    _profile_rows.append(
+        f"category_count: {len(categories)}"
+    )
 
     if (
         unit.category is not None
@@ -4170,7 +4200,7 @@ def inventory_detail(unit_id):
     # application role is technician. Store the User.id in the
     # Repair Order; username is presentation/audit metadata only.
     repair_technicians = (
-        User.query.options(noload("*"))
+        User.query
         .filter(
             User.role == "technician"
         )
@@ -4180,8 +4210,43 @@ def inventory_detail(unit_id):
         .all()
     )
 
+    _profile_checkpoint("repair_technicians")
+    _profile_rows.append(
+        f"technician_count: {len(repair_technicians)}"
+    )
 
+    _profile_checkpoint("before_render")
 
+    _profile_rows.append(
+        f"PRE_RENDER_TOTAL: "
+        f"{time.perf_counter() - _profile_started:.6f}s"
+    )
+
+    try:
+        _profile_path = (
+            Path(__file__).resolve().parent.parent
+            / "appliance_inventory_detail_runtime_profile.txt"
+        )
+
+        with _profile_path.open(
+            "a",
+            encoding="utf-8",
+        ) as _profile_file:
+
+            _profile_file.write(
+                f"\n=== INVENTORY DETAIL "
+                f"unit_id={unit_id} "
+                f"{datetime.now().isoformat()} ===\n"
+            )
+
+            _profile_file.write(
+                "\n".join(_profile_rows)
+            )
+
+            _profile_file.write("\n")
+
+    except Exception:
+        pass
 
     return render_template(
         "appliance_inventory_detail.html",

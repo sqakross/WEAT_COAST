@@ -45,7 +45,6 @@ from services.appliance_receiving_service import (
 # ============================================================
 
 _APPLIANCE_INVOICE_MAX_BYTES = 15 * 1024 * 1024
-from sqlalchemy.orm import noload
 
 
 def _appliance_invoice_dir() -> Path:
