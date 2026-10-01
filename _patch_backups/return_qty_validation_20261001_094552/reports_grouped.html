@@ -455,11 +455,10 @@
                                pattern="\d*"
                                step="1"
                                min="0"
-                               max="{{ it_rem }}"
-                               data-max-return="{{ it_rem }}"
-                               value="{{ 1 if it_rem > 0 else 0 }}"
+                               max="{{ it_qty }}"
+                               value="{{ 1 if it_qty > 0 else 0 }}"
                                form="{{ form_id }}"
-                               {% if row_is_return or it_rem <= 0 %}disabled{% endif %}>
+                               {% if row_is_return %}disabled{% endif %}>
                       </div>
                     </td>
 
@@ -724,64 +723,6 @@
     {# =========================================================
        RELATED INVOICES — SAME JOB
        ========================================================= #}
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-
-  document.querySelectorAll('.btn-return-selected').forEach(function (btn) {
-
-    btn.addEventListener('click', function (e) {
-
-      const formId = btn.getAttribute('form') || btn.closest('form')?.id;
-      const form = formId
-        ? document.getElementById(formId)
-        : btn.closest('form');
-
-      if (!form) return;
-
-      const checked = document.querySelectorAll(
-        '.linecb[form="' + form.id + '"]:checked'
-      );
-
-      for (const cb of checked) {
-
-        const id = cb.value;
-
-        const qtyInput = document.querySelector(
-          '.return-qty[name="qty_' + id + '"]'
-        );
-
-        if (!qtyInput) continue;
-
-        const requested = parseInt(qtyInput.value || '0', 10) || 0;
-        const available = parseInt(
-          qtyInput.dataset.maxReturn || qtyInput.max || '0',
-          10
-        ) || 0;
-
-        if (requested > available) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-
-          alert(
-            'Cannot return ' + requested +
-            '. Only ' + available +
-            ' item' + (available === 1 ? '' : 's') +
-            ' available to return.'
-          );
-
-          qtyInput.focus();
-          qtyInput.select();
-          return false;
-        }
-      }
-    }, true);
-
-  });
-
-});
-</script>
-
     {% if related_invoices %}
 
       <div class="card mt-4 mb-4 border-primary-subtle">

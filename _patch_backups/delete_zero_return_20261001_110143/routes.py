@@ -17218,28 +17218,8 @@ def update_invoice():
 
     # ---------- helpers ----------
     def _is_return_row(r):
-        """
-        Persistent RETURN detection.
-
-        A RETURN remains a RETURN even when its quantity was edited
-        from a negative value to 0.  Quantity alone therefore cannot
-        be used to identify the record.
-        """
-        qty = int(getattr(r, "quantity", 0) or 0)
-
-        ref = str(
-            getattr(r, "reference_job", "") or ""
-        ).strip().upper()
-
-        cost_source = str(
-            getattr(r, "cost_source", "") or ""
-        ).strip().upper()
-
-        return (
-            qty < 0
-            or ref.startswith("RETURN")
-            or cost_source == "BASE_RETURN"
-        )
+        """A row is a 'return' when its quantity is negative."""
+        return (getattr(r, 'quantity', 0) or 0) < 0
 
     def _next_invoice_number():
         """Safe next invoice number from max(IssuedBatch, IssuedPartRecord)."""

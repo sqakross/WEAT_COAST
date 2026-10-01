@@ -17218,28 +17218,8 @@ def update_invoice():
 
     # ---------- helpers ----------
     def _is_return_row(r):
-        """
-        Persistent RETURN detection.
-
-        A RETURN remains a RETURN even when its quantity was edited
-        from a negative value to 0.  Quantity alone therefore cannot
-        be used to identify the record.
-        """
-        qty = int(getattr(r, "quantity", 0) or 0)
-
-        ref = str(
-            getattr(r, "reference_job", "") or ""
-        ).strip().upper()
-
-        cost_source = str(
-            getattr(r, "cost_source", "") or ""
-        ).strip().upper()
-
-        return (
-            qty < 0
-            or ref.startswith("RETURN")
-            or cost_source == "BASE_RETURN"
-        )
+        """A row is a 'return' when its quantity is negative."""
+        return (getattr(r, 'quantity', 0) or 0) < 0
 
     def _next_invoice_number():
         """Safe next invoice number from max(IssuedBatch, IssuedPartRecord)."""
@@ -17606,7 +17586,6 @@ def update_invoice():
         try:
             created = 0
             trimmed_any = False
-            return_qty_warnings = []
             created_returns = []
 
             for r in recs:
@@ -17628,21 +17607,8 @@ def update_invoice():
                     qty_req = 0
 
                 if qty_req > available:
-                    requested_qty = qty_req
                     qty_req = available
                     trimmed_any = True
-
-                    part_number = (
-                        (getattr(r.part, "part_number", None) or "").strip()
-                        if getattr(r, "part", None)
-                        else ""
-                    )
-
-                    return_qty_warnings.append({
-                        "part_number": part_number or f"record #{r.id}",
-                        "requested": requested_qty,
-                        "allowed": available,
-                    })
 
                 if qty_req <= 0:
                     continue
@@ -17744,16 +17710,8 @@ def update_invoice():
             db.session.commit()
 
             if created:
-                flash(f"Created {created} return line(s).", "success")
-
-                for item in return_qty_warnings:
-                    flash(
-                        f"Return quantity adjusted for {item['part_number']}: "
-                        f"requested {item['requested']}, "
-                        f"allowed {item['allowed']}. "
-                        f"Only {item['allowed']} was returned.",
-                        "warning",
-                    )
+                note = " (some requested quantities were trimmed)" if trimmed_any else ""
+                flash(f"Created {created} return line(s){note}.", "success")
             else:
                 flash("No lines were eligible for return.", "warning")
 
@@ -17770,7 +17728,6 @@ def update_invoice():
         role = (getattr(current_user, "role", "") or "").strip().lower()
         can_edit_refjob = role in ("superadmin", "admin")
         is_super = role == "superadmin"
-        qty_edit_warnings = []
 
         # 1) SUPERADMIN: full edit (qty/ucost/issued_to/refjob)
         if is_super:
@@ -17782,259 +17739,24 @@ def update_invoice():
                         new_qty = int(new_qty_s)
                         old_qty = int(r.quantity or 0)
 
-                        # Determine transaction type from persistent metadata,
-                        # not only from current quantity.
+                        # RETURN rows are negative accounting/technician-debt
+                        # records. Physical inventory was already handled when
+                        # the RETURN was originally posted.
                         #
-                        # Important: a RETURN may temporarily have qty=0 after
-                        # an admin correction. It must still remain a RETURN
-                        # record so 0 -> -1 can be restored later.
-                        ref_upper = (
-                            (getattr(r, "reference_job", None) or "")
-                            .strip()
-                            .upper()
-                        )
-                        cost_source_upper = (
-                            (getattr(r, "cost_source", None) or "")
-                            .strip()
-                            .upper()
-                        )
-
-                        is_return_row = (
-                            old_qty < 0
-                            or ref_upper.startswith("RETURN")
-                            or cost_source_upper == "BASE_RETURN"
-                        )
-
-                        if is_return_row:
-                            # RETURN edit is technician-debt/accounting only.
-                            # Physical stock MUST NOT move here.
-                            #
-                            # Resolve the ORIGINAL positive issue/source and
-                            # calculate how much this RETURN row may represent.
-
-                            return_ref = (
-                                (getattr(r, "reference_job", None) or "")
-                                .strip()
-                            )
-
-                            original_ref = return_ref
-                            if return_ref.upper().startswith("RETURN"):
-                                original_ref = return_ref[6:].strip()
-
-                            source_inv_raw = (
-                                (getattr(r, "inv_ref", None) or "")
-                                .strip()
-                            )
-
-                            source_invoice_no = None
-                            if source_inv_raw:
-                                try:
-                                    source_invoice_no = int(source_inv_raw)
-                                except Exception:
-                                    source_invoice_no = None
-
-                            source_receipt_line_id = getattr(
-                                r,
-                                "source_receipt_line_id",
-                                None
-                            )
-
-                            # -------------------------------------------------
-                            # Find positive source issue(s)
-                            # -------------------------------------------------
-                            src_q = IssuedPartRecord.query.filter(
-                                IssuedPartRecord.part_id == r.part_id,
-                                IssuedPartRecord.issued_to == r.issued_to,
-                                IssuedPartRecord.quantity > 0,
-                            )
-
-                            if original_ref:
-                                src_q = src_q.filter(
-                                    IssuedPartRecord.reference_job
-                                    == original_ref
-                                )
-
-                            if source_invoice_no is not None:
-                                src_q = src_q.filter(
-                                    IssuedPartRecord.invoice_number
-                                    == source_invoice_no
-                                )
-
-                            if source_receipt_line_id is not None:
-                                src_q = src_q.filter(
-                                    IssuedPartRecord.source_receipt_line_id
-                                    == source_receipt_line_id
-                                )
-
-                            # Legacy fallback: old RETURN rows may not have
-                            # inv_ref/source_receipt_line_id.
-                            if (
-                                source_invoice_no is None
-                                and source_receipt_line_id is None
-                            ):
-                                try:
-                                    src_cost = round(
-                                        float(
-                                            getattr(
-                                                r,
-                                                "unit_cost_at_issue",
-                                                0.0
-                                            ) or 0.0
-                                        ),
-                                        2
-                                    )
-
-                                    src_q = src_q.filter(
-                                        func.round(
-                                            func.coalesce(
-                                                IssuedPartRecord.unit_cost_at_issue,
-                                                0.0
-                                            ),
-                                            2
-                                        ) == src_cost
-                                    )
-                                except Exception:
-                                    pass
-
-                            source_rows = src_q.all()
-
-                            issued_total = sum(
-                                max(0, int(x.quantity or 0))
-                                for x in source_rows
-                            )
-
-                            # -------------------------------------------------
-                            # Count OTHER returns against same source.
-                            # Current row is excluded because we are editing it.
-                            # -------------------------------------------------
-                            ret_q = IssuedPartRecord.query.filter(
-                                IssuedPartRecord.id != r.id,
-                                IssuedPartRecord.part_id == r.part_id,
-                                IssuedPartRecord.issued_to == r.issued_to,
-                                IssuedPartRecord.quantity < 0,
-                            )
-
-                            if original_ref:
-                                wanted_return_ref = (
-                                    f"RETURN {original_ref}".upper()
-                                )
-
-                                ret_q = ret_q.filter(
-                                    func.upper(
-                                        func.coalesce(
-                                            IssuedPartRecord.reference_job,
-                                            ""
-                                        )
-                                    ) == wanted_return_ref
-                                )
-
-                            if source_invoice_no is not None:
-                                ret_q = ret_q.filter(
-                                    func.trim(
-                                        func.coalesce(
-                                            IssuedPartRecord.inv_ref,
-                                            ""
-                                        )
-                                    ) == str(source_invoice_no)
-                                )
-
-                            if source_receipt_line_id is not None:
-                                ret_q = ret_q.filter(
-                                    IssuedPartRecord.source_receipt_line_id
-                                    == source_receipt_line_id
-                                )
-
-                            if (
-                                source_invoice_no is None
-                                and source_receipt_line_id is None
-                            ):
-                                try:
-                                    src_cost = round(
-                                        float(
-                                            getattr(
-                                                r,
-                                                "unit_cost_at_issue",
-                                                0.0
-                                            ) or 0.0
-                                        ),
-                                        2
-                                    )
-
-                                    ret_q = ret_q.filter(
-                                        func.round(
-                                            func.coalesce(
-                                                IssuedPartRecord.unit_cost_at_issue,
-                                                0.0
-                                            ),
-                                            2
-                                        ) == src_cost
-                                    )
-                                except Exception:
-                                    pass
-
-                            other_negative_total = (
-                                db.session.query(
-                                    func.coalesce(
-                                        func.sum(
-                                            IssuedPartRecord.quantity
-                                        ),
-                                        0
-                                    )
-                                )
-                                .filter(
-                                    IssuedPartRecord.id.in_(
-                                        [x.id for x in ret_q.all()]
-                                    )
-                                )
-                                .scalar()
-                                or 0
-                            )
-
-                            other_returned = abs(
-                                int(other_negative_total)
-                            )
-
-                            max_return_qty = max(
-                                0,
-                                issued_total - other_returned
-                            )
-
-                            min_allowed = -max_return_qty
-
-                            part_number = (
-                                getattr(
-                                    getattr(r, "part", None),
-                                    "part_number",
-                                    None
-                                )
-                                or f"record #{r.id}"
-                            )
-
-                            # Never allow positive qty on RETURN.
+                        # Editing an existing RETURN (-1 -> 0, -1 -> -2, etc.)
+                        # must NOT move Part.quantity again.
+                        if old_qty < 0:
+                            # Do not allow a RETURN row to become an ISSUE row.
                             if new_qty > 0:
-                                qty_edit_warnings.append(
-                                    f"{part_number}: RETURN quantity must be "
-                                    f"between {min_allowed} and 0. "
-                                    f"Positive quantity {new_qty} is not allowed."
+                                raise ValueError(
+                                    "RETURN quantity cannot be changed to a positive ISSUE quantity."
                                 )
 
-                            # Never allow more returned than source allows.
-                            elif new_qty < min_allowed:
-                                qty_edit_warnings.append(
-                                    f"{part_number}: maximum return quantity is "
-                                    f"{max_return_qty}. "
-                                    f"Allowed range is {min_allowed} to 0. "
-                                    f"Requested {new_qty} was NOT saved."
-                                )
-
-                            else:
-                                # Valid RETURN ledger correction.
-                                # DO NOT touch Part.quantity.
-                                r.quantity = new_qty
+                            r.quantity = new_qty
 
                         else:
-                            # Normal ISSUE row.
-                            # ISSUE cannot be converted into RETURN here.
+                            # Normal positive ISSUE row.
+                            # Do not allow ISSUE -> RETURN through Save Invoice.
                             if new_qty < 0:
                                 raise ValueError(
                                     "ISSUE quantity cannot be changed to a negative RETURN quantity."
@@ -18110,13 +17832,7 @@ def update_invoice():
             )
 
         db.session.commit()
-
-        if qty_edit_warnings:
-            for msg in qty_edit_warnings:
-                flash(msg, "warning")
-        else:
-            flash("Invoice saved.", "success")
-
+        flash("Invoice saved.", "success")
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to save invoice: {e}", "danger")
