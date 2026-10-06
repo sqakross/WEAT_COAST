@@ -1686,18 +1686,10 @@ document.querySelectorAll(".admin-toggle-all").forEach(btn => {
 
       const data = await response.json();
 
-      if (data.invalid_serial) {
-        out.innerHTML =
-          '<span class="text-muted">' +
-          'Serial is not available for history matching.' +
-          '</span>';
-        return;
-      }
-
       if (!data.count) {
         out.innerHTML =
           '<span class="text-muted">' +
-          'No Work Orders found for this serial.' +
+          'No previous Work Orders for this serial.' +
           '</span>';
         return;
       }
@@ -1705,19 +1697,12 @@ document.querySelectorAll(".admin-toggle-all").forEach(btn => {
       let rows = "";
 
       data.items.forEach(function (x) {
-        const rowClass = x.is_current
-          ? ' class="table-primary"'
-          : '';
-
         rows +=
-          "<tr" + rowClass + ">" +
+          "<tr>" +
             '<td class="text-nowrap">' +
               '<a href="' + esc(x.url) + '" target="_blank">' +
                 "<strong>WO #" + esc(x.wo_id) + "</strong>" +
               "</a>" +
-              (x.is_current
-                ? ' <span class="badge bg-primary ms-1">CURRENT</span>'
-                : '') +
             "</td>" +
             "<td>" +
               esc(x.job_numbers || x.canonical_job || "—") +

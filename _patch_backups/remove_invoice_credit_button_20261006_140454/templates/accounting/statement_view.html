@@ -316,6 +316,23 @@
 
                             <td class="text-end">
 
+                                {% if
+                                    (row.statement_line.line_type or "")|lower
+                                    == "credit"
+                                %}
+
+                                    <a
+                                        href="{{ url_for(
+                                            'accounting.statement_credit_invoice_match',
+                                            line_id=row.statement_line.id
+                                        ) }}"
+                                        class="btn btn-sm btn-outline-primary mb-1"
+                                    >
+                                        Invoice Credit
+                                    </a>
+
+                                {% endif %}
+
                                 <a
                                     href="{{ url_for(
                                         'accounting.statement_line_split',

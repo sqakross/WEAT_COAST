@@ -3,7 +3,12 @@
 {% block content %}
 
 {% set line = view.line %}
-{% set statement_amount = line.invoice_amount or line.open_balance or 0 %}
+{% set is_credit = (line.line_type or "")|lower == "credit" %}
+{% set statement_amount = (
+    line.credit_amount
+    if is_credit
+    else (line.invoice_amount or line.open_balance or 0)
+) %}
 
 <div class="container-fluid">
 
@@ -11,7 +16,11 @@
 
         <div>
             <h3 class="mb-1">
-                Match Supplier Invoice
+                {% if is_credit %}
+                    Match Invoice Credit
+                {% else %}
+                    Match Supplier Invoice
+                {% endif %}
             </h3>
 
             <div class="text-muted">
@@ -54,7 +63,11 @@
                 <div class="col-md-3">
 
                     <div class="text-muted small">
-                        Statement Invoice
+                        {% if is_credit %}
+                            Statement Credit
+                        {% else %}
+                            Statement Invoice
+                        {% endif %}
                     </div>
 
                     <div
@@ -113,7 +126,11 @@
             <div class="card-header d-flex justify-content-between align-items-center">
 
                 <span class="fw-semibold">
-                    Invoice Components
+                    {% if is_credit %}
+                        Invoice Credit Components
+                    {% else %}
+                        Invoice Components
+                    {% endif %}
                 </span>
 
                 <button
@@ -421,7 +438,11 @@
                     class="btn btn-primary"
                     disabled
                 >
-                    Save and Match
+                    {% if is_credit %}
+                        Save Invoice Credit
+                    {% else %}
+                        Save and Match
+                    {% endif %}
                 </button>
 
             </div>

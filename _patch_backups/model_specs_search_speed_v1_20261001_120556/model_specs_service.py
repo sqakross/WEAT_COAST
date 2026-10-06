@@ -622,8 +622,7 @@ Return verified specifications only.
             max_output_tokens=1200,
             tools=[
                 {
-                    "type": "web_search",
-                    "search_context_size": "low",
+                    "type": "web_search"
                 }
             ],
 
@@ -659,6 +658,140 @@ Return verified specifications only.
             model,
             model_specs_openai_elapsed,
         )
+
+        # WCCR_MODEL_SPECS_USAGE_DIAGNOSTIC_V1
+        try:
+            usage = getattr(
+                response,
+                "usage",
+                None,
+            )
+
+            input_tokens = getattr(
+                usage,
+                "input_tokens",
+                None,
+            )
+
+            output_tokens = getattr(
+                usage,
+                "output_tokens",
+                None,
+            )
+
+            total_tokens = getattr(
+                usage,
+                "total_tokens",
+                None,
+            )
+
+            input_details = getattr(
+                usage,
+                "input_tokens_details",
+                None,
+            )
+
+            cached_tokens = getattr(
+                input_details,
+                "cached_tokens",
+                None,
+            )
+
+            output_details = getattr(
+                usage,
+                "output_tokens_details",
+                None,
+            )
+
+            reasoning_tokens = getattr(
+                output_details,
+                "reasoning_tokens",
+                None,
+            )
+
+            output_items = getattr(
+                response,
+                "output",
+                None,
+            ) or []
+
+            output_types = [
+                str(getattr(item, "type", None))
+                for item in output_items
+            ]
+
+            diagnostic_lines = [
+                "=" * 100,
+                "MODEL SPECS LAST RESPONSE USAGE",
+                "=" * 100,
+                "",
+                f"brand={brand}",
+                f"model={model}",
+                f"response_model={getattr(response, 'model', None)}",
+                "",
+                f"input_tokens={input_tokens}",
+                f"output_tokens={output_tokens}",
+                f"reasoning_tokens={reasoning_tokens}",
+                f"cached_tokens={cached_tokens}",
+                f"total_tokens={total_tokens}",
+                "",
+                f"output_item_count={len(output_items)}",
+                f"output_item_types={output_types}",
+                "",
+                f"response_status={getattr(response, 'status', None)}",
+                f"service_tier={getattr(response, 'service_tier', None)}",
+                "",
+                "Diagnostic metadata only.",
+                "No prompt or response text saved.",
+                "No application behavior changed.",
+            ]
+
+            (
+                Path.cwd()
+                / "model_specs_last_response_usage.txt"
+            ).write_text(
+                "\n".join(diagnostic_lines),
+                encoding="utf-8",
+            )
+
+            logging.getLogger(__name__).info(
+                "MODEL_SPECS_USAGE "
+                "input=%s output=%s reasoning=%s "
+                "cached=%s total=%s items=%s",
+                input_tokens,
+                output_tokens,
+                reasoning_tokens,
+                cached_tokens,
+                total_tokens,
+                len(output_items),
+            )
+
+        except Exception as usage_exc:
+            logging.getLogger(__name__).warning(
+                "MODEL_SPECS_USAGE_FAILED %s",
+                usage_exc,
+            )
+
+        raw_text = (
+            response.output_text
+            or ""
+        ).strip()
+
+        if not raw_text:
+            raise RuntimeError(
+                "OpenAI returned an empty response."
+            )
+
+        model_specs_parse_started_at = time.perf_counter()
+
+        try:
+            payload = json.loads(
+                raw_text
+            )
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "OpenAI returned invalid JSON."
+            ) from exc
 
         logging.getLogger(__name__).info(
             "MODEL_SPECS_PARSE_JSON "

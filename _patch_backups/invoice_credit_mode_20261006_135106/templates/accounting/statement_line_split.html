@@ -16,44 +16,15 @@
             </div>
         </div>
 
-        <div class="d-flex gap-2 align-items-center">
-
-            {% if (line.line_type or "")|lower == "credit" %}
-
-                <form
-                    method="POST"
-                    action="{{ url_for(
-                        'accounting.statement_line_invoice_credit',
-                        line_id=line.id
-                    ) }}"
-                    class="m-0"
-                    onsubmit="return confirm(
-                        'Switch this credit to Invoice Credit mode? '
-                        + 'The current Return/Fee split for this credit '
-                        + 'will be cleared.'
-                    );"
-                >
-                    <button
-                        type="submit"
-                        class="btn btn-outline-primary"
-                    >
-                        Use as Invoice Credit
-                    </button>
-                </form>
-
-            {% endif %}
-
-            <a
-                href="{{ url_for(
-                    'accounting.statement_view',
-                    statement_id=line.statement_id
-                ) }}"
-                class="btn btn-outline-secondary"
-            >
-                ← Back
-            </a>
-
-        </div>
+        <a
+            href="{{ url_for(
+                'accounting.statement_view',
+                statement_id=line.statement_id
+            ) }}"
+            class="btn btn-outline-secondary"
+        >
+            ← Back
+        </a>
 
     </div>
 

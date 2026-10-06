@@ -11,7 +11,6 @@ from models import (
     ReturnDestination,
     SupplierStatement,
     SupplierStatementLine,
-    SupplierStatementCreditInvoiceLink,
     WorkOrder,
     WorkOrderPart,
 )
@@ -965,79 +964,6 @@ def build_statement_view(
         supplier_aliases = _supplier_aliases(
             supplier_name
         )
-
-        # ====================================================
-        # EXPLICIT INVOICE CREDIT LINK
-        # ====================================================
-        if line_type == "credit":
-
-            credit_link = (
-                SupplierStatementCreditInvoiceLink.query
-                .filter_by(
-                    credit_line_id=line.id
-                )
-                .first()
-            )
-
-            if (
-                credit_link is not None
-                and credit_link.invoice_line is not None
-            ):
-                invoice_line = (
-                    credit_link.invoice_line
-                )
-
-                statement_amount = round(
-                    abs(
-                        float(
-                            line.credit_amount
-                            or line.open_balance
-                            or 0.0
-                        )
-                    ),
-                    2,
-                )
-
-                linked_amount = round(
-                    abs(
-                        float(
-                            credit_link.amount
-                            or 0.0
-                        )
-                    ),
-                    2,
-                )
-
-                row.system_amount = (
-                    linked_amount
-                )
-
-                row.difference = round(
-                    statement_amount
-                    - linked_amount,
-                    2,
-                )
-
-                row.technician_job = (
-                    f"INVOICE CREDIT -> "
-                    f"{invoice_line.document_number}"
-                    f" • ${linked_amount:,.2f}"
-                )
-
-                if (
-                    abs(row.difference)
-                    <= 0.009
-                ):
-                    row.status = "MATCHED"
-                    result.matched_count += 1
-                else:
-                    row.status = "PARTIAL_MATCH"
-
-                result.rows.append(
-                    row
-                )
-
-                continue
 
         matches = (
             IssuedPartRecord.query

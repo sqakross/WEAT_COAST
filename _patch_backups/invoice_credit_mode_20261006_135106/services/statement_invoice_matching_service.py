@@ -166,27 +166,12 @@ def save_components(
             "Add at least one invoice amount."
         )
 
-    line_type = (
-        line.line_type or ""
-    ).strip().lower()
-
-    if line_type == "credit":
-        statement_source_amount = (
-            line.credit_amount
-            or line.open_balance
-            or 0
-        )
-    else:
-        statement_source_amount = (
-            line.invoice_amount
-            or line.open_balance
-            or 0
-        )
-
     statement_amount = round(
         abs(
             float(
-                statement_source_amount
+                line.invoice_amount
+                or line.open_balance
+                or 0
             )
         ),
         2,

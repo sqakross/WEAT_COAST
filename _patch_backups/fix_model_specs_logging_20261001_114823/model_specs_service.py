@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 
-import logging
 import time
 @dataclass
 class ModelSpecsResult:
@@ -622,8 +621,7 @@ Return verified specifications only.
             max_output_tokens=1200,
             tools=[
                 {
-                    "type": "web_search",
-                    "search_context_size": "low",
+                    "type": "web_search"
                 }
             ],
 
@@ -659,6 +657,27 @@ Return verified specifications only.
             model,
             model_specs_openai_elapsed,
         )
+
+        raw_text = (
+            response.output_text
+            or ""
+        ).strip()
+
+        if not raw_text:
+            raise RuntimeError(
+                "OpenAI returned an empty response."
+            )
+
+        model_specs_parse_started_at = time.perf_counter()
+
+        try:
+            payload = json.loads(
+                raw_text
+            )
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "OpenAI returned invalid JSON."
+            ) from exc
 
         logging.getLogger(__name__).info(
             "MODEL_SPECS_PARSE_JSON "

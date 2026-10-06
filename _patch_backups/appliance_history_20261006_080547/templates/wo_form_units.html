@@ -438,16 +438,6 @@
           </div>
         </div>
 
-        <!-- APPLIANCE HISTORY EDIT -->
-        {% if IS_EDIT %}
-        <div class="appliance-history-wrap mb-3"
-             data-current-wo="{{ wo.id }}">
-          <div class="appliance-history-slot"
-               data-unit-index="{{ ui }}">
-          </div>
-        </div>
-        {% endif %}
-
         <div class="table-responsive">
           <table class="table table-sm table-bordered align-middle unit-table">
             <thead>
@@ -1092,11 +1082,11 @@ function wccrToast(msg) {
   }
 
   function syncAllSupplierStates(){
-    document.querySelectorAll('#unitsWrap .unit-table tbody tr').forEach(syncSupplierState);
+    document.querySelectorAll('#unitsWrap tbody tr').forEach(syncSupplierState);
   }
 
     function updateSupplierRequired(){
-  document.querySelectorAll('#unitsWrap .unit-table tbody tr').forEach(tr=>{
+  document.querySelectorAll('#unitsWrap tbody tr').forEach(tr=>{
     const ordCb = tr.querySelector('.ordered-check');
     const supInp = tr.querySelector('.supplier-input');
     const etaInp = tr.querySelector('.eta-input');
@@ -1394,7 +1384,7 @@ function wccrToast(msg) {
     const delivery = parseFloat(deliveryEl?.value || '0') || 0;
     let unitSum = 0;
 
-    card.querySelectorAll('.unit-table tbody tr').forEach(tr => {
+    card.querySelectorAll('tbody tr').forEach(tr => {
       const q        = parseFloat(tr.querySelector('.qty')?.value || '0') || 0;
       const baseCost = parseFloat(tr.querySelector('.unit-cost')?.value || '0') || 0;
 
@@ -1627,7 +1617,7 @@ function applyHintResult(tr, j){
   }
 }
   async function warmupHintsBulk(){
-  const rows = [...document.querySelectorAll('#unitsWrap .unit-table tbody tr')];
+  const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
   const items = [];
   const rowMap = new Map();
 
@@ -1703,7 +1693,7 @@ function applyHintResult(tr, j){
 async function refreshVisibleHints(force = false){
   if (window._wccrHintsRefreshing) return;
 
-  const rows = [...document.querySelectorAll('#unitsWrap .unit-table tbody tr')];
+  const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
 
 
   window._wccrHintsRefreshing = true;
@@ -2099,7 +2089,7 @@ function clearHintCacheForRow(tr){
 
     if(btn.classList.contains('add-row')){
       const card  = btn.closest('.card'); if(!card) return;
-      const tbody = card.querySelector('.unit-table tbody'); if(!tbody) return;
+      const tbody = card.querySelector('tbody'); if(!tbody) return;
       const ui    = [...document.querySelectorAll('#unitsWrap .card')].indexOf(card);
       const ri    = tbody.querySelectorAll('tr').length;
 
@@ -2188,7 +2178,7 @@ ensureCopyButtonsForAllAppliances();
 }
 
   const isINSJob = isInsuranceJob();
-  const rows = [...document.querySelectorAll('#unitsWrap .unit-table tbody tr')];
+  const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
   const issueFormEl = form;
 
 
@@ -3297,254 +3287,4 @@ jobInput.addEventListener(
 
 })();
 </script>
-
-<!-- APPLIANCE HISTORY EDIT JS -->
-<script>
-(function () {
-  "use strict";
-
-  function esc(v) {
-    return String(v == null ? "" : v)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
-  function statusBadge(status) {
-    const s = String(status || "").toLowerCase();
-
-    let cls = "bg-secondary";
-
-    if (s === "done") cls = "bg-success";
-    else if (s === "ordered") cls = "bg-info text-dark";
-    else if (s === "cancel_job") cls = "bg-danger";
-    else if (s === "search_ordered") cls = "bg-secondary";
-
-    return '<span class="badge ' + cls + '">' +
-           esc(status || "—") +
-           '</span>';
-  }
-
-  function partsHtml(parts) {
-    if (!parts || !parts.length) {
-      return '<span class="text-muted">No parts</span>';
-    }
-
-    return parts.map(function (p) {
-      let txt = esc(p.part_number || "—");
-
-      if (p.quantity != null) {
-        txt += " × " + esc(p.quantity);
-      }
-
-      if (p.part_name) {
-        txt += " — " + esc(p.part_name);
-      }
-
-      return '<div>' + txt + '</div>';
-    }).join("");
-  }
-
-  function renderHistory(slot, data) {
-    if (!data || !data.ok) {
-      slot.innerHTML =
-        '<div class="small text-danger">History unavailable</div>';
-      return;
-    }
-
-    if (data.invalid_serial) {
-      slot.innerHTML =
-        '<div class="small text-muted">' +
-        '<strong>Appliance history:</strong> ' +
-        'serial is not available for history matching.' +
-        '</div>';
-      return;
-    }
-
-    if (!data.count) {
-      slot.innerHTML =
-        '<div class="small text-muted">' +
-        '<strong>Appliance history:</strong> ' +
-        'no Work Orders found for this serial.' +
-        '</div>';
-      return;
-    }
-
-    let rows = "";
-
-    data.items.forEach(function (x) {
-      const rowClass = x.is_current
-        ? ' class="table-primary"'
-        : '';
-
-      rows +=
-        '<tr' + rowClass + '>' +
-          '<td class="text-nowrap">' +
-            '<a href="' + esc(x.url) + '" target="_blank">' +
-              '<strong>WO #' + esc(x.wo_id) + '</strong>' +
-            '</a>' +
-            (x.is_current
-              ? ' <span class="badge bg-primary ms-1">CURRENT</span>'
-              : '') +
-          '</td>' +
-          '<td>' + esc(x.job_numbers || x.canonical_job || "—") + '</td>' +
-          '<td class="text-nowrap">' + esc(x.created_at || "—") + '</td>' +
-          '<td>' + statusBadge(x.status) + '</td>' +
-          '<td>' + esc(x.technician || "—") + '</td>' +
-          '<td>' + partsHtml(x.parts) + '</td>' +
-        '</tr>';
-    });
-
-    slot.innerHTML =
-      '<div class="border rounded bg-light p-2">' +
-        '<div class="d-flex justify-content-between align-items-center mb-2">' +
-          '<strong>Service history for this appliance</strong>' +
-          '<span class="badge bg-primary">' +
-            esc(data.count) +
-            ' WO' + (data.count === 1 ? '' : 's') +
-          '</span>' +
-        '</div>' +
-        '<div class="table-responsive">' +
-          '<table class="table table-sm table-bordered bg-white mb-0">' +
-            '<thead>' +
-              '<tr>' +
-                '<th>WO</th>' +
-                '<th>Job</th>' +
-                '<th>Date</th>' +
-                '<th>Status</th>' +
-                '<th>Technician</th>' +
-                '<th>Parts / work</th>' +
-              '</tr>' +
-            '</thead>' +
-            '<tbody>' + rows + '</tbody>' +
-          '</table>' +
-        '</div>' +
-      '</div>';
-  }
-
-  async function loadHistory(card) {
-    if (!card) return;
-
-    const serialInput =
-      card.querySelector('input[name$="[serial]"]');
-
-    const slot =
-      card.querySelector(".appliance-history-slot");
-
-    if (!serialInput || !slot) return;
-
-    const serial = String(serialInput.value || "").trim();
-    const currentWo =
-      slot.closest(".appliance-history-wrap")?.dataset.currentWo || "";
-
-    if (!serial) {
-      slot.innerHTML = "";
-      return;
-    }
-
-    slot.innerHTML =
-      '<div class="small text-muted">Checking appliance history...</div>';
-
-    try {
-      const url =
-        "{{ url_for('inventory.appliance_history_api') }}" +
-        "?serial=" + encodeURIComponent(serial) +
-        "&exclude_wo=" + encodeURIComponent(currentWo);
-
-      const response = await fetch(url, {
-        headers: {
-          "X-Requested-With": "XMLHttpRequest"
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error("HTTP " + response.status);
-      }
-
-      const data = await response.json();
-      renderHistory(slot, data);
-
-    } catch (err) {
-      console.error("Appliance history:", err);
-
-      slot.innerHTML =
-        '<div class="small text-danger">' +
-        'Unable to load appliance history.' +
-        '</div>';
-    }
-  }
-
-  function prepareCard(card) {
-    if (!card) return;
-
-    const serialInput =
-      card.querySelector('input[name$="[serial]"]');
-
-    if (!serialInput) return;
-
-    let slot =
-      card.querySelector(".appliance-history-slot");
-
-    if (!slot) {
-      const row = serialInput.closest(".row");
-
-      if (!row) return;
-
-      const wrap = document.createElement("div");
-      wrap.className = "appliance-history-wrap mb-3";
-      wrap.dataset.currentWo = "{{ wo.id if wo and wo.id else '' }}";
-
-      slot = document.createElement("div");
-      slot.className = "appliance-history-slot";
-
-      wrap.appendChild(slot);
-      row.insertAdjacentElement("afterend", wrap);
-    }
-
-    if (serialInput.dataset.historyBound === "1") {
-      return;
-    }
-
-    serialInput.dataset.historyBound = "1";
-
-    let timer = null;
-
-    function refresh() {
-      clearTimeout(timer);
-
-      timer = setTimeout(function () {
-        loadHistory(card);
-      }, 300);
-    }
-
-    serialInput.addEventListener("change", refresh);
-    serialInput.addEventListener("blur", refresh);
-
-    loadHistory(card);
-  }
-
-  function scan() {
-    document
-      .querySelectorAll("#unitsWrap > .card")
-      .forEach(prepareCard);
-  }
-
-  scan();
-
-  const unitsWrap = document.getElementById("unitsWrap");
-
-  if (unitsWrap) {
-    const observer = new MutationObserver(function () {
-      scan();
-    });
-
-    observer.observe(unitsWrap, {
-      childList: true
-    });
-  }
-})();
-</script>
-
 {% endblock %}

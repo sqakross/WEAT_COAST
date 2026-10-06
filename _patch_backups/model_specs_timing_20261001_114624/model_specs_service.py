@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -9,8 +9,6 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 
-import logging
-import time
 @dataclass
 class ModelSpecsResult:
     input_brand: str
@@ -596,15 +594,6 @@ Return verified specifications only.
             "additionalProperties": False,
         }
 
-        model_specs_openai_started_at = time.perf_counter()
-
-        logging.getLogger(__name__).info(
-            "MODEL_SPECS_OPENAI_START "
-            "brand=%s model=%s",
-            brand,
-            model,
-        )
-
         response = self.client.responses.create(
             model=self.MODEL,
 
@@ -622,8 +611,7 @@ Return verified specifications only.
             max_output_tokens=1200,
             tools=[
                 {
-                    "type": "web_search",
-                    "search_context_size": "low",
+                    "type": "web_search"
                 }
             ],
 
@@ -647,27 +635,24 @@ Return verified specifications only.
             },
         )
 
-        model_specs_openai_elapsed = (
-            time.perf_counter()
-            - model_specs_openai_started_at
-        )
+        raw_text = (
+            response.output_text
+            or ""
+        ).strip()
 
-        logging.getLogger(__name__).info(
-            "MODEL_SPECS_OPENAI_DONE "
-            "brand=%s model=%s duration=%.3fs",
-            brand,
-            model,
-            model_specs_openai_elapsed,
-        )
+        if not raw_text:
+            raise RuntimeError(
+                "OpenAI returned an empty response."
+            )
 
-        logging.getLogger(__name__).info(
-            "MODEL_SPECS_PARSE_JSON "
-            "brand=%s model=%s duration=%.3fs",
-            brand,
-            model,
-            time.perf_counter()
-            - model_specs_parse_started_at,
-        )
+        try:
+            payload = json.loads(
+                raw_text
+            )
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "OpenAI returned invalid JSON."
+            ) from exc
 
         if not isinstance(
             payload,

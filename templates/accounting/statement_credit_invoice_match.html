@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="container py-4" style="max-width: 1050px;">
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+
+        <div>
+            <h3 class="mb-1">
+                Match Invoice Credit
+            </h3>
+
+            <div class="text-muted">
+                Credit document {{ line.document_number }}
+            </div>
+        </div>
+
+        <a
+            href="{{ url_for(
+                'accounting.statement_view',
+                statement_id=line.statement_id
+            ) }}"
+            class="btn btn-outline-secondary"
+        >
+            ← Back
+        </a>
+
+    </div>
+
+
+    <div class="card shadow-sm border-0 mb-3">
+
+        <div class="card-body">
+
+            <div class="row g-3">
+
+                <div class="col-md-3">
+                    <div class="text-muted small">
+                        Supplier
+                    </div>
+
+                    <div class="fw-semibold">
+                        {{ line.supplier_name }}
+                    </div>
+                </div>
+
+
+                <div class="col-md-3">
+                    <div class="text-muted small">
+                        Credit Document
+                    </div>
+
+                    <div class="fw-semibold">
+                        {{ line.document_number }}
+                    </div>
+                </div>
+
+
+                <div class="col-md-3">
+                    <div class="text-muted small">
+                        Credit Amount
+                    </div>
+
+                    <div class="fw-bold">
+                        ${{ "{:,.2f}".format(
+                            line.credit_amount or 0
+                        ) }}
+                    </div>
+                </div>
+
+
+                <div class="col-md-3">
+                    <div class="text-muted small">
+                        Date
+                    </div>
+
+                    <div class="fw-semibold">
+                        {% if line.document_date %}
+                            {{ line.document_date.strftime("%Y-%m-%d") }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <form method="POST">
+
+        <div class="card shadow-sm border-0">
+
+            <div class="card-header bg-white fw-semibold">
+                Apply Credit To Invoice
+            </div>
+
+            <div class="card-body">
+
+                <label class="form-label fw-semibold">
+                    Invoice
+                </label>
+
+                <select
+                    name="invoice_line_id"
+                    class="form-select"
+                    required
+                >
+
+                    <option value="">
+                        — Select invoice —
+                    </option>
+
+                    {% for invoice in invoice_lines %}
+
+                        <option
+                            value="{{ invoice.id }}"
+                            {% if existing_link
+                                  and existing_link.invoice_line_id
+                                      == invoice.id %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ invoice.document_number }}
+                            — {{ invoice.document_date.strftime("%Y-%m-%d")
+                                 if invoice.document_date else "No date" }}
+                            — {{ invoice.description or "—" }}
+                            — ${{ "{:,.2f}".format(
+                                invoice.invoice_amount
+                                or invoice.open_balance
+                                or 0
+                            ) }}
+                        </option>
+
+                    {% endfor %}
+
+                </select>
+
+
+                <div class="form-text mt-2">
+                    Select the supplier invoice that this credit belongs to.
+                    A full Invoice Credit must equal the selected invoice amount.
+                </div>
+
+
+                {% if existing_link and existing_link.invoice_line %}
+
+                    <div class="alert alert-success mt-3 mb-0">
+
+                        Currently matched to:
+
+                        <strong>
+                            {{ existing_link.invoice_line.document_number }}
+                        </strong>
+
+                        —
+                        ${{ "{:,.2f}".format(
+                            existing_link.amount or 0
+                        ) }}
+
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+
+            <div class="card-footer bg-white text-end">
+
+                <a
+                    href="{{ url_for(
+                        'accounting.statement_view',
+                        statement_id=line.statement_id
+                    ) }}"
+                    class="btn btn-outline-secondary"
+                >
+                    Cancel
+                </a>
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                >
+                    Save Invoice Credit
+                </button>
+
+            </div>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

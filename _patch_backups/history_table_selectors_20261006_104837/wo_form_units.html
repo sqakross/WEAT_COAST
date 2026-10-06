@@ -1092,11 +1092,11 @@ function wccrToast(msg) {
   }
 
   function syncAllSupplierStates(){
-    document.querySelectorAll('#unitsWrap .unit-table tbody tr').forEach(syncSupplierState);
+    document.querySelectorAll('#unitsWrap tbody tr').forEach(syncSupplierState);
   }
 
     function updateSupplierRequired(){
-  document.querySelectorAll('#unitsWrap .unit-table tbody tr').forEach(tr=>{
+  document.querySelectorAll('#unitsWrap tbody tr').forEach(tr=>{
     const ordCb = tr.querySelector('.ordered-check');
     const supInp = tr.querySelector('.supplier-input');
     const etaInp = tr.querySelector('.eta-input');
@@ -1394,7 +1394,7 @@ function wccrToast(msg) {
     const delivery = parseFloat(deliveryEl?.value || '0') || 0;
     let unitSum = 0;
 
-    card.querySelectorAll('.unit-table tbody tr').forEach(tr => {
+    card.querySelectorAll('tbody tr').forEach(tr => {
       const q        = parseFloat(tr.querySelector('.qty')?.value || '0') || 0;
       const baseCost = parseFloat(tr.querySelector('.unit-cost')?.value || '0') || 0;
 
@@ -1627,7 +1627,7 @@ function applyHintResult(tr, j){
   }
 }
   async function warmupHintsBulk(){
-  const rows = [...document.querySelectorAll('#unitsWrap .unit-table tbody tr')];
+  const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
   const items = [];
   const rowMap = new Map();
 
@@ -1703,7 +1703,7 @@ function applyHintResult(tr, j){
 async function refreshVisibleHints(force = false){
   if (window._wccrHintsRefreshing) return;
 
-  const rows = [...document.querySelectorAll('#unitsWrap .unit-table tbody tr')];
+  const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
 
 
   window._wccrHintsRefreshing = true;
@@ -2099,7 +2099,7 @@ function clearHintCacheForRow(tr){
 
     if(btn.classList.contains('add-row')){
       const card  = btn.closest('.card'); if(!card) return;
-      const tbody = card.querySelector('.unit-table tbody'); if(!tbody) return;
+      const tbody = card.querySelector('tbody'); if(!tbody) return;
       const ui    = [...document.querySelectorAll('#unitsWrap .card')].indexOf(card);
       const ri    = tbody.querySelectorAll('tr').length;
 
@@ -2188,7 +2188,7 @@ ensureCopyButtonsForAllAppliances();
 }
 
   const isINSJob = isInsuranceJob();
-  const rows = [...document.querySelectorAll('#unitsWrap .unit-table tbody tr')];
+  const rows = [...document.querySelectorAll('#unitsWrap tbody tr')];
   const issueFormEl = form;
 
 
