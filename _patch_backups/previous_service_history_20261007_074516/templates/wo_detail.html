@@ -180,7 +180,7 @@
   <div class="col-12">
     <div class="card border-primary-subtle mt-2">
       <div class="card-header py-2">
-        <strong>Previous Service History</strong>
+        <strong>Appliance Service History</strong>
       </div>
 
       <div class="card-body py-2">
@@ -1697,7 +1697,7 @@ document.querySelectorAll(".admin-toggle-all").forEach(btn => {
       if (!data.count) {
         out.innerHTML =
           '<span class="text-muted">' +
-          'No previous service history for this appliance.' +
+          'No Work Orders found for this serial.' +
           '</span>';
         return;
       }
@@ -1705,12 +1705,19 @@ document.querySelectorAll(".admin-toggle-all").forEach(btn => {
       let rows = "";
 
       data.items.forEach(function (x) {
+        const rowClass = x.is_current
+          ? ' class="table-primary"'
+          : '';
+
         rows +=
-          "<tr>" +
+          "<tr" + rowClass + ">" +
             '<td class="text-nowrap">' +
               '<a href="' + esc(x.url) + '" target="_blank">' +
                 "<strong>WO #" + esc(x.wo_id) + "</strong>" +
               "</a>" +
+              (x.is_current
+                ? ' <span class="badge bg-primary ms-1">CURRENT</span>'
+                : '') +
             "</td>" +
             "<td>" +
               esc(x.job_numbers || x.canonical_job || "—") +

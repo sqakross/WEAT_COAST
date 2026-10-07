@@ -5499,12 +5499,9 @@ def appliance_history_api():
         )
     )
 
-    # Previous service history only:
-    # exclude the Work Order currently being viewed/edited.
-    if exclude_wo:
-        q = q.filter(
-            WorkUnit.work_order_id != exclude_wo
-        )
+    # Full appliance history intentionally includes the current WO.
+    # exclude_wo is retained as the current-WO identifier so the UI can
+    # highlight that row instead of removing it.
 
     # Limit protects Edit/View from an unexpectedly huge history.
     matched_units = (
@@ -5585,6 +5582,9 @@ def appliance_history_api():
 
         items.append({
             "wo_id": wo.id,
+            "is_current": bool(
+                exclude_wo and int(wo.id) == int(exclude_wo)
+            ),
             "url": url_for(
                 "inventory.wo_detail",
                 wo_id=wo.id

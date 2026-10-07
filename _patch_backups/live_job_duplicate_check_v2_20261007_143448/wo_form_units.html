@@ -3112,25 +3112,6 @@ return;
   statusLine.textContent = "Finish entering job number(s) to check.";
 
   setButtonsEnabled(true);
-
-  /*
-   * LIVE JOB CHECK
-   *
-   * Do not request on every keystroke.
-   * Wait 800 ms after the last input change,
-   * then use the existing reserveNow().
-   */
-  const raw = (jobInput.value || "").trim();
-
-  if (!hasAnyToken(raw)) {
-    setIdle();
-    return;
-  }
-
-  reserveTimer = setTimeout(() => {
-    reserveTimer = null;
-    reserveNow();
-  }, 800);
 }
 
 jobInput.addEventListener(

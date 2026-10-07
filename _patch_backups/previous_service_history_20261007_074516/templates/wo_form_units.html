@@ -3112,25 +3112,6 @@ return;
   statusLine.textContent = "Finish entering job number(s) to check.";
 
   setButtonsEnabled(true);
-
-  /*
-   * LIVE JOB CHECK
-   *
-   * Do not request on every keystroke.
-   * Wait 800 ms after the last input change,
-   * then use the existing reserveNow().
-   */
-  const raw = (jobInput.value || "").trim();
-
-  if (!hasAnyToken(raw)) {
-    setIdle();
-    return;
-  }
-
-  reserveTimer = setTimeout(() => {
-    reserveTimer = null;
-    reserveNow();
-  }, 800);
 }
 
 jobInput.addEventListener(
@@ -3385,7 +3366,8 @@ jobInput.addEventListener(
     if (!data.count) {
       slot.innerHTML =
         '<div class="small text-muted">' +
-        'No previous service history for this appliance.' +
+        '<strong>Appliance history:</strong> ' +
+        'no Work Orders found for this serial.' +
         '</div>';
       return;
     }
@@ -3393,12 +3375,19 @@ jobInput.addEventListener(
     let rows = "";
 
     data.items.forEach(function (x) {
+      const rowClass = x.is_current
+        ? ' class="table-primary"'
+        : '';
+
       rows +=
-        '<tr>' +
+        '<tr' + rowClass + '>' +
           '<td class="text-nowrap">' +
             '<a href="' + esc(x.url) + '" target="_blank">' +
               '<strong>WO #' + esc(x.wo_id) + '</strong>' +
             '</a>' +
+            (x.is_current
+              ? ' <span class="badge bg-primary ms-1">CURRENT</span>'
+              : '') +
           '</td>' +
           '<td>' + esc(x.job_numbers || x.canonical_job || "—") + '</td>' +
           '<td class="text-nowrap">' + esc(x.created_at || "—") + '</td>' +
@@ -3411,10 +3400,10 @@ jobInput.addEventListener(
     slot.innerHTML =
       '<div class="border rounded bg-light p-2">' +
         '<div class="d-flex justify-content-between align-items-center mb-2">' +
-          '<strong>Previous service history</strong>' +
+          '<strong>Service history for this appliance</strong>' +
           '<span class="badge bg-primary">' +
             esc(data.count) +
-            ' previous WO' + (data.count === 1 ? '' : 's') +
+            ' WO' + (data.count === 1 ? '' : 's') +
           '</span>' +
         '</div>' +
         '<div class="table-responsive">' +
