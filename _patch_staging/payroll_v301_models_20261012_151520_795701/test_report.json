@@ -1,0 +1,89 @@
+{
+  "version": "V3.0.1",
+  "status": "STAGING",
+  "checks": [
+    {
+      "name": "WCCR root",
+      "pass": true
+    },
+    {
+      "name": "Extensions module",
+      "pass": true
+    },
+    {
+      "name": "No existing payroll models",
+      "pass": true
+    },
+    {
+      "name": "No existing payroll validation",
+      "pass": true
+    },
+    {
+      "name": "Python syntax",
+      "pass": true
+    },
+    {
+      "name": "Hourly type",
+      "pass": true
+    },
+    {
+      "name": "Salary type",
+      "pass": true
+    },
+    {
+      "name": "Decimal amount",
+      "pass": true
+    },
+    {
+      "name": "Reject negative amount",
+      "pass": true
+    },
+    {
+      "name": "Reject excess precision",
+      "pass": true
+    },
+    {
+      "name": "Reject NaN",
+      "pass": true
+    },
+    {
+      "name": "Reject float",
+      "pass": true
+    },
+    {
+      "name": "Reject invalid classification",
+      "pass": true
+    },
+    {
+      "name": "Reject reversed dates",
+      "pass": true
+    },
+    {
+      "name": "Overlapping dates detected",
+      "pass": true
+    },
+    {
+      "name": "Adjacent dates allowed",
+      "pass": true
+    },
+    {
+      "name": "Isolated SQLite insert",
+      "pass": true
+    },
+    {
+      "name": "Duplicate profile rejected",
+      "pass": true
+    }
+  ],
+  "production_modified": false,
+  "production_database_accessed": false,
+  "ready_for_deployment": false,
+  "remaining": [
+    "SQLAlchemy model integration tests",
+    "Rate interval enforcement in service",
+    "Permission and CSRF tests",
+    "Atomic audit transaction tests",
+    "Migration and rollback tests",
+    "Payroll settings UI"
+  ]
+}

@@ -802,6 +802,187 @@ def cleanup_old_reports(folder: str, days_old: int = 3):
 # -------------------------------------------------------------------
 # 12) Локальный запуск (dev, HTTPS с локальным сертификатом)
 # -------------------------------------------------------------------
+
+# === WO SAVE ERROR MONITOR START ===
+#
+# Lightweight diagnostic for intermittent /work_orders/save failures.
+#
+# Normal successful saves are NOT written to the diagnostic file.
+# We record:
+#   - 405 responses
+#   - 3xx redirects
+#   - 4xx / 5xx responses
+#
+# This does NOT change the response or Work Order save logic.
+#
+
+@app.after_request
+def _wo_save_error_monitor(response):
+    from flask import request
+    from datetime import datetime, timezone
+    import os
+    import traceback
+
+    if request.path != "/work_orders/save":
+        return response
+
+    status = int(response.status_code or 0)
+
+    # Normal POST -> 302 -> Work Order detail is successful.
+    # Only log HTTP errors or redirects back to the Save endpoint.
+    location = response.headers.get("Location") or ""
+
+    from urllib.parse import urlsplit
+
+    redirect_path = urlsplit(location).path
+
+    suspicious_redirect = (
+        300 <= status < 400
+        and redirect_path.rstrip("/") == "/work_orders/save"
+    )
+
+    interesting = (
+        status >= 400
+        or suspicious_redirect
+    )
+
+    if not interesting:
+        return response
+
+    try:
+        log_path = os.path.join(
+            app.instance_path,
+            "wo_save_http_error.log"
+        )
+
+        os.makedirs(
+            os.path.dirname(log_path),
+            exist_ok=True
+        )
+
+        form_keys = []
+
+        if request.method == "POST":
+            try:
+                form_keys = sorted(request.form.keys())
+            except Exception:
+                form_keys = ["<unable to read form keys>"]
+
+        lines = [
+            "",
+            "=" * 100,
+            "WO SAVE HTTP ERROR / REDIRECT",
+            "=" * 100,
+            f"TIME_UTC       : {datetime.now(timezone.utc).isoformat()}",
+            f"METHOD         : {request.method}",
+            f"PATH           : {request.path}",
+            f"FULL_PATH      : {request.full_path}",
+            f"ENDPOINT       : {request.endpoint!r}",
+            f"STATUS         : {status}",
+            f"LOCATION       : {response.headers.get('Location')!r}",
+            f"ALLOW          : {response.headers.get('Allow')!r}",
+            f"CONTENT_TYPE   : {response.headers.get('Content-Type')!r}",
+            f"REFERRER       : {request.referrer!r}",
+            f"REMOTE_ADDR    : {request.remote_addr!r}",
+            f"USER_AGENT     : {request.headers.get('User-Agent')!r}",
+            f"X_REQUESTED    : {request.headers.get('X-Requested-With')!r}",
+            "",
+            "FORM SUMMARY",
+            "-" * 100,
+            f"wo_id          : {(request.form.get('wo_id') if request.method == 'POST' else None)!r}",
+            f"_ajax_save     : {(request.form.get('_ajax_save') if request.method == 'POST' else None)!r}",
+            f"_operation     : {(request.form.get('_operation') if request.method == 'POST' else None)!r}",
+            f"_save_clicked  : {(request.form.get('_save_clicked') if request.method == 'POST' else None)!r}",
+            f"job_numbers    : {(request.form.get('job_numbers') if request.method == 'POST' else None)!r}",
+            f"FORM_KEY_COUNT : {len(form_keys)}",
+            f"FORM_KEYS      : {form_keys[:200]!r}",
+            "",
+            "RESPONSE",
+            "-" * 100,
+            f"STATUS         : {response.status}",
+            f"LOCATION       : {response.headers.get('Location')!r}",
+            f"ALLOW          : {response.headers.get('Allow')!r}",
+            "=" * 100,
+            "",
+        ]
+
+        with open(
+            log_path,
+            "a",
+            encoding="utf-8"
+        ) as fp:
+            fp.write("\n".join(lines))
+
+        app.logger.error(
+            "WO_SAVE_MONITOR | method=%s | status=%s | "
+            "endpoint=%s | location=%r | referrer=%r",
+            request.method,
+            status,
+            request.endpoint,
+            response.headers.get("Location"),
+            request.referrer,
+        )
+
+    except Exception:
+        app.logger.exception(
+            "WO_SAVE_MONITOR itself failed"
+        )
+
+    return response
+
+
+@app.errorhandler(405)
+def _wo_save_405_monitor(error):
+    from flask import request
+    from datetime import datetime, timezone
+    import os
+
+    if request.path == "/work_orders/save":
+        try:
+            log_path = os.path.join(
+                app.instance_path,
+                "wo_save_http_error.log"
+            )
+
+            os.makedirs(
+                os.path.dirname(log_path),
+                exist_ok=True
+            )
+
+            with open(
+                log_path,
+                "a",
+                encoding="utf-8"
+            ) as fp:
+                fp.write(
+                    "\n"
+                    + "=" * 100 + "\n"
+                    + "405 ERROR HANDLER\n"
+                    + "=" * 100 + "\n"
+                    + f"TIME_UTC     : {datetime.now(timezone.utc).isoformat()}\n"
+                    + f"METHOD       : {request.method}\n"
+                    + f"PATH         : {request.path}\n"
+                    + f"FULL_PATH    : {request.full_path}\n"
+                    + f"ENDPOINT     : {request.endpoint!r}\n"
+                    + f"REFERRER     : {request.referrer!r}\n"
+                    + f"REMOTE_ADDR  : {request.remote_addr!r}\n"
+                    + f"USER_AGENT   : {request.headers.get('User-Agent')!r}\n"
+                    + f"X_REQUESTED  : {request.headers.get('X-Requested-With')!r}\n"
+                    + f"ERROR        : {error!r}\n"
+                    + "=" * 100 + "\n"
+                )
+
+        except Exception:
+            app.logger.exception(
+                "WO_SAVE 405 diagnostic failed"
+            )
+
+    # Preserve Flask's normal 405 response.
+    return error
+
+
+# === WO SAVE ERROR MONITOR END ===
+
 if __name__ == "__main__":
     # WCCR_RUNTIME_STATE_E1
     # Production process authorization is established before

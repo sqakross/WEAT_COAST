@@ -1,0 +1,8 @@
+{
+  "auto_close_time": "18:00",
+  "expected_lunch_minutes": 30,
+  "idle_minutes": 30,
+  "missing_lunch_after_hours": 6,
+  "paid_break_minutes": 15,
+  "smart_shift_recovery": true
+}\n

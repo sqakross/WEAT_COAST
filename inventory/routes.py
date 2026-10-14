@@ -10565,6 +10565,9 @@ def wo_list():
     if joined_parts:
         q = q.distinct(WorkOrder.id)
 
+    # WCCR_WO_SEARCH_MATCH_V2
+    search_match_labels = {}
+
     # ---- fetch rows ----
     MAX_LIMIT = 200
 
@@ -10615,6 +10618,61 @@ def wo_list():
 
     items = base_q.all()
 
+    # WCCR_WO_SEARCH_MATCH_V2: result explanations
+    if qtext:
+        needle = qtext.casefold()
+
+        for wo in items:
+            label = None
+
+            jobs = re.findall(
+                r"[A-Za-z0-9]+",
+                str(wo.job_numbers or "")
+            )
+
+            if any(j.casefold() == needle for j in jobs):
+                label = "Exact Job #" + qtext
+
+            elif needle in str(wo.job_numbers or "").casefold():
+                label = "Job #" + str(wo.job_numbers)
+
+            if (
+                matched_by_invoice
+                and wo.id in invoice_matched_wo_ids
+            ):
+                label = "Invoice #" + matched_invoice_number
+
+            if label is None:
+                for part in wo.parts:
+                    for title, value in (
+                        ("Part #", part.part_number),
+                        ("Alt Part #", part.alt_part_numbers),
+                        ("Supplier Invoice #", part.invoice_number),
+                        ("Part Name: ", part.part_name),
+                    ):
+                        value = str(value or "").strip()
+                        if value and needle in value.casefold():
+                            label = title + value
+                            break
+
+                    if label:
+                        break
+
+            if label is None:
+                for title, value in (
+                    ("Customer PO: ", wo.customer_po),
+                    ("Technician: ", wo.technician_name),
+                    ("Brand: ", wo.brand),
+                    ("Model: ", wo.model),
+                ):
+                    value = str(value or "").strip()
+                    if value and needle in value.casefold():
+                        label = title + value
+                        break
+
+            if label:
+                search_match_labels[wo.id] = label
+
     count_items = len(items)
 
     # ---- datalist hints ----
@@ -10664,6 +10722,7 @@ def wo_list():
 
     return render_template(
         "wo_list.html",
+        search_match_labels=search_match_labels,
         items=items,
         count_items=count_items,
         hint_values=hint_values,
@@ -18694,6 +18753,53 @@ def download_report_pdf():
                      download_name=f"report_{start or 'all'}_{end or 'all'}.pdf",
                      mimetype='application/pdf')
 
+
+# WCCR_EMPLOYEE_TIME_5B3_BEGIN
+@inventory_bp.route(
+    "/users/<int:user_id>/employee-time-tracking",
+    methods=["POST"],
+)
+@login_required
+def employee_time_tracking_setting(user_id):
+    from flask import abort
+    from services.employee_time_settings import (
+        verify_csrf_token,
+        set_tracking_enabled,
+        EmployeeTimeSettingsError,
+    )
+
+    from services.attendance_permissions import (
+        can_manage_attendance_users,
+    )
+
+    if not can_manage_attendance_users(current_user):
+        abort(403)
+
+    token = request.form.get("employee_time_csrf", "")
+
+    if not verify_csrf_token(token, current_user.id, user_id):
+        abort(400)
+
+    enabled_value = request.form.get("enabled")
+
+    if enabled_value not in ("0", "1"):
+        abort(400)
+
+    try:
+        set_tracking_enabled(
+            current_user,
+            user_id,
+            enabled_value == "1",
+        )
+    except EmployeeTimeSettingsError as exc:
+        flash(str(exc), "danger")
+    else:
+        flash("Employee Time Tracking updated.", "success")
+
+    return redirect(url_for("inventory.users"))
+# WCCR_EMPLOYEE_TIME_5B3_END
+
+
 @inventory_bp.route("/users", methods=["GET", "POST"])
 @login_required
 def users():
@@ -18809,6 +18915,7 @@ def users():
             User.id,
             User.username,
             User.role,
+            User.employee_time_tracking_enabled,
         )
         .order_by(User.username.asc())
         .all()
@@ -18871,8 +18978,21 @@ def users():
         ),
     )
 
+    from services.attendance_permissions import (
+        can_manage_attendance_users,
+    )
+
+    attendance_manage_users_allowed = (
+        can_manage_attendance_users(current_user)
+    )
+
     response = render_template(
         "users.html",
+        attendance_manage_users_allowed=attendance_manage_users_allowed,
+        employee_time_csrf=lambda target_id: __import__(
+            "services.employee_time_settings",
+            fromlist=["make_csrf_token"],
+        ).make_csrf_token(current_user.id, target_id),
         users=users,
         role_options=role_options,
         users_create_allowed=users_create_allowed,
@@ -24000,20 +24120,84 @@ def add_part_batch():
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
 
+# WCCR_ATTENDANCE_PAYROLL_V29B_BEGIN
+@inventory_bp.route("/attendance-payroll", methods=["GET"])
+@inventory_bp.route(
+    "/attendance-payroll/<string:section>", methods=["GET"]
+)
+@login_required
+def attendance_payroll_dashboard(section="overview"):
+    from flask import abort, render_template
+    from flask_login import current_user
+    from services.erp_access_service import ErpAccessService
 
+    role = (getattr(current_user, "role", "") or "").strip().lower()
+    if role not in ("superadmin", "admin"):
+        abort(403)
 
+    permissions = {
+        "attendance_view": "erp.attendance.view_all",
+        "attendance_review": "erp.attendance.review_shifts",
+        "attendance_manage": "erp.attendance.manage_users",
+        "payroll_view": "erp.payroll.view",
+        "payroll_rates": "erp.payroll.manage_rates",
+        "payroll_approve": "erp.payroll.approve",
+    }
 
+    def allowed(code):
+        if role == "superadmin":
+            return True
+        return bool(ErpAccessService.is_allowed(
+            current_user, code, default_allowed=False
+        ))
 
+    access = {
+        key: allowed(code)
+        for key, code in permissions.items()
+    }
 
+    sections = {
+        "overview": None,
+        "attendance": "attendance_view",
+        "timesheets": "attendance_view",
+        "pay-settings": "payroll_rates",
+        "payroll-preview": "payroll_view",
+        "payroll-approval": "payroll_approve",
+        "my-access": None,
+    }
 
+    if section not in sections:
+        abort(404)
 
+    required = sections[section]
+    if required is not None and not access[required]:
+        abort(403)
 
+    attendance_data = None
 
+    if section in ("overview", "attendance", "timesheets"):
+        if access["attendance_view"]:
+            from extensions import db
+            from services.employee_time_policy import (
+                load_policy
+            )
+            from services.attendance_dashboard_service import (
+                get_attendance_dashboard_data
+            )
 
+            policy = load_policy()
+            attendance_data = get_attendance_dashboard_data(
+                db,
+                paid_break_minutes=policy["paid_break_minutes"],
+                    can_review=access["attendance_review"]
+            )
 
-
-
-
-
-
-
+    return render_template(
+        "attendance_payroll_dashboard.html",
+        section=section,
+        access=access,
+        permission_codes=permissions,
+        payroll_read_only=True,
+        attendance_data=attendance_data,
+    )
+# WCCR_ATTENDANCE_PAYROLL_V29B_END

@@ -353,6 +353,72 @@ ERP_PERMISSION_GROUPS = [
 ]
 
 
+# WCCR_TIME_TRACKING_ERP_3D
+ERP_PERMISSION_GROUPS.append({
+    "key": "time_tracking",
+    "label": "Time Tracking",
+    "description": "Employee time tracking settings access.",
+    "permissions": [
+        {
+            "code": "erp.time_tracking.view_settings",
+            "name": "View Settings",
+            "description": "View time tracking policy settings.",
+        },
+        {
+            "code": "erp.time_tracking.manage_settings",
+            "name": "Manage Settings",
+            "description": "Change time tracking policy settings.",
+        },
+    ],
+})
+
+# WCCR V2.8D.4 FIX02 - STAGING
+ERP_PERMISSION_GROUPS.append({
+    "key": "attendance",
+    "label": "Attendance",
+    "description": "Employee attendance and payroll permissions.",
+    "permissions": [
+        {
+            "code": "erp.attendance.view_all",
+            "name": "View All Attendance",
+            "description": "View All Attendance.",
+        },
+        {
+            "code": "erp.attendance.review_shifts",
+            "name": "Review Shifts",
+            "description": "Review Shifts.",
+        },
+        {
+            "code": "erp.attendance.manage_users",
+            "name": "Manage Attendance Users",
+            "description": "Manage Attendance Users.",
+        },
+    ],
+})
+
+ERP_PERMISSION_GROUPS.append({
+    "key": "payroll",
+    "label": "Payroll",
+    "description": "Employee attendance and payroll permissions.",
+    "permissions": [
+        {
+            "code": "erp.payroll.view",
+            "name": "View Payroll",
+            "description": "View Payroll.",
+        },
+        {
+            "code": "erp.payroll.manage_rates",
+            "name": "Manage Pay Rates",
+            "description": "Manage Pay Rates.",
+        },
+        {
+            "code": "erp.payroll.approve",
+            "name": "Approve Payroll",
+            "description": "Approve Payroll.",
+        },
+    ],
+})
+
 ERP_PERMISSION_INDEX = {
     permission["code"]: {
         **permission,

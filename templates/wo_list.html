@@ -571,6 +571,15 @@
               {{ w.job_numbers or '—' }}
             </span>
 
+            {# WCCR_WO_SEARCH_LAYOUT_V34 #}
+            {# WCCR_WO_SEARCH_MATCH_V2 #}
+            {% if filters.q and search_match_labels.get(w.id) %}
+              <div class="text-muted small mt-1"
+                   style="font-size:.69rem;line-height:1.2">
+                Matched by {{ search_match_labels[w.id] }}
+              </div>
+            {% endif %}
+
             {% if matched_by_invoice and (invoice_matched_wo_ids is defined) and (w.id in invoice_matched_wo_ids) %}
               <span class="badge bg-warning text-dark ms-2">INV#{{ matched_invoice_number }}</span>
             {% endif %}

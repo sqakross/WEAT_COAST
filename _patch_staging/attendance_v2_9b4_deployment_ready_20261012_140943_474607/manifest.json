@@ -1,0 +1,61 @@
+{
+  "version": "V2.9B.4",
+  "source": "C:\\Users\\administrator.WEST\\PycharmProjects\\WEAT_COAST\\_patch_staging\\attendance_v2_9b4_integration_fix12_20261012_140838_090832",
+  "deployment_package": "C:\\Users\\administrator.WEST\\PycharmProjects\\WEAT_COAST\\_patch_staging\\attendance_v2_9b4_deployment_ready_20261012_140943_474607\\package",
+  "files": [
+    {
+      "file": "inventory/routes.py",
+      "staging_sha256": "794ca8e2fb04856edea6c775b330903afb5a9e98956413806a60bf4cb534b026",
+      "production_exists": true,
+      "production_sha256": "cbd6ed1adfd8a4b009b1faa8bd198efec2ef8fddaa112a3b109b049fd1e841c7",
+      "different": true
+    },
+    {
+      "file": "auth/routes.py",
+      "staging_sha256": "3a00fa1036652e7c7f6e1f5df42190d672dc1dcdb9f8915df0d8c4be63203a15",
+      "production_exists": true,
+      "production_sha256": "15ab76b8e860a771bf3abb7a7a9e17f07f7d1274e62bc6437c464453673f6841",
+      "different": true
+    },
+    {
+      "file": "services/attendance_dashboard_service.py",
+      "staging_sha256": "f1ee6977600ab73f0e1b46ffd55fc2a30b17e0c2fcce313acdfcd5f3ce8587dc",
+      "production_exists": false,
+      "production_sha256": null,
+      "different": true
+    },
+    {
+      "file": "services/employee_time_calculations.py",
+      "staging_sha256": "a769671ec2a6a667b93646520756c5f79e001a4773795df9f06fd9c1622094df",
+      "production_exists": false,
+      "production_sha256": null,
+      "different": true
+    },
+    {
+      "file": "templates/base.html",
+      "staging_sha256": "e17e109a4d4d4df6c561ed639eba459146ea57606d42f84b7bb0279b862ed07e",
+      "production_exists": true,
+      "production_sha256": "24ed7be913e2d20976029e8b9cbb3e698ba241c0de678fbf4d27c01c5379debd",
+      "different": true
+    },
+    {
+      "file": "templates/attendance_payroll_dashboard.html",
+      "staging_sha256": "9aa215adce6a9003ec525a7014f8e0e5cabb1fd22ade019bd6c0bc2732242b16",
+      "production_exists": false,
+      "production_sha256": null,
+      "different": true
+    },
+    {
+      "file": "templates/attendance_payroll_live.html",
+      "staging_sha256": "204574e0e207fd044bae831e892405f25e7cb394c253b8d218d49b4413d4ab80",
+      "production_exists": false,
+      "production_sha256": null,
+      "different": true
+    }
+  ],
+  "production_modified": false,
+  "production_db_accessed": false,
+  "server_restarted": false,
+  "deployment_executed": false,
+  "rollback_policy": "Before deployment, back up every existing production file and record which destination files did not exist. On rollback restore existing files and remove only files newly created by this deployment. Verify hashes before and after."
+}

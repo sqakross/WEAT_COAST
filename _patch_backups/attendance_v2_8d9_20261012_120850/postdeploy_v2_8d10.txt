@@ -1,0 +1,48 @@
+WCCR V2.8D.10 POST-DEPLOY VERIFICATION
+STATUS: PASS
+PASS services/erp_permission_registry.py installed
+PASS services/erp_permission_registry.py staging exists
+PASS services/erp_permission_registry.py SHA256
+PASS services/erp_permission_registry.py syntax
+PASS services/erp_permission_registry.py manifest
+PASS services/erp_permission_registry.py backup exists
+PASS services/erp_permission_registry.py backup SHA256
+PASS services/employee_time_settings.py installed
+PASS services/employee_time_settings.py staging exists
+PASS services/employee_time_settings.py SHA256
+PASS services/employee_time_settings.py syntax
+PASS services/employee_time_settings.py manifest
+PASS services/employee_time_settings.py backup exists
+PASS services/employee_time_settings.py backup SHA256
+PASS inventory/routes.py installed
+PASS inventory/routes.py staging exists
+PASS inventory/routes.py SHA256
+PASS inventory/routes.py syntax
+PASS inventory/routes.py manifest
+PASS inventory/routes.py backup exists
+PASS inventory/routes.py backup SHA256
+PASS templates/users.html installed
+PASS templates/users.html staging exists
+PASS templates/users.html SHA256
+PASS templates/users.html manifest
+PASS templates/users.html backup exists
+PASS templates/users.html backup SHA256
+PASS services/attendance_permissions.py installed
+PASS services/attendance_permissions.py staging exists
+PASS services/attendance_permissions.py SHA256
+PASS services/attendance_permissions.py syntax
+PASS services/attendance_permissions.py manifest
+PASS services/attendance_permissions.py new file recorded
+PASS Permission erp.attendance.view_all
+PASS Permission erp.attendance.review_shifts
+PASS Permission erp.attendance.manage_users
+PASS Permission erp.payroll.view
+PASS Permission erp.payroll.manage_rates
+PASS Permission erp.payroll.approve
+PASS Delegated authorization helper
+PASS Users template permission flag
+
+ERRORS:
+
+SERVER RESTARTED: NO
+PRODUCTION DATABASE MODIFIED: NO

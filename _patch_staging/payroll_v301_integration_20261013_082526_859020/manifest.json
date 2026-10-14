@@ -1,0 +1,119 @@
+{
+  "version": "WCCR V3.0.1",
+  "stage": "Integration Preparation",
+  "status": "STAGING_ONLY",
+  "created_at": "2026-10-13T08:25:27.182285",
+  "source_hashes": {
+    "models": "aa063a9419cbe6925cc0e432abb3d820f71a9fef408e7fb142e470202a9bacd5",
+    "routes": "794ca8e2fb04856edea6c775b330903afb5a9e98956413806a60bf4cb534b026",
+    "access": "665527f2b055846d4fb8eae0a5ee4c25cf9d4ac5cded9ffc055d3228dfc5c4c5",
+    "dashboard": "2a3f65c12e2f33169b28e21e2556c72233a93b5a4fb8bbae8b679992cd36f9a2",
+    "navigation": "e17e109a4d4d4df6c561ed639eba459146ea57606d42f84b7bb0279b862ed07e",
+    "extensions": "708edfae17394f6b10fbe8579a226f988dd8897cdf080692e1440e0adfd1af5e"
+  },
+  "package_files": [
+    "package\\services\\employee_pay_models.py",
+    "package\\services\\employee_pay_persistence.py",
+    "package\\services\\employee_pay_service.py",
+    "package\\services\\employee_pay_validation.py"
+  ],
+  "planned_changes": [
+    "Register Payroll models in WCCR metadata",
+    "Create three Payroll tables with migration",
+    "Implement concurrency-safe rate insertion",
+    "Integrate actual ERP permission checks",
+    "Add Employee Pay Settings GET/POST",
+    "Add dedicated CSRF protection",
+    "Expose navigation to delegated users",
+    "Preserve existing Attendance restrictions"
+  ],
+  "excluded_changes": [
+    "Inventory",
+    "Work Orders",
+    "TechnicianPayment",
+    "Attendance shift data",
+    "Payroll calculations",
+    "Payroll approvals"
+  ],
+  "checks": [
+    {
+      "name": "models exists",
+      "pass": true
+    },
+    {
+      "name": "routes exists",
+      "pass": true
+    },
+    {
+      "name": "access exists",
+      "pass": true
+    },
+    {
+      "name": "dashboard exists",
+      "pass": true
+    },
+    {
+      "name": "navigation exists",
+      "pass": true
+    },
+    {
+      "name": "extensions exists",
+      "pass": true
+    },
+    {
+      "name": "User model exists",
+      "pass": true
+    },
+    {
+      "name": "ERP override model exists",
+      "pass": true
+    },
+    {
+      "name": "Payroll models not deployed",
+      "pass": true
+    },
+    {
+      "name": "Attendance Payroll route exists",
+      "pass": true
+    },
+    {
+      "name": "ERP permission service exists",
+      "pass": true
+    },
+    {
+      "name": "Pay settings section exists",
+      "pass": true
+    },
+    {
+      "name": "Transaction staging exists",
+      "pass": true
+    },
+    {
+      "name": "Transaction retest report exists",
+      "pass": true
+    },
+    {
+      "name": "Transaction retest passed",
+      "pass": true
+    },
+    {
+      "name": "Staged source exists: employee_pay_models.py",
+      "pass": true
+    },
+    {
+      "name": "Staged source exists: employee_pay_validation.py",
+      "pass": true
+    },
+    {
+      "name": "Staged source exists: employee_pay_service.py",
+      "pass": true
+    },
+    {
+      "name": "Staged source exists: employee_pay_persistence.py",
+      "pass": true
+    }
+  ],
+  "production_modified": false,
+  "production_database_accessed": false,
+  "deployment_ready": false
+}

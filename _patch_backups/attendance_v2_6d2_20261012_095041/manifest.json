@@ -1,0 +1,15 @@
+{
+  "project": "WCCR",
+  "component": "Employee Attendance Service",
+  "package_version": "V2.6D.2",
+  "candidate_version": "V2.6B.5C.4",
+  "created_at": "2026-10-12T09:50:41.602390",
+  "production_target": "C:\\Users\\administrator.WEST\\PycharmProjects\\WEAT_COAST\\services\\employee_time_tracking_service.py",
+  "original_sha256": "d89d7bcdada6a212e815befdd9e15f3604fb5dc3f4d2f8f63c21590088e9a2ba",
+  "candidate_sha256": "13843aeb487a17b3c45f0e4bc61b349b294111fb1c567ff6e8c4eeba4f234eed",
+  "backup_file": "production_original.py",
+  "candidate_file": "attendance_candidate.py",
+  "deployment_status": "NOT INSTALLED",
+  "database_modified": false,
+  "windows_service_restarted": false
+}

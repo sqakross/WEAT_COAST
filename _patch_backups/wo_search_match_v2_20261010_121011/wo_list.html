@@ -1,0 +1,671 @@
+ wo_list: {% extends "base.html" %}
+{% block content %}
+
+<style>
+
+  /* =========================================================
+   TECHNICIAN TABLET VIEW — show only Jobs + Actions
+   ========================================================= */
+    {% set role_low = (current_user.role or '')|lower %}
+    {% if role_low in ['technician', 'tech'] %}
+    @media (pointer:coarse), (max-width: 1400px){
+
+      .sticky-tools{
+        position: static !important;
+      }
+
+      .table-responsive{
+        overflow-x: hidden !important;
+      }
+
+      .wo-list-table{
+        width: 100% !important;
+        table-layout: fixed !important;
+      }
+
+        /* Hide on technician tablet:
+         Brand/Model, Type, Status, Audit */
+      .wo-list-table th:nth-child(4),
+      .wo-list-table td:nth-child(4),
+      .wo-list-table th:nth-child(5),
+      .wo-list-table td:nth-child(5),
+      .wo-list-table th:nth-child(6),
+      .wo-list-table td:nth-child(6),
+      .wo-list-table th:nth-child(7),
+      .wo-list-table td:nth-child(7){
+        display: none !important;
+      }
+
+      .wo-list-table th:nth-child(3),
+      .wo-list-table td:nth-child(3){
+        width: 72% !important;
+        font-size: 18px !important;
+      }
+
+      .wo-list-table th:nth-child(8),
+      .wo-list-table td:nth-child(8){
+        width: 28% !important;
+        text-align: center !important;
+      }
+
+      .jobs-trunc{
+        max-width: 100% !important;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        font-weight: 600 !important;
+      }
+
+      .wo-list-table td:nth-child(3) .small{
+        font-size: 13px !important;
+      }
+
+      .wo-actions{
+        width: 100% !important;
+      }
+
+      .wo-actions .btn{
+        width: 100% !important;
+        font-size: 15px !important;
+        padding: 10px 6px !important;
+        margin-bottom: 6px !important;
+      }
+
+      /* technician does not need Form button on tablet */
+      .wo-actions a.btn-outline-secondary{
+        display: none !important;
+      }
+
+    }
+    {% endif %}
+  /* ===== Общие карточки ===== */
+  .card-lite      { border:1px solid #dee2e6; border-radius:.75rem; background:#fff; }
+  .card-lite .hd  { background:#f8f9fa; border-bottom:1px solid #dee2e6; padding:.6rem .9rem; }
+  .card-lite .bd  { padding:.9rem; }
+
+  /* ===== Sticky-панель под верхним меню ===== */
+  :root { --sticky-top: 64px; }          /* подстрой под высоту твоего topbar */
+  @media (max-width: 768px){ :root { --sticky-top: 56px; } }
+
+  .sticky-tools{ position: sticky; top: var(--sticky-top); z-index: 1030; }
+  .sticky-tools .card-lite{ margin-bottom:.6rem; box-shadow: 0 6px 14px rgba(16,24,40,.06); }
+  .sticky-tools::after{ content:''; display:block; height:.25rem; } /* визуально «склеивает» с фильтрами */
+
+  /* ===== Шапка (заголовок + New Work Order + кнопка Filters на таче) ===== */
+  .wo-title{ display:flex; gap:.75rem; align-items:baseline; }
+  .wo-title h3{ font-size:1.15rem; line-height:1.2; margin:0; }
+  .wo-title small{ color:#6c757d; font-size:.9rem; }
+
+  .btn-filter-touch{ display:none; }
+  @media (pointer:coarse){ .btn-filter-touch{ display:inline-flex !important; } }
+  @media (pointer:fine){  .btn-filter-touch{ display:none !important; } }
+
+  /* ===== SEARCH ===== */
+  .search-grid{
+    display:grid;
+    grid-template-columns: 1.6fr 160px 160px auto; /* Query | From | To | Actions */
+    gap:.6rem;
+    align-items:end;
+  }
+  /* планшеты/тач: одна строка Query | Search | Reset; From/To скрываем */
+  @media (pointer:coarse){
+    .search-grid{
+      grid-template-columns: 1fr auto auto;
+      gap:.5rem;
+    }
+    .search-grid .field-date{ display:none !important; }
+    .search-grid .actions{ display:flex; gap:.5rem; justify-content:flex-end; }
+    .search-grid input[name="q"]{ min-width: 0; }
+  }
+
+  /* ===== DESKTOP FILTERS ===== */
+  .filter-bar{ border:1px solid #dee2e6; background:#fff; border-radius:.75rem; padding:.45rem .75rem; }
+  .filter-bar .summary{ display:flex; gap:.5rem; align-items:center; overflow:auto; }
+  .filter-chip{ font-size:.8rem; }
+  .filter-icon-btn{ display:inline-flex; align-items:center; gap:.35rem; }
+  .filters-grid{ display:grid; grid-template-columns: 1fr 1fr 1fr auto; gap:.6rem; }
+  @media (max-width: 992px){ .filters-grid{ grid-template-columns: 1fr; } }
+  .active-chips .badge{ margin-right:.25rem; }
+
+  /* ===== TOUCH OFFCANVAS + FAB ===== */
+  .offcanvas-filters{ width:320px; max-width:90vw; box-shadow: -8px 0 20px rgba(16,24,40,.12); }
+  .offcanvas-filters .offcanvas-body{ padding:.9rem; }
+
+  .fab-filter{
+    position: fixed; right: 16px; bottom: 16px; z-index: 1040;
+    width: 52px; height: 52px; border-radius: 50%;
+    display: none; align-items:center; justify-content:center;
+    box-shadow: 0 8px 24px rgba(16,24,40,.18);
+  }
+  @media (pointer:coarse){ .fab-filter{ display:flex; } }
+
+  /* ===== Таблица ===== */
+  .wo-list-table .col-id{ width:60px; white-space:nowrap; }
+  .wo-list-table .col-tech{ width:140px; }
+  .wo-list-table .col-type{ width:110px; text-align:center; white-space:nowrap; }
+  .wo-list-table .col-status{ width:140px; text-align:center; white-space:nowrap; }
+
+  /* ✅ AUDIT COLUMN */
+  .wo-list-table .col-audit{ width:190px; white-space:nowrap; }
+
+  .wo-list-table .col-actions{ width:180px; white-space:nowrap; }
+
+  .jobs-trunc,.brand-trunc{
+    max-width:320px; display:inline-block; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; vertical-align:bottom;
+  }
+
+  /* ✅ audit look */
+  .audit-cell{ line-height:1.15; }
+  .audit-cell .when{ display:block; font-size:.86rem; }
+  .audit-cell .who{ display:block; font-size:.78rem; color:#6c757d; }
+
+  /* На таче — компактные кнопки действий в столбик */
+  @media (pointer:coarse){
+    .wo-list-table .col-actions{ width:96px; }
+    .wo-list-table .col-audit{ width:140px; }
+    .jobs-trunc,.brand-trunc{ max-width:180px; }
+    .wo-actions{ flex-direction:column !important; gap:.4rem !important; align-items:stretch !important; }
+    .wo-actions .btn{ width:100%; padding:.375rem .5rem; }
+  }
+
+  /* Убираем зазор между Search и Filters */
+  .sticky-tools .card-lite { margin-bottom: .2rem; }                 /* было .6rem */
+  .sticky-tools .card-lite .hd { padding-bottom: .4rem; }            /* уплотняем заголовок */
+  .sticky-tools .card-lite .bd { padding-top: .6rem; padding-bottom: .35rem; } /* меньше низ */
+
+  .sticky-tools .filters-desktop .filter-bar{
+    margin-top: -.2rem;                                              /* подтягиваем бар к Search */
+    padding-top: .35rem;                                             /* ровная линия */
+    border-top-left-radius: 0;                                       /* визуально как единый блок */
+    border-top-right-radius: 0;
+    /* Если видна тонкая линия между блоками – можно убрать верхнюю границу */
+    /* border-top: 0; */
+  }
+
+  /* Дополнительно: убираем технический «прокладочный» зазор */
+  .sticky-tools::after{ height: 0; } /* was .25rem */
+
+    /* ✅ FIX: make Delete (<button>) same size as Open/Edit (<a>) in Actions */
+  .wo-actions a.btn.btn-sm,
+  .wo-actions button.btn.btn-sm{
+    padding: .25rem .5rem !important;
+    font-size: .875rem !important;
+    line-height: 1.5 !important;
+    border-radius: .2rem !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+
+  /* some global CSS affects buttons only */
+  .wo-actions button.btn{
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  /* =========================================================
+   FIX: WO LIST action buttons size (superadmin/admin too)
+   Make Delete button same size as Open/Edit/Form
+   ========================================================= */
+
+.wo-list-table .wo-actions .btn,
+.wo-list-table .wo-actions button.btn{
+  padding: .25rem .5rem !important;    /* btn-sm */
+  font-size: .875rem !important;       /* btn-sm */
+  line-height: 1.2 !important;
+  border-radius: .5rem !important;
+  min-height: 0 !important;
+}
+
+.wo-list-table .wo-actions form{
+  display:inline !important;
+  margin:0 !important;
+}
+
+/* =========================================================
+   WO LIST: make all Actions buttons same width
+   ========================================================= */
+
+/* same size for Open/Edit/Delete */
+.wo-list-table .wo-actions .btn,
+.wo-list-table .wo-actions button.btn{
+  padding: .25rem .5rem !important;     /* btn-sm */
+  font-size: .875rem !important;        /* btn-sm */
+  line-height: 1.2 !important;
+  border-radius: .5rem !important;
+
+  min-width: 64px !important;           /* <<< ключевое: одинаковая ширина */
+  text-align: center !important;
+}
+
+/* keep delete form inline and tight */
+.wo-list-table .wo-actions form{
+  display:inline !important;
+  margin:0 !important;
+}
+
+/* on touch (where you stack buttons) keep full width */
+@media (pointer:coarse){
+  .wo-list-table .wo-actions .btn,
+  .wo-list-table .wo-actions button.btn{
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+}
+/* =========================================================
+   WO LIST – normalize Open / Edit / Delete buttons
+   ========================================================= */
+
+.wo-list-table .wo-actions .btn{
+  box-sizing: border-box !important;
+
+  min-width: 64px !important;
+  height: 30px !important;              /* фиксируем высоту */
+  padding: 0 .5rem !important;
+
+  font-size: .875rem !important;
+  line-height: 1 !important;
+
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  border-width: 1px !important;         /* 🔑 одинаковая рамка */
+  border-style: solid !important;
+  border-radius: .5rem !important;
+}
+
+/* Убираем bootstrap-особенности delete */
+.wo-list-table .wo-actions .btn-outline-danger{
+  --bs-btn-hover-color: #fff;
+  --bs-btn-hover-bg: #dc3545;
+  --bs-btn-hover-border-color: #dc3545;
+}
+
+/* Форма delete не ломает размеры */
+.wo-list-table .wo-actions form{
+  display:inline-block !important;
+  margin:0 !important;
+}
+
+
+</style>
+
+<div class="sticky-tools">
+  <!-- ===== Заголовок + New Work Order (липко) ===== -->
+  <div class="card-lite">
+    <div class="hd d-flex justify-content-between align-items-center">
+      <div class="wo-title">
+        <h3>Work Orders</h3>
+        <small>
+          {% if count_items is defined %}
+            Showing {{ count_items }} result{% if count_items != 1 %}s{% endif %}
+            {% if count_items >= 200 %}(limited to 200){% endif %}
+          {% endif %}
+
+          {% if matched_by_invoice and matched_invoice_number %}
+              <span class="badge bg-info text-dark ms-2">
+                Matched by Invoice #{{ matched_invoice_number }}
+              </span>
+            {% endif %}
+
+        </small>
+      </div>
+
+      <div class="d-flex gap-2">
+        <!-- Кнопка Filters для тача (открывает offcanvas) -->
+        <button class="btn btn-outline-secondary btn-sm btn-filter-touch"
+                type="button" data-bs-toggle="offcanvas"
+                data-bs-target="#filtersOffcanvas" aria-controls="filtersOffcanvas">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="me-1">
+            <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
+          </svg>
+          Filters
+        </button>
+
+        {# ERP ACCESS PATCH 05 STEP 5 - WO LIST ACTION PERMISSIONS #}
+        {% set wo_list_role_low = (current_user.role or '')|lower %}
+
+        {% set wo_list_module_allowed =
+             wo_list_role_low in ['technician', 'tech']
+             or erp_access_allowed(
+                 current_user,
+                 'erp.work_orders.access',
+                 True
+             )
+        %}
+
+        {% set wo_list_can_create =
+             wo_list_role_low not in ['technician', 'tech']
+             and wo_list_module_allowed
+             and erp_access_allowed(
+                 current_user,
+                 'erp.work_orders.create',
+                 wo_list_role_low in ['admin', 'superadmin']
+             )
+        %}
+
+        {% set wo_list_can_edit =
+             wo_list_role_low not in ['technician', 'tech']
+             and wo_list_module_allowed
+             and erp_access_allowed(
+                 current_user,
+                 'erp.work_orders.edit',
+                 wo_list_role_low in ['admin', 'superadmin']
+             )
+        %}
+
+        {% if wo_list_can_create %}
+          <a href="{{ url_for('inventory.wo_new') }}"
+             class="btn btn-success btn-sm">+ New Work Order</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ===== Search ===== -->
+    <div class="bd">
+      <form method="get" class="search-grid">
+        <div>
+          <label class="form-label mb-1 small">Query</label>
+          <input name="q" class="form-control"
+                 list="wo-hints"
+                 value="{{ (filters.q if filters else '') }}"
+                 placeholder="Tech / Job # / Brand / Model / Part # / Part name / INV# / Customer PO">
+        </div>
+
+        <div class="field-date">
+          <label class="form-label mb-1 small">From</label>
+          <input type="date" name="from" class="form-control"
+                 value="{{ (filters['from'] if filters and filters['from'] else '') }}">
+        </div>
+        <div class="field-date">
+          <label class="form-label mb-1 small">To</label>
+          <input type="date" name="to" class="form-control"
+                 value="{{ (filters['to'] if filters and filters['to'] else '') }}">
+        </div>
+
+        <div class="actions d-flex gap-2 justify-content-end">
+          <input type="hidden" name="tech_id" value="{{ filters.tech_id if filters else '' }}">
+          <input type="hidden" name="type"    value="{{ filters.type    if filters else '' }}">
+          <input type="hidden" name="status"  value="{{ filters.status  if filters else '' }}">
+          <button class="btn btn-primary px-4" type="submit">Search</button>
+          <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Reset</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <datalist id="wo-hints">
+    {% if hint_values is defined %}
+      {% for h in hint_values %}{% if h %}<option value="{{ h }}">{% endif %}{% endfor %}
+    {% endif %}
+  </datalist>
+
+  <!-- ===== Desktop Filters (bar + collapse) ===== -->
+  <div class="filters-desktop">
+    <div class="filter-bar">
+      <div class="summary">
+        <strong>Filters</strong>
+        {% set has_any = (filters and (filters.tech_id or filters.type or filters.status)) %}
+        {% if filters and filters.tech_id %}<span class="badge text-bg-secondary filter-chip">tech: {{ filters.tech_id }}</span>{% endif %}
+        {% if filters and filters.type %}<span class="badge text-bg-secondary filter-chip">type: {{ filters.type }}</span>{% endif %}
+        {% if filters and filters.status %}<span class="badge text-bg-secondary filter-chip">status: {{ filters.status }}</span>{% endif %}
+        {% if not has_any %}<span class="text-muted small">None</span>{% endif %}
+
+        <button class="btn btn-outline-secondary btn-sm filter-icon-btn ms-auto"
+                type="button" data-bs-toggle="collapse"
+                data-bs-target="#filtersCollapse" aria-expanded="false"
+                aria-controls="filtersCollapse" title="Adjust filters">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+            <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
+          </svg>
+          Filters
+        </button>
+      </div>
+    </div>
+
+    <div class="collapse mt-2" id="filtersCollapse">
+      <div class="card-lite">
+        <div class="bd">
+          <form method="get" class="filters-grid align-items-end">
+            <div>
+              <label class="form-label mb-1 small">Technician</label>
+              <select name="tech_id" class="form-select">
+                <option value="">Any</option>
+                {% for tid, tname in (technicians or []) %}
+                  <option value="{{ tid }}" {{ 'selected' if filters and filters.tech_id==tid }}>
+                    {{ tname }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div>
+              <label class="form-label mb-1 small">Type</label>
+              <select name="type" class="form-select">
+                <option value="">Any</option>
+                <option value="BASE"      {{ 'selected' if filters and filters.type=='BASE' }}>BASE</option>
+                <option value="INSURANCE" {{ 'selected' if filters and filters.type=='INSURANCE' }}>INSURANCE</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="form-label mb-1 small">Status</label>
+              <select name="status" class="form-select">
+                <option value="">Any</option>
+                <option value="search_ordered" {{ 'selected' if filters and filters.status=='search_ordered' }}>search_ordered</option>
+                <option value="ordered"        {{ 'selected' if filters and filters.status=='ordered' }}>ordered</option>
+                <option value="done"           {{ 'selected' if filters and filters.status=='done' }}>done</option>
+                <option value="cancel_job" {{ 'selected' if filters and filters.status=='cancel_job' }}>cancel_job</option>
+              </select>
+            </div>
+
+            <div class="d-flex gap-2 justify-content-end">
+              <input type="hidden" name="q"    value="{{ filters.q    if filters else '' }}">
+              <input type="hidden" name="from" value="{{ filters['from'] if filters and filters['from'] else '' }}">
+              <input type="hidden" name="to"   value="{{ filters['to']   if filters and filters['to']   else '' }}">
+              <button class="btn btn-primary px-4" type="submit">Apply</button>
+              <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Clear</a>
+            </div>
+          </form>
+
+          <div class="active-chips mt-2 small">
+            {% if filters %}
+              {% if filters.q %}<span class="badge text-bg-secondary">q: {{ filters.q }}</span>{% endif %}
+              {% if filters.tech_id %}<span class="badge text-bg-secondary">tech_id: {{ filters.tech_id }}</span>{% endif %}
+              {% if filters.type %}<span class="badge text-bg-secondary">type: {{ filters.type }}</span>{% endif %}
+              {% if filters.status %}<span class="badge text-bg-secondary">status: {{ filters.status }}</span>{% endif %}
+              {% if filters['from'] %}<span class="badge text-bg-secondary">from: {{ filters['from'] }}</span>{% endif %}
+              {% if filters['to'] %}<span class="badge text-bg-secondary">to: {{ filters['to'] }}</span>{% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div> <!-- /filters-desktop -->
+</div> <!-- /sticky-tools -->
+
+<!-- ===== Touch Offcanvas ===== -->
+<div class="offcanvas offcanvas-end offcanvas-filters"
+     tabindex="-1" id="filtersOffcanvas" aria-labelledby="filtersOffcanvasLabel">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="filtersOffcanvasLabel">Filters</h5>
+    <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+  </div>
+  <div class="offcanvas-body">
+    <form method="get" class="filters-grid align-items-end">
+      <div>
+        <label class="form-label mb-1 small">Technician</label>
+        <select name="tech_id" class="form-select">
+          <option value="">Any</option>
+          {% for tid, tname in (technicians or []) %}
+            <option value="{{ tid }}" {{ 'selected' if filters and filters.tech_id==tid }}>{{ tname }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="form-label mb-1 small">Type</label>
+        <select name="type" class="form-select">
+          <option value="">Any</option>
+          <option value="BASE"      {{ 'selected' if filters and filters.type=='BASE' }}>BASE</option>
+          <option value="INSURANCE" {{ 'selected' if filters and filters.type=='INSURANCE' }}>INSURANCE</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="form-label mb-1 small">Status</label>
+        <select name="status" class="form-select">
+          <option value="">Any</option>
+          <option value="search_ordered" {{ 'selected' if filters and filters.status=='search_ordered' }}>search_ordered</option>
+          <option value="ordered"        {{ 'selected' if filters and filters.status=='ordered' }}>ordered</option>
+          <option value="done"           {{ 'selected' if filters and filters.status=='done' }}>done</option>
+        </select>
+      </div>
+
+      <input type="hidden" name="q"    value="{{ filters.q    if filters else '' }}">
+      <input type="hidden" name="from" value="{{ filters['from'] if filters and filters['from'] else '' }}">
+      <input type="hidden" name="to"   value="{{ filters['to']   if filters and filters['to']   else '' }}">
+
+      <div class="d-flex gap-2 justify-content-end mt-2">
+        <button class="btn btn-primary px-4" type="submit">Apply</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Clear</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- FAB (touch) -->
+<button class="btn btn-primary fab-filter"
+        type="button" data-bs-toggle="offcanvas"
+        data-bs-target="#filtersOffcanvas" aria-controls="filtersOffcanvas"
+        title="Filters">
+  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="currentColor" viewBox="0 0 16 16">
+    <path d="M6 10a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 6 10m-2-3a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 7m-2-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11A.5.5 0 0 1 2 4"/>
+  </svg>
+</button>
+
+<!-- ===== Таблица ===== -->
+<div class="table-responsive">
+  <table class="table table-sm table-hover align-middle wo-list-table">
+    <thead class="table-light">
+      <tr>
+        <th class="col-id">ID</th>
+        <th class="col-tech">Technician</th>
+        <th>Jobs</th>
+        <th>Brand/Model</th>
+        <th class="col-type">Type</th>
+        <th class="col-status">Status</th>
+        <th class="col-audit">Audit</th>
+        <th class="text-end col-actions">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if items and items|length > 0 %}
+        {% for w in items %}
+        <tr>
+          <td>{{ w.id }}</td>
+          <td>{{ w.technician_name or '—' }}</td>
+          <td>
+            <span class="jobs-trunc" title="{{ w.job_numbers or '' }}">
+              {{ w.job_numbers or '—' }}
+            </span>
+
+            {% if matched_by_invoice and (invoice_matched_wo_ids is defined) and (w.id in invoice_matched_wo_ids) %}
+              <span class="badge bg-warning text-dark ms-2">INV#{{ matched_invoice_number }}</span>
+            {% endif %}
+
+            {% if w.canonical_job %}
+              <div class="text-muted small">primary: <code>{{ w.canonical_job }}</code></div>
+            {% endif %}
+          </td>
+          <td>
+            <span class="brand-trunc" title="{{ (w.brand or '') ~ ' ' ~ (w.model or '') }}">
+              {{ (w.brand or '') ~ (' ' if w.brand and w.model else '') ~ (w.model or '') }}
+            </span>
+          </td>
+          <td class="text-center">
+            {% if w.job_type == 'INSURANCE' %}
+              <span class="badge bg-warning text-dark">INSURANCE</span>
+            {% else %}
+              <span class="badge bg-secondary">BASE</span>
+            {% endif %}
+          </td>
+          <td class="text-center">
+          {% if w.status == 'done' %}
+            <span class="badge bg-success">done</span>
+          {% elif w.status == 'ordered' %}
+            <span class="badge bg-info text-dark">ordered</span>
+          {% elif w.status == 'cancel_job' %}
+            <span class="badge bg-danger">cancel_job</span>
+          {% else %}
+            <span class="badge bg-secondary">search_ordered</span>
+          {% endif %}
+        </td>
+
+          <!-- ✅ AUDIT CELL: Updated first, then Created -->
+
+            <td class="audit-cell">
+              <span class="when">
+                upd:
+                {{ w.updated_at | local_date
+                   if w.updated_at
+                   else (w.created_at | local_date if w.created_at else '—') }}
+              </span>
+
+              <span class="who">
+                by
+                {{ (w.updated_by_user and w.updated_by_user.username)
+                   or (w.created_by_user and w.created_by_user.username)
+                   or '—' }}
+              </span>
+
+              <span class="who" style="margin-top:.15rem;">
+                crt:
+                {{ w.created_at | local_date if w.created_at else '—' }}
+                •
+                {{ (w.created_by_user and w.created_by_user.username) or '—' }}
+              </span>
+            </td>
+
+          <td class="text-end">
+            <div class="wo-actions d-inline-flex gap-1">
+              <a class="btn btn-outline-primary btn-sm"
+                 href="{{ url_for('inventory.wo_detail', wo_id=w.id) }}">Open</a>
+              {% if wo_list_can_edit %}
+                  <a class="btn btn-outline-secondary btn-sm"
+                     href="{{ url_for('inventory.wo_edit', wo_id=w.id) }}">Edit</a>
+                {% elif wo_list_role_low not in ['technician','tech'] %}
+                  <a class="btn btn-outline-secondary btn-sm"
+                     href="{{ url_for('inventory.wo_edit', wo_id=w.id, readonly=1) }}">Form</a>
+                {% endif %}
+              {% if current_user.role == 'superadmin' %}
+                <form method="post"
+                      action="{{ url_for('inventory.wo_delete', wo_id=w.id) }}"
+                      onsubmit="return confirm('Delete Work Order #{{ w.id }}? This cannot be undone.');"
+                      class="d-inline">
+                  <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
+                </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr><td colspan="8" class="text-muted">No work orders found.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const q = document.querySelector('input[name="q"]');
+  if (q && !q.value.trim()) { q.focus(); q.select(); }
+});
+</script>
+{% endblock %}
+

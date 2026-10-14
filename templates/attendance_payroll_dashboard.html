@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid py-3">
+  <h3 class="mb-2">Attendance &amp; Payroll</h3>
+  <p class="text-muted">
+    Employee attendance, timesheets and payroll preparation.
+  </p>
+
+  <div class="d-flex flex-wrap gap-2 mb-4">
+    {% set tabs = [
+      ('overview', 'Overview'),
+      ('attendance', 'Attendance'),
+      ('timesheets', 'Timesheets'),
+      ('pay-settings', 'Employee Pay Settings'),
+      ('payroll-preview', 'Payroll Preview'),
+      ('payroll-approval', 'Payroll Approval'),
+      ('my-access', 'My Access')
+    ] %}
+    {% for key, label in tabs %}
+      <a class="btn btn-sm
+        {{ 'btn-primary' if section == key else 'btn-outline-secondary' }}"
+        href="{{ url_for('inventory.attendance_payroll_dashboard',
+                         section=key) }}">
+        {{ label }}
+      </a>
+    {% endfor %}
+  </div>
+
+  {% if section == 'overview' %}
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card"><div class="card-body">
+          <h5>Attendance</h5>
+          <p>Employee shifts, daily hours and pending reviews.</p>
+          <span class="badge bg-success">Live attendance connected</span>
+        </div></div>
+      </div>
+      <div class="col-md-6">
+        <div class="card"><div class="card-body">
+          <h5>Payroll</h5>
+          <p>Pay profiles, overtime and payroll approval.</p>
+          <span class="badge bg-secondary">
+            Payroll engine pending
+          </span>
+        </div></div>
+      </div>
+    </div>
+
+  {% elif section == 'my-access' %}
+    <h5>My Effective Permissions</h5>
+    <table class="table table-sm table-striped">
+      <thead><tr><th>Permission</th><th>Effective Access</th></tr></thead>
+      <tbody>
+      {% for key, code in permission_codes.items() %}
+        <tr>
+          <td>{{ code }}</td>
+          <td>
+            {% if access[key] %}
+              <span class="badge bg-success">ALLOWED</span>
+            {% else %}
+              <span class="badge bg-danger">DENIED</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="text-muted">
+      Effective access is evaluated for the currently signed-in user.
+    </p>
+
+  {% elif section == 'attendance' %}
+    <h5>Attendance Dashboard</h5>
+    <div class="alert alert-info">
+      Live attendance information is displayed below.
+      Open shifts and review items require verification.
+    </div>
+
+  {% elif section == 'timesheets' %}
+    <h5>Employee Timesheets</h5>
+    <div class="alert alert-info">
+      Daily attendance totals are displayed below.
+      All hours remain preliminary until reviewed.
+    </div>
+
+  {% elif section == 'pay-settings' %}
+    <h5>Employee Pay Settings</h5>
+    <p>Planned employee profile fields:</p>
+    <ul>
+      <li>Work State (California initially)</li>
+      <li>Hourly or Salary</li>
+      <li>Hourly Rate or Salary Amount</li>
+      <li>Exempt / Non-exempt classification</li>
+      <li>Effective Date and Rate History</li>
+      <li>Automatic Overtime Policy</li>
+    </ul>
+    <div class="alert alert-warning">
+      Settings are not editable yet. No payroll data is being
+      written or calculated.
+    </div>
+
+  {% elif section == 'payroll-preview' %}
+    <h5>Payroll Preview</h5>
+    <div class="alert alert-warning">
+      Payroll calculations are not yet enabled.
+    </div>
+
+  {% elif section == 'payroll-approval' %}
+    <h5>Payroll Approval</h5>
+    <div class="alert alert-warning">
+      Approval actions are not yet enabled.
+    </div>
+  {% endif %}
+</div>
+
+{# WCCR_ATTENDANCE_DASHBOARD_V294 #}
+{% if section in ["overview", "attendance", "timesheets"] %}
+  {% include "attendance_payroll_live.html" %}
+{% endif %}
+{% endblock %}

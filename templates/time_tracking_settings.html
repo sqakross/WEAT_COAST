@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4" style="max-width:800px">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h3 class="mb-1">Time Tracking Settings</h3>
+      <div class="text-muted small">
+        {# WCCR_TIME_TRACKING_ERP_3D #}
+        {% if can_manage %}
+          Settings administrator
+        {% else %}
+          Read-only access
+        {% endif %}
+        | America/Los_Angeles
+      </div>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('auth.my_time') }}">My Time</a>
+  </div>
+
+  <div class="alert alert-info">
+    These settings are saved but are not yet connected to
+    automatic shift processing or the existing report calculations.
+  </div>
+
+  {% if policy %}
+  <div class="card shadow-sm border-0 rounded-4">
+    <div class="card-body p-4">
+      <form method="post">
+        <input type="hidden" name="policy_csrf"
+               value="{{ csrf_token }}">
+
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Paid Break Allowance (minutes)</label>
+            <input class="form-control" type="number"
+                   name="paid_break_minutes" min="0" max="120"
+                   required value="{{ policy.paid_break_minutes }}">
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Idle Detection (minutes)</label>
+            <input class="form-control" type="number"
+                   name="idle_minutes" min="1" max="240"
+                   required value="{{ policy.idle_minutes }}">
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Auto-close Time (Pacific)</label>
+            <input class="form-control" type="time"
+                   name="auto_close_time" required
+                   value="{{ policy.auto_close_time }}">
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Missing Lunch Review (hours)</label>
+            <input class="form-control" type="number"
+                   name="missing_lunch_after_hours" min="1" max="24"
+                   required value="{{ policy.missing_lunch_after_hours }}">
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Expected Lunch (minutes)</label>
+            <input class="form-control" type="number"
+                   name="expected_lunch_minutes" min="1" max="120"
+                   required value="{{ policy.expected_lunch_minutes }}">
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label d-block">Smart Shift Recovery</label>
+            <div class="form-check form-switch mt-2">
+              <input class="form-check-input" type="checkbox"
+                     id="smartRecovery" name="smart_shift_recovery"
+                     {% if policy.smart_shift_recovery %}checked{% endif %}>
+              <label class="form-check-label" for="smartRecovery">
+                Enable recovery
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <hr class="my-4">
+
+        <button class="btn btn-primary" type="submit">
+          Save Settings
+        </button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{# WCCR_TIME_TRACKING_ERP_3D READ ONLY #}
+{% if not can_manage %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const root = document.querySelector(".container");
+  if (!root) return;
+  root.querySelectorAll("form").forEach(function (form) {
+    form.querySelectorAll(
+      "input, select, textarea, button"
+    ).forEach(function (control) {
+      control.disabled = true;
+    });
+    form.querySelectorAll(
+      'button[type="submit"], input[type="submit"]'
+    ).forEach(function (control) {
+      control.hidden = true;
+    });
+  });
+});
+</script>
+{% endif %}

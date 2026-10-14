@@ -1,0 +1,6 @@
+﻿WCCR V2.2K - SAFE INSTALLATION
+RESULT: STOP
+ERROR: Exception calling "Replace" with "3" argument(s): "The path is not of a legal form."
+ROLLBACK: NOT REQUIRED
+BACKUP: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\_patch_backups\attendance_v22k_20261013_133302\employee_time_tracking_service.py
+TARGET: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\services\employee_time_tracking_service.py

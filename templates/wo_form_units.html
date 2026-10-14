@@ -1175,7 +1175,6 @@ function wccrToast(msg) {
   }
 
   async function handleDuplicateCheckBeforeSubmit(){
-    if (IS_EDIT) return true;
 
     const jobField = form.querySelector('[name="job_numbers"]');
     if (!jobField) return true;
@@ -1185,6 +1184,9 @@ function wccrToast(msg) {
 
     const params = new URLSearchParams();
     params.set("job_numbers", rawJobs);
+    if (IS_EDIT && CURRENT_WO_ID) {
+      params.set("current_wo_id", CURRENT_WO_ID);
+    }
 
     let resp;
     try {
@@ -1194,12 +1196,34 @@ function wccrToast(msg) {
         headers: { "Accept": "application/json" }
       });
     } catch (err) {
+      if (IS_EDIT) {
+        alert("Unable to verify Job Numbers. Try again.");
+        return false;
+      }
       return true;
     }
 
-    if (!resp.ok) return true;
+    if (!resp.ok) {
+      if (IS_EDIT) {
+        alert("Job Number verification failed.");
+        return false;
+      }
+      return true;
+    }
 
-    const data = await resp.json();
+    let data;
+    try {
+      data = await resp.json();
+    } catch (err) {
+      alert("Invalid Job Number verification response.");
+      return false;
+    }
+
+    if (typeof data.duplicate !== 'boolean') {
+      alert("Incomplete Job Number verification response.");
+      return false;
+    }
+
     if (!data.duplicate) return true;
 
     if (CURRENT_WO_ID && String(data.existing_id || '') === CURRENT_WO_ID) {
@@ -1283,6 +1307,18 @@ function wccrToast(msg) {
       || "{{ url_for('inventory.wo_save') }}";
 
     try {
+      const duplicateOk =
+        await handleDuplicateCheckBeforeSubmit();
+
+      if (!duplicateOk) {
+        saveInProgress = false;
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save';
+        }
+        return;
+      }
+
       const saveData = new FormData(form);
 
       saveData.set('_ajax_save', '1');
@@ -1302,31 +1338,21 @@ function wccrToast(msg) {
       const contentType =
         response.headers.get('content-type') || '';
 
-      if (
-        !response.ok
-        || !contentType.includes('application/json')
-      ) {
-        /*
-         * При validation error wo_save может вернуть HTML
-         * или redirect на detail. Показываем реальный ответ.
-         */
-        if (response.url) {
-          isSubmitting = true;
-          isDirty = false;
-
-          window.removeEventListener(
-            'beforeunload',
-            handleBeforeUnload
-          );
-
-          window.location.href = response.url;
-          return;
-        }
-
-        throw new Error('Work Order save failed.');
+      if (!contentType.includes('application/json')) {
+        throw new Error(
+          "Unexpected server response. Save was not confirmed."
+        );
       }
 
       const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result?.message ||
+          result?.error ||
+          "Work Order validation failed."
+        );
+      }
 
       if (!result?.ok) {
         throw new Error(
@@ -2327,23 +2353,21 @@ try {
   const contentType =
     response.headers.get('content-type') || '';
 
-  if (
-    !response.ok
-    || !contentType.includes('application/json')
-  ) {
-    /*
-     * wo_save returned an existing redirect or HTML error.
-     * Open its final destination so the user sees the error.
-     */
-    if (response.url) {
-      window.location.href = response.url;
-      return;
-    }
-
-    throw new Error('Work Order save failed.');
+  if (!contentType.includes('application/json')) {
+    throw new Error(
+      "Unexpected response while saving before issue."
+    );
   }
 
   const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      result?.message ||
+      result?.error ||
+      "Work Order validation failed."
+    );
+  }
 
   if (!result.issue_url && !issueUrl) {
     throw new Error('Issue URL was not returned.');
@@ -2716,6 +2740,114 @@ return;
   const IS_RO = {{ 'true' if RO else 'false' }};
   const woIdEl = document.querySelector('#woForm input[name="wo_id"]');
   const IS_EDIT_REAL = !!(woIdEl && String(woIdEl.value || '').trim());
+
+  if (IS_EDIT_REAL && !IS_RO) {
+    const form = document.getElementById('woForm');
+    const input = form?.querySelector('[name="job_numbers"]');
+    const save = document.getElementById('saveBtn');
+    const currentId = String(woIdEl.value || '').trim();
+    const api = "{{ url_for('inventory.api_job_duplicate_check') }}";
+
+    if (input) {
+      const status = document.createElement('div');
+      status.className = 'form-text';
+      input.insertAdjacentElement('afterend', status);
+
+      let timer;
+      let revision = 0;
+      let controller;
+
+      function display(message, state, existingId) {
+        status.replaceChildren();
+        status.className = 'form-text ' +
+          (state === 'ok' ? 'text-success' :
+           state === 'checking' ? 'text-muted' : 'text-danger');
+        status.textContent = message;
+
+        const blocked = state !== 'ok';
+        input.classList.toggle('is-invalid', state === 'error');
+
+        if (save) save.disabled = blocked;
+
+        if (existingId) {
+          const link = document.createElement('a');
+          link.href =
+            "{{ url_for('inventory.wo_detail', wo_id=0) }}"
+              .replace(/0\/?$/, String(existingId));
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = ' Open WO #' + existingId;
+          status.appendChild(link);
+        }
+      }
+
+      async function verify() {
+        const id = ++revision;
+        const value = input.value.trim();
+
+        if (controller) controller.abort();
+
+        if (!value) {
+          display('Job Number is required.', 'error');
+          return;
+        }
+
+        controller = new AbortController();
+        display('Checking Job Numbers...', 'checking');
+
+        try {
+          const params = new URLSearchParams({
+            job_numbers: value,
+            current_wo_id: currentId
+          });
+
+          const response = await fetch(
+            api + '?' + params.toString(),
+            {
+              credentials: 'same-origin',
+              headers: {'Accept': 'application/json'},
+              signal: controller.signal
+            }
+          );
+
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+
+          const data = await response.json();
+          if (id !== revision) return;
+
+          if (typeof data.duplicate !== 'boolean')
+            throw new Error('Invalid response');
+
+          if (data.duplicate) {
+            const wo = String(data.existing_id || '');
+            if (!/^\d+$/.test(wo))
+              throw new Error('Missing WO number');
+
+            display('Duplicate Job Number ? WO #' + wo,
+                    'error', wo);
+          } else {
+            display('Job Numbers verified.', 'ok');
+          }
+        } catch (error) {
+          if (id !== revision || error.name === 'AbortError')
+            return;
+          display('Verification unavailable. Retry.', 'error');
+        }
+      }
+
+      function schedule() {
+        ++revision;
+        clearTimeout(timer);
+        if (controller) controller.abort();
+        display('Checking Job Numbers...', 'checking');
+        timer = setTimeout(verify, 800);
+      }
+
+      input.addEventListener('input', schedule);
+      input.addEventListener('change', schedule);
+      verify();
+    }
+  }
 
   if (IS_EDIT_REAL || IS_RO) return;
 

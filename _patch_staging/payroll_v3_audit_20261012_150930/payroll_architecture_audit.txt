@@ -1,0 +1,865 @@
+WCCR V3.0 EMPLOYEE PAY SETTINGS - ARCHITECTURE AUDIT
+
+ROOT: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST
+
+SCANNED FILES: 224
+
+MATCHED FILES: 18
+
+MODE: READ ONLY
+
+==========================================================================================
+FILE: auth\routes.py
+MATCHES: 5
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [],
+  "functions": [
+    {
+      "name": "load_user",
+      "line": 24,
+      "end_line": 36
+    }
+  ]
+}
+MATCHED SOURCE CONTEXT:
+   216:     shift = EmployeeTimeTrackingService.get_open_shift(
+   217:         current_user.id
+   218:     )
+   219:     # WCCR_SMART_SHIFT_RECOVERY_4A
+   220:     recovery_candidate = (
+   221:         EmployeeTimeTrackingService.recovery_candidate(current_user)
+   222:         if shift is None else None
+----------------------------------------------------------------------
+   442: 
+   443:     try:
+   444:         if action == "start":
+   445:             # WCCR_SMART_SHIFT_RECOVERY_4B
+   446:             if EmployeeTimeTrackingService.get_open_shift(
+   447:                 current_user.id
+   448:             ) is not None:
+----------------------------------------------------------------------
+   453:             EmployeeTimeTrackingService.login(current_user)
+   454: 
+   455:         elif action == "resume":
+   456:             # WCCR_SMART_SHIFT_RECOVERY_4A
+   457:             EmployeeTimeTrackingService.resume_shift(current_user)
+   458: 
+   459:         elif action == "end_shift":
+----------------------------------------------------------------------
+   567:                 "expected_lunch_minutes": int(
+   568:                     request.form.get("expected_lunch_minutes", "")
+   569:                 ),
+   570:                 "smart_shift_recovery": (
+   571:                     request.form.get("smart_shift_recovery") == "on"
+   572:                 ),
+   573:             }
+   574: 
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: inventory\routes.py
+MATCHES: 27
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [],
+  "functions": [
+    {
+      "name": "_is_superadmin_user",
+      "line": 300,
+      "end_line": 307
+    },
+    {
+      "name": "_erp_tools_access_allowed",
+      "line": 11699,
+      "end_line": 11704
+    },
+    {
+      "name": "employee_time_tracking_setting",
+      "line": 18763,
+      "end_line": 18799
+    },
+    {
+      "name": "users",
+      "line": 18805,
+      "end_line": 19004
+    },
+    {
+      "name": "user_access",
+      "line": 19011,
+      "end_line": 19553
+    },
+    {
+      "name": "add_user",
+      "line": 19557,
+      "end_line": 19654
+    },
+    {
+      "name": "edit_user",
+      "line": 19659,
+      "end_line": 19813
+    },
+    {
+      "name": "delete_user",
+      "line": 19891,
+      "end_line": 19951
+    },
+    {
+      "name": "attendance_payroll_dashboard",
+      "line": 24129,
+      "end_line": 24202
+    },
+    {
+      "name": "_snap_from_units_payload",
+      "line": 9650,
+      "end_line": 9678
+    }
+  ]
+}
+MATCHED SOURCE CONTEXT:
+ 18818:         default_allowed=True,
+ 18819:     ):
+ 18820:         flash(
+ 18821:             "Access denied: Manage Users access is disabled.",
+ 18822:             "danger",
+ 18823:         )
+ 18824:         return redirect(url_for("inventory.dashboard"))
+----------------------------------------------------------------------
+ 18915:             User.id,
+ 18916:             User.username,
+ 18917:             User.role,
+ 18918:             User.employee_time_tracking_enabled,
+ 18919:         )
+ 18920:         .order_by(User.username.asc())
+ 18921:         .all()
+----------------------------------------------------------------------
+ 18982:         can_manage_attendance_users,
+ 18983:     )
+ 18984: 
+ 18985:     attendance_manage_users_allowed = (
+ 18986:         can_manage_attendance_users(current_user)
+ 18987:     )
+ 18988: 
+ 18989:     response = render_template(
+ 18990:         "users.html",
+ 18991:         attendance_manage_users_allowed=attendance_manage_users_allowed,
+ 18992:         employee_time_csrf=lambda target_id: __import__(
+ 18993:             "services.employee_time_settings",
+ 18994:             fromlist=["make_csrf_token"],
+----------------------------------------------------------------------
+ 19567:         default_allowed=True,
+ 19568:     ):
+ 19569:         flash(
+ 19570:             "Access denied: Manage Users access is disabled.",
+ 19571:             "danger",
+ 19572:         )
+ 19573:         return redirect(url_for("inventory.dashboard"))
+----------------------------------------------------------------------
+ 19656: 
+ 19657: @inventory_bp.route('/users/edit/<int:user_id>', methods=['GET', 'POST'])
+ 19658: @login_required
+ 19659: def edit_user(user_id):
+ 19660:     from sqlalchemy import func
+ 19661:     user = User.query.get_or_404(user_id)
+ 19662: 
+----------------------------------------------------------------------
+ 19673:         default_allowed=True,
+ 19674:     ):
+ 19675:         flash(
+ 19676:             "Access denied: Manage Users access is disabled.",
+ 19677:             "danger",
+ 19678:         )
+ 19679:         return redirect(url_for("inventory.dashboard"))
+----------------------------------------------------------------------
+ 19760:             )
+ 19761:             if exists:
+ 19762:                 flash("Username already exists.", "danger")
+ 19763:                 return redirect(url_for('inventory.edit_user', user_id=user.id))
+ 19764:             user.username = new_username
+ 19765: 
+ 19766:         # Ñ€Ð¾Ð»ÑŒ â€” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð² Ð¿Ñ€ÐµÐ´ÐµÐ»Ð°Ñ… Ñ€Ð°Ð·Ñ€ÐµÑˆÑ‘Ð½Ð½Ñ‹Ñ… Ð¾Ð¿Ñ†Ð¸Ð¹
+----------------------------------------------------------------------
+ 19775:                 "danger",
+ 19776:             )
+ 19777:             return redirect(
+ 19778:                 url_for("inventory.edit_user", user_id=user.id)
+ 19779:             )
+ 19780: 
+ 19781:         if new_role_raw not in allowed_values:
+----------------------------------------------------------------------
+ 19784:                 "danger",
+ 19785:             )
+ 19786:             return redirect(
+ 19787:                 url_for("inventory.edit_user", user_id=user.id)
+ 19788:             )
+ 19789: 
+ 19790:         user.role = new_role_raw
+----------------------------------------------------------------------
+ 19796:             db.session.rollback()
+ 19797:             flash(f"Failed to update user: {e}", "danger")
+ 19798:             return redirect(
+ 19799:                 url_for("inventory.edit_user", user_id=user.id)
+ 19800:             )
+ 19801: 
+ 19802:         flash(
+----------------------------------------------------------------------
+ 19806:         return redirect(url_for("inventory.users"))
+ 19807: 
+ 19808:     return render_template(
+ 19809:         "edit_user.html",
+ 19810:         user=user,
+ 19811:         role_options=role_options,
+ 19812:         change_role_allowed=change_role_allowed,
+----------------------------------------------------------------------
+ 19904:         default_allowed=True,
+ 19905:     ):
+ 19906:         flash(
+ 19907:             "Access denied: Manage Users access is disabled.",
+ 19908:             "danger",
+ 19909:         )
+ 19910:         return redirect(url_for("inventory.dashboard"))
+----------------------------------------------------------------------
+ 24120:     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
+ 24121: 
+ 24122: 
+ 24123: # WCCR_ATTENDANCE_PAYROLL_V29B_BEGIN
+ 24124: @inventory_bp.route("/attendance-payroll", methods=["GET"])
+ 24125: @inventory_bp.route(
+ 24126:     "/attendance-payroll/<string:section>", methods=["GET"]
+ 24127: )
+ 24128: @login_required
+ 24129: def attendance_payroll_dashboard(section="overview"):
+ 24130:     from flask import abort, render_template
+ 24131:     from flask_login import current_user
+ 24132:     from services.erp_access_service import ErpAccessService
+----------------------------------------------------------------------
+ 24138:     permissions = {
+ 24139:         "attendance_view": "erp.attendance.view_all",
+ 24140:         "attendance_review": "erp.attendance.review_shifts",
+ 24141:         "attendance_manage": "erp.attendance.manage_users",
+ 24142:         "payroll_view": "erp.payroll.view",
+ 24143:         "payroll_rates": "erp.payroll.manage_rates",
+ 24144:         "payroll_approve": "erp.payroll.approve",
+ 24145:     }
+ 24146: 
+ 24147:     def allowed(code):
+----------------------------------------------------------------------
+ 24160:         "overview": None,
+ 24161:         "attendance": "attendance_view",
+ 24162:         "timesheets": "attendance_view",
+ 24163:         "pay-settings": "payroll_rates",
+ 24164:         "payroll-preview": "payroll_view",
+ 24165:         "payroll-approval": "payroll_approve",
+ 24166:         "my-access": None,
+ 24167:     }
+ 24168: 
+----------------------------------------------------------------------
+ 24193:             )
+ 24194: 
+ 24195:     return render_template(
+ 24196:         "attendance_payroll_dashboard.html",
+ 24197:         section=section,
+ 24198:         access=access,
+ 24199:         permission_codes=permissions,
+ 24200:         payroll_read_only=True,
+ 24201:         attendance_data=attendance_data,
+ 24202:     )
+ 24203: # WCCR_ATTENDANCE_PAYROLL_V29B_END
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: models.py
+MATCHES: 2
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [
+    {
+      "name": "User",
+      "line": 71,
+      "end_line": 99
+    },
+    {
+      "name": "UserWarehouseAccess",
+      "line": 199,
+      "end_line": 295
+    },
+    {
+      "name": "UserPermission",
+      "line": 363,
+      "end_line": 443
+    },
+    {
+      "name": "UserPermissionAudit",
+      "line": 446,
+      "end_line": 548
+    },
+    {
+      "name": "ErpAccessOverride",
+      "line": 570,
+      "end_line": 705
+    },
+    {
+      "name": "TechnicianPayment",
+      "line": 3102,
+      "end_line": 3142
+    },
+    {
+      "name": "TechnicianPaymentAllocation",
+      "line": 3145,
+      "end_line": 3185
+    }
+  ],
+  "functions": [
+    {
+      "name": "technician_username",
+      "line": 930,
+      "end_line": 933
+    },
+    {
+      "name": "created_by_username",
+      "line": 941,
+      "end_line": 942
+    },
+    {
+      "name": "updated_by_username",
+      "line": 945,
+      "end_line": 946
+    },
+    {
+      "name": "technician_username",
+      "line": 4747,
+      "end_line": 4751
+    }
+  ]
+}
+MATCHED SOURCE CONTEXT:
+    76:     username = db.Column(db.String(64), unique=True, nullable=False)
+    77:     password_hash = db.Column(db.String(128), nullable=False)
+    78:     role = db.Column(db.String(20), nullable=False, default=ROLE_TECHNICIAN)
+    79:     employee_time_tracking_enabled = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('0'))
+    80: 
+    81:     @validates("role")
+    82:     def _validate_role(self, key, value: str | None):
+----------------------------------------------------------------------
+  3115:     unapplied_amount = db.Column(db.Float, nullable=False, default=0.0)
+  3116: 
+  3117:     method = db.Column(db.String(40), nullable=True)
+  3118:     # cash / zelle / check / payroll / other
+  3119: 
+  3120:     reference = db.Column(db.String(120), nullable=True)
+  3121:     note = db.Column(db.String(500), nullable=True)
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: scripts\seed_appliance_permissions.py
+MATCHES: 1
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [],
+  "functions": []
+}
+MATCHED SOURCE CONTEXT:
+   118:         "sort_order": 160,
+   119:     },
+   120:     {
+   121:         "code": "access.manage_users",
+   122:         "name": "Manage User Access",
+   123:         "description": "Manage user access configuration.",
+   124:         "group_name": "Access Administration",
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: services\attendance_permissions.py
+MATCHES: 1
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [],
+  "functions": [
+    {
+      "name": "can_manage_attendance_users",
+      "line": 3,
+      "end_line": 19
+    }
+  ]
+}
+MATCHED SOURCE CONTEXT:
+    14: 
+    15:     return ErpAccessService.is_allowed(
+    16:         actor,
+    17:         "erp.attendance.manage_users",
+    18:         default_allowed=False,
+    19:     )
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: services\employee_time_calculations.py
+MATCHES: 3
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [],
+  "functions": []
+}
+MATCHED SOURCE CONTEXT:
+     1: """Shared WCCR attendance calculations.
+     2: Extracted without changing calculation formulas.
+     3: Payroll approval must use separately validated rules.
+     4: """
+     5: from datetime import datetime, time, timezone
+     6: 
+----------------------------------------------------------------------
+    22:     def seconds_between(start, end):
+    23:         return max(0, (end - start).total_seconds())
+    24: 
+    25:     # WCCR_SMART_SHIFT_RECOVERY_4A
+    26:     def summary(shift, events, end_time):
+    27:         start = aware(shift.started_at)
+    28:         finish = aware(shift.ended_at) or end_time
+----------------------------------------------------------------------
+   134:             unpaid_break
+   135:         )
+   136: 
+   137:         # WCCR_SMART_SHIFT_RECOVERY_4A
+   138:         # Total Shift remains elapsed calendar time; recovery gaps
+   139:         # are excluded from Worked Time.
+   140:         recovery_gap = sum(
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: services\employee_time_policy.py
+MATCHES: 3
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [
+    {
+      "name": "TimePolicyError",
+      "line": 28,
+      "end_line": 29
+    }
+  ],
+  "functions": []
+}
+MATCHED SOURCE CONTEXT:
+    19:     "auto_close_time": "18:00",
+    20:     "missing_lunch_after_hours": 6,
+    21:     "expected_lunch_minutes": 30,
+    22:     "smart_shift_recovery": True,
+    23: }
+    24: 
+    25: _POLICY_LOCK = RLock()
+----------------------------------------------------------------------
+    80: 
+    81:     result["auto_close_time"] = clock
+    82: 
+    83:     recovery = values["smart_shift_recovery"]
+    84: 
+    85:     if type(recovery) is not bool:
+    86:         raise TimePolicyError(
+    87:             "Smart Shift Recovery must be boolean"
+    88:         )
+    89: 
+    90:     result["smart_shift_recovery"] = recovery
+    91: 
+    92:     return result
+    93: 
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: services\employee_time_settings.py
+MATCHES: 2
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [
+    {
+      "name": "EmployeeTimeSettingsError",
+      "line": 16,
+      "end_line": 17
+    }
+  ],
+  "functions": []
+}
+MATCHED SOURCE CONTEXT:
+   101:             "Technician tracking is prohibited"
+   102:         )
+   103: 
+   104:     old_value = bool(target.employee_time_tracking_enabled)
+   105: 
+   106:     if old_value == enabled:
+   107:         return False
+----------------------------------------------------------------------
+   130:                     note="Closed by Superadmin tracking disable",
+   131:                 ))
+   132: 
+   133:         target.employee_time_tracking_enabled = enabled
+   134: 
+   135:         db.session.add(EmployeeTimeSettingsAudit(
+   136:             user_id=target.id,
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: services\employee_time_tracking_service.py
+MATCHES: 3
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [
+    {
+      "name": "TimeTrackingError",
+      "line": 27,
+      "end_line": 29
+    },
+    {
+      "name": "EmployeeTimeTrackingService",
+      "line": 35,
+      "end_line": 872
+    }
+  ],
+  "functions": []
+}
+MATCHED SOURCE CONTEXT:
+    60: 
+    61:             and getattr(
+    62: 
+    63:                 user, "employee_time_tracking_enabled", False
+    64: 
+    65:             ) is True
+    66: 
+----------------------------------------------------------------------
+    90: 
+    91: 
+    92: 
+    93:     # WCCR_SMART_SHIFT_RECOVERY_4A
+    94: 
+    95:     @classmethod
+    96: 
+----------------------------------------------------------------------
+   104: 
+   105: 
+   106: 
+   107:         if not load_policy()["smart_shift_recovery"]:
+   108: 
+   109:             return None
+   110: 
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: services\erp_permission_registry.py
+MATCHES: 14
+==========================================================================================
+PYTHON STRUCTURE:
+{
+  "classes": [],
+  "functions": []
+}
+MATCHED SOURCE CONTEXT:
+   291:         "permissions": [
+   292:             {
+   293:                 "code": "erp.users.access",
+   294:                 "name": "Access Manage Users",
+   295:                 "description": "Open Manage Users.",
+   296:             },
+   297:             {
+   298:                 "code": "erp.users.create",
+----------------------------------------------------------------------
+   376: ERP_PERMISSION_GROUPS.append({
+   377:     "key": "attendance",
+   378:     "label": "Attendance",
+   379:     "description": "Employee attendance and payroll permissions.",
+   380:     "permissions": [
+   381:         {
+   382:             "code": "erp.attendance.view_all",
+----------------------------------------------------------------------
+   389:             "description": "Review Shifts.",
+   390:         },
+   391:         {
+   392:             "code": "erp.attendance.manage_users",
+   393:             "name": "Manage Attendance Users",
+   394:             "description": "Manage Attendance Users.",
+   395:         },
+----------------------------------------------------------------------
+   397: })
+   398: 
+   399: ERP_PERMISSION_GROUPS.append({
+   400:     "key": "payroll",
+   401:     "label": "Payroll",
+   402:     "description": "Employee attendance and payroll permissions.",
+   403:     "permissions": [
+   404:         {
+   405:             "code": "erp.payroll.view",
+   406:             "name": "View Payroll",
+   407:             "description": "View Payroll.",
+   408:         },
+   409:         {
+   410:             "code": "erp.payroll.manage_rates",
+   411:             "name": "Manage Pay Rates",
+   412:             "description": "Manage Pay Rates.",
+   413:         },
+   414:         {
+   415:             "code": "erp.payroll.approve",
+   416:             "name": "Approve Payroll",
+   417:             "description": "Approve Payroll.",
+   418:         },
+   419:     ],
+   420: })
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: templates\accounting\payment_new.html
+MATCHES: 4
+==========================================================================================
+MATCHED SOURCE CONTEXT:
+    43:       <div class="col-md-3">
+    44:         <label class="form-label">Method</label>
+    45:         <select name="method" class="form-select">
+    46:           <option value="payroll" selected>Payroll Deduction</option>
+    47:             <option value="cash">Cash</option>
+    48:             <option value="check">Check</option>
+    49:             <option value="zelle">Zelle</option>
+----------------------------------------------------------------------
+    54:       </div>
+    55: 
+    56:       <div class="col-md-3">
+    57:         <label class="form-label">Reference # / Payroll Period</label>
+    58:         <input name="reference"
+    59:                class="form-control"
+    60:                placeholder="Payroll date / payroll # / check # / Zelle ref">
+    61:       </div>
+    62: 
+    63:       <div class="col-12">
+----------------------------------------------------------------------
+   128: 
+   129:   <input type="hidden" name="payment_date" value="{{ request.form.get('payment_date') or today }}">
+   130:   <input type="hidden" name="amount" value="{{ amount_raw }}">
+   131:   <input type="hidden" name="method" value="{{ request.form.get('method') or 'payroll' }}">
+   132:   <input type="hidden" name="reference" value="{{ request.form.get('reference') or '' }}">
+   133:   <input type="hidden" name="note" value="{{ request.form.get('note') or '' }}">
+   134: 
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: templates\attendance_payroll_dashboard.html
+MATCHES: 19
+==========================================================================================
+MATCHED SOURCE CONTEXT:
+     1: {% extends "base.html" %}
+     2: {% block content %}
+     3: <div class="container-fluid py-3">
+     4:   <h3 class="mb-2">Attendance &amp; Payroll</h3>
+     5:   <p class="text-muted">
+     6:     Employee attendance, timesheets and payroll preparation.
+     7:   </p>
+     8: 
+     9:   <div class="d-flex flex-wrap gap-2 mb-4">
+----------------------------------------------------------------------
+    12:       ('attendance', 'Attendance'),
+    13:       ('timesheets', 'Timesheets'),
+    14:       ('pay-settings', 'Employee Pay Settings'),
+    15:       ('payroll-preview', 'Payroll Preview'),
+    16:       ('payroll-approval', 'Payroll Approval'),
+    17:       ('my-access', 'My Access')
+    18:     ] %}
+    19:     {% for key, label in tabs %}
+    20:       <a class="btn btn-sm
+    21:         {{ 'btn-primary' if section == key else 'btn-outline-secondary' }}"
+    22:         href="{{ url_for('inventory.attendance_payroll_dashboard',
+    23:                          section=key) }}">
+    24:         {{ label }}
+    25:       </a>
+----------------------------------------------------------------------
+    37:       </div>
+    38:       <div class="col-md-6">
+    39:         <div class="card"><div class="card-body">
+    40:           <h5>Payroll</h5>
+    41:           <p>Pay profiles, overtime and payroll approval.</p>
+    42:           <span class="badge bg-secondary">
+    43:             Payroll engine pending
+    44:           </span>
+    45:         </div></div>
+    46:       </div>
+----------------------------------------------------------------------
+    88:     <p>Planned employee profile fields:</p>
+    89:     <ul>
+    90:       <li>Work State (California initially)</li>
+    91:       <li>Hourly or Salary</li>
+    92:       <li>Hourly Rate or Salary Amount</li>
+    93:       <li>Exempt / Non-exempt classification</li>
+    94:       <li>Effective Date and Rate History</li>
+    95:       <li>Automatic Overtime Policy</li>
+    96:     </ul>
+    97:     <div class="alert alert-warning">
+    98:       Settings are not editable yet. No payroll data is being
+    99:       written or calculated.
+   100:     </div>
+   101: 
+   102:   {% elif section == 'payroll-preview' %}
+   103:     <h5>Payroll Preview</h5>
+   104:     <div class="alert alert-warning">
+   105:       Payroll calculations are not yet enabled.
+   106:     </div>
+   107: 
+   108:   {% elif section == 'payroll-approval' %}
+   109:     <h5>Payroll Approval</h5>
+   110:     <div class="alert alert-warning">
+   111:       Approval actions are not yet enabled.
+   112:     </div>
+----------------------------------------------------------------------
+   115: 
+   116: {# WCCR_ATTENDANCE_DASHBOARD_V294 #}
+   117: {% if section in ["overview", "attendance", "timesheets"] %}
+   118:   {% include "attendance_payroll_live.html" %}
+   119: {% endif %}
+   120: {% endblock %}
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: templates\attendance_payroll_live.html
+MATCHES: 1
+==========================================================================================
+MATCHED SOURCE CONTEXT:
+     3: 
+     4:   <div class="alert alert-info py-2">
+     5:     Preliminary attendance information.
+     6:     Not approved for payroll.
+     7:   </div>
+     8: 
+     9:   <div class="row g-3 mb-4">
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: templates\base.html
+MATCHES: 6
+==========================================================================================
+MATCHED SOURCE CONTEXT:
+   617:                 ) %}
+   618:           <li class="nav-item">
+   619:             <a class="nav-link{% if request.endpoint and request.endpoint.startswith('inventory.users') %} active{% endif %}"
+   620:                href="{{ url_for('inventory.users') }}">MANAGE USERS</a>
+   621:           </li>
+   622:           {% endif %}
+   623:         </ul>
+----------------------------------------------------------------------
+   638:             </button>
+   639:             <a class="wccr-btn-ghost text-decoration-none" href="{{ url_for('inventory.change_password', user_id=current_user.id) }}">🔑 CHANGE PASSWORD</a>
+   640:             
+   641: {# WCCR_ATTENDANCE_PAYROLL_NAV_V29B_BEGIN #}
+   642: {% if current_user.is_authenticated
+   643:       and (current_user.role or '')|lower in ['superadmin', 'admin'] %}
+   644: <a class="nav-link"
+   645:    href="{{ url_for('inventory.attendance_payroll_dashboard') }}">
+   646:   Attendance &amp; Payroll
+   647: </a>
+   648: {% endif %}
+   649: {# WCCR_ATTENDANCE_PAYROLL_NAV_V29B_END #}
+   650: 
+   651: {# WCCR_MY_TIME_V1 NAV #}
+   652:             {% if current_user.is_authenticated
+   653:                   and current_user.employee_time_tracking_enabled is sameas true
+   654:                   and (current_user.role or '')|lower != 'technician' %}
+   655:             <a class="wccr-btn-ghost text-decoration-none"
+   656:                href="{{ url_for('auth.my_time') }}">MY TIME</a>
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: templates\my_time.html
+MATCHES: 3
+==========================================================================================
+MATCHED SOURCE CONTEXT:
+    78:         <p class="text-muted small mb-4">
+    79:           Lunch and Break beyond the first {{ paid_break_limit_minutes }} minutes per shift are
+    80:           excluded from Worked Time. Preliminary estimate,
+    81:           not an approved payroll record.
+    82:         </p>
+    83: 
+    84:         <div class="d-flex flex-wrap gap-2">
+----------------------------------------------------------------------
+   116: 
+   117:       {% else %}
+   118:         <span class="badge bg-secondary mb-3">No Active Shift</span>
+   119:         {# WCCR_SMART_SHIFT_RECOVERY_4A #}
+   120:         {% if recovery_candidate %}
+   121:           <p class="text-muted">
+   122:             Your previous shift ended today. You can resume it.
+----------------------------------------------------------------------
+   131:           <p class="text-muted">Start a new shift when you begin working.</p>
+   132:         {% endif %}
+   133: 
+   134:         {# WCCR_SMART_SHIFT_RECOVERY_4B #}
+   135:         {% if not recovery_candidate %}
+   136:         <form method="post" action="{{ url_for('auth.my_time_action') }}">
+   137:           <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: templates\time_tracking_settings.html
+MATCHES: 2
+==========================================================================================
+MATCHED SOURCE CONTEXT:
+    70:             <label class="form-label d-block">Smart Shift Recovery</label>
+    71:             <div class="form-check form-switch mt-2">
+    72:               <input class="form-check-input" type="checkbox"
+    73:                      id="smartRecovery" name="smart_shift_recovery"
+    74:                      {% if policy.smart_shift_recovery %}checked{% endif %}>
+    75:               <label class="form-check-label" for="smartRecovery">
+    76:                 Enable recovery
+    77:               </label>
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: templates\user_access.html
+MATCHES: 1
+==========================================================================================
+MATCHED SOURCE CONTEXT:
+    20:       </div>
+    21: 
+    22:       <div class="d-flex gap-2">
+    23:         <a href="{{ url_for('inventory.edit_user', user_id=user.id) }}"
+    24:            class="btn btn-outline-primary btn-sm shadow-sm"
+    25:            style="border-radius:.6rem;">
+    26:           ✏️ Edit User
+----------------------------------------------------------------------
+
+==========================================================================================
+FILE: templates\users.html
+MATCHES: 6
+==========================================================================================
+MATCHED SOURCE CONTEXT:
+   261:                   <td>
+   262:                     {% if r == 'technician' %}
+   263:                       <span class="text-muted small">N/A</span>
+   264:                     {% elif attendance_manage_users_allowed %}
+   265:                       <form method="post"
+   266:                             class="m-0"
+   267:                             action="{{ url_for('inventory.employee_time_tracking_setting', user_id=u.id) }}">
+----------------------------------------------------------------------
+   270:                                value="{{ employee_time_csrf(u.id) }}">
+   271:                         <input type="hidden"
+   272:                                name="enabled"
+   273:                                value="{{ '0' if u.employee_time_tracking_enabled else '1' }}">
+   274:                         <button type="submit"
+   275:                                 class="btn btn-sm {{ 'btn-success' if u.employee_time_tracking_enabled else 'btn-outline-secondary' }}"
+   276:                                 onclick="return confirm('Change time tracking for this employee?');">
+   277:                           {{ 'ON' if u.employee_time_tracking_enabled else 'OFF' }}
+   278:                         </button>
+   279:                       </form>
+   280:                     {% else %}
+   281:                       <span class="text-muted small">
+   282:                         {{ 'ON' if u.employee_time_tracking_enabled else 'OFF' }}
+   283:                       </span>
+   284:                     {% endif %}
+   285:                   </td>
+----------------------------------------------------------------------
+   305:                         {% if users_edit_allowed %}
+   306:                         <a class="btn btn-light btn-sm border shadow-sm"
+   307:                            style="font-weight:500; line-height:1.2; border-radius:.6rem; min-width:70px;"
+   308:                            href="{{ url_for('inventory.edit_user', user_id=u.id) }}">
+   309:                           ✏️ Edit
+   310:                         </a>
+   311:                         {% endif %}
+----------------------------------------------------------------------

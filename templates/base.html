@@ -637,6 +637,24 @@
               🧪 SESSION
             </button>
             <a class="wccr-btn-ghost text-decoration-none" href="{{ url_for('inventory.change_password', user_id=current_user.id) }}">🔑 CHANGE PASSWORD</a>
+            
+{# WCCR_ATTENDANCE_PAYROLL_NAV_V29B_BEGIN #}
+{% if current_user.is_authenticated
+      and (current_user.role or '')|lower in ['superadmin', 'admin'] %}
+<a class="nav-link"
+   href="{{ url_for('inventory.attendance_payroll_dashboard') }}">
+  Attendance &amp; Payroll
+</a>
+{% endif %}
+{# WCCR_ATTENDANCE_PAYROLL_NAV_V29B_END #}
+
+{# WCCR_MY_TIME_V1 NAV #}
+            {% if current_user.is_authenticated
+                  and current_user.employee_time_tracking_enabled is sameas true
+                  and (current_user.role or '')|lower != 'technician' %}
+            <a class="wccr-btn-ghost text-decoration-none"
+               href="{{ url_for('auth.my_time') }}">MY TIME</a>
+            {% endif %}
             <a class="wccr-btn-solid text-decoration-none" href="{{ url_for('auth.logout') }}">LOGOUT</a>
           </div>
         </div>

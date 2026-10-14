@@ -76,6 +76,7 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(64), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
     role = db.Column(db.String(20), nullable=False, default=ROLE_TECHNICIAN)
+    employee_time_tracking_enabled = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('0'))
 
     @validates("role")
     def _validate_role(self, key, value: str | None):

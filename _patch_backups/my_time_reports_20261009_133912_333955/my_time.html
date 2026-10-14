@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4" style="max-width:960px">
+
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <h3 class="mb-1">My Time</h3>
+      <div class="text-muted small">Employee Time Tracking ? Los Angeles Time</div>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('auth.my_time') }}">Refresh</a>
+  </div>
+
+  <div class="card shadow-sm border-0 rounded-4 mb-4">
+    <div class="card-body p-4">
+
+      {% if shift %}
+        <div class="d-flex flex-wrap justify-content-between gap-3 mb-3">
+          <div>
+            <div class="text-muted small">Shift started</div>
+            <strong>{{ started }}</strong>
+          </div>
+          <div>
+            {% if shift.requires_review %}
+              <span class="badge bg-warning text-dark">Pending Review</span>
+            {% elif active_pause %}
+              <span class="badge bg-info text-dark">{{ active_pause|title }}</span>
+            {% else %}
+              <span class="badge bg-success">Working</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="text-muted small">Estimated Worked Time</div>
+        <div id="myTimeClock"
+             class="display-5 fw-semibold mb-2"
+             data-seconds="{{ worked_seconds }}"
+             data-running="{{ '0' if active_pause else '1' }}">00:00:00</div>
+
+        <p class="text-muted small mb-4">
+          Lunch and break time is excluded. This is a preliminary
+          estimate, not an approved payroll record.
+        </p>
+
+        <div class="d-flex flex-wrap gap-2">
+          {% if active_pause %}
+            <form method="post" action="{{ url_for('auth.my_time_action') }}">
+              <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="action"
+                     value="{{ 'lunch_end' if active_pause == 'LUNCH' else 'break_end' }}">
+              <button class="btn btn-primary" type="submit">
+                End {{ active_pause|title }}
+              </button>
+            </form>
+          {% else %}
+            <form method="post" action="{{ url_for('auth.my_time_action') }}">
+              <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="lunch_start">
+              <button class="btn btn-outline-primary" type="submit">Start Lunch</button>
+            </form>
+
+            <form method="post" action="{{ url_for('auth.my_time_action') }}">
+              <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="break_start">
+              <button class="btn btn-outline-primary" type="submit">Start Break</button>
+            </form>
+          {% endif %}
+
+          <form method="post"
+                action="{{ url_for('auth.my_time_action') }}"
+                onsubmit="return confirm('End this shift?');">
+            <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="end_shift">
+            <button class="btn btn-danger" type="submit">End Shift</button>
+          </form>
+        </div>
+
+      {% else %}
+        <span class="badge bg-secondary mb-3">No Active Shift</span>
+        <p class="text-muted">Start a new shift when you begin working.</p>
+
+        <form method="post" action="{{ url_for('auth.my_time_action') }}">
+          <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="action" value="start">
+          <button class="btn btn-success" type="submit">Start Shift</button>
+        </form>
+      {% endif %}
+
+    </div>
+  </div>
+
+  <div class="card shadow-sm border-0 rounded-4">
+    <div class="card-body p-4">
+      <h5 class="mb-3">Recent Shifts</h5>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Start (PT)</th>
+              <th>End (PT)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in recent %}
+              <tr>
+                <td>{{ la_time(item.started_at) }}</td>
+                <td>{{ la_time(item.ended_at) }}</td>
+                <td>{{ 'Pending review' if item.requires_review else item.status }}</td>
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="3" class="text-muted">No shifts yet</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  const el = document.getElementById("myTimeClock");
+  if (!el) return;
+
+  let seconds = Number(el.dataset.seconds || 0);
+  const running = el.dataset.running === "1";
+
+  function render() {
+    const s = Math.max(0, Math.floor(seconds));
+    el.textContent = [
+      Math.floor(s / 3600),
+      Math.floor(s / 60) % 60,
+      s % 60
+    ].map(n => String(n).padStart(2, "0")).join(":");
+  }
+
+  render();
+
+  if (running) {
+    setInterval(function () {
+      seconds++;
+      render();
+    }, 1000);
+  }
+})();
+</script>
+{% endblock %}
