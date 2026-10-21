@@ -1,0 +1,1237 @@
+WCCR V6.7B APPROVAL WORKFLOW
+FOCUSED SOURCE INSPECTION
+READ ONLY - NO DATABASE ACCESS
+======================================================================
+
+======================================================================
+FILE: auth/routes.py
+======================================================================
+
+--- LINES 630-810 ---
+  630:         policy = None
+  631: 
+  632:     csrf_token = serializer.dumps({
+  633:         "uid": current_user.id,
+  634:         "sid": session.get("_id", "")
+  635:     })
+  636: 
+  637:     return render_template(
+  638:         "time_tracking_settings.html",
+  639:         policy=policy,
+  640:         csrf_token=csrf_token,
+  641:         can_manage=can_manage,
+  642:     )
+  643: 
+  644: 
+  645: __all__ = ['auth_bp']
+  646: 
+  647: 
+  648: # WCCR_MY_TIME_CORRECTION_V41
+  649: @auth_bp.route("/my-time/correction/<int:shift_id>",
+  650:                methods=["GET", "POST"])
+  651: @login_required
+  652: def my_time_correction(shift_id):
+  653:     from flask import abort, current_app
+  654:     from itsdangerous import (
+  655:         URLSafeTimedSerializer, BadSignature, SignatureExpired
+  656:     )
+  657:     from sqlalchemy import text
+  658:     from sqlalchemy.exc import IntegrityError
+  659:     from datetime import datetime, timezone, timedelta
+  660:     from zoneinfo import ZoneInfo
+  661:     from services.employee_time_tracking_models import EmployeeShift
+  662: 
+  663:     if not EmployeeTimeTrackingService.eligible(current_user):
+  664:         abort(403)
+  665: 
+  666:     shift = db.session.get(EmployeeShift, shift_id)
+  667:     if shift is None or shift.user_id != current_user.id:
+  668:         abort(404)
+  669:     if shift.ended_at is None:
+  670:         abort(409)
+  671: 
+  672:     la = ZoneInfo("America/Los_Angeles")
+  673: 
+  674:     def utc(value):
+  675:         if value.tzinfo is None:
+  676:             return value.replace(tzinfo=timezone.utc)
+  677:         return value.astimezone(timezone.utc)
+  678: 
+  679:     def local(value):
+  680:         return utc(value).astimezone(la).strftime(
+  681:             "%Y-%m-%dT%H:%M"
+  682:         )
+  683: 
+  684:     def parse_local(value):
+  685:         try:
+  686:             naive = datetime.strptime(value, "%Y-%m-%dT%H:%M")
+  687:         except (ValueError, TypeError):
+  688:             raise ValueError("Invalid date or time.")
+  689: 
+  690:         candidates = set()
+  691:         for fold in (0, 1):
+  692:             candidate = naive.replace(tzinfo=la, fold=fold)
+  693:             instant = candidate.astimezone(timezone.utc)
+  694:             if instant.astimezone(la).replace(
+  695:                 tzinfo=None
+  696:             ) == naive:
+  697:                 candidates.add(instant)
+  698: 
+  699:         if len(candidates) != 1:
+  700:             raise ValueError(
+  701:                 "Ambiguous or nonexistent Pacific time."
+  702:             )
+  703:         return candidates.pop()
+  704: 
+  705:     serializer = URLSafeTimedSerializer(
+  706:         current_app.secret_key,
+  707:         salt="wccr-my-time-correction-v41"
+  708:     )
+  709: 
+  710:     old_start = utc(shift.started_at)
+  711:     old_end = utc(shift.ended_at)
+  712: 
+  713:     if request.method == "POST":
+  714:         required = {
+  715:             "csrf_token", "started_at", "ended_at",
+  716:             "reason", "expected_start", "expected_end"
+  717:         }
+  718:         if set(request.form.keys()) != required:
+  719:             abort(400)
+  720: 
+  721:         try:
+  722:             token = serializer.loads(
+  723:                 request.form["csrf_token"], max_age=1800
+  724:             )
+  725:         except (BadSignature, SignatureExpired):
+  726:             abort(400)
+  727: 
+  728:         if not isinstance(token, dict) or (
+  729:             token.get("uid") != current_user.id
+  730:             or token.get("shift") != shift_id
+  731:             or token.get("sid") != session.get("_id", "")
+  732:         ):
+  733:             abort(400)
+  734: 
+  735:         try:
+  736:             reason = request.form["reason"].strip()
+  737:             start = parse_local(request.form["started_at"])
+  738:             end = parse_local(request.form["ended_at"])
+  739: 
+  740:             if not 4 <= len(reason) <= 1000:
+  741:                 raise ValueError(
+  742:                     "Reason must contain 4 to 1000 characters."
+  743:                 )
+  744:             if end <= start or end - start > timedelta(hours=24):
+  745:                 raise ValueError(
+  746:                     "Invalid interval (maximum 24 hours)."
+  747:                 )
+  748:             if end > datetime.now(timezone.utc):
+  749:                 raise ValueError("End cannot be in the future.")
+  750:             if start == old_start and end == old_end:
+  751:                 raise ValueError("No changes requested.")
+  752:             if (
+  753:                 request.form["expected_start"] != old_start.isoformat()
+  754:                 or request.form["expected_end"] != old_end.isoformat()
+  755:             ):
+  756:                 raise ValueError("Shift changed. Refresh the page.")
+  757: 
+  758:             db.session.execute(text(
+  759:                 "INSERT INTO employee_time_correction_requests "
+  760:                 "(shift_id,user_id,original_start_utc,"
+  761:                 "original_end_utc,requested_start_utc,"
+  762:                 "requested_end_utc,reason,status,created_at_utc) "
+  763:                 "VALUES (:shift,:uid,:os,:oe,:ns,:ne,"
+  764:                 ":reason,'pending',:created)"
+  765:             ), {
+  766:                 "shift": shift_id,
+  767:                 "uid": current_user.id,
+  768:                 "os": old_start.isoformat(),
+  769:                 "oe": old_end.isoformat(),
+  770:                 "ns": start.isoformat(),
+  771:                 "ne": end.isoformat(),
+  772:                 "reason": reason,
+  773:                 "created": datetime.now(timezone.utc).isoformat()
+  774:             })
+  775:             db.session.commit()
+  776:         except ValueError as exc:
+  777:             db.session.rollback()
+  778:             flash(str(exc), "warning")
+  779:         except IntegrityError:
+  780:             db.session.rollback()
+  781:             flash("A request is already pending.", "warning")
+  782:         except Exception:
+  783:             db.session.rollback()
+  784:             current_app.logger.exception(
+  785:                 "Correction request failed: %s", shift_id
+  786:             )
+  787:             flash("Unable to submit request.", "danger")
+  788:         else:
+  789:             flash("Correction request submitted.", "success")
+  790:             return redirect(url_for("auth.my_time"))
+  791: 
+  792:     token = serializer.dumps({
+  793:         "uid": current_user.id,
+  794:         "shift": shift_id,
+  795:         "sid": session.get("_id", "")
+  796:     })
+  797: 
+  798:     return render_template(
+  799:         "employee_time_correction_request.html",
+  800:         shift=shift,
+  801:         started_at=local(shift.started_at),
+  802:         ended_at=local(shift.ended_at),
+  803:         expected_start=old_start.isoformat(),
+  804:         expected_end=old_end.isoformat(),
+  805:         csrf_token=token
+  806:     )
+  807: 
+  808: 
+  809: # WCCR_ATTENDANCE_V50_CORE
+  810: @auth_bp.route("/attendance/correction-requests", methods=["GET"])
+
+--- LINES 810-1045 ---
+  810: @auth_bp.route("/attendance/correction-requests", methods=["GET"])
+  811: @login_required
+  812: def attendance_correction_requests():
+  813:     from flask import abort, current_app
+  814:     from sqlalchemy import text
+  815:     from services.attendance_review_permissions import can_review_action
+  816:     from services.employee_time_tracking_models import EmployeeShift
+  817:     from models import User
+  818: 
+  819:     if not (
+  820:         can_review_action(current_user, "review")
+  821:         or can_review_action(current_user, "approve")
+  822:     ):
+  823:         abort(403)
+  824: 
+  825:     records = db.session.execute(text("""
+  826:         SELECT id, shift_id, user_id, status, reason,
+  827:                original_start_utc, original_end_utc,
+  828:                requested_start_utc, requested_end_utc,
+  829:                created_at_utc, reviewed_by_user_id,
+  830:                reviewed_at_utc, review_note
+  831:         FROM employee_time_correction_requests
+  832:         ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END,
+  833:                  id DESC
+  834:         LIMIT 500
+  835:     """)).mappings().all()
+  836: 
+  837: 
+  838:     # WCCR_ATTENDANCE_V51_PREPARE
+  839:     from datetime import datetime, timezone
+  840:     from zoneinfo import ZoneInfo
+  841:     from itsdangerous import URLSafeTimedSerializer
+  842: 
+  843:     pacific = ZoneInfo("America/Los_Angeles")
+  844:     serializer = URLSafeTimedSerializer(
+  845:         current_app.secret_key,
+  846:         salt="wccr-correction-review-v51"
+  847:     )
+  848: 
+  849:     def display_pt(value):
+  850:         if not value:
+  851:             return "-"
+  852:         dt = datetime.fromisoformat(value)
+  853:         if dt.tzinfo is None:
+  854:             dt = dt.replace(tzinfo=timezone.utc)
+  855:         return dt.astimezone(pacific).strftime(
+  856:             "%b %d, %Y %I:%M %p"
+  857:         )
+  858: 
+  859:     prepared = []
+  860:     for item in records:
+  861:         r = dict(item)
+  862:         r["original_start_pt"] = display_pt(
+  863:             r["original_start_utc"]
+  864:         )
+  865:         r["original_end_pt"] = display_pt(
+  866:             r["original_end_utc"]
+  867:         )
+  868:         r["requested_start_pt"] = display_pt(
+  869:             r["requested_start_utc"]
+  870:         )
+  871:         r["requested_end_pt"] = display_pt(
+  872:             r["requested_end_utc"]
+  873:         )
+  874:         r["employee_name"] = "Employee #" + str(r["user_id"])
+  875:         r["review_csrf"] = serializer.dumps({
+  876:             "uid": current_user.id,
+  877:             "rid": r["id"],
+  878:             "sid": session.get("_id", "")
+  879:         })
+  880:         prepared.append(r)
+  881: 
+  882:     return render_template(
+  883:         "attendance_correction_queue.html",
+  884:         records=prepared,
+  885:         can_edit=can_review_action(current_user, "edit"),
+  886:         can_approve=can_review_action(current_user, "approve")
+  887:     )
+  888: 
+  889: 
+  890: # WCCR_ATTENDANCE_V51_ACTIONS
+  891: @auth_bp.route(
+  892:     "/attendance/correction-requests/<int:request_id>/reject",
+  893:     methods=["POST"]
+  894: )
+  895: @login_required
+  896: def attendance_correction_reject(request_id):
+  897:     from flask import abort, current_app
+  898:     from sqlalchemy import text
+  899:     from itsdangerous import (
+  900:         URLSafeTimedSerializer, BadSignature, SignatureExpired
+  901:     )
+  902:     from datetime import datetime, timezone
+  903:     from services.attendance_review_permissions import can_review_action
+  904: 
+  905:     if not can_review_action(current_user, "approve"):
+  906:         abort(403)
+  907: 
+  908:     serializer = URLSafeTimedSerializer(
+  909:         current_app.secret_key,
+  910:         salt="wccr-correction-review-v51"
+  911:     )
+  912:     try:
+  913:         payload = serializer.loads(
+  914:             request.form.get("csrf_token", ""), max_age=1800
+  915:         )
+  916:     except (BadSignature, SignatureExpired):
+  917:         abort(400)
+  918: 
+  919:     if (
+  920:         not isinstance(payload, dict)
+  921:         or payload.get("uid") != current_user.id
+  922:         or payload.get("rid") != request_id
+  923:         or payload.get("sid") != session.get("_id", "")
+  924:     ):
+  925:         abort(400)
+  926: 
+  927:     note = request.form.get("review_note", "").strip()
+  928:     if not 4 <= len(note) <= 1000:
+  929:         flash("Review reason must be 4-1000 characters.", "warning")
+  930:         return redirect(url_for("auth.attendance_correction_requests"))
+  931: 
+  932:     try:
+  933:         result = db.session.execute(text("""
+  934:             UPDATE employee_time_correction_requests
+  935:             SET status='rejected',
+  936:                 reviewed_by_user_id=:uid,
+  937:                 reviewed_at_utc=:now,
+  938:                 review_note=:note
+  939:             WHERE id=:rid AND status='pending'
+  940:         """), {
+  941:             "uid": current_user.id,
+  942:             "now": datetime.now(timezone.utc).isoformat(),
+  943:             "note": note,
+  944:             "rid": request_id
+  945:         })
+  946:         if result.rowcount != 1:
+  947:             db.session.rollback()
+  948:             flash("Request already processed or not found.", "warning")
+  949:         else:
+  950:             db.session.commit()
+  951:             flash("Correction request rejected.", "success")
+  952:     except Exception:
+  953:         db.session.rollback()
+  954:         current_app.logger.exception(
+  955:             "Correction rejection failed: %s", request_id
+  956:         )
+  957:         flash("Unable to reject request.", "danger")
+  958: 
+  959:     return redirect(url_for("auth.attendance_correction_requests"))
+  960: 
+  961: 
+  962: # WCCR_ATTENDANCE_V52_REVIEW
+  963: @auth_bp.route(
+  964:     "/attendance/correction-requests/<int:request_id>",
+  965:     methods=["GET"]
+  966: )
+  967: @login_required
+  968: def attendance_correction_detail(request_id):
+  969:     from flask import abort
+  970:     from sqlalchemy import text, select
+  971:     from datetime import datetime, timezone
+  972:     from zoneinfo import ZoneInfo
+  973:     from services.attendance_review_permissions import can_review_action
+  974:     from services.employee_time_tracking_models import (
+  975:         EmployeeShift, EmployeeTimeEvent
+  976:     )
+  977: 
+  978:     can_review = can_review_action(current_user, "review")
+  979:     can_edit = can_review_action(current_user, "edit")
+  980:     can_approve = can_review_action(current_user, "approve")
+  981: 
+  982:     if not (can_review or can_edit or can_approve):
+  983:         abort(403)
+  984: 
+  985:     request_record = db.session.execute(text("""
+  986:         SELECT *
+  987:         FROM employee_time_correction_requests
+  988:         WHERE id=:rid
+  989:     """), {"rid": request_id}).mappings().first()
+  990: 
+  991:     if request_record is None:
+  992:         abort(404)
+  993: 
+  994:     record = dict(request_record)
+  995:     shift = db.session.get(EmployeeShift, record["shift_id"])
+  996: 
+  997:     if shift is None or shift.user_id != record["user_id"]:
+  998:         abort(409)
+  999: 
+ 1000:     events = db.session.execute(
+ 1001:         select(EmployeeTimeEvent)
+ 1002:         .where(EmployeeTimeEvent.shift_id == shift.id)
+ 1003:         .order_by(EmployeeTimeEvent.id)
+ 1004:     ).scalars().all()
+ 1005: 
+ 1006:     pacific = ZoneInfo("America/Los_Angeles")
+ 1007: 
+ 1008:     def pt(value):
+ 1009:         if value is None:
+ 1010:             return "-"
+ 1011:         if isinstance(value, str):
+ 1012:             value = datetime.fromisoformat(value)
+ 1013:         if value.tzinfo is None:
+ 1014:             value = value.replace(tzinfo=timezone.utc)
+ 1015:         return value.astimezone(pacific).strftime(
+ 1016:             "%b %d, %Y %I:%M %p"
+ 1017:         )
+ 1018: 
+ 1019:     event_rows = [
+ 1020:         {
+ 1021:             "type": event.event_type,
+ 1022:             "time": pt(event.occurred_at),
+ 1023:             "note": event.note or ""
+ 1024:         }
+ 1025:         for event in events
+ 1026:     ]
+ 1027: 
+ 1028:     return render_template(
+ 1029:         "attendance_correction_detail.html",
+ 1030:         record=record,
+ 1031:         shift=shift,
+ 1032:         events=event_rows,
+ 1033:         pt=pt,
+ 1034:         can_edit=can_edit,
+ 1035:         can_approve=can_approve
+ 1036:     )
+ 1037: 
+ 1038: 
+ 1039: # WCCR_ATTENDANCE_V54_INTERVAL
+ 1040: @auth_bp.route(
+ 1041:     "/attendance/shift/<int:shift_id>/intervals",
+ 1042:     methods=["GET", "POST"]
+ 1043: )
+ 1044: @login_required
+ 1045: def attendance_interval_editor(shift_id):
+
+--- LINES 1045-1482 ---
+ 1045: def attendance_interval_editor(shift_id):
+ 1046:     from flask import abort, current_app
+ 1047:     from sqlalchemy import text, select
+ 1048:     from datetime import datetime, timezone, timedelta
+ 1049:     from zoneinfo import ZoneInfo
+ 1050:     from itsdangerous import (
+ 1051:         URLSafeTimedSerializer, BadSignature, SignatureExpired
+ 1052:     )
+ 1053:     from services.attendance_review_permissions import can_review_action
+ 1054:     from services.employee_time_tracking_models import (
+ 1055:         EmployeeShift, EmployeeTimeEvent
+ 1056:     )
+ 1057: 
+ 1058:     if not can_review_action(current_user, "edit"):
+ 1059:         abort(403)
+ 1060: 
+ 1061:     shift = db.session.get(EmployeeShift, shift_id)
+ 1062:     if shift is None:
+ 1063:         abort(404)
+ 1064:     if shift.ended_at is None:
+ 1065:         abort(409)
+ 1066: 
+ 1067:     pacific = ZoneInfo("America/Los_Angeles")
+ 1068: 
+ 1069:     def aware(value):
+ 1070:         if value.tzinfo is None:
+ 1071:             return value.replace(tzinfo=timezone.utc)
+ 1072:         return value.astimezone(timezone.utc)
+ 1073: 
+ 1074:     def pt(value):
+ 1075:         if value is None:
+ 1076:             return "-"
+ 1077:         if isinstance(value, str):
+ 1078:             value = datetime.fromisoformat(value)
+ 1079:         return aware(value).astimezone(pacific).strftime(
+ 1080:             "%b %d, %Y %I:%M %p"
+ 1081:         )
+ 1082: 
+ 1083:     def parse_pt(value):
+ 1084:         naive = datetime.strptime(value, "%Y-%m-%dT%H:%M")
+ 1085:         candidates = set()
+ 1086:         for fold in (0, 1):
+ 1087:             local = naive.replace(tzinfo=pacific, fold=fold)
+ 1088:             utc = local.astimezone(timezone.utc)
+ 1089:             if utc.astimezone(pacific).replace(
+ 1090:                 tzinfo=None
+ 1091:             ) == naive:
+ 1092:                 candidates.add(utc)
+ 1093:         if len(candidates) != 1:
+ 1094:             raise ValueError(
+ 1095:                 "Invalid or ambiguous Pacific Time."
+ 1096:             )
+ 1097:         return candidates.pop()
+ 1098: 
+ 1099:     serializer = URLSafeTimedSerializer(
+ 1100:         current_app.secret_key,
+ 1101:         salt="wccr-interval-v54"
+ 1102:     )
+ 1103: 
+ 1104:     start_bound = aware(shift.started_at)
+ 1105:     end_bound = aware(shift.ended_at)
+ 1106: 
+ 1107:     if request.method == "POST":
+ 1108:         if set(request.form.keys()) != {
+ 1109:             "csrf_token", "action_type", "start",
+ 1110:             "end", "reason"
+ 1111:         }:
+ 1112:             abort(400)
+ 1113: 
+ 1114:         try:
+ 1115:             token = serializer.loads(
+ 1116:                 request.form["csrf_token"],
+ 1117:                 max_age=1800
+ 1118:             )
+ 1119:         except (BadSignature, SignatureExpired):
+ 1120:             abort(400)
+ 1121: 
+ 1122:         if not isinstance(token, dict) or (
+ 1123:             token.get("uid") != current_user.id
+ 1124:             or token.get("shift") != shift_id
+ 1125:             or token.get("sid") != session.get("_id", "")
+ 1126:         ):
+ 1127:             abort(400)
+ 1128: 
+ 1129:         try:
+ 1130:             action = request.form["action_type"]
+ 1131:             reason = request.form["reason"].strip()
+ 1132:             start = parse_pt(request.form["start"])
+ 1133:             end = parse_pt(request.form["end"])
+ 1134: 
+ 1135:             if action not in (
+ 1136:                 "correct_interval", "exclude_interval"
+ 1137:             ):
+ 1138:                 raise ValueError("Invalid correction type.")
+ 1139:             if not 4 <= len(reason) <= 1000:
+ 1140:                 raise ValueError(
+ 1141:                     "Reason must contain 4-1000 characters."
+ 1142:                 )
+ 1143:             if not start_bound <= start < end <= end_bound:
+ 1144:                 raise ValueError(
+ 1145:                     "Interval must be inside the closed shift."
+ 1146:                 )
+ 1147:             if end - start > timedelta(hours=24):
+ 1148:                 raise ValueError(
+ 1149:                     "Interval exceeds 24 hours. "
+ 1150:                     "Split it into smaller intervals."
+ 1151:                 )
+ 1152: 
+ 1153:             db.session.execute(text("""
+ 1154:                 INSERT INTO employee_time_interval_proposals
+ 1155:                 (
+ 1156:                     shift_id, created_by_user_id,
+ 1157:                     action_type, start_utc, end_utc,
+ 1158:                     reason, status, created_at_utc
+ 1159:                 )
+ 1160:                 VALUES
+ 1161:                 (
+ 1162:                     :shift, :uid, :action, :start,
+ 1163:                     :end, :reason, 'pending', :created
+ 1164:                 )
+ 1165:             """), {
+ 1166:                 "shift": shift_id,
+ 1167:                 "uid": current_user.id,
+ 1168:                 "action": action,
+ 1169:                 "start": start.isoformat(),
+ 1170:                 "end": end.isoformat(),
+ 1171:                 "reason": reason,
+ 1172:                 "created": datetime.now(
+ 1173:                     timezone.utc
+ 1174:                 ).isoformat()
+ 1175:             })
+ 1176:             db.session.commit()
+ 1177:             flash(
+ 1178:                 "Interval proposal saved for review.",
+ 1179:                 "success"
+ 1180:             )
+ 1181:             return redirect(url_for(
+ 1182:                 "auth.attendance_interval_editor",
+ 1183:                 shift_id=shift_id
+ 1184:             ))
+ 1185:         except ValueError as exc:
+ 1186:             db.session.rollback()
+ 1187:             flash(str(exc), "warning")
+ 1188:         except Exception:
+ 1189:             db.session.rollback()
+ 1190:             current_app.logger.exception(
+ 1191:                 "Interval proposal failed: %s", shift_id
+ 1192:             )
+ 1193:             flash("Unable to save proposal.", "danger")
+ 1194: 
+ 1195:     events = db.session.execute(
+ 1196:         select(EmployeeTimeEvent)
+ 1197:         .where(EmployeeTimeEvent.shift_id == shift_id)
+ 1198:         .order_by(
+ 1199:             EmployeeTimeEvent.occurred_at,
+ 1200:             EmployeeTimeEvent.id
+ 1201:         )
+ 1202:     ).scalars().all()
+ 1203: 
+ 1204:     proposals = db.session.execute(text("""
+ 1205:         SELECT id, action_type, start_utc, end_utc,
+ 1206:                reason, status, created_at_utc,
+ 1207:                created_by_user_id
+ 1208:         FROM employee_time_interval_proposals
+ 1209:         WHERE shift_id=:shift
+ 1210:         ORDER BY id DESC
+ 1211:         LIMIT 200
+ 1212:     """), {"shift": shift_id}).mappings().all()
+ 1213: 
+ 1214:     token = serializer.dumps({
+ 1215:         "uid": current_user.id,
+ 1216:         "shift": shift_id,
+ 1217:         "sid": session.get("_id", "")
+ 1218:     })
+ 1219: 
+ 1220:     return render_template(
+ 1221:         "attendance_interval_editor.html",
+ 1222:         shift=shift,
+ 1223:         events=events,
+ 1224:         proposals=proposals,
+ 1225:         pt=pt,
+ 1226:         csrf_token=token,
+ 1227:         started_at=start_bound.astimezone(
+ 1228:             pacific
+ 1229:         ).strftime("%Y-%m-%dT%H:%M"),
+ 1230:         ended_at=end_bound.astimezone(
+ 1231:             pacific
+ 1232:         ).strftime("%Y-%m-%dT%H:%M")
+ 1233:     )
+ 1234: 
+ 1235: 
+ 1236: # WCCR_ATTENDANCE_V55_TARGETED
+ 1237: @auth_bp.route(
+ 1238:     "/attendance/shift/<int:shift_id>/targeted-correction",
+ 1239:     methods=["GET", "POST"]
+ 1240: )
+ 1241: @login_required
+ 1242: def attendance_targeted_correction(shift_id):
+ 1243:     from flask import abort, current_app
+ 1244:     from sqlalchemy import text, select
+ 1245:     from datetime import datetime, timezone
+ 1246:     from zoneinfo import ZoneInfo
+ 1247:     from itsdangerous import (
+ 1248:         URLSafeTimedSerializer, BadSignature, SignatureExpired
+ 1249:     )
+ 1250:     from services.attendance_review_permissions import can_review_action
+ 1251:     from services.employee_time_tracking_models import (
+ 1252:         EmployeeShift, EmployeeTimeEvent
+ 1253:     )
+ 1254: 
+ 1255:     if not can_review_action(current_user, "edit"):
+ 1256:         abort(403)
+ 1257: 
+ 1258:     shift = db.session.get(EmployeeShift, shift_id)
+ 1259:     if shift is None:
+ 1260:         abort(404)
+ 1261:     if shift.ended_at is None:
+ 1262:         abort(409)
+ 1263: 
+ 1264:     pacific = ZoneInfo("America/Los_Angeles")
+ 1265: 
+ 1266:     def utc(value):
+ 1267:         if value.tzinfo is None:
+ 1268:             return value.replace(tzinfo=timezone.utc)
+ 1269:         return value.astimezone(timezone.utc)
+ 1270: 
+ 1271:     def display(value):
+ 1272:         if value is None:
+ 1273:             return "-"
+ 1274:         if isinstance(value, str):
+ 1275:             value = datetime.fromisoformat(value)
+ 1276:         return utc(value).astimezone(pacific).strftime(
+ 1277:             "%b %d, %Y %I:%M %p"
+ 1278:         )
+ 1279: 
+ 1280:     def local_input(value):
+ 1281:         return utc(value).astimezone(pacific).strftime(
+ 1282:             "%Y-%m-%dT%H:%M"
+ 1283:         )
+ 1284: 
+ 1285:     def parse_local(value):
+ 1286:         try:
+ 1287:             naive = datetime.strptime(value, "%Y-%m-%dT%H:%M")
+ 1288:         except (ValueError, TypeError):
+ 1289:             raise ValueError("Invalid date/time.")
+ 1290: 
+ 1291:         candidates = set()
+ 1292:         for fold in (0, 1):
+ 1293:             local = naive.replace(tzinfo=pacific, fold=fold)
+ 1294:             instant = local.astimezone(timezone.utc)
+ 1295:             if instant.astimezone(pacific).replace(
+ 1296:                 tzinfo=None
+ 1297:             ) == naive:
+ 1298:                 candidates.add(instant)
+ 1299: 
+ 1300:         if len(candidates) != 1:
+ 1301:             raise ValueError(
+ 1302:                 "Ambiguous or nonexistent Pacific time."
+ 1303:             )
+ 1304:         return candidates.pop()
+ 1305: 
+ 1306:     serializer = URLSafeTimedSerializer(
+ 1307:         current_app.secret_key,
+ 1308:         salt="wccr-targeted-v55"
+ 1309:     )
+ 1310: 
+ 1311:     events = db.session.execute(
+ 1312:         select(EmployeeTimeEvent)
+ 1313:         .where(EmployeeTimeEvent.shift_id == shift_id)
+ 1314:         .order_by(
+ 1315:             EmployeeTimeEvent.occurred_at,
+ 1316:             EmployeeTimeEvent.id
+ 1317:         )
+ 1318:     ).scalars().all()
+ 1319: 
+ 1320:     if request.method == "POST":
+ 1321:         required = {
+ 1322:             "csrf_token", "action_type", "event_id",
+ 1323:             "new_time", "reason"
+ 1324:         }
+ 1325:         if set(request.form.keys()) != required:
+ 1326:             abort(400)
+ 1327: 
+ 1328:         try:
+ 1329:             payload = serializer.loads(
+ 1330:                 request.form["csrf_token"], max_age=1800
+ 1331:             )
+ 1332:         except (BadSignature, SignatureExpired):
+ 1333:             abort(400)
+ 1334: 
+ 1335:         if not isinstance(payload, dict) or (
+ 1336:             payload.get("uid") != current_user.id
+ 1337:             or payload.get("shift") != shift_id
+ 1338:             or payload.get("sid") != session.get("_id", "")
+ 1339:         ):
+ 1340:             abort(400)
+ 1341: 
+ 1342:         try:
+ 1343:             action = request.form["action_type"]
+ 1344:             reason = request.form["reason"].strip()
+ 1345: 
+ 1346:             if not 4 <= len(reason) <= 1000:
+ 1347:                 raise ValueError(
+ 1348:                     "Reason must contain 4-1000 characters."
+ 1349:                 )
+ 1350: 
+ 1351:             event_id = None
+ 1352:             original = None
+ 1353:             proposed = None
+ 1354: 
+ 1355:             if action == "correct_event_time":
+ 1356:                 try:
+ 1357:                     event_id = int(request.form["event_id"])
+ 1358:                 except (ValueError, TypeError):
+ 1359:                     raise ValueError("Select an event.")
+ 1360: 
+ 1361:                 event = next(
+ 1362:                     (e for e in events if e.id == event_id),
+ 1363:                     None
+ 1364:                 )
+ 1365:                 if event is None:
+ 1366:                     raise ValueError("Event does not belong to shift.")
+ 1367: 
+ 1368:                 original = utc(event.occurred_at)
+ 1369:                 proposed = parse_local(
+ 1370:                     request.form["new_time"]
+ 1371:                 )
+ 1372: 
+ 1373:                 if proposed == original:
+ 1374:                     raise ValueError("No change requested.")
+ 1375: 
+ 1376:                 if not (
+ 1377:                     utc(shift.started_at) <= proposed
+ 1378:                     <= utc(shift.ended_at)
+ 1379:                 ):
+ 1380:                     raise ValueError(
+ 1381:                         "Proposed time must be within shift boundaries."
+ 1382:                     )
+ 1383: 
+ 1384:             elif action == "exclude_entire_shift":
+ 1385:                 if (
+ 1386:                     request.form["event_id"]
+ 1387:                     or request.form["new_time"]
+ 1388:                 ):
+ 1389:                     raise ValueError(
+ 1390:                         "Exclusion must not specify an event or time."
+ 1391:                     )
+ 1392:             else:
+ 1393:                 raise ValueError("Invalid action.")
+ 1394: 
+ 1395:             db.session.execute(text("""
+ 1396:                 INSERT INTO employee_time_targeted_proposals
+ 1397:                 (
+ 1398:                     shift_id, event_id, action_type,
+ 1399:                     original_time_utc, proposed_time_utc,
+ 1400:                     created_by_user_id, reason,
+ 1401:                     status, created_at_utc
+ 1402:                 )
+ 1403:                 VALUES
+ 1404:                 (
+ 1405:                     :shift, :event, :action,
+ 1406:                     :original, :proposed, :uid,
+ 1407:                     :reason, 'pending', :created
+ 1408:                 )
+ 1409:             """), {
+ 1410:                 "shift": shift_id,
+ 1411:                 "event": event_id,
+ 1412:                 "action": action,
+ 1413:                 "original": (
+ 1414:                     original.isoformat()
+ 1415:                     if original else None
+ 1416:                 ),
+ 1417:                 "proposed": (
+ 1418:                     proposed.isoformat()
+ 1419:                     if proposed else None
+ 1420:                 ),
+ 1421:                 "uid": current_user.id,
+ 1422:                 "reason": reason,
+ 1423:                 "created": datetime.now(
+ 1424:                     timezone.utc
+ 1425:                 ).isoformat()
+ 1426:             })
+ 1427:             db.session.commit()
+ 1428:             flash(
+ 1429:                 "Targeted correction proposal saved.",
+ 1430:                 "success"
+ 1431:             )
+ 1432:             return redirect(url_for(
+ 1433:                 "auth.attendance_targeted_correction",
+ 1434:                 shift_id=shift_id
+ 1435:             ))
+ 1436:         except ValueError as exc:
+ 1437:             db.session.rollback()
+ 1438:             flash(str(exc), "warning")
+ 1439:         except sqlite3.IntegrityError:
+ 1440:             db.session.rollback()
+ 1441:             flash("A pending proposal already exists.", "warning")
+ 1442:         except Exception:
+ 1443:             db.session.rollback()
+ 1444:             current_app.logger.exception(
+ 1445:                 "Targeted correction failed: %s", shift_id
+ 1446:             )
+ 1447:             flash(
+ 1448:                 "Unable to save proposal. "
+ 1449:                 "Check for an existing pending proposal.",
+ 1450:                 "danger"
+ 1451:             )
+ 1452: 
+ 1453:     proposals = db.session.execute(text("""
+ 1454:         SELECT id, event_id, action_type,
+ 1455:                original_time_utc, proposed_time_utc,
+ 1456:                reason, status, created_at_utc
+ 1457:         FROM employee_time_targeted_proposals
+ 1458:         WHERE shift_id=:shift
+ 1459:         ORDER BY id DESC LIMIT 200
+ 1460:     """), {"shift": shift_id}).mappings().all()
+ 1461: 
+ 1462:     token = serializer.dumps({
+ 1463:         "uid": current_user.id,
+ 1464:         "shift": shift_id,
+ 1465:         "sid": session.get("_id", "")
+ 1466:     })
+ 1467: 
+ 1468:     from services.attendance_timeline_preview import (
+ 1469:         reconstruct_preview
+ 1470:     )
+ 1471:     timeline = reconstruct_preview(events)
+ 1472: 
+ 1473:     return render_template(
+ 1474:         "attendance_targeted_correction.html",
+ 1475:         shift=shift,
+ 1476:         events=events,
+ 1477:         timeline=timeline,
+ 1478:         proposals=proposals,
+ 1479:         display=display,
+ 1480:         local_input=local_input,
+ 1481:         csrf_token=token
+ 1482:     )
+
+======================================================================
+FILE: services/attendance_shift_edit.py
+======================================================================
+
+--- LINES 1-165 ---
+    1: """WCCR Edit Shift V4.0 - restricted completed-shift editor."""
+    2: from datetime import datetime, timezone, timedelta
+    3: from zoneinfo import ZoneInfo
+    4: 
+    5: from sqlalchemy import select, update
+    6: from extensions import db
+    7: from services.employee_time_tracking_models import (
+    8:     EmployeeShift, EmployeeTimeEvent, EmployeeTimeAudit,
+    9: )
+   10: 
+   11: LA = ZoneInfo("America/Los_Angeles")
+   12: ALLOWED_EVENTS = {"LOGIN", "END_SHIFT", "IDLE"}
+   13: 
+   14: 
+   15: class ShiftEditError(ValueError):
+   16:     pass
+   17: 
+   18: 
+   19: def aware(value):
+   20:     if value.tzinfo is None:
+   21:         return value.replace(tzinfo=timezone.utc)
+   22:     return value.astimezone(timezone.utc)
+   23: 
+   24: 
+   25: def local_string(value):
+   26:     return aware(value).astimezone(LA).strftime("%Y-%m-%dT%H:%M")
+   27: 
+   28: 
+   29: def parse_local(value):
+   30:     try:
+   31:         naive = datetime.strptime(value, "%Y-%m-%dT%H:%M")
+   32:     except (TypeError, ValueError):
+   33:         raise ShiftEditError("Invalid date or time.")
+   34: 
+   35:     # Reject nonexistent and ambiguous DST local times.
+   36:     candidates = []
+   37:     for fold in (0, 1):
+   38:         local = naive.replace(tzinfo=LA, fold=fold)
+   39:         utc = local.astimezone(timezone.utc)
+   40:         if utc.astimezone(LA).replace(tzinfo=None) == naive:
+   41:             candidates.append(utc)
+   42:     unique = set(candidates)
+   43:     if len(unique) != 1:
+   44:         raise ShiftEditError(
+   45:             "Ambiguous or nonexistent California time."
+   46:         )
+   47:     return candidates[0]
+   48: 
+   49: 
+   50: def validate_shift(shift, events):
+   51:     if shift is None:
+   52:         raise ShiftEditError("Shift not found.")
+   53:     if shift.ended_at is None or shift.status not in (
+   54:         "closed", "pending_review"
+   55:     ):
+   56:         raise ShiftEditError("Only completed shifts can be edited.")
+   57:     if not events:
+   58:         raise ShiftEditError("Shift has no events.")
+   59:     types = [event.event_type for event in events]
+   60:     if (
+   61:         any(t not in ALLOWED_EVENTS for t in types)
+   62:         or types.count("LOGIN") != 1
+   63:         or types.count("END_SHIFT") != 1
+   64:     ):
+   65:         raise ShiftEditError(
+   66:             "This shift needs the advanced interval editor."
+   67:         )
+   68:     if aware(shift.ended_at) <= aware(shift.started_at):
+   69:         raise ShiftEditError("Existing shift interval is invalid.")
+   70: 
+   71: 
+   72: def get_shift(shift_id):
+   73:     shift = db.session.get(EmployeeShift, shift_id)
+   74:     events = db.session.execute(
+   75:         select(EmployeeTimeEvent)
+   76:         .where(EmployeeTimeEvent.shift_id == shift_id)
+   77:         .order_by(EmployeeTimeEvent.id)
+   78:     ).scalars().all()
+   79:     validate_shift(shift, events)
+   80:     return shift, events
+   81: 
+   82: 
+   83: def save_shift(shift_id, actor_id, start_text, end_text,
+   84:                reason, expected_start, expected_end):
+   85:     reason = (reason or "").strip()
+   86:     if len(reason) < 10 or len(reason) > 1000:
+   87:         raise ShiftEditError(
+   88:             "Reason must contain 10 to 1000 characters."
+   89:         )
+   90: 
+   91:     start = parse_local(start_text)
+   92:     end = parse_local(end_text)
+   93:     if end <= start or end - start > timedelta(hours=24):
+   94:         raise ShiftEditError(
+   95:             "Shift must be positive and no longer than 24 hours."
+   96:         )
+   97:     if end > datetime.now(timezone.utc):
+   98:         raise ShiftEditError("Shift end cannot be in the future.")
+   99: 
+  100:     try:
+  101:         shift, events = get_shift(shift_id)
+  102:         old_start = aware(shift.started_at)
+  103:         old_end = aware(shift.ended_at)
+  104: 
+  105:         if (
+  106:             old_start.isoformat() != expected_start
+  107:             or old_end.isoformat() != expected_end
+  108:         ):
+  109:             raise ShiftEditError(
+  110:                 "Shift changed. Reload before editing."
+  111:             )
+  112: 
+  113:         # Original events remain untouched and inside the interval.
+  114:         for event in events:
+  115:             at = aware(event.occurred_at)
+  116:             if at < start or at > end:
+  117:                 raise ShiftEditError(
+  118:                     "An original event is outside the proposed "
+  119:                     "interval. Advanced editing is required."
+  120:                 )
+  121: 
+  122:         if start == old_start and end == old_end:
+  123:             raise ShiftEditError("No changes were made.")
+  124: 
+  125:         # Conditional UPDATE prevents a stale form from overwriting
+  126:         # another edit. Status and original times must still match.
+  127:         result = db.session.execute(
+  128:             update(EmployeeShift)
+  129:             .where(
+  130:                 EmployeeShift.id == shift_id,
+  131:                 EmployeeShift.started_at == shift.started_at,
+  132:                 EmployeeShift.ended_at == shift.ended_at,
+  133:                 EmployeeShift.status == shift.status,
+  134:             )
+  135:             .values(
+  136:                 started_at=start.replace(tzinfo=None),
+  137:                 ended_at=end.replace(tzinfo=None),
+  138:                 status="pending_review",
+  139:                 requires_review=True,
+  140:             )
+  141:             .execution_options(synchronize_session=False)
+  142:         )
+  143:         if result.rowcount != 1:
+  144:             raise ShiftEditError(
+  145:                 "Shift changed concurrently. Reload."
+  146:             )
+  147: 
+  148:         for field, old, new in (
+  149:             ("started_at", old_start, start),
+  150:             ("ended_at", old_end, end),
+  151:         ):
+  152:             if old != new:
+  153:                 db.session.add(EmployeeTimeAudit(
+  154:                     shift_id=shift_id,
+  155:                     changed_by_user_id=actor_id,
+  156:                     field_name=field,
+  157:                     old_value=old.isoformat(),
+  158:                     new_value=new.isoformat(),
+  159:                     reason=reason,
+  160:                 ))
+  161: 
+  162:         db.session.commit()
+  163:     except Exception:
+  164:         db.session.rollback()
+  165:         raise
+
+======================================================================
+FILE: templates/attendance_correction_requests.html
+======================================================================
+NOT FOUND
+
+======================================================================
+FILE: templates/attendance_correction_detail.html
+======================================================================
+
+--- LINES 1-109 ---
+    1: 
+    2: {% extends "base.html" %}
+    3: {% block content %}
+    4: <div class="container py-4" style="max-width:1050px">
+    5:   <div class="d-flex justify-content-between align-items-center mb-3">
+    6:     <div>
+    7:       <h3 class="mb-1">Correction Request #{{ record.id }}</h3>
+    8:       <div class="text-muted">
+    9:         Employee #{{ record.user_id }} ? Shift #{{ record.shift_id }}
+   10:       </div>
+   11:     </div>
+   12:     <a class="btn btn-outline-secondary"
+   13:        href="{{ url_for('auth.attendance_correction_requests') }}">
+   14:       Back to Queue
+   15:     </a>
+   16:   </div>
+   17: 
+   18:   <div class="card shadow-sm mb-3">
+   19:     <div class="card-body">
+   20:       <h5>Request Details</h5>
+   21:       <p>
+   22:         <strong>Status:</strong> {{ record.status }}
+   23:       </p>
+   24:       <div class="table-responsive">
+   25:         <table class="table table-bordered align-middle">
+   26:           <thead>
+   27:             <tr>
+   28:               <th></th>
+   29:               <th>Original (PT)</th>
+   30:               <th>Requested (PT)</th>
+   31:               <th>Current Shift (PT)</th>
+   32:             </tr>
+   33:           </thead>
+   34:           <tbody>
+   35:             <tr>
+   36:               <th>Start</th>
+   37:               <td>{{ pt(record.original_start_utc) }}</td>
+   38:               <td>{{ pt(record.requested_start_utc) }}</td>
+   39:               <td>{{ pt(shift.started_at) }}</td>
+   40:             </tr>
+   41:             <tr>
+   42:               <th>End</th>
+   43:               <td>{{ pt(record.original_end_utc) }}</td>
+   44:               <td>{{ pt(record.requested_end_utc) }}</td>
+   45:               <td>{{ pt(shift.ended_at) }}</td>
+   46:             </tr>
+   47:           </tbody>
+   48:         </table>
+   49:       </div>
+   50:       <p><strong>Employee Reason:</strong> {{ record.reason }}</p>
+   51:       {% if record.review_note %}
+   52:       <p><strong>Review Note:</strong> {{ record.review_note }}</p>
+   53:       {% endif %}
+   54:     </div>
+   55:   </div>
+   56: 
+   57:   <div class="card shadow-sm mb-3">
+   58:     <div class="card-body">
+   59:       <h5>Original Shift Events</h5>
+   60:       <div class="table-responsive">
+   61:         <table class="table table-sm">
+   62:           <thead>
+   63:             <tr><th>Event</th><th>Time (PT)</th><th>Note</th></tr>
+   64:           </thead>
+   65:           <tbody>
+   66:             {% for e in events %}
+   67:             <tr>
+   68:               <td>{{ e.type }}</td>
+   69:               <td>{{ e.time }}</td>
+   70:               <td>{{ e.note }}</td>
+   71:             </tr>
+   72:             {% else %}
+   73:             <tr>
+   74:               <td colspan="3">No events recorded.</td>
+   75:             </tr>
+   76:             {% endfor %}
+   77:           </tbody>
+   78:         </table>
+   79:       </div>
+   80:     </div>
+   81:   </div>
+   82: 
+   83:   <div class="card shadow-sm">
+   84:     <div class="card-body">
+   85:       <h5>Management Actions</h5>
+   86:       {% if can_edit %}
+   87:       <a class="btn btn-primary"
+   88:          href="{{ url_for(
+   89:            'inventory.attendance_shift_edit',
+   90:            shift_id=shift.id) }}">
+   91:         Edit Shift
+   92:       </a>
+   93:       {% endif %}
+   94: 
+   95:       {% if record.status == 'pending' %}
+   96:       <p class="text-muted small mt-3 mb-0">
+   97:         Request remains Pending until an authorized decision.
+   98:         Editing a shift does not automatically approve it.
+   99:         Approval is disabled until event-safe processing is ready.
+  100:       </p>
+  101:       {% else %}
+  102:       <p class="text-muted mt-3 mb-0">
+  103:         This request has already been processed.
+  104:       </p>
+  105:       {% endif %}
+  106:     </div>
+  107:   </div>
+  108: </div>
+  109: {% endblock %}
+
+======================================================================
+FILE: templates/attendance_shift_edit.html
+======================================================================
+
+--- LINES 1-71 ---
+    1: {% extends "base.html" %}
+    2: {% block content %}
+    3: <div class="container py-4" style="max-width:760px">
+    4:   <h3>Edit Shift #{{ shift.id }}</h3>
+    5:   <p class="text-muted">
+    6:     Employee ID: {{ shift.user_id }} |
+    7:     Status: {{ shift.status }}
+    8:   </p>
+    9:   <div class="alert alert-warning">
+   10:     California local time. Original events are preserved.
+   11:     This edit will require approval.
+   12:   </div>
+   13:   
+   14: {# WCCR_ATTENDANCE_V53_CORE #}
+   15: {% if edit_blocked_reason %}
+   16: <div class="alert alert-warning">
+   17:   <strong>Advanced editing required.</strong>
+   18:   <div class="mt-3">
+   19:     <a class="btn btn-primary btn-sm"
+   20:        href="{{ url_for(
+   21:          'auth.attendance_interval_editor',
+   22:          shift_id=shift.id) }}">
+   23:       Open Advanced Interval Editor
+   24:     </a>
+   25:   </div>
+   26: 
+   27:   <div>{{ edit_blocked_reason }}</div>
+   28:   <div class="small mt-2">
+   29:     This shift contains events that cannot safely be edited
+   30:     with the basic Start / End editor.
+   31:     Original time records have not been changed.
+   32:   </div>
+   33: </div>
+   34: {% else %}
+   35: <form method="post">
+   36:     <input type="hidden" name="csrf_token"
+   37:            value="{{ csrf_token }}">
+   38:     <input type="hidden" name="expected_start"
+   39:            value="{{ expected_start }}">
+   40:     <input type="hidden" name="expected_end"
+   41:            value="{{ expected_end }}">
+   42:     <div class="mb-3">
+   43:       <label class="form-label">Shift Start</label>
+   44:       <input class="form-control" type="datetime-local"
+   45:              name="started_at" value="{{ started_at }}"
+   46:              required>
+   47:     </div>
+   48:     <div class="mb-3">
+   49:       <label class="form-label">Shift End</label>
+   50:       <input class="form-control" type="datetime-local"
+   51:              name="ended_at" value="{{ ended_at }}"
+   52:              required>
+   53:     </div>
+   54:     <div class="mb-3">
+   55:       <label class="form-label">Reason for Correction</label>
+   56:       <textarea class="form-control" name="reason"
+   57:                 minlength="10" maxlength="1000"
+   58:                 rows="3" required></textarea>
+   59:     </div>
+   60:     <button class="btn btn-primary" type="submit">
+   61:       Save Correction
+   62:     </button>
+   63:     <a class="btn btn-outline-secondary"
+   64:        href="{{ url_for(
+   65:          'inventory.attendance_payroll_dashboard',
+   66:          section='timesheets') }}">Cancel</a>
+   67:   </form>
+   68: {% endif %}
+   69: 
+   70: </div>
+   71: {% endblock %}

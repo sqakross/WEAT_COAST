@@ -1,0 +1,48 @@
+WCCR V6.6C DATABASE CONFIGURATION
+READ ONLY
+DATE: 2026-10-15T09:18:17.152862
+ROOT: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST
+
+======================================================================
+FILE: app.py
+LINE 1: REFERENCES load_dotenv
+LINE 2: REFERENCES load_dotenv
+LINE 164: REFERENCES from_object
+LINE 165: REFERENCES from_pyfile
+LINE 304: REFERENCES instance_path
+LINE 306: REFERENCES SQLALCHEMY_ENGINE_OPTIONS
+LINE 854: REFERENCES instance_path
+LINE 943: REFERENCES instance_path
+
+======================================================================
+FILE: config.py
+LINE 14: REFERENCES SQLALCHEMY_DATABASE_URI
+LINE 15: REFERENCES SQLALCHEMY_TRACK_MODIFICATIONS
+
+======================================================================
+FILE: extensions.py
+
+======================================================================
+FILE: run.py
+
+======================================================================
+FILE: instance/config.py
+
+======================================================================
+ENVIRONMENT CONFIGURATION
+DATABASE_URL: NOT SET
+SQLALCHEMY_DATABASE_URI: NOT SET
+FLASK_APP: NOT SET
+FLASK_ENV: NOT SET
+
+======================================================================
+SQLITE FILE INVENTORY (METADATA ONLY)
+FILE: instance\app.db | SIZE: 0 | MODIFIED: 2026-01-03T10:02:27.846122
+FILE: instance\inventory.db | SIZE: 28893184 | MODIFIED: 2026-10-15T07:54:09.616619
+FILE: _test_sandboxes\attendance_v361_20261014_103757\instance\inventory_test.db | SIZE: 28737536 | MODIFIED: 2026-10-14T10:37:58.356501
+SQLITE CANDIDATES: 3
+
+SOURCE MODIFIED: NO
+DATABASE MODIFIED: NO
+APPLICATION IMPORTED: NO
+DATABASE CONNECTION OPENED: NO

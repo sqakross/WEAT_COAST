@@ -1,0 +1,109 @@
+
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4" style="max-width:1050px">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h3 class="mb-1">Correction Request #{{ record.id }}</h3>
+      <div class="text-muted">
+        Employee #{{ record.user_id }} ? Shift #{{ record.shift_id }}
+      </div>
+    </div>
+    <a class="btn btn-outline-secondary"
+       href="{{ url_for('auth.attendance_correction_requests') }}">
+      Back to Queue
+    </a>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h5>Request Details</h5>
+      <p>
+        <strong>Status:</strong> {{ record.status }}
+      </p>
+      <div class="table-responsive">
+        <table class="table table-bordered align-middle">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Original (PT)</th>
+              <th>Requested (PT)</th>
+              <th>Current Shift (PT)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th>Start</th>
+              <td>{{ pt(record.original_start_utc) }}</td>
+              <td>{{ pt(record.requested_start_utc) }}</td>
+              <td>{{ pt(shift.started_at) }}</td>
+            </tr>
+            <tr>
+              <th>End</th>
+              <td>{{ pt(record.original_end_utc) }}</td>
+              <td>{{ pt(record.requested_end_utc) }}</td>
+              <td>{{ pt(shift.ended_at) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>Employee Reason:</strong> {{ record.reason }}</p>
+      {% if record.review_note %}
+      <p><strong>Review Note:</strong> {{ record.review_note }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h5>Original Shift Events</h5>
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead>
+            <tr><th>Event</th><th>Time (PT)</th><th>Note</th></tr>
+          </thead>
+          <tbody>
+            {% for e in events %}
+            <tr>
+              <td>{{ e.type }}</td>
+              <td>{{ e.time }}</td>
+              <td>{{ e.note }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="3">No events recorded.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <h5>Management Actions</h5>
+      {% if can_edit %}
+      <a class="btn btn-primary"
+         href="{{ url_for(
+           'inventory.attendance_shift_edit',
+           shift_id=shift.id) }}">
+        Edit Shift
+      </a>
+      {% endif %}
+
+      {% if record.status == 'pending' %}
+      <p class="text-muted small mt-3 mb-0">
+        Request remains Pending until an authorized decision.
+        Editing a shift does not automatically approve it.
+        Approval is disabled until event-safe processing is ready.
+      </p>
+      {% else %}
+      <p class="text-muted mt-3 mb-0">
+        This request has already been processed.
+      </p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

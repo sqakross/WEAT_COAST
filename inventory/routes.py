@@ -5625,9 +5625,177 @@ def appliance_history_api():
     })
 
 
+
+# ============================================================
+# WCCR_WO_NOTES_V1
+# Inline Work Order Notes - independent, permission controlled
+# ============================================================
+
+@inventory_bp.post(
+    "/work_orders/<int:wo_id>/notes",
+    endpoint="wo_notes_save",
+)
+@login_required
+def wo_notes_save(wo_id):
+    import hmac
+    import hashlib
+    from flask import request, session, abort, redirect, url_for, flash
+    from flask_login import current_user
+    from sqlalchemy import update, or_
+    from extensions import db
+    from models import WorkOrder
+
+    role = (getattr(current_user, "role", "") or "").lower().strip()
+
+    # Never grant editing by role alone (except existing
+    # ErpAccessService superadmin policy).
+    if role not in ("technician", "tech"):
+        if not ErpAccessService.is_allowed(
+            current_user,
+            "erp.work_orders.access",
+            default_allowed=True,
+        ):
+            abort(403)
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.work_orders.edit_notes",
+        default_allowed=False,
+    ):
+        abort(403)
+
+    wo = db.session.get(WorkOrder, wo_id)
+    if wo is None:
+        abort(404)
+
+    # Preserve existing technician own-WO restriction.
+    if role in ("technician", "tech"):
+        me_id = getattr(current_user, "id", None)
+        me_name = (
+            getattr(current_user, "username", "") or ""
+        ).strip().lower()
+        tech_id = getattr(wo, "technician_id", None)
+        tech_name = (
+            getattr(wo, "technician_username", None)
+            or getattr(wo, "technician_name", None)
+            or ""
+        ).strip().lower()
+
+        if not (
+            (me_id and tech_id and me_id == tech_id)
+            or (me_name and tech_name and me_name == tech_name)
+        ):
+            abort(403)
+
+    token = request.form.get("wo_notes_csrf", "")
+    expected = session.get("wo_notes_csrf", "")
+
+    if not (
+        expected
+        and token
+        and hmac.compare_digest(str(token), str(expected))
+    ):
+        abort(400, "Invalid Notes security token")
+
+    new_note = (request.form.get("note") or "").strip()
+    old_note = request.form.get("original_note", "")
+
+    if len(new_note) > 20000:
+        abort(400, "Notes exceed 20000 characters")
+
+    if len(old_note) > 20000:
+        abort(400, "Invalid original note")
+
+    actual_old = wo.note or ""
+
+    # Protect against changes since the form was opened.
+    if actual_old != old_note:
+        flash(
+            "Notes were changed by another user. "
+            "Reload and review before saving.",
+            "warning",
+        )
+        return redirect(
+            url_for("inventory.wo_detail", wo_id=wo_id)
+        )
+
+    if new_note == actual_old:
+        flash("No changes to Notes.", "info")
+        return redirect(
+            url_for("inventory.wo_detail", wo_id=wo_id)
+        )
+
+    try:
+        # Compare-and-swap at database level: only update
+        # when the current note still matches the old note.
+        result = db.session.execute(
+            update(WorkOrder)
+            .where(WorkOrder.id == wo_id)
+            .where(
+                or_(
+                    WorkOrder.note == old_note,
+                    (
+                        WorkOrder.note.is_(None)
+                        if old_note == ""
+                        else WorkOrder.id == -1
+                    ),
+                )
+            )
+            .values(
+                note=new_note or None,
+                updated_at=datetime.utcnow(),
+                updated_by_id=current_user.id,
+            )
+        )
+
+        if result.rowcount != 1:
+            db.session.rollback()
+            flash(
+                "Notes changed before saving. Reload and retry.",
+                "warning",
+            )
+            return redirect(
+                url_for("inventory.wo_detail", wo_id=wo_id)
+            )
+
+        _add_wo_audit(
+            wo_id,
+            "note",
+            "Work Order Notes updated",
+            meta={
+                "field": "note",
+                "old_value": actual_old,
+                "new_value": new_note,
+            },
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "WO Notes save failed: WO %s", wo_id
+        )
+        flash("Unable to save Notes.", "danger")
+        return redirect(
+            url_for("inventory.wo_detail", wo_id=wo_id)
+        )
+
+    flash("Work Order Notes saved.", "success")
+    return redirect(
+        url_for("inventory.wo_detail", wo_id=wo_id)
+    )
+
+
 @inventory_bp.get("/work_orders/<int:wo_id>", endpoint="wo_detail")
 @login_required
 def wo_detail(wo_id):
+    # WCCR_WO_NOTES_V1 - session-bound form token
+    import secrets
+    from flask import session
+    if "wo_notes_csrf" not in session:
+        session["wo_notes_csrf"] = secrets.token_urlsafe(32)
+
     # ERP ACCESS FIX 05 STEP 1A - WO DETAIL current_user import
     from flask_login import current_user
 
@@ -18799,6 +18967,80 @@ def employee_time_tracking_setting(user_id):
     return redirect(url_for("inventory.users"))
 # WCCR_EMPLOYEE_TIME_5B3_END
 
+# WCCR_CLOCK_V66C_V2
+@inventory_bp.route(
+    "/users/<int:user_id>/employee-time-mode",
+    methods=["POST"],
+)
+@login_required
+def employee_time_mode_setting(user_id):
+    from flask import abort
+    from sqlalchemy import text
+    from datetime import datetime, timezone
+    from services.attendance_permissions import (
+        can_manage_attendance_users,
+    )
+    from services.employee_time_settings import (
+        verify_csrf_token,
+    )
+
+    if not can_manage_attendance_users(current_user):
+        abort(403)
+
+    token = request.form.get("employee_time_csrf", "")
+    if not verify_csrf_token(
+        token, current_user.id, user_id
+    ):
+        abort(400)
+
+    mode = request.form.get("mode", "")
+    if mode not in ("automatic", "manual"):
+        abort(400)
+
+    target = db.session.get(User, user_id)
+    if target is None:
+        abort(404)
+
+    if (target.role or "").strip().lower() == "technician":
+        abort(403)
+
+    old_mode = target.employee_time_tracking_mode
+
+    if old_mode == mode:
+        return redirect(url_for("inventory.users"))
+
+    try:
+        target.employee_time_tracking_mode = mode
+
+        db.session.execute(
+            text(
+                "INSERT INTO employee_time_mode_audit "
+                "(user_id, changed_by_user_id, old_mode, "
+                "new_mode, changed_at_utc) "
+                "VALUES (:uid, :actor, :old, :new, :stamp)"
+            ),
+            {
+                "uid": target.id,
+                "actor": current_user.id,
+                "old": old_mode,
+                "new": mode,
+                "stamp": datetime.now(
+                    timezone.utc
+                ).isoformat(),
+            },
+        )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        raise
+
+    flash("Employee Clock Mode updated.", "success")
+    return redirect(url_for("inventory.users"))
+
+
+
 
 @inventory_bp.route("/users", methods=["GET", "POST"])
 @login_required
@@ -18916,6 +19158,7 @@ def users():
             User.username,
             User.role,
             User.employee_time_tracking_enabled,
+            User.employee_time_tracking_mode,
         )
         .order_by(User.username.asc())
         .all()
@@ -19068,6 +19311,58 @@ def user_access(user_id):
     # SAVE ACCESS
     # =========================================================
     if request.method == "POST":
+        # WCCR_ATTENDANCE_SECURITY_V32: dedicated Superadmin permission update
+        if is_target_superadmin:
+            from flask import abort
+            from services.attendance_review_permissions import REVIEW_PERMISSIONS
+            from services.attendance_review_csrf import (
+                verify_csrf_token, rotate_csrf_nonce,
+            )
+            rights = frozenset(REVIEW_PERMISSIONS.values())
+            prefix = 'erp_override__'
+            expected_fields = {
+                prefix + code for code in rights
+            } | {'attendance_review_csrf'}
+            if set(request.form.keys()) != expected_fields:
+                abort(400)
+            token_values = request.form.getlist(
+                'attendance_review_csrf'
+            )
+            if len(token_values) != 1 or not verify_csrf_token(
+                token_values[0], current_user.id, user.id
+            ):
+                abort(400)
+            submitted = {
+                key[len(prefix):] for key in request.form.keys()
+                if key.startswith(prefix)
+            }
+            if submitted != rights:
+                abort(400)
+            changes = {}
+            for code in rights:
+                values = request.form.getlist(prefix + code)
+                if len(values) != 1 or values[0] not in (
+                    'DEFAULT', 'ALLOW', 'DENY'
+                ):
+                    abort(400)
+                changes[code] = values[0]
+            try:
+                for code, effect in changes.items():
+                    ErpAccessService.set_override(
+                        user=user, permission_code=code,
+                        effect=effect, actor=current_user,
+                        commit=False,
+                    )
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                raise
+            rotate_csrf_nonce()
+            flash('Attendance Review permissions updated.', 'success')
+            return redirect(url_for(
+                'inventory.user_access', user_id=user.id
+            ))
+
 
         # Superadmin always has global bypass.
         if is_target_superadmin:
@@ -19400,16 +19695,7 @@ def user_access(user_id):
 
         erp_permission_groups.append(ui_group)
 
-    if is_target_superadmin:
-        erp_override_map = {
-            permission["code"]: "ALLOW"
-            for group in ERP_PERMISSION_GROUPS
-            for permission in group["permissions"]
-        }
-    else:
-        erp_override_map = (
-            ErpAccessService.override_map(user)
-        )
+    erp_override_map = ErpAccessService.override_map(user)
 
     # ---------------------------------------------------------
     # Recent access audit
@@ -19547,6 +19833,17 @@ def user_access(user_id):
         default_warehouse_id=default_warehouse_id,
         selected_permission_codes=selected_permission_codes,
         erp_permission_groups=erp_permission_groups,
+        attendance_review_csrf=__import__(
+            'services.attendance_review_csrf',
+            fromlist=['make_csrf_token']
+        ).make_csrf_token(current_user.id, user.id)
+        if is_target_superadmin else None,
+        attendance_review_rights=frozenset(
+            __import__(
+                'services.attendance_review_permissions',
+                fromlist=['REVIEW_PERMISSIONS']
+            ).REVIEW_PERMISSIONS.values()
+        ),
         erp_override_map=erp_override_map,
         recent_audit_groups=recent_audit_groups,
         is_target_superadmin=is_target_superadmin,
@@ -24130,6 +24427,7 @@ def attendance_payroll_dashboard(section="overview"):
     from flask import abort, render_template
     from flask_login import current_user
     from services.erp_access_service import ErpAccessService
+    from services.attendance_review_permissions import can_review_action
 
     role = (getattr(current_user, "role", "") or "").strip().lower()
     if role not in ("superadmin", "admin"):
@@ -24155,6 +24453,12 @@ def attendance_payroll_dashboard(section="overview"):
         key: allowed(code)
         for key, code in permissions.items()
     }
+    access['attendance_review'] = can_review_action(
+        current_user, 'review'
+    )
+    access["attendance_edit"] = can_review_action(
+        current_user, "edit"
+    )
 
     sections = {
         "overview": None,
@@ -24174,6 +24478,46 @@ def attendance_payroll_dashboard(section="overview"):
         abort(403)
 
     attendance_data = None
+    timesheet_from = ""
+    timesheet_to = ""
+    selected_start = None
+    selected_end = None
+
+    # WCCR_ACCOUNTING_TIMESHEET_V61
+    if section == "timesheets":
+        from flask import request, abort
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        local_today = datetime.now(
+            ZoneInfo("America/Los_Angeles")
+        ).date()
+
+        try:
+            selected_start = datetime.strptime(
+                request.args.get(
+                    "from",
+                    (local_today - timedelta(days=13)).isoformat()
+                ),
+                "%Y-%m-%d"
+            ).date()
+            selected_end = datetime.strptime(
+                request.args.get("to", local_today.isoformat()),
+                "%Y-%m-%d"
+            ).date()
+        except (ValueError, TypeError):
+            abort(400)
+
+        if (
+            selected_end < selected_start
+            or selected_end > local_today
+            or (selected_end - selected_start).days > 30
+        ):
+            abort(400)
+
+        timesheet_from = selected_start.isoformat()
+        timesheet_to = selected_end.isoformat()
+
 
     if section in ("overview", "attendance", "timesheets"):
         if access["attendance_view"]:
@@ -24189,7 +24533,9 @@ def attendance_payroll_dashboard(section="overview"):
             attendance_data = get_attendance_dashboard_data(
                 db,
                 paid_break_minutes=policy["paid_break_minutes"],
-                    can_review=access["attendance_review"]
+                    can_review=access["attendance_review"],
+                start_date=selected_start,
+                end_date=selected_end
             )
 
     return render_template(
@@ -24199,5 +24545,123 @@ def attendance_payroll_dashboard(section="overview"):
         permission_codes=permissions,
         payroll_read_only=True,
         attendance_data=attendance_data,
+        timesheet_from=timesheet_from,
+        timesheet_to=timesheet_to,
     )
 # WCCR_ATTENDANCE_PAYROLL_V29B_END
+
+# WCCR_EDIT_SHIFT_V40
+@inventory_bp.route(
+    "/attendance-payroll/shift/<int:shift_id>/edit",
+    methods=["GET", "POST"]
+)
+@login_required
+def attendance_shift_edit(shift_id):
+    import secrets
+    from flask import (
+        abort, request, render_template, redirect,
+        url_for, flash, session,
+    )
+    from flask_login import current_user
+    from services.attendance_review_permissions import (
+        require_review_action,
+    )
+    from services.attendance_shift_edit import (
+        get_shift, save_shift, local_string,
+        aware, ShiftEditError,
+    )
+
+    try:
+        require_review_action(current_user, "edit")
+    except PermissionError:
+        abort(403)
+
+    # WCCR_ATTENDANCE_V53_CORE
+    from services.employee_time_tracking_models import (
+        EmployeeShift, EmployeeTimeEvent
+    )
+    from sqlalchemy import select
+
+    shift = db.session.get(EmployeeShift, shift_id)
+    if shift is None:
+        abort(404)
+
+    events = db.session.execute(
+        select(EmployeeTimeEvent)
+        .where(EmployeeTimeEvent.shift_id == shift_id)
+        .order_by(EmployeeTimeEvent.id)
+    ).scalars().all()
+
+    edit_blocked_reason = None
+    try:
+        shift, events = get_shift(shift_id)
+    except ShiftEditError as exc:
+        edit_blocked_reason = str(exc)
+
+    token_key = "attendance_shift_edit_v40_token"
+    binding_key = "attendance_shift_edit_v40_binding"
+    binding = f"{current_user.id}:{shift_id}"
+
+    if request.method == "POST":
+        if edit_blocked_reason is not None:
+            abort(409)
+        submitted = request.form.get("csrf_token", "")
+        stored = session.get(token_key, "")
+        if (
+            not stored
+            or session.get(binding_key) != binding
+            or not secrets.compare_digest(submitted, stored)
+        ):
+            abort(400)
+
+        try:
+            if set(request.form.keys()) != {
+                "csrf_token", "started_at", "ended_at",
+                "reason", "expected_start", "expected_end",
+            }:
+                abort(400)
+
+            save_shift(
+                shift_id,
+                current_user.id,
+                request.form["started_at"],
+                request.form["ended_at"],
+                request.form["reason"],
+                request.form["expected_start"],
+                request.form["expected_end"],
+            )
+            session.pop(token_key, None)
+            session.pop(binding_key, None)
+            flash(
+                "Shift updated. Approval is still required.",
+                "success",
+            )
+            return redirect(url_for(
+                "inventory.attendance_payroll_dashboard",
+                section="timesheets",
+            ))
+        except ShiftEditError as exc:
+            flash(str(exc), "danger")
+        except Exception:
+            from flask import current_app
+            current_app.logger.exception(
+                "Attendance shift edit failed: shift=%s", shift_id
+            )
+            flash("Unable to save shift.", "danger")
+
+    if session.get(binding_key) != binding:
+        session[token_key] = secrets.token_urlsafe(32)
+        session[binding_key] = binding
+
+    return render_template(
+        "attendance_shift_edit.html",
+        shift=shift,
+        events=events,
+        edit_blocked_reason=edit_blocked_reason,
+        csrf_token=session[token_key],
+        started_at=local_string(shift.started_at),
+        ended_at=local_string(shift.ended_at),
+        expected_start=aware(shift.started_at).isoformat(),
+        expected_end=aware(shift.ended_at).isoformat(),
+    )
+

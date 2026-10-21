@@ -14,7 +14,7 @@ from services.employee_time_calculations import (
 
 def get_attendance_dashboard_data(
     db, *, paid_break_minutes, can_review=False,
-    now=None, days=14
+    now=None, days=14, start_date=None, end_date=None
 ):
     if now is None:
         now = datetime.now(timezone.utc)
@@ -28,6 +28,20 @@ def get_attendance_dashboard_data(
     tz = ZoneInfo("America/Los_Angeles")
     today = now.astimezone(tz).date()
     first_day = today - timedelta(days=days - 1)
+    # WCCR_ACCOUNTING_TIMESHEET_V61
+    actual_today = today
+    if start_date is not None or end_date is not None:
+        from datetime import date as _date
+        if (
+            type(start_date) is not _date
+            or type(end_date) is not _date
+            or end_date < start_date
+            or end_date > actual_today
+            or (end_date - start_date).days > 30
+        ):
+            raise ValueError("Invalid selected timesheet period")
+        first_day = start_date
+        today = end_date
 
     def midnight(day):
         return datetime.combine(
@@ -35,6 +49,9 @@ def get_attendance_dashboard_data(
         ).astimezone(timezone.utc)
 
     left = midnight(first_day)
+    selected_end = min(
+        now, midnight(today + timedelta(days=1))
+    )
 
     (
         aware, la_time, seconds_between, summary,
@@ -46,7 +63,7 @@ def get_attendance_dashboard_data(
     shifts = db.session.execute(
         select(EmployeeShift)
         .where(
-            EmployeeShift.started_at <= now,
+            EmployeeShift.started_at < selected_end,
             or_(
                 EmployeeShift.ended_at.is_(None),
                 EmployeeShift.ended_at > left
@@ -83,6 +100,41 @@ def get_attendance_dashboard_data(
         for event in events:
             events_by_shift[event.shift_id].append(event)
 
+    # WCCR_ATTENDANCE_V62
+    # Repeated LOGIN without LOGOUT is ambiguous.
+    # Do not silently reinterpret historical attendance events.
+    ambiguous_shift_ids = set()
+    for _shift in shifts:
+        _logged_in = False
+        for _event in events_by_shift[_shift.id]:
+            _kind = _event.event_type
+            if _kind == "LOGIN":
+                if _logged_in:
+                    ambiguous_shift_ids.add(_shift.id)
+                _logged_in = True
+            elif _kind in ("LOGOUT", "END_SHIFT"):
+                _logged_in = False
+
+    # WCCR_ATTENDANCE_V63
+    # Reporting-only safeguards. Never alter recorded events.
+    unverified_shift_ids = set(ambiguous_shift_ids)
+
+    for _shift in shifts:
+        _shift_start = aware(_shift.started_at)
+        _shift_end = aware(_shift.ended_at) or now
+
+        if (_shift_end - _shift_start).total_seconds() > 16 * 3600:
+            unverified_shift_ids.add(_shift.id)
+
+        if any(
+            _event.event_type in (
+                "TRACKING_DISABLED",
+                "AUTO_CLOSE_MIDNIGHT",
+            )
+            for _event in events_by_shift[_shift.id]
+        ):
+            unverified_shift_ids.add(_shift.id)
+
     working = []
     review = []
     overnight = []
@@ -96,7 +148,9 @@ def get_attendance_dashboard_data(
 
         open_shift = shift.ended_at is None
         requires_review = bool(
-            shift.requires_review or info["anomalies"]
+            shift.requires_review
+            or info["anomalies"]
+            or shift.id in unverified_shift_ids
         )
 
         elapsed = (
@@ -142,15 +196,27 @@ def get_attendance_dashboard_data(
         while day <= today:
             start = midnight(day)
             finish = min(
-                now,
+                selected_end,
                 midnight(day + timedelta(days=1))
             )
             amounts = totals(info, start, finish)
 
-            if amounts["total"] > 0:
+            if (
+                amounts["total"] > 0
+                or (
+                    requires_review
+                    and info["start"] < finish
+                    and info["end"] > start
+                )
+            ):
                 timesheets.append({
                     **record,
                     "date": day.isoformat(),
+                    "unverified": (
+                        shift.id in unverified_shift_ids
+                    ),
+                    "daily_start": max(info["start"], start),
+                    "daily_end": min(info["end"], finish),
                     **amounts,
                 })
 
@@ -161,6 +227,71 @@ def get_attendance_dashboard_data(
 
             day += timedelta(days=1)
 
+
+    # V6.1 - aggregate per employee and California calendar day.
+    daily_groups = defaultdict(list)
+    for part in timesheets:
+        daily_groups[(part["user_id"], part["date"])].append(part)
+
+    daily_timesheets = []
+    for (employee_id, work_date), parts in daily_groups.items():
+        parts.sort(key=lambda x: (
+            x["daily_start"], x["daily_end"], x["shift_id"]
+        ))
+
+        max_end = None
+        overlapping = False
+        for part in parts:
+            if max_end is not None and part["daily_start"] < max_end:
+                overlapping = True
+            if max_end is None or part["daily_end"] > max_end:
+                max_end = part["daily_end"]
+
+        unverified = any(
+            p.get("unverified", False) for p in parts
+        )
+        review_required = (
+            overlapping
+            or unverified
+            or any(p["requires_review"] for p in parts)
+        )
+        is_open = any(p["open"] for p in parts)
+        first = parts[0]
+
+        daily_timesheets.append({
+            "date": work_date,
+            "user_id": employee_id,
+            "employee_name": first["employee_name"],
+            "started": first["daily_start"].astimezone(
+                tz
+            ).strftime("%I:%M %p"),
+            "ended": (
+                "Still open" if is_open else
+                max_end.astimezone(tz).strftime("%I:%M %p")
+            ),
+            "unverified": unverified,
+            "worked": (
+                None if overlapping or unverified else
+                sum(p["worked"] for p in parts)
+            ),
+            "lunch": (
+                None if overlapping else
+                sum(p["lunch"] for p in parts)
+            ),
+            "break": (
+                None if overlapping else
+                sum(p["break"] for p in parts)
+            ),
+            "open": is_open,
+            "needs_review": review_required,
+            "overlap": overlapping,
+            "parts": parts,
+        })
+
+    daily_timesheets.sort(key=lambda x: (
+        x["date"], x["user_id"]
+    ), reverse=True)
+
     timesheets.sort(
         key=lambda row: (
             row["date"],
@@ -170,11 +301,25 @@ def get_attendance_dashboard_data(
         reverse=True
     )
 
+    # V6.3: Today's Worked Hours = review-free daily rows.
+    # These are preliminary display totals, NOT payroll approval.
+    today_totals = defaultdict(int)
+    for _day_row in daily_timesheets:
+        if (
+            _day_row["date"] == actual_today.isoformat()
+            and not _day_row["needs_review"]
+            and _day_row["worked"] is not None
+        ):
+            today_totals[_day_row["user_id"]] += (
+                _day_row["worked"]
+            )
+
     return {
         "working": working,
         "pending_review": review,
         "overnight": overnight,
         "timesheets": timesheets,
+        "daily_timesheets": daily_timesheets,
         "today_totals": dict(today_totals),
         "today": today.isoformat(),
         "first_day": first_day.isoformat(),

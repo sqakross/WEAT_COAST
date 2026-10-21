@@ -1,0 +1,561 @@
+
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4" style="max-width:1100px">
+
+  {# WCCR_ATTENDANCE_V56_UNIFIED_UI #}
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h3 class="mb-1">Edit Employee Time</h3>
+      <div class="text-muted">
+        Employee #{{ shift.user_id }} ? Shift #{{ shift.id }}
+        ? Pacific Time
+      </div>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('auth.attendance_interval_editor',
+                        shift_id=shift.id) }}">
+      Back
+    </a>
+  </div>
+
+  <div class="alert alert-warning">
+    <strong>Correction proposal only.</strong>
+    Original events and recorded hours are unchanged.
+    Approval is not enabled yet.
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h5>Shift Overview</h5>
+      <div class="row">
+        <div class="col-md-6">
+          <strong>Start:</strong> {{ display(shift.started_at) }}
+        </div>
+        <div class="col-md-6">
+          <strong>End:</strong> {{ display(shift.ended_at) }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+
+  {# WCCR_V58_PERIOD_EDITOR #}
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h5>Work &amp; Time Periods</h5>
+      <p class="text-muted small">
+        Preliminary reconstruction. These periods have not
+        been verified for payroll.
+      </p>
+
+      {% if timeline.warnings %}
+      <div class="alert alert-warning">
+        <strong>Review Required</strong>
+        ? recovery or event inconsistencies detected.
+        <details class="mt-2">
+          <summary>Show warnings</summary>
+          <ul class="mt-2 mb-0">
+            {% for warning in timeline.warnings %}
+            <li>{{ warning }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+      </div>
+      {% endif %}
+
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>Start (PT)</th>
+              <th>End (PT)</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in timeline.rows %}
+            <tr>
+              <td>
+                <strong>{{ row.type }}</strong>
+                {% if row.status != 'Candidate' %}
+                <div class="text-muted small">
+                  {{ row.detail }}
+                </div>
+                {% endif %}
+              </td>
+              <td>{{ row.start }}</td>
+              <td>{{ row.end }}</td>
+              <td>
+                {% if row.status == 'Candidate' %}
+                  <span class="badge bg-secondary">
+                    Candidate
+                  </span>
+                {% else %}
+                  <span class="badge bg-warning text-dark">
+                    Review Required
+                  </span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.end != '?'
+                      and row.start != '?'
+                      and row.type in
+                        ('Work candidate', 'Lunch', 'Break') %}
+                <button type="button"
+                  class="btn btn-outline-primary btn-sm edit-period"
+                  data-type="{{ row.type }}"
+                  data-start="{{ row.start }}"
+                  data-end="{{ row.end }}"
+                  data-status="{{ row.status }}"
+                  data-events="{{ row.event_ids }}">
+                  Edit Period
+                </button>
+                {% else %}
+                <span class="text-muted small">
+                  Review event
+                </span>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="5">No reconstructed periods.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3" id="period-editor"
+       hidden>
+    <div class="card-body">
+      <h5>Edit Selected Period</h5>
+
+      <div class="alert alert-info">
+        <strong>Preview only.</strong>
+        This form calculates a proposed change locally.
+        It does not submit or apply the correction.
+      </div>
+
+      <div class="mb-3">
+        <strong>Selected:</strong>
+        <span id="period-description"></span>
+      </div>
+
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Original Start (PT)</label>
+          <input class="form-control" id="original-start"
+                 readonly>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Original End (PT)</label>
+          <input class="form-control" id="original-end"
+                 readonly>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">New Start (PT)</label>
+          <input class="form-control" type="datetime-local"
+                 id="period-new-start">
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">New End (PT)</label>
+          <input class="form-control" type="datetime-local"
+                 id="period-new-end">
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Reason for Correction</label>
+        <textarea class="form-control"
+                  id="period-reason"
+                  minlength="4" maxlength="1000"
+                  rows="2"></textarea>
+      </div>
+
+      <div id="period-warning" class="alert alert-warning"
+           hidden>
+        This period has ambiguous recovery events.
+        It cannot be approved without further validation.
+      </div>
+
+      <div id="period-result" class="alert alert-secondary"
+           aria-live="polite">
+        Select corrected start and end times.
+      </div>
+
+      <button type="button" class="btn btn-primary"
+              id="preview-period">
+        Preview Changes
+      </button>
+      <button type="button" class="btn btn-outline-secondary"
+              id="cancel-period">
+        Cancel
+      </button>
+
+      <div class="text-muted small mt-3">
+        This preview is not a payroll calculation.
+        Saving period-level corrections requires
+        a validated server-side approval workflow.
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3" id="correction-card">
+    <div class="card-body">
+      <h5>Event-Level Correction (Advanced)</h5>
+      <p class="text-muted small">
+        This existing form submits changes to one original
+        event, not to an entire reconstructed period.
+      </p>
+
+      <form method="post" id="correction-form">
+        <input type="hidden" name="csrf_token"
+               value="{{ csrf_token }}">
+
+        <div class="mb-3">
+          <label class="form-label">Correction Type</label>
+          <select name="action_type" id="action-type"
+                  class="form-select" required>
+            <option value="correct_event_time">
+              Change Start / End Time
+            </option>
+            <option value="exclude_entire_shift">
+              Exclude Entire Shift ? No Work Performed
+            </option>
+          </select>
+        </div>
+
+        <div id="event-fields">
+          <div class="mb-3">
+            <label class="form-label">Selected Event</label>
+            <select name="event_id" id="event-id"
+                    class="form-select" required>
+              <option value="">Choose a row above...</option>
+              {% for e in events %}
+              <option value="{{ e.id }}"
+                      data-time="{{ local_input(e.occurred_at) }}"
+                      data-type="{{ e.event_type }}"
+                      data-original="{{ display(e.occurred_at) }}">
+                {{ e.event_type }} ?
+                {{ display(e.occurred_at) }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="alert alert-info" id="selected-details"
+               style="display:none"></div>
+
+          <div class="mb-3">
+            <label class="form-label">
+              Corrected Time (PT)
+            </label>
+            <input type="datetime-local" name="new_time"
+                   id="new-time" class="form-control" required>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">
+            Reason for Correction
+          </label>
+          <textarea name="reason" class="form-control"
+                    minlength="4" maxlength="1000"
+                    rows="3" required></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary">
+          Save Correction Proposal
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h5>Correction History</h5>
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>Action</th><th>Original</th>
+              <th>Proposed</th><th>Reason</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in proposals %}
+            <tr>
+              <td>{{ p.action_type }}</td>
+              <td>{{ display(p.original_time_utc) }}</td>
+              <td>{{ display(p.proposed_time_utc) }}</td>
+              <td>{{ p.reason }}</td>
+              <td>{{ p.status }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="5" class="text-muted">
+                No corrections submitted.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <details class="card shadow-sm">
+    <summary class="card-body" style="cursor:pointer">
+      Technical Event Details
+    </summary>
+    <div class="card-body pt-0">
+      <table class="table table-sm">
+        <thead>
+          <tr><th>ID</th><th>Event</th><th>Time</th><th>Note</th></tr>
+        </thead>
+        <tbody>
+          {% for e in events %}
+          <tr>
+            <td>{{ e.id }}</td>
+            <td>{{ e.event_type }}</td>
+            <td>{{ display(e.occurred_at) }}</td>
+            <td>{{ e.note or '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</div>
+
+<script>
+(function () {
+  const action = document.getElementById("action-type");
+  const fields = document.getElementById("event-fields");
+  const selected = document.getElementById("event-id");
+  const newTime = document.getElementById("new-time");
+  const details = document.getElementById("selected-details");
+
+  function sync() {
+    const editing = action.value === "correct_event_time";
+    fields.hidden = !editing;
+    selected.disabled = !editing;
+    newTime.disabled = !editing;
+    selected.required = editing;
+    newTime.required = editing;
+
+    if (!editing) {
+      selected.value = "";
+      newTime.value = "";
+      details.style.display = "none";
+    }
+  }
+
+  function selectEvent(id) {
+    selected.value = id;
+    const opt = selected.selectedOptions[0];
+
+    if (!opt || !opt.value) {
+      newTime.value = "";
+      details.style.display = "none";
+      return;
+    }
+
+    newTime.value = opt.dataset.time || "";
+    details.textContent =
+      "Editing: " + (opt.dataset.type || "") +
+      " | Original: " + (opt.dataset.original || "");
+    details.style.display = "block";
+  }
+
+  action.addEventListener("change", sync);
+  selected.addEventListener("change", function () {
+    selectEvent(selected.value);
+  });
+
+  document.querySelectorAll(".choose-event").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      action.value = "correct_event_time";
+      sync();
+      selectEvent(btn.dataset.id);
+      document.getElementById("correction-card")
+        .scrollIntoView({behavior:"smooth",block:"start"});
+    });
+  });
+
+  sync();
+})();
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  const editor = document.getElementById("period-editor");
+  const description = document.getElementById("period-description");
+  const originalStart = document.getElementById("original-start");
+  const originalEnd = document.getElementById("original-end");
+  const newStart = document.getElementById("period-new-start");
+  const newEnd = document.getElementById("period-new-end");
+  const reason = document.getElementById("period-reason");
+  const warning = document.getElementById("period-warning");
+  const result = document.getElementById("period-result");
+
+  let selected = null;
+
+  function parsePacificDisplay(value) {
+    const match = value.match(
+      /^([A-Za-z]{3}) (\d{1,2}), (\d{4}) (\d{1,2}):(\d{2}) (AM|PM)$/
+    );
+    if (!match) return null;
+
+    const months = {
+      Jan: 1, Feb: 2, Mar: 3, Apr: 4,
+      May: 5, Jun: 6, Jul: 7, Aug: 8,
+      Sep: 9, Oct: 10, Nov: 11, Dec: 12
+    };
+
+    const month = months[match[1]];
+    if (!month) return null;
+
+    let hour = Number(match[4]) % 12;
+    if (match[6] === "PM") hour += 12;
+
+    const pad = x => String(x).padStart(2, "0");
+    return (
+      match[3] + "-" + pad(month) + "-" +
+      pad(match[2]) + "T" +
+      pad(hour) + ":" + match[5]
+    );
+  }
+
+  function localMinutes(value) {
+    const match = value.match(
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/
+    );
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+
+    const utc = Date.UTC(
+      year, month - 1, day, hour, minute
+    );
+    const check = new Date(utc);
+
+    if (
+      check.getUTCFullYear() !== year ||
+      check.getUTCMonth() + 1 !== month ||
+      check.getUTCDate() !== day ||
+      check.getUTCHours() !== hour ||
+      check.getUTCMinutes() !== minute
+    ) return null;
+
+    return utc / 60000;
+  }
+
+  function formatDuration(minutes) {
+    const abs = Math.abs(minutes);
+    const h = Math.floor(abs / 60);
+    const m = abs % 60;
+    return h + "h " + String(m).padStart(2, "0") + "m";
+  }
+
+  document.querySelectorAll(".edit-period").forEach(button => {
+    button.addEventListener("click", function () {
+      selected = {
+        type: button.dataset.type,
+        start: button.dataset.start,
+        end: button.dataset.end,
+        status: button.dataset.status,
+        events: button.dataset.events
+      };
+
+      originalStart.value = selected.start;
+      originalEnd.value = selected.end;
+      newStart.value = parsePacificDisplay(selected.start) || "";
+      newEnd.value = parsePacificDisplay(selected.end) || "";
+      reason.value = "";
+
+      description.textContent = selected.type;
+      warning.hidden = selected.status === "Candidate";
+      result.textContent =
+        "Edit the times and click Preview Changes.";
+
+      editor.hidden = false;
+      editor.scrollIntoView({
+        behavior: "smooth", block: "start"
+      });
+    });
+  });
+
+  document.getElementById("preview-period")
+    .addEventListener("click", function () {
+      if (!selected) return;
+
+      const oldS = localMinutes(
+        parsePacificDisplay(selected.start) || ""
+      );
+      const oldE = localMinutes(
+        parsePacificDisplay(selected.end) || ""
+      );
+      const nextS = localMinutes(newStart.value);
+      const nextE = localMinutes(newEnd.value);
+
+      if (
+        oldS === null || oldE === null ||
+        nextS === null || nextE === null ||
+        nextE <= nextS
+      ) {
+        result.textContent =
+          "Invalid interval. End must be after Start.";
+        return;
+      }
+
+      if (reason.value.trim().length < 4) {
+        result.textContent =
+          "Please enter a reason (at least 4 characters).";
+        return;
+      }
+
+      const before = oldE - oldS;
+      const after = nextE - nextS;
+      const difference = after - before;
+
+      result.textContent =
+        "Before: " + formatDuration(before) +
+        " | After: " + formatDuration(after) +
+        " | Difference: " +
+        (difference >= 0 ? "+" : "-") +
+        formatDuration(difference) +
+        ". Preliminary wall-clock comparison only; " +
+        "not approved payable hours.";
+
+      if (selected.status !== "Candidate") {
+        warning.hidden = false;
+      }
+    });
+
+  document.getElementById("cancel-period")
+    .addEventListener("click", function () {
+      editor.hidden = true;
+      selected = null;
+    });
+})();
+</script>
+
+{% endblock %}

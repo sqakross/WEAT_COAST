@@ -77,6 +77,8 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(128), nullable=False)
     role = db.Column(db.String(20), nullable=False, default=ROLE_TECHNICIAN)
     employee_time_tracking_enabled = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('0'))
+    # WCCR_CLOCK_V66C_V2
+    employee_time_tracking_mode = db.Column(db.String(16), nullable=False, default='automatic', server_default=db.text("'automatic'"))
 
     @validates("role")
     def _validate_role(self, key, value: str | None):

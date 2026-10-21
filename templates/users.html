@@ -277,6 +277,28 @@
                           {{ 'ON' if u.employee_time_tracking_enabled else 'OFF' }}
                         </button>
                       </form>
+
+{# WCCR_CLOCK_V66C_V2 #}
+<form method="post" class="mt-1"
+      action="{{ url_for('inventory.employee_time_mode_setting', user_id=u.id) }}">
+  <input type="hidden"
+         name="employee_time_csrf"
+         value="{{ employee_time_csrf(u.id) }}">
+  <select name="mode"
+          class="form-select form-select-sm"
+          aria-label="Clock mode"
+          onchange="this.form.requestSubmit()">
+    <option value="automatic"
+      {% if u.employee_time_tracking_mode == 'automatic' %}selected{% endif %}>
+      Automatic
+    </option>
+    <option value="manual"
+      {% if u.employee_time_tracking_mode == 'manual' %}selected{% endif %}>
+      Manual
+    </option>
+  </select>
+</form>
+
                     {% else %}
                       <span class="text-muted small">
                         {{ 'ON' if u.employee_time_tracking_enabled else 'OFF' }}

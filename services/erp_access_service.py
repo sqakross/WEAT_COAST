@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime
 
@@ -74,6 +74,13 @@ class ErpAccessService:
 
         return code
 
+    ATTENDANCE_REVIEW_RIGHTS = frozenset({
+        'erp.attendance.review_shifts',
+        'erp.attendance.edit_shifts',
+        'erp.attendance.approve_shifts',
+        'erp.attendance.view_audit',
+    })
+
     @classmethod
     def get_override(
         cls,
@@ -88,7 +95,7 @@ class ErpAccessService:
             permission_code
         )
 
-        if cls.is_superadmin(user):
+        if cls.is_superadmin(user) and code not in cls.ATTENDANCE_REVIEW_RIGHTS:
             return cls.EFFECT_ALLOW
 
         row = (
@@ -127,6 +134,10 @@ class ErpAccessService:
         if user is None:
             return False
 
+        code = cls._normalize_code(permission_code)
+        if code in cls.ATTENDANCE_REVIEW_RIGHTS:
+            return cls.get_override(user, code) == cls.EFFECT_ALLOW
+
         if cls.is_superadmin(user):
             return True
 
@@ -164,7 +175,9 @@ class ErpAccessService:
                 "Actor is required."
             )
 
-        if cls.is_superadmin(user):
+        code = cls._normalize_code(permission_code)
+        if (cls.is_superadmin(user) and
+                code not in cls.ATTENDANCE_REVIEW_RIGHTS):
             raise ErpAccessError(
                 "Superadmin ERP access cannot be restricted."
             )
@@ -253,11 +266,23 @@ class ErpAccessService:
             return {}
 
         if cls.is_superadmin(user):
-
-            return {
+            result = {
                 code: cls.EFFECT_ALLOW
                 for code in ERP_PERMISSION_CODES
+                if code not in cls.ATTENDANCE_REVIEW_RIGHTS
             }
+            rows = ErpAccessOverride.query.filter_by(
+                user_id=user.id
+            ).all()
+            for row in rows:
+                if row.permission_code in cls.ATTENDANCE_REVIEW_RIGHTS:
+                    effect = (row.effect or '').strip().upper()
+                    result[row.permission_code] = (
+                        effect if effect in (
+                            cls.EFFECT_ALLOW, cls.EFFECT_DENY
+                        ) else cls.EFFECT_DENY
+                    )
+            return result
 
         rows = (
             ErpAccessOverride.query

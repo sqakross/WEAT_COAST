@@ -1,0 +1,2755 @@
+﻿WCCR WO #6388 - STOCK ISSUE DIAGNOSTIC
+Timestamp: 2026-10-19T14:03:23.1528271-07:00
+Root: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST
+Part: DA32-00006R
+Mode: READ ONLY
+Source files scanned: 239
+==========================================================================================
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\models.py
+MATCHES: 1
+==========================================================================================
+   966:         lazy="selectin",
+   967:         overlaps="parts,work_order",
+   968:     )
+   969: 
+   970: 
+   971: class WorkOrderPart(db.Model):
+   972:     __tablename__ = "work_order_parts"
+   973:     __table_args__ = {"extend_existing": True}
+   974: 
+   975:     id = db.Column(db.Integer, primary_key=True)
+   976:     work_order_id = db.Column(db.Integer, db.ForeignKey("work_orders.id"), nullable=False, index=True)
+   977:     unit_id = db.Column(db.Integer, db.ForeignKey("work_units.id"), nullable=True, index=True)
+   978: 
+   979:     part_number = db.Column(db.String(80), nullable=False)
+   980:     part_name   = db.Column(db.String(120))
+   981:     quantity    = db.Column(db.Integer, default=1)
+   982: 
+   983:     alt_part_numbers = db.Column(db.String(200))
+   984:     alt_numbers      = db.Column(db.String(200))
+   985: 
+   986:     supplier       = db.Column(db.String(80))
+   987:     backorder_flag = db.Column(db.Boolean, default=False)
+   988: 
+   989:     status      = db.Column(db.String(32), default="search_ordered")
+   990:     line_status = db.Column(db.String(32), default="search_ordered")
+   991: 
+   992:     unit_price_base  = db.Column(db.Float)
+   993:     unit_price_final = db.Column(db.Float)
+   994: 
+   995:     unit_cost        = db.Column(db.Float, nullable=True, default=None)
+   996:     issued_qty       = db.Column(db.Integer, nullable=False, default=0)
+   997:     last_issued_at   = db.Column(db.DateTime, nullable=True)
+   998: 
+   999:     warehouse  = db.Column(db.String(120), nullable=True)
+  1000:     unit_label = db.Column(db.String(120), nullable=True)
+  1001:     stock_hint = db.Column(db.String(120))
+  1002: 
+  1003:     ordered_flag = db.Column(db.Boolean, default=False, index=True)
+  1004:     ordered_date = db.Column(db.Date, nullable=True)
+  1005:     eta_date = db.Column(db.Date, nullable=True)
+  1006: 
+  1007:     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+  1008: 
+  1009:     is_insurance_supplied = db.Column(db.Boolean, nullable=False, default=False, index=True)
+  1010:     invoice_number = db.Column(db.String(32), nullable=True, index=True)
+  1011: 
+  1012:     item_type = db.Column(
+  1013:         db.String(20),
+  1014:         nullable=False,
+  1015:         default="part",
+  1016:         index=True,
+  1017:     )
+  1018: 
+  1019:     tool_asset_id = db.Column(
+  1020:         db.Integer,
+  1021:         db.ForeignKey("tool_assets.id"),
+  1022:         nullable=True,
+  1023:         index=True,
+  1024:     )
+  1025: 
+  1026:     tool_asset = db.relationship(
+  1027:         "ToolAsset",
+  1028:         foreign_keys=[tool_asset_id],
+  1029:         lazy="joined",
+  1030:     )
+  1031: 
+  1032: 
+  1033:     @property
+  1034:     def warehouse_or_label(self) -> str:
+  1035:         return self.warehouse or self.unit_label or ""
+  1036: 
+  1037:     @property
+  1038:     def is_ordered(self) -> bool:
+  1039:         st = (self.status or "").strip().lower()
+  1040:         ls = (self.line_status or "").strip().lower()
+  1041:         return bool(self.ordered_flag) or st == "ordered" or ls == "ordered"
+  1042: 
+  1043:     def mark_ordered(self, when: date | None = None):
+  1044:         self.ordered_flag = True
+  1045:         self.ordered_date = when or date.today()
+  1046:         if (self.status or "").lower() != "ordered":
+  1047:             self.status = "ordered"
+  1048:         if (self.line_status or "").lower() != "ordered":
+  1049:             self.line_status = "ordered"
+  1050: 
+  1051:     def clear_ordered(self):
+  1052:         self.ordered_flag = False
+  1053:         self.ordered_date = None
+  1054: 
+  1055:     def __repr__(self):
+  1056:         return f"<WOP id={self.id} pn={self.part_number} ordered={self.ordered_flag} on={self.ordered_date}>"
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\inventory\routes.py
+MATCHES: 17
+==========================================================================================
+  2652:                     f"manual_batch_confirm:"
+  2653:                     f"batch:{batch.id}:"
+  2654:                     f"inv:{getattr(batch, 'invoice_number', 'na')}:"
+  2655:                     f"ts:{issue_stamp}:"
+  2656:                     f"{datetime.utcnow().timestamp()}"
+  2657:                 )
+  2658: 
+  2659:                 _enqueue_email_once(
+  2660:                     unique_key=unique_key,
+  2661:                     to_email=target_email,
+  2662:                     subject=subject,
+  2663:                     body=body,
+  2664:                     work_order_id=getattr(wo, "id", None),
+  2665:                     batch_id=getattr(batch, "id", None),
+  2666:                     kind="tech_first_confirm",
+  2667:                 )
+  2668: 
+  2669:                 email_created = True
+  2670: 
+  2671:         db.session.commit()
+  2672: 
+  2673:         return jsonify({
+  2674:             "ok": True,
+  2675:             "updated": updated,
+  2676:             "email_created": email_created,
+  2677:             "email_skipped_reason": email_skipped_reason,
+  2678:         })
+  2679: 
+  2680:     except Exception as e:
+  2681:         db.session.rollback()
+  2682:         return jsonify({
+  2683:             "ok": False,
+  2684:             "error": str(e)
+  2685:         }), 500
+  2686: 
+  2687: @inventory_bp.get("/api/stock_hint", endpoint="api_stock_hint")
+  2688: @login_required
+  2689: def api_stock_hint():
+  2690:     pn = (request.args.get("pn") or "").strip().upper()
+  2691:     qty_needed_raw = (request.args.get("qty") or "").strip()
+  2692:     wh = (request.args.get("wh") or "").strip().upper()
+  2693: 
+  2694:     try:
+  2695:         qty_needed = int(qty_needed_raw or 0)
+  2696:     except ValueError:
+  2697:         qty_needed = 0
+  2698: 
+  2699:     if not pn:
+  2700:         return jsonify({
+  2701:             "ok": False,
+  2702:             "error": "NO_PN",
+  2703:             "hint": "WAIT",
+  2704:             "qty_available": 0,
+  2705:             "location": None,
+  2706:             "unit_cost": None,
+  2707:             "name": None,
+  2708:             "part_name": None,
+  2709:         }), 400
+  2710: 
+  2711:     rows = (
+  2712:         db.session.query(
+  2713:             Part.part_number,
+  2714:             Part.name,
+  2715:             Part.quantity,
+  2716:             Part.location,
+  2717:             Part.unit_cost,
+  2718:         )
+  2719:         .filter(Part.part_number == pn)
+  2720:         .all()
+  2721:     )
+  2722: 
+  2723:     qty_available = 0
+  2724:     locations = []
+  2725:     unit_cost = None
+  2726:     name = None
+  2727: 
+  2728:     for p in rows:
+  2729:         try:
+  2730:             part_qty = int(p.quantity or 0)
+  2731:         except (ValueError, TypeError):
+  2732:             part_qty = 0
+  2733: 
+  2734:         qty_available += part_qty
+  2735: 
+  2736:         loc = (p.location or "").strip().upper()
+  2737:         if part_qty > 0 and loc and loc not in locations:
+  2738:             locations.append(loc)
+  2739: 
+  2740:         if unit_cost is None and p.unit_cost is not None:
+  2741:             unit_cost = float(p.unit_cost)
+  2742: 
+  2743:         if name is None and p.name:
+  2744:             name = p.name
+  2745: 
+  2746:     is_stock = qty_available >= qty_needed if qty_needed > 0 else qty_available > 0
+  2747: 
+  2748:     return jsonify({
+  2749:         "ok": True,
+  2750:         "part_number": pn,
+  2751:         "qty_available": qty_available,
+  2752:         "hint": "STOCK" if is_stock else "WAIT",
+  2753:         "location": "/".join(locations) if locations else None,
+  2754:         "unit_cost": unit_cost,
+  2755:         "name": name,
+  2756:         "part_name": name,
+  2757:     })
+  2758: 
+  2759: 
+  2760: @inventory_bp.post("/api/stock_hint_bulk", endpoint="api_stock_hint_bulk")
+  2761: @login_required
+  2762: def api_stock_hint_bulk():
+  2763:     data = request.get_json(silent=True) or {}
+  2764:     items = data.get("items") or []
+  2765: 
+  2766:     normalized = []
+  2767:     pn_set = set()
+  2768: 
+  2769:     for item in items:
+  2770:         pn = (item.get("pn") or "").strip().upper()
+  2771:         wh = (item.get("wh") or "").strip().upper()
+  2772: 
+  2773:         try:
+  2774:             qty_needed = int(item.get("qty") or 0)
+  2775:         except (ValueError, TypeError):
+  2776:             qty_needed = 0
+  2777: 
+  2778:         key = f"{pn}|{qty_needed}|{wh}"
+  2779:         normalized.append((key, pn, qty_needed, wh))
+  2780: 
+  2781:         if pn:
+  2782:             pn_set.add(pn)
+  2783: 
+  2784:     parts_by_pn = {}
+  2785: 
+  2786:     if pn_set:
+  2787:         rows = (
+  2788:             db.session.query(
+  2789:                 Part.part_number,
+  2790:                 Part.name,
+  2791:                 Part.quantity,
+  2792:                 Part.location,
+  2793:                 Part.unit_cost,
+  2794:             )
+  2795:             .filter(Part.part_number.in_(pn_set))
+  2796:             .all()
+  2797:         )
+  2798: 
+  2799:         for p in rows:
+  2800:             pnum = (p.part_number or "").strip().upper()
+  2801:             parts_by_pn.setdefault(pnum, []).append(p)
+  2802: 
+  2803:     result = {}
+  2804: 
+  2805:     for key, pn, qty_needed, wh in normalized:
+  2806:         if not pn:
+  2807:             result[key] = {
+  2808:                 "ok": False,
+  2809:                 "error": "NO_PN",
+  2810:                 "hint": "WAIT",
+  2811:                 "qty_available": 0,
+  2812:                 "location": None,
+  2813:                 "unit_cost": None,
+  2814:                 "name": None,
+  2815:                 "part_name": None,
+  2816:                 "part_number": "",
+  2817:             }
+  3221:         chosen_cost_source = None
+  3222: 
+  3223:         cache_key = (
+  3224:             pn,
+  3225:             inv_ref or "",
+  3226:             is_stock,
+  3227:         )
+  3228: 
+  3229:         if cache_key in receipt_pick_cache:
+  3230:             lot_line, lot_src = receipt_pick_cache[
+  3231:                 cache_key
+  3232:             ]
+  3233:         else:
+  3234:             lot_line, lot_src = (
+  3235:                 pick_receipt_line_for_issue(
+  3236:                     part_number=pn,
+  3237:                     inv_ref=inv_ref,
+  3238:                     prefer_latest=is_stock,
+  3239:                 )
+  3240:             )
+  3241: 
+  3242:             receipt_pick_cache[cache_key] = (
+  3243:                 lot_line,
+  3244:                 lot_src,
+  3245:             )
+  3246: 
+  3247:         if inv_ref:
+  3248:             # Strict supplier invoice mode.
+  3249:             if (
+  3250:                 lot_line is None
+  3251:                 or lot_src != "receipt_inv_match"
+  3252:             ):
+  3253:                 raise ValueError(
+  3254:                     f"INV# '{inv_ref}' was not found in "
+  3255:                     f"POSTED receipts for part '{pn}'. "
+  3256:                     f"Nothing was issued."
+  3257:                 )
+  3258: 
+  3259:             normalized_inv = inv_ref.lstrip("0") or "0"
+  3260:             invoice_key = (pn, normalized_inv)
+  3261: 
+  3262:             # IMPORTANT:
+  3263:             # Do not allow SELECT statements below to autoflush
+  3264:             # IssuedPartRecord rows created earlier in THIS SAME
+  3265:             # bulk issue operation.
+  3266:             #
+  3267:             # Historical issued qty is read from DB.
+  3268:             # Current-operation qty is tracked separately in
+  3269:             # invoice_reserved_qty.
+  3270:             with db.session.no_autoflush:
+  3271: 
+  3272:                 received_qty = (
+  3273:                     db.session.query(
+  3274:                         func.coalesce(
+  3275:                             func.sum(
+  3276:                                 GoodsReceiptLine.quantity
+  3277:                             ),
+  3278:                             0,
+  3279:                         )
+  3280:                     )
+  3281:                     .join(
+  3282:                         GoodsReceipt,
+  3283:                         GoodsReceiptLine.goods_receipt_id
+  3284:                         == GoodsReceipt.id,
+  3285:                     )
+  3286:                     .filter(
+  3287:                         func.upper(
+  3288:                             GoodsReceiptLine.part_number
+  3289:                         )
+  3290:                         == pn
+  3291:                     )
+  3292:                     .filter(
+  3293:                         func.upper(
+  3294:                             GoodsReceipt.status
+  3295:                         )
+  3296:                         == "POSTED"
+  3297:                     )
+  3298:                     .filter(
+  3299:                         func.ltrim(
+  3300:                             func.upper(
+  3301:                                 func.coalesce(
+  3302:                                     GoodsReceipt.invoice_number,
+  3303:                                     "",
+  3304:                                 )
+  3305:                             ),
+  3306:                             "0",
+  3307:                         )
+  3308:                         == normalized_inv
+  3309:                     )
+  3310:                     .scalar()
+  3311:                     or 0
+  8747:         "markup_percent":   0.0,
+  8748:         "status":           "search_ordered",
+  8749:     }
+  8750:     if prefill:
+  8751:         # ÃÂ°ÃÂºÃÂºÃ‘Æ’Ã‘â‚¬ÃÂ°Ã‘â€šÃÂ½ÃÂ¾ ÃÂºÃÂ¾ÃÂ¿ÃÂ¸Ã‘â‚¬Ã‘Æ’ÃÂµÃÂ¼ ÃÂ¿ÃÂ¾ÃÂ»Ã‘Â, ÃÂµÃ‘ÂÃÂ»ÃÂ¸ ÃÂµÃ‘ÂÃ‘â€šÃ‘Å’
+  8752:         wo_hdr["technician_id"]   = getattr(prefill, "technician_id",   "") or ""
+  8753:         wo_hdr["technician_name"] = getattr(prefill, "technician_name", "") or ""
+  8754:         wo_hdr["job_numbers"]     = getattr(prefill, "job_numbers",     "") or ""
+  8755:         wo_hdr["job_type"]        = getattr(prefill, "job_type",        "BASE") or "BASE"
+  8756:         wo_hdr["delivery_fee"]    = getattr(prefill, "delivery_fee",    0.0) or 0.0
+  8757:         wo_hdr["markup_percent"]  = getattr(prefill, "markup_percent",  0.0) or 0.0
+  8758:         wo_hdr["status"]          = getattr(prefill, "status",          "search_ordered") or "search_ordered"
+  8759: 
+  8760:     # ---------- ÃÂ±ÃÂ»ÃÂ¾ÃÂºÃÂ¸ appliances / units / rows ----------
+  8761:     # ÃÂ­Ã‘â€šÃÂ¾ Ã‘â€šÃÂ¾, Ã‘â€¡Ã‘â€šÃÂ¾ Ã‘â€šÃ‘â€¹ Ã‘ÂÃÂ¾ÃÂ±ÃÂ¸Ã‘â‚¬ÃÂ°ÃÂµÃ‘Ë†Ã‘Å’ ÃÂ²ÃÂ½Ã‘Æ’Ã‘â€šÃ‘â‚¬ÃÂ¸ wo_save ÃÂ² units_payload.
+  8762:     # Ãâ€¢Ã‘ÂÃÂ»ÃÂ¸ Ã‘Æ’ ÃÂ½ÃÂ°Ã‘Â Ã‘Æ’ÃÂ¶ÃÂµ ÃÂµÃ‘ÂÃ‘â€šÃ‘Å’ units_prefill (Ã‘ÂÃÂ¿ÃÂ°Ã‘â‚¬Ã‘ÂÃÂ¸ÃÂ»ÃÂ¸ ÃÂ¸ÃÂ· Ã‘â€žÃÂ¾Ã‘â‚¬ÃÂ¼Ã‘â€¹ ÃÂ¿ÃÂµÃ‘â‚¬ÃÂµÃÂ´ ÃÂ²ÃÂ°ÃÂ»ÃÂ¸ÃÂ´ÃÂ°Ã‘â€ ÃÂ¸ÃÂµÃÂ¹),
+  8763:     # Ã‘â€šÃÂ¾ ÃÂ¾Ã‘â€šÃÂ´ÃÂ°Ã‘â€˜ÃÂ¼ ÃÂµÃÂ³ÃÂ¾; ÃÂ¸ÃÂ½ÃÂ°Ã‘â€¡ÃÂµ ÃÂ¾Ã‘â€šÃÂ´ÃÂ°Ã‘â€˜ÃÂ¼ ÃÂ´ÃÂµÃ‘â€žÃÂ¾ÃÂ»Ã‘â€š Ã‘Â ÃÂ¾ÃÂ´ÃÂ½ÃÂ¸ÃÂ¼ appliance ÃÂ¸ ÃÂ¾ÃÂ´ÃÂ½ÃÂ¾ÃÂ¹ ÃÂ¿Ã‘Æ’Ã‘ÂÃ‘â€šÃÂ¾ÃÂ¹ Ã‘ÂÃ‘â€šÃ‘â‚¬ÃÂ¾ÃÂºÃÂ¾ÃÂ¹.
+  8764:     if units_prefill:
+  8765:         units_for_template = units_prefill
+  8766:     else:
+  8767:         units_for_template = [{
+  8768:             "brand": "",
+  8769:             "model": "",
+  8770:             "serial": "",
+  8771:             "rows": [{
+  8772:                 "part_number": "",
+  8773:                 "part_name": "",
+  8774:                 "quantity": 1,
+  8775:                 "alt_numbers": "",
+  8776:                 "warehouse": "",
+  8777:                 "supplier": "",
+  8778:                 "backorder_flag": False,
+  8779:                 "ordered_flag": False,
+  8780:                 "unit_cost": "",
+  8781:                 "line_status": "search_ordered",
+  8782:                 "stock_hint": "",
+  8783:             }],
+  8784:         }]
+  8785: 
+  8786:     # Ãâ€™ÃÂÃâ€“ÃÂÃÅ¾: Ã‘ÂÃ‘â€šÃÂ¾Ã‘â€š Ã‘Ë†ÃÂ°ÃÂ±ÃÂ»ÃÂ¾ÃÂ½ ÃÂ´ÃÂ¾ÃÂ»ÃÂ¶ÃÂµÃÂ½ ÃÂ±Ã‘â€¹Ã‘â€šÃ‘Å’ ÃÂ¢ÃÅ¾ÃÂ§ÃÂÃÅ¾ Ã‘â€šÃÂ¾ÃÂ¹ Ã‘ÂÃ‘â€šÃ‘â‚¬ÃÂ°ÃÂ½ÃÂ¸Ã‘â€ ÃÂµÃÂ¹, ÃÂºÃÂ¾Ã‘â€šÃÂ¾Ã‘â‚¬ÃÂ°Ã‘Â Ã‘Æ’ Ã‘â€šÃÂµÃÂ±Ã‘Â ÃÂ½ÃÂ° /work_orders/new Ã‘ÂÃÂµÃÂ¹Ã‘â€¡ÃÂ°Ã‘Â.
+  8787:     # Ãâ€¢Ã‘ÂÃÂ»ÃÂ¸ ÃÂ¾ÃÂ½ Ã‘Æ’ Ã‘â€šÃÂµÃÂ±Ã‘Â ÃÂ½ÃÂ°ÃÂ·Ã‘â€¹ÃÂ²ÃÂ°ÃÂµÃ‘â€šÃ‘ÂÃ‘Â ÃÂ¸ÃÂ½ÃÂ°Ã‘â€¡ÃÂµ Ã¢â‚¬â€œ ÃÂ¿ÃÂ¾ÃÂ´Ã‘ÂÃ‘â€šÃÂ°ÃÂ²Ã‘Å’ ÃÂ¿Ã‘â‚¬ÃÂ°ÃÂ²ÃÂ¸ÃÂ»Ã‘Å’ÃÂ½Ã‘â€¹ÃÂ¹ ÃÂ¿Ã‘Æ’Ã‘â€šÃ‘Å’.
+  8788:     return render_template(
+  8789:         "work_orders/new.html",
+  8790:         wo=wo_hdr,
+  8791:         units=units_for_template,
+  8792:         tech_users=tech_users,
+  8793:         recent_suppliers=recent_suppliers,
+  8794:         readonly=False,
+  8795:     )
+  8796: 
+  8797: @inventory_bp.get("/work_orders/newx", endpoint="wo_newx")
+  8798: @login_required
+  8799: def wo_newx(prefill_wo=None, prefill_units=None):
+  8800:     from flask import session, render_template
+  8801:     recent_suppliers = session.get("recent_suppliers", [])
+  8802: 
+  8803:     # ERP ACCESS PATCH 05 STEP 2 - WO NEWX
+  8804:     role_low = (
+  8805:         getattr(current_user, "role", "") or ""
+  8806:     ).strip().lower()
+  8807: 
+  8808:     # Keep the existing technician workflow unchanged.
+  8809:     # ERP override must not turn a technician into a WO creator.
+  8810:     if role_low == "technician":
+  8811:         flash("Access denied", "danger")
+  8812:         return redirect(url_for("inventory.wo_list"))
+  8813: 
+  8814:     if not ErpAccessService.is_allowed(
+  8815:         current_user,
+  8816:         "erp.work_orders.access",
+  8817:         default_allowed=True,
+  8818:     ):
+  8819:         flash(
+  8820:             "Access denied: Work Orders access is disabled.",
+  8821:             "danger",
+  8822:         )
+  8823:         return redirect(url_for("inventory.dashboard"))
+  8824: 
+  8825:     legacy_create_allowed = (
+  8826:         role_low in ("admin", "superadmin")
+  8827:     )
+  8828: 
+  8829:     if not ErpAccessService.is_allowed(
+  8830:         current_user,
+  8831:         "erp.work_orders.create",
+  8832:         default_allowed=legacy_create_allowed,
+  8833:     ):
+  8834:         flash(
+  8835:             "Access denied: Create Work Order permission is disabled.",
+  8836:             "danger",
+  8837:         )
+ 10192:         if not ajax_save:
+ 10193:             flash("Work Order saved.", "success")
+ 10194: 
+ 10195:     except Exception as e:
+ 10196:         db.session.rollback()
+ 10197:         current_app.logger.exception("WO_SAVE commit failed")
+ 10198:         flash(f"Failed to save Work Order: {e}", "danger")
+ 10199:         return _safe_detail_redirect(wo)
+ 10200: 
+ 10201:     # Ã¢Å“â€¦ RELEASE reservation only after successful NEW WO save
+ 10202:     if is_new:
+ 10203:         try:
+ 10204:             tokens2 = _job_tokens(saved_job_numbers)
+ 10205:             if tokens2:
+ 10206:                 JobReservation.query.filter(
+ 10207:                     JobReservation.job_token.in_(tokens2),
+ 10208:                     JobReservation.holder_user_id == actor_id
+ 10209:                 ).delete(synchronize_session=False)
+ 10210:                 db.session.commit()
+ 10211:         except Exception:
+ 10212:             db.session.rollback()
+ 10213:             current_app.logger.exception("WO_SAVE failed to release job reservation")
+ 10214: 
+ 10215:     # ---------- remember suppliers ----------
+ 10216:     if suppliers_seen:
+ 10217:         cur = session.get("recent_suppliers", [])
+ 10218:         merged, seen = [], set()
+ 10219:         for x in suppliers_seen + list(cur):
+ 10220:             xl = x.lower()
+ 10221:             if xl in seen:
+ 10222:                 continue
+ 10223:             seen.add(xl)
+ 10224:             merged.append(x)
+ 10225:         session["recent_suppliers"] = merged[:20]
+ 10226:         session.modified = True
+ 10227:     # AJAX Save used by Issue Selected.
+ 10228:     # WO is already committed; do not reload the edit page.
+ 10229:     if ajax_save:
+ 10230:         return jsonify({
+ 10231:             "ok": True,
+ 10232:             "wo_id": saved_wo_id,
+ 10233:             "updated_at": saved_updated_at,
+ 10234:             "issue_url": url_for(
+ 10235:                 "inventory.wo_issue_instock",
+ 10236:                 wo_id=saved_wo_id,
+ 10237:             ),
+ 10238:         })
+ 10239: 
+ 10240:     after_save = (request.form.get("_after_save") or "").strip()
+ 10241:     save_clicked = (request.form.get("_save_clicked") or "").strip()
+ 10242: 
+ 10243:     # ÃÂµÃ‘ÂÃÂ»ÃÂ¸ Ã‘ÂÃ‘â€šÃÂ¾ ÃÂ¾ÃÂ±Ã‘â€¹Ã‘â€¡ÃÂ½Ã‘â€¹ÃÂ¹ Save Ã¢â‚¬â€ ÃÂ¸ÃÂ³ÃÂ½ÃÂ¾Ã‘â‚¬ÃÂ¸Ã‘â‚¬Ã‘Æ’ÃÂµÃÂ¼ auto_issue ÃÂ¿ÃÂ¾ÃÂ»ÃÂ½ÃÂ¾Ã‘ÂÃ‘â€šÃ‘Å’Ã‘Å½
+ 10244:     if save_clicked:
+ 10245:         return redirect(
+ 10246:             url_for(
+ 10247:                 "inventory.wo_detail",
+ 10248:                 wo_id=saved_wo_id,
+ 10249:             )
+ 10250:         )
+ 10251: 
+ 10252:     # Ã‘â€šÃÂ¾ÃÂ»Ã‘Å’ÃÂºÃÂ¾ ÃÂµÃ‘ÂÃÂ»ÃÂ¸ Ã‘ÂÃ‘â€šÃÂ¾ Ã‘â‚¬ÃÂµÃÂ°ÃÂ»Ã‘Å’ÃÂ½ÃÂ¾ Issue flow
+ 10253:     if after_save == "edit_auto_issue":
+ 10254:         return redirect(
+ 10255:             url_for(
+ 10256:                 "inventory.wo_edit",
+ 10257:                 wo_id=saved_wo_id,
+ 10258:                 auto_issue=1,
+ 10259:             )
+ 10260:         )
+ 10261: 
+ 10262:     return redirect(
+ 10263:         url_for(
+ 10264:             "inventory.wo_detail",
+ 10265:             wo_id=saved_wo_id,
+ 10266:         )
+ 10267:     )
+ 10268: 
+ 10269: @inventory_bp.get("/work_orders")
+ 10270: @login_required
+ 10271: def wo_list():
+ 10272:     """
+ 10273:     Unified search for Work Orders.
+ 10274: 
+ 10275:     GET params:
+ 10276:       q       - free text (tech name, job#, brand, model, part#, alt part#, part name)
+ 10277:       from    - date (YYYY-MM-DD)
+ 10278:       to      - date (YYYY-MM-DD)
+ 10279:       tech_id - technician id (admin/superadmin only; technicians ignored)
+ 10280:       type    - BASE | INSURANCE
+ 10281:       status  - search_ordered | ordered | done | cancel_job
+ 10282:     """
+ 11146:                         "danger",
+ 11147:                     )
+ 11148: 
+ 11149:                     return redirect(
+ 11150:                         url_for(
+ 11151:                             "inventory.wo_detail",
+ 11152:                             wo_id=wo.id,
+ 11153:                         )
+ 11154:                     )
+ 11155: 
+ 11156:                 continue
+ 11157: 
+ 11158:             if issued_so_far >= qty_req:
+ 11159:                 continue
+ 11160: 
+ 11161:             # INV# snapshot from UI (even without Save)
+ 11162:             inv_now = (inv_now_by_line_id.get(int(line.id)) or "").strip().upper()[:32]
+ 11163: 
+ 11164:             # if user typed INV# but didn't Save Ã¢â‚¬â€ save it now
+ 11165:             if inv_now:
+ 11166:                 try:
+ 11167:                     line.invoice_number = inv_now
+ 11168:                     db.session.add(line)
+ 11169:                 except Exception:
+ 11170:                     pass
+ 11171: 
+ 11172:             is_ins_line = (
+ 11173:                 (line.id in ins_ids)
+ 11174:                 or bool(getattr(line, "is_insurance_supplied", False))
+ 11175:             )
+ 11176: 
+ 11177: 
+ 11178: 
+ 11179:             hint_norm = (hint_map.get(pn) or "STOCK").upper()
+ 11180:             try:
+ 11181:                 line.stock_hint = hint_norm
+ 11182:             except Exception:
+ 11183:                 pass
+ 11184: 
+ 11185:             # ========== A) INS ==========
+ 11186:             if is_ins_job and is_ins_line:
+ 11187:                 if not part:
+ 11188:                     part = Part(part_number=pn)
+ 11189:                     if hasattr(part, "name"):
+ 11190:                         part.name = getattr(line, "part_name", "") or pn
+ 11191:                     if hasattr(Part, "location"):
+ 11192:                         setattr(part, "location", "0.00INS")
+ 11193:                     if hasattr(Part, "quantity"):
+ 11194:                         setattr(part, "quantity", 0)
+ 11195:                     if hasattr(Part, "unit_cost"):
+ 11196:                         setattr(part, "unit_cost", 0.0)
+ 11197:                     db.session.add(part)
+ 11198:                     db.session.flush()
+ 11199: 
+ 11200:                 rec = IssuedPartRecord(
+ 11201:                     part_id=part.id,
+ 11202:                     quantity=qty_req,
+ 11203:                     issued_to=(wo.technician_name or "").strip(),
+ 11204:                     reference_job=(wo.canonical_job or "").strip(),
+ 11205:                     issued_by=getattr(current_user, "username", "system"),
+ 11206:                     issue_date=issue_date,
+ 11207:                     unit_cost_at_issue=0.0,
+ 11208:                     is_insurance_supplied=True,
+ 11209:                     location=getattr(part, "location", "INS"),
+ 11210:                 )
+ 11211:                 if hasattr(rec, "inv_ref"):
+ 11212:                     rec.inv_ref = inv_now or None
+ 11213:                 if hasattr(rec, "part_number"):
+ 11214:                     rec.part_number = pn
+ 11215:                 if hasattr(rec, "name_at_issue"):
+ 11216:                     rec.name_at_issue = getattr(line, "part_name", "") or "Ã¢â‚¬â€"
+ 11217: 
+ 11218:                 db.session.add(rec)
+ 11219:                 new_records.append(rec)
+ 11220:                 issued_row_ids.append(line.id)
+ 11221:                 issued_delta_by_line_id[int(line.id)] = issued_delta_by_line_id.get(int(line.id), 0) + qty_req
+ 11222:                 continue
+ 11223: 
+ 11224:             # ========== B) STOCK ==========
+ 11225:             if not part:
+ 11226:                 skipped_rows.append({
+ 11227:                     "id": line.id,
+ 11228:                     "pn": pn,
+ 11229:                     "name": getattr(line, "part_name", "") or "Ã¢â‚¬â€",
+ 11230:                     "qty": qty_req,
+ 11231:                     "hint": hint_norm,
+ 11232:                 })
+ 11233:                 continue
+ 11234: 
+ 11235:             has_inv = bool(inv_now)
+ 11236: 
+ 11237:             ok = can_issue(pn, qty_req)
+ 11238: 
+ 11239:             if not ok and part:
+ 11240:                 # fallback to DB "real" quantity if stock_map was stale
+ 11241:                 try:
+ 11242:                     real_left = int(getattr(part, "quantity", 0) or 0)
+ 11243:                 except Exception:
+ 11244:                     real_left = 0
+ 11245:                 if real_left >= qty_req:
+ 11246:                     stock_map[pn] = int(stock_map.get(pn, 0))
+ 11247:                     stock_map[pn] = max(0, stock_map[pn] - qty_req)
+ 11248:                     ok = True
+ 11249: 
+ 11250:             hint_norm = (hint_map.get(pn) or ("STOCK" if ok else "WAIT"))
+ 11251:             try:
+ 11252:                 line.stock_hint = hint_norm
+ 11253:             except Exception:
+ 11254:                 pass
+ 11255: 
+ 11256:             if not ok and not has_inv:
+ 11257:                 skipped_rows.append({
+ 11258:                     "id": line.id,
+ 11259:                     "pn": pn,
+ 11260:                     "name": getattr(line, "part_name", "") or "Ã¢â‚¬â€",
+ 11261:                     "qty": qty_req,
+ 11262:                     "hint": hint_norm,
+ 11263:                 })
+ 11264:                 continue
+ 11265: 
+ 11266:             try:
+ 11267:                 real_cost = float(part.unit_cost or 0.0)
+ 11268:             except Exception:
+ 11269:                 real_cost = 0.0
+ 11270: 
+ 11271:             items_to_issue.append({
+ 11272:                 "part_id": part.id,
+ 11273:                 "qty": qty_req,
+ 11274:                 "unit_price": real_cost,
+ 11275:                 "inv_ref": inv_now,  # goes into IssuedPartRecord.inv_ref via helper
+ 11276:             })
+ 11277:             issued_row_ids.append(line.id)
+ 11278:             issued_delta_by_line_id[int(line.id)] = issued_delta_by_line_id.get(int(line.id), 0) + qty_req
+ 11279: 
+ 11280:         _issue_perf("prepare_selected_items")
+ 11281: 
+ 11282:         if not issued_row_ids and not items_to_issue and not new_records:
+ 11283:             if skipped_rows:
+ 11284:                 flash("Selected item(s) are not available in stock. Nothing was issued.", "warning")
+ 11285:             else:
+ 11286:                 flash("Nothing was issued.", "warning")
+ 11287:             return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+ 11288: 
+ 11289:         if issued_row_ids and not items_to_issue and not new_records:
+ 11290:             try:
+ 11291:                 tool_wo_id = int(wo.id)
+ 11292: 
+ 11293:                 _release_edit_lock_in_transaction()
+ 11294: 
+ 11295:                 db.session.commit()
+ 11296: 
+ 11297:                 flash(
+ 11298:                     "Tool(s) assigned to technician.",
+ 11299:                     "success",
+ 11300:                 )
+ 11301: 
+ 11302:             except Exception as e:
+ 11303:                 db.session.rollback()
+ 11304:                 flash(f"Error assigning tool(s): {e}", "danger")
+ 11305: 
+ 11306:             return redirect(url_for("inventory.wo_detail", wo_id=wo.id))
+ 11307: 
+ 11308:         # --- issue stock items in bulk ---
+ 11309:         if items_to_issue:
+ 11310:             try:
+ 11311:                 issue_date_stock, created_records = _issue_records_bulk(
+ 11312:                     issued_to=wo.technician_name,
+ 11313:                     reference_job=wo.canonical_job,
+ 11314:                     items=items_to_issue,
+ 11315:                 )
+ 11316: 
+ 11317:                 _issue_perf("issue_records_bulk")
+ 11318: 
+ 11319:                 if issue_date_stock:
+ 11320:                     issue_date = issue_date_stock
+ 11321:                 if created_records:
+ 11322:                     new_records.extend(created_records)
+ 11323:             except Exception as e:
+ 11324:                 db.session.rollback()
+ 11325:                 flash(f"Error issuing stock items: {e}", "danger")
+ 11326:                 return redirect(url_for("inventory.wo_detail", wo_id=wo_id))
+ 11327: 
+ 11328:         # --- apply issued deltas to WO lines (INS + STOCK) ---
+ 11329:         if issued_row_ids:
+ 11330:             now = datetime.utcnow()
+ 11331:             for line in WorkOrderPart.query.filter(WorkOrderPart.id.in_(issued_row_ids)).all():
+ 11332:                 qty_needed = int(line.quantity or 0)
+ 11333:                 issued_so_far = int(line.issued_qty or 0)
+ 11334:                 issued_so_far = min(issued_so_far, qty_needed)
+ 11335:                 delta = int(issued_delta_by_line_id.get(int(line.id), 0) or 0)
+ 11336:                 if delta <= 0:
+ 11337:                     continue
+ 11338: 
+ 11339:                 line.issued_qty = issued_so_far + delta
+ 11340:                 line.last_issued_at = now
+ 11341: 
+ 14075:     for u in units.values():
+ 14076:         for row in u["rows"]:
+ 14077:             row["quantity"] = int(row.get("quantity") or 0)
+ 14078:             row["backorder_flag"] = bool(row.get("backorder_flag") in ("on", "true", "1"))
+ 14079:             row["line_status"] = (row.get("line_status") or "search_ordered")
+ 14080:     # ÃÂ¿Ã‘â‚¬ÃÂµÃÂ²Ã‘â‚¬ÃÂ°Ã‘â€°ÃÂ°ÃÂµÃÂ¼ ÃÂ² Ã‘Æ’ÃÂ¿ÃÂ¾Ã‘â‚¬Ã‘ÂÃÂ´ÃÂ¾Ã‘â€¡ÃÂµÃÂ½ÃÂ½Ã‘â€¹ÃÂ¹ Ã‘ÂÃÂ¿ÃÂ¸Ã‘ÂÃÂ¾ÃÂº
+ 14081:     out = [units[i] for i in sorted(units.keys())]
+ 14082:     return out
+ 14083: @inventory_bp.get("/api/part_lookup")
+ 14084: @login_required
+ 14085: def api_part_lookup():
+ 14086:     from flask import request, jsonify
+ 14087:     from sqlalchemy import func
+ 14088:     from extensions import db
+ 14089:     from models import Part
+ 14090:     # ERP ACCESS PATCH 04A-V2 STEP 1 - INVENTORY MODULE ACCESS
+ 14091:     if not ErpAccessService.is_allowed(
+ 14092:         current_user,
+ 14093:         "erp.inventory.access",
+ 14094:         default_allowed=True,
+ 14095:     ):
+ 14096:         return jsonify(
+ 14097:             {
+ 14098:                 "found": False,
+ 14099:                 "error": "Access denied: Inventory access is disabled.",
+ 14100:             }
+ 14101:         ), 403
+ 14102: 
+ 14103: 
+ 14104:     pn = (request.args.get("pn") or "").strip().upper()
+ 14105:     if not pn:
+ 14106:         return jsonify({"found": False})
+ 14107: 
+ 14108:     part = Part.query.filter(func.upper(Part.part_number) == pn).first()
+ 14109:     if not part:
+ 14110:         return jsonify({"found": False, "stock_hint": "Ã¢â‚¬â€"})
+ 14111: 
+ 14112:     # --- stock ---
+ 14113:     on_hand = int(getattr(part, "on_hand", 0) or getattr(part, "quantity", 0) or 0)
+ 14114:     stock_hint = "STOCK" if on_hand > 0 else "WAIT"
+ 14115:     wh = getattr(part, "location", None) or getattr(part, "wh", None) or ""
+ 14116: 
+ 14117:     # ============================================================
+ 14118:     # NEW: latest POSTED receipt invoice (safe / optional)
+ 14119:     # ============================================================
+ 14120:     latest_inv = None
+ 14121:     latest_posted_at = None
+ 14122:     latest_line_id = None
+ 14123: 
+ 14124:     try:
+ 14125:         from models import GoodsReceipt, GoodsReceiptLine
+ 14126: 
+ 14127:         q = (
+ 14128:             db.session.query(GoodsReceiptLine, GoodsReceipt)
+ 14129:             .join(GoodsReceipt, GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id)
+ 14130:             .filter(func.upper(GoodsReceiptLine.part_number) == pn)
+ 14131:             .filter(func.lower(func.coalesce(GoodsReceipt.status, "")) == "posted")
+ 14132:             .order_by(
+ 14133:                 GoodsReceipt.posted_at.desc().nullslast(),
+ 14134:                 GoodsReceipt.id.desc(),
+ 14135:                 GoodsReceiptLine.id.desc(),
+ 14136:             )
+ 14137:         )
+ 14138:         row = q.first()
+ 14139:         if row:
+ 14140:             line, gr = row
+ 14141:             latest_inv = getattr(gr, "invoice_number", None)
+ 14142:             latest_posted_at = getattr(gr, "posted_at", None)
+ 14143:             latest_line_id = getattr(line, "id", None)
+ 14144:     except Exception:
+ 14145:         # safe fallback Ã¢â‚¬â€ ÃÂ½ÃÂ¸Ã‘â€¡ÃÂµÃÂ³ÃÂ¾ ÃÂ½ÃÂµ ÃÂ»ÃÂ¾ÃÂ¼ÃÂ°ÃÂµÃÂ¼
+ 14146:         pass
+ 14147: 
+ 14148:     # ============================================================
+ 14149:     # RESPONSE (backward compatible + new fields)
+ 14150:     # ============================================================
+ 14151:     return jsonify({
+ 14152:         # OLD fields (ÃÂÃâ€¢ Ãâ€ºÃÅ¾ÃÅ“ÃÂÃâ€¢ÃÅ“)
+ 14153:         "found": True,
+ 14154:         "name": getattr(part, "name", "") or "",
+ 14155:         "wh": wh,
+ 14156:         "stock_hint": stock_hint,
+ 14157: 
+ 14158:         # NEW fields (ÃÂ´ÃÂ»Ã‘Â ÃÂ½ÃÂ¾ÃÂ²ÃÂ¾ÃÂ³ÃÂ¾ UI)
+ 14159:         "id": part.id,
+ 14160:         "part_number": part.part_number,
+ 14161:         "quantity": on_hand,
+ 14162:         "location": wh,
+ 14163:         "latest_receipt_invoice_number": latest_inv,
+ 14164:         "latest_receipt_posted_at": (
+ 14165:             latest_posted_at.isoformat() if latest_posted_at else None
+ 14166:         ),
+ 14167:         "latest_receipt_line_id": (
+ 14168:             int(latest_line_id) if latest_line_id is not None else None
+ 14169:         ),
+ 14170:     })
+ 14171: 
+ 14172: @inventory_bp.post("/work_orders/<int:wo_id>/units/<int:unit_id>/issue_instock")
+ 14173: @login_required
+ 14174: def wo_issue_instock_unit(wo_id, unit_id):
+ 14175:     # ERP ACCESS PATCH 04A-v2 STEP 4 - WO UNIT INVENTORY ISSUE
+ 14176:     # This endpoint mutates Inventory from inside a Work Order unit.
+ 14177:     # Module DENY always wins.
+ 14178:     # DEFAULT for the action preserves the old admin/superadmin rule.
+ 14179:     legacy_admin_allowed = (
+ 14180:         (getattr(current_user, "role", "") or "").strip().lower()
+ 14181:         in ("admin", "superadmin")
+ 14182:     )
+ 14183: 
+ 14184:     if not ErpAccessService.is_allowed(
+ 14185:         current_user,
+ 14186:         "erp.inventory.access",
+ 14187:         default_allowed=True,
+ 14188:     ):
+ 14189:         flash(
+ 14190:             "Access denied: Inventory access is disabled.",
+ 14191:             "danger",
+ 14192:         )
+ 14193:         return redirect(
+ 14194:             url_for(
+ 14195:                 "inventory.wo_detail",
+ 14196:                 wo_id=wo_id,
+ 14197:             )
+ 14198:         )
+ 14199: 
+ 14200:     if not ErpAccessService.is_allowed(
+ 14201:         current_user,
+ 14202:         "erp.inventory.issue",
+ 14203:         default_allowed=legacy_admin_allowed,
+ 14204:     ):
+ 14205:         flash(
+ 14206:             "Access denied: Issue Parts permission is disabled.",
+ 14207:             "danger",
+ 14208:         )
+ 14209:         return redirect(
+ 14210:             url_for(
+ 14211:                 "inventory.wo_detail",
+ 15421: 
+ 15422:                     db.session.add(rec)
+ 15423:                     new_records.append(rec)
+ 15424: 
+ 15425:                     # batch_location: ÃÂµÃ‘ÂÃÂ»ÃÂ¸ Ã‘â€šÃÂ¾ÃÂ»Ã‘Å’ÃÂºÃÂ¾ INS Ã‘ÂÃ‘â€šÃ‘â‚¬ÃÂ¾ÃÂºÃÂ¸ Ã¢â‚¬â€ ÃÂ½ÃÂ¸ÃÂ¶ÃÂµ ÃÂ¿ÃÂ¾Ã‘ÂÃ‘â€šÃÂ°ÃÂ²ÃÂ¸ÃÂ¼ "INS"
+ 15426:                     if batch_location is None and loc_snapshot:
+ 15427:                         batch_location = loc_snapshot
+ 15428:                     continue
+ 15429: 
+ 15430:                 # --- normal stock line ---
+ 15431:                 if int(part.quantity or 0) < qty:
+ 15432:                     raise ValueError(
+ 15433:                         f"Not enough stock for {getattr(part, 'part_number', 'UNKNOWN')}: "
+ 15434:                         f"need {qty}, have {int(part.quantity or 0)}."
+ 15435:                     )
+ 15436: 
+ 15437:                 # Ã¢Å“â€¦ LOT COSTING (strict when inv_ref is provided)
+ 15438:                 pn = (getattr(part, "part_number", "") or "").strip()
+ 15439:                 line, src = pick_receipt_line_for_issue(part_number=pn, inv_ref=inv_ref)
+ 15440: 
+ 15441:                 # Ã°Å¸â€Â¥ STRICT RULE:
+ 15442:                 # if inv_ref is set (and not STOCK) Ã¢â€ â€™ MUST match a posted receipt invoice AND return a line
+ 15443:                 if inv_ref and line is None:
+ 15444:                     received_qty, already_issued_qty, available_qty = _invoice_available_qty_for_part(
+ 15445:                         pn=pn,
+ 15446:                         inv_ref=inv_ref,
+ 15447:                     )
+ 15448: 
+ 15449:                     if received_qty > 0 and available_qty <= 0:
+ 15450:                         raise ValueError(
+ 15451:                             f"INV# '{inv_ref}' was found for part '{pn}', "
+ 15452:                             f"but no quantity remains available. "
+ 15453:                             f"Received: {received_qty}; "
+ 15454:                             f"already issued: {already_issued_qty}; "
+ 15455:                             f"available: {available_qty}. "
+ 15456:                             f"Nothing was issued."
+ 15457:                         )
+ 15458: 
+ 15459:                     raise ValueError(
+ 15460:                         f"INV# '{inv_ref}' not found in POSTED receipts for part '{pn}'. "
+ 15461:                         f"Nothing was issued."
+ 15462:                     )
+ 15463: 
+ 15464:                 if inv_ref:
+ 15465:                     received_qty, already_issued_qty, available_qty = _invoice_available_qty_for_part(
+ 15466:                         pn=pn,
+ 15467:                         inv_ref=inv_ref,
+ 15468:                     )
+ 15469: 
+ 15470:                     if qty > available_qty:
+ 15471:                         raise ValueError(
+ 15472:                             f"Cannot issue {qty} pcs of '{pn}' from supplier invoice '{inv_ref}'. "
+ 15473:                             f"Received on this invoice: {received_qty}. "
+ 15474:                             f"Already issued from this invoice: {already_issued_qty}. "
+ 15475:                             f"Available: {available_qty}."
+ 15476:                         )
+ 15477: 
+ 15478:                 if line is not None:
+ 15479:                     chosen_receipt_line_id = int(line.id)
+ 15480:                 else:
+ 15481:                     chosen_receipt_line_id = None
+ 15482: 
+ 15483:                 if inv_ref and line is not None:
+ 15484:                     # Real supplier invoice selected:
+ 15485:                     # price comes from that exact receiving invoice line.
+ 15486:                     unit_cost = float(receipt_line_cost(line))
+ 15487:                     chosen_cost_source = src
+ 15488:                 else:
+ 15489:                     # STOCK or no invoice selected:
+ 15490:                     # price comes from current Inventory Dashboard price.
+ 15491:                     unit_cost = float(getattr(part, "unit_cost", 0) or 0.0)
+ 15492: 
+ 15493:                     if unit_cost <= 0 and line is not None:
+ 15494:                         unit_cost = float(receipt_line_cost(line))
+ 15495:                         chosen_cost_source = src
+ 15496:                     else:
+ 15497:                         chosen_cost_source = "part_unit_cost_stock"
+ 15498: 
+ 15499:                 # decrement stock (still not committed)
+ 15500:                 part.quantity = int(part.quantity or 0) - qty
+ 15501: 
+ 15502:                 rec = IssuedPartRecord(
+ 15503:                     part_id=part.id,
+ 15504:                     quantity=qty,
+ 15505:                     issued_to=issued_to,
+ 15506:                     reference_job=reference_job,
+ 15507:                     issued_by=issued_by,
+ 15508:                     issue_date=issue_dt,
+ 15509:                     unit_cost_at_issue=unit_cost,
+ 15510:                     location=loc_snapshot,
+ 15511:                 )
+ 15512: 
+ 15513:                 if hasattr(rec, "inv_ref"):
+ 15514:                     rec.inv_ref = inv_ref
+ 15515:                 if hasattr(rec, "source_receipt_line_id"):
+ 15516:                     rec.source_receipt_line_id = chosen_receipt_line_id
+ 17749:                                 )
+ 17750: 
+ 17751:                                 if candidate_inv_norm == inv_ref_norm:
+ 17752:                                     line = candidate
+ 17753:                                     break
+ 17754: 
+ 17755:                         # Legacy fallback:
+ 17756:                         # Prefer a row that actually has issued qty.
+ 17757:                         if line is None:
+ 17758:                             for candidate in candidate_lines:
+ 17759:                                 if int(
+ 17760:                                     getattr(
+ 17761:                                         candidate,
+ 17762:                                         "issued_qty",
+ 17763:                                         0,
+ 17764:                                     )
+ 17765:                                     or 0
+ 17766:                                 ) > 0:
+ 17767:                                     line = candidate
+ 17768:                                     break
+ 17769: 
+ 17770:                         # Last-resort compatibility fallback.
+ 17771:                         if line is None and candidate_lines:
+ 17772:                             line = candidate_lines[0]
+ 17773: 
+ 17774:                         if line:
+ 17775:                             old_issued = int(getattr(line, "issued_qty", 0) or 0)
+ 17776: 
+ 17777:                             qty_to_rollback = min(max(int(qty or 0), 0), old_issued)
+ 17778:                             new_issued = max(old_issued - qty_to_rollback, 0)
+ 17779: 
+ 17780:                             line.issued_qty = new_issued
+ 17781: 
+ 17782:                             if new_issued <= 0:
+ 17783:                                 line.last_issued_at = None
+ 17784:                                 line.stock_hint = None
+ 17785: 
+ 17786:                                 if hasattr(line, "status"):
+ 17787:                                     line.status = "search_ordered"
+ 17788: 
+ 17789:                                 if hasattr(line, "line_status"):
+ 17790:                                     line.line_status = "search_ordered"
+ 17791: 
+ 17792:                             db.session.add(line)
+ 17793: 
+ 17794:                 if r.batch_id:
+ 17795:                     touched.add(r.batch_id)
+ 17796: 
+ 17797:                 db.session.delete(r)
+ 17798: 
+ 17799:             # Remove empty batches
+ 17800:             for bid in touched:
+ 17801:                 still = db.session.query(IssuedPartRecord.id).filter_by(batch_id=bid).first()
+ 17802:                 if not still:
+ 17803:                     b = db.session.get(IssuedBatch, bid)
+ 17804:                     if b:
+ 17805:                         db.session.delete(b)
+ 17806: 
+ 17807:             db.session.commit()
+ 17808:             flash(f"Invoice #{delete_invoice_no:06d} deleted.", "success")
+ 17809: 
+ 17810:         except Exception as e:
+ 17811:             db.session.rollback()
+ 17812:             flash(f"Failed to delete invoice: {e}", "danger")
+ 17813: 
+ 17814:         return redirect(url_for('inventory.reports_grouped'))
+ 17815:     # ---------- DELETE RETURN ----------
+ 17816:     if do_delete_ret:
+ 17817:         if current_user.role != 'superadmin':
+ 17818:             flash("Only superadmin may delete return invoices.", "danger")
+ 17819:             return redirect(url_for('inventory.reports_grouped'))
+ 17820:         touched = set()
+ 17821:         try:
+ 17822:             for r in recs:
+ 17823:                 if not _is_return_row(r):
+ 17824:                     continue
+ 17825:                 sr = (
+ 17826:                     db.session.query(SupplierReturnBatch)
+ 17827:                     .filter(
+ 17828:                         SupplierReturnBatch.source_kind == "reports_return",
+ 17829:                         SupplierReturnBatch.source_return_record_id == r.id
+ 17830:                     )
+ 17831:                     .first()
+ 17832:                 )
+ 17833: 
+ 17834:                 if sr:
+ 17835:                     try:
+ 17836:                         if (sr.status or "draft") == "posted":
+ 17837:                             unpost_batch(batch_id=sr.id, actor=current_user.username)
+ 17838: 
+ 17839:                         db.session.delete(sr)
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\migrations\versions\1c799d3a6825_technician_receipts_receipts_table.py
+MATCHES: 3
+==========================================================================================
+    58:                 type_=sa.String(length=255),
+    59:                 existing_nullable=False,
+    60:             )
+    61:         except Exception:
+    62:             pass
+    63:         try:
+    64:             op.alter_column(
+    65:                 "issued_part_record", "issued_by",
+    66:                 existing_type=sa.String(length=100),
+    67:                 type_=sa.String(length=255),
+    68:                 existing_nullable=False,
+    69:             )
+    70:         except Exception:
+    71:             pass
+    72:         try:
+    73:             op.alter_column(
+    74:                 "issued_part_record", "reference_job",
+    75:                 existing_type=sa.String(length=100),
+    76:                 type_=sa.String(length=255),
+    77:                 existing_nullable=True,
+    78:             )
+    79:         except Exception:
+    80:             pass
+    81: 
+    82:     # --- WorkOrderPart: ÑÐ»ÑƒÐ¶ÐµÐ±Ð½Ñ‹Ðµ Ð¿Ð¾Ð»Ñ (ÐµÑÐ»Ð¸ Ð¸Ñ… Ð½ÐµÑ‚) ---
+    83:     # issued_qty
+    84:     try:
+    85:         op.add_column("work_order_parts", sa.Column("issued_qty", sa.Integer(), nullable=True))
+    86:     except Exception:
+    87:         pass
+    88:     # last_issued_at
+    89:     try:
+    90:         op.add_column("work_order_parts", sa.Column("last_issued_at", sa.DateTime(), nullable=True))
+    91:     except Exception:
+    92:         pass
+    93:     # stock_hint (Ð´Ð»Ñ ÐºÐµÑˆÐ° Ð¿Ð¾Ð´ÑÐºÐ°Ð·ÐºÐ¸ ÑÐºÐ»Ð°Ð´Ð°)
+    94:     try:
+    95:         op.add_column("work_order_parts", sa.Column("stock_hint", sa.String(length=64), nullable=True))
+    96:     except Exception:
+    97:         pass
+    98: 
+    99:     # Ð¸Ð½Ð´ÐµÐºÑÑ‹ (Ð¿Ð¾ Ð¶ÐµÐ»Ð°Ð½Ð¸ÑŽ/ÐµÑÐ»Ð¸ Ð½Ð°Ð´Ð¾)
+   100:     try:
+   101:         op.create_index("ix_work_order_parts_work_order_id", "work_order_parts", ["work_order_id"])
+   102:     except Exception:
+   103:         pass
+   104:     try:
+   105:         op.create_index("ix_work_order_parts_unit_id", "work_order_parts", ["unit_id"])
+   106:     except Exception:
+   107:         pass
+   108: 
+   109: 
+   110: def downgrade():
+   111:     # Ð¾Ñ‚ÐºÐ°Ñ‚Ñ‹Ð²Ð°ÐµÐ¼ Ð¿Ð¾ Ð¼Ð¸Ð½Ð¸Ð¼ÑƒÐ¼Ñƒ (Ð±ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾)
+   112:     try:
+   113:         op.drop_constraint("fk_ipr_batch", "issued_part_record", type_="foreignkey")
+   114:     except Exception:
+   115:         pass
+   116:     try:
+   117:         op.drop_column("issued_part_record", "batch_id")
+   118:     except Exception:
+   119:         pass
+   120: 
+   121:     try:
+   122:         op.drop_index("ix_work_order_parts_work_order_id", table_name="work_order_parts")
+   123:     except Exception:
+   124:         pass
+   125:     try:
+   126:         op.drop_index("ix_work_order_parts_unit_id", table_name="work_order_parts")
+   127:     except Exception:
+   128:         pass
+   129: 
+   130:     try:
+   131:         op.drop_column("work_order_parts", "issued_qty")
+   132:     except Exception:
+   133:         pass
+   134:     try:
+   135:         op.drop_column("work_order_parts", "last_issued_at")
+   136:     except Exception:
+   137:         pass
+   138:     try:
+   139:         op.drop_column("work_order_parts", "stock_hint")
+   140:     except Exception:
+   141:         pass
+   142: 
+   143:     try:
+   144:         op.drop_index("ix_issued_batch_invoice_number", table_name="issued_batch")
+   145:     except Exception:
+   146:         pass
+   147:     try:
+   148:         op.drop_table("issued_batch")
+   149:     except Exception:
+   150:         pass
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\services\appliance_issue_service.bak_before_atomic_vendor_return_20260829_130632.py
+MATCHES: 1
+==========================================================================================
+   575:                         .STATUS_AVAILABLE
+   576:                     ),
+   577:                 )
+   578:                 .update(
+   579:                     {
+   580:                         ApplianceUnit.status:
+   581:                             ApplianceIssueService
+   582:                             .STATUS_ISSUED,
+   583: 
+   584:                         ApplianceUnit.current_work_order_id:
+   585:                             (
+   586:                                 work_order.id
+   587:                                 if work_order is not None
+   588:                                 else None
+   589:                             ),
+   590: 
+   591:                         ApplianceUnit.current_work_order_number:
+   592:                             work_order_number_clean,
+   593: 
+   594:                         ApplianceUnit.updated_at:
+   595:                             now,
+   596: 
+   597:                         ApplianceUnit.updated_by_id:
+   598:                             actor.id,
+   599:                     },
+   600:                     synchronize_session=False,
+   601:                 )
+   602:             )
+   603: 
+   604:             if updated_count != len(
+   605:                 normalized_ids
+   606:             ):
+   607:                 raise ApplianceIssueError(
+   608:                     "One or more appliances were "
+   609:                     "changed by another user. "
+   610:                     "Nothing was issued. Refresh and try again."
+   611:                 )
+   612: 
+   613:             # -------------------------------------------------
+   614:             # Create Issue Lines and immutable Movements.
+   615:             # -------------------------------------------------
+   616: 
+   617:             for line_no, unit in enumerate(
+   618:                 ordered_units,
+   619:                 start=1,
+   620:             ):
+   621: 
+   622:                 category_name = (
+   623:                     unit.category.name
+   624:                     if unit.category is not None
+   625:                     else None
+   626:                 )
+   627: 
+   628:                 line = ApplianceIssueLine(
+   629:                     issue_id=issue.id,
+   630:                     line_no=line_no,
+   631:                     appliance_unit_id=unit.id,
+   632:                     current_work_order_id=(
+   633:                         work_order.id
+   634:                         if work_order is not None
+   635:                         else None
+   636:                     ),
+   637:                     current_work_order_number=(
+   638:                         work_order_number_clean
+   639:                     ),
+   640:                     status=(
+   641:                         ApplianceIssueService
+   642:                         .LINE_STATUS_ISSUED
+   643:                     ),
+   644:                     installed_at=None,
+   645:                     resolved_at=None,
+   646:                     notes=None,
+   647: 
+   648:                     # Historical snapshot for printing.
+   649:                     # NO PRICES.
+   650:                     inventory_number_snapshot=(
+   651:                         unit.inventory_number
+   652:                     ),
+   653:                     appliance_type_snapshot=(
+   654:                         category_name
+   655:                     ),
+   656:                     brand_snapshot=unit.brand,
+   657:                     model_number_snapshot=(
+   658:                         unit.model_number
+   659:                     ),
+   660:                     serial_number_snapshot=(
+   661:                         unit.serial_number
+   662:                     ),
+   663:                     size_value_snapshot=(
+   664:                         unit.size_value
+   665:                     ),
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\services\appliance_issue_service.bak_before_atomic_vendor_return_20260829_130748.py
+MATCHES: 1
+==========================================================================================
+   575:                         .STATUS_AVAILABLE
+   576:                     ),
+   577:                 )
+   578:                 .update(
+   579:                     {
+   580:                         ApplianceUnit.status:
+   581:                             ApplianceIssueService
+   582:                             .STATUS_ISSUED,
+   583: 
+   584:                         ApplianceUnit.current_work_order_id:
+   585:                             (
+   586:                                 work_order.id
+   587:                                 if work_order is not None
+   588:                                 else None
+   589:                             ),
+   590: 
+   591:                         ApplianceUnit.current_work_order_number:
+   592:                             work_order_number_clean,
+   593: 
+   594:                         ApplianceUnit.updated_at:
+   595:                             now,
+   596: 
+   597:                         ApplianceUnit.updated_by_id:
+   598:                             actor.id,
+   599:                     },
+   600:                     synchronize_session=False,
+   601:                 )
+   602:             )
+   603: 
+   604:             if updated_count != len(
+   605:                 normalized_ids
+   606:             ):
+   607:                 raise ApplianceIssueError(
+   608:                     "One or more appliances were "
+   609:                     "changed by another user. "
+   610:                     "Nothing was issued. Refresh and try again."
+   611:                 )
+   612: 
+   613:             # -------------------------------------------------
+   614:             # Create Issue Lines and immutable Movements.
+   615:             # -------------------------------------------------
+   616: 
+   617:             for line_no, unit in enumerate(
+   618:                 ordered_units,
+   619:                 start=1,
+   620:             ):
+   621: 
+   622:                 category_name = (
+   623:                     unit.category.name
+   624:                     if unit.category is not None
+   625:                     else None
+   626:                 )
+   627: 
+   628:                 line = ApplianceIssueLine(
+   629:                     issue_id=issue.id,
+   630:                     line_no=line_no,
+   631:                     appliance_unit_id=unit.id,
+   632:                     current_work_order_id=(
+   633:                         work_order.id
+   634:                         if work_order is not None
+   635:                         else None
+   636:                     ),
+   637:                     current_work_order_number=(
+   638:                         work_order_number_clean
+   639:                     ),
+   640:                     status=(
+   641:                         ApplianceIssueService
+   642:                         .LINE_STATUS_ISSUED
+   643:                     ),
+   644:                     installed_at=None,
+   645:                     resolved_at=None,
+   646:                     notes=None,
+   647: 
+   648:                     # Historical snapshot for printing.
+   649:                     # NO PRICES.
+   650:                     inventory_number_snapshot=(
+   651:                         unit.inventory_number
+   652:                     ),
+   653:                     appliance_type_snapshot=(
+   654:                         category_name
+   655:                     ),
+   656:                     brand_snapshot=unit.brand,
+   657:                     model_number_snapshot=(
+   658:                         unit.model_number
+   659:                     ),
+   660:                     serial_number_snapshot=(
+   661:                         unit.serial_number
+   662:                     ),
+   663:                     size_value_snapshot=(
+   664:                         unit.size_value
+   665:                     ),
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\services\appliance_issue_service.bak_before_disposition_permissions_20260829_130201.py
+MATCHES: 1
+==========================================================================================
+   575:                         .STATUS_AVAILABLE
+   576:                     ),
+   577:                 )
+   578:                 .update(
+   579:                     {
+   580:                         ApplianceUnit.status:
+   581:                             ApplianceIssueService
+   582:                             .STATUS_ISSUED,
+   583: 
+   584:                         ApplianceUnit.current_work_order_id:
+   585:                             (
+   586:                                 work_order.id
+   587:                                 if work_order is not None
+   588:                                 else None
+   589:                             ),
+   590: 
+   591:                         ApplianceUnit.current_work_order_number:
+   592:                             work_order_number_clean,
+   593: 
+   594:                         ApplianceUnit.updated_at:
+   595:                             now,
+   596: 
+   597:                         ApplianceUnit.updated_by_id:
+   598:                             actor.id,
+   599:                     },
+   600:                     synchronize_session=False,
+   601:                 )
+   602:             )
+   603: 
+   604:             if updated_count != len(
+   605:                 normalized_ids
+   606:             ):
+   607:                 raise ApplianceIssueError(
+   608:                     "One or more appliances were "
+   609:                     "changed by another user. "
+   610:                     "Nothing was issued. Refresh and try again."
+   611:                 )
+   612: 
+   613:             # -------------------------------------------------
+   614:             # Create Issue Lines and immutable Movements.
+   615:             # -------------------------------------------------
+   616: 
+   617:             for line_no, unit in enumerate(
+   618:                 ordered_units,
+   619:                 start=1,
+   620:             ):
+   621: 
+   622:                 category_name = (
+   623:                     unit.category.name
+   624:                     if unit.category is not None
+   625:                     else None
+   626:                 )
+   627: 
+   628:                 line = ApplianceIssueLine(
+   629:                     issue_id=issue.id,
+   630:                     line_no=line_no,
+   631:                     appliance_unit_id=unit.id,
+   632:                     current_work_order_id=(
+   633:                         work_order.id
+   634:                         if work_order is not None
+   635:                         else None
+   636:                     ),
+   637:                     current_work_order_number=(
+   638:                         work_order_number_clean
+   639:                     ),
+   640:                     status=(
+   641:                         ApplianceIssueService
+   642:                         .LINE_STATUS_ISSUED
+   643:                     ),
+   644:                     installed_at=None,
+   645:                     resolved_at=None,
+   646:                     notes=None,
+   647: 
+   648:                     # Historical snapshot for printing.
+   649:                     # NO PRICES.
+   650:                     inventory_number_snapshot=(
+   651:                         unit.inventory_number
+   652:                     ),
+   653:                     appliance_type_snapshot=(
+   654:                         category_name
+   655:                     ),
+   656:                     brand_snapshot=unit.brand,
+   657:                     model_number_snapshot=(
+   658:                         unit.model_number
+   659:                     ),
+   660:                     serial_number_snapshot=(
+   661:                         unit.serial_number
+   662:                     ),
+   663:                     size_value_snapshot=(
+   664:                         unit.size_value
+   665:                     ),
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\services\appliance_issue_service.bak_before_repair_history_20260902_094326.py
+MATCHES: 1
+==========================================================================================
+   578:                         .STATUS_AVAILABLE
+   579:                     ),
+   580:                 )
+   581:                 .update(
+   582:                     {
+   583:                         ApplianceUnit.status:
+   584:                             ApplianceIssueService
+   585:                             .STATUS_ISSUED,
+   586: 
+   587:                         ApplianceUnit.current_work_order_id:
+   588:                             (
+   589:                                 work_order.id
+   590:                                 if work_order is not None
+   591:                                 else None
+   592:                             ),
+   593: 
+   594:                         ApplianceUnit.current_work_order_number:
+   595:                             work_order_number_clean,
+   596: 
+   597:                         ApplianceUnit.updated_at:
+   598:                             now,
+   599: 
+   600:                         ApplianceUnit.updated_by_id:
+   601:                             actor.id,
+   602:                     },
+   603:                     synchronize_session=False,
+   604:                 )
+   605:             )
+   606: 
+   607:             if updated_count != len(
+   608:                 normalized_ids
+   609:             ):
+   610:                 raise ApplianceIssueError(
+   611:                     "One or more appliances were "
+   612:                     "changed by another user. "
+   613:                     "Nothing was issued. Refresh and try again."
+   614:                 )
+   615: 
+   616:             # -------------------------------------------------
+   617:             # Create Issue Lines and immutable Movements.
+   618:             # -------------------------------------------------
+   619: 
+   620:             for line_no, unit in enumerate(
+   621:                 ordered_units,
+   622:                 start=1,
+   623:             ):
+   624: 
+   625:                 category_name = (
+   626:                     unit.category.name
+   627:                     if unit.category is not None
+   628:                     else None
+   629:                 )
+   630: 
+   631:                 line = ApplianceIssueLine(
+   632:                     issue_id=issue.id,
+   633:                     line_no=line_no,
+   634:                     appliance_unit_id=unit.id,
+   635:                     current_work_order_id=(
+   636:                         work_order.id
+   637:                         if work_order is not None
+   638:                         else None
+   639:                     ),
+   640:                     current_work_order_number=(
+   641:                         work_order_number_clean
+   642:                     ),
+   643:                     status=(
+   644:                         ApplianceIssueService
+   645:                         .LINE_STATUS_ISSUED
+   646:                     ),
+   647:                     installed_at=None,
+   648:                     resolved_at=None,
+   649:                     notes=None,
+   650: 
+   651:                     # Historical snapshot for printing.
+   652:                     # NO PRICES.
+   653:                     inventory_number_snapshot=(
+   654:                         unit.inventory_number
+   655:                     ),
+   656:                     appliance_type_snapshot=(
+   657:                         category_name
+   658:                     ),
+   659:                     brand_snapshot=unit.brand,
+   660:                     model_number_snapshot=(
+   661:                         unit.model_number
+   662:                     ),
+   663:                     serial_number_snapshot=(
+   664:                         unit.serial_number
+   665:                     ),
+   666:                     size_value_snapshot=(
+   667:                         unit.size_value
+   668:                     ),
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\services\appliance_issue_service.bak_before_repair_history_20260902_094539.py
+MATCHES: 1
+==========================================================================================
+   578:                         .STATUS_AVAILABLE
+   579:                     ),
+   580:                 )
+   581:                 .update(
+   582:                     {
+   583:                         ApplianceUnit.status:
+   584:                             ApplianceIssueService
+   585:                             .STATUS_ISSUED,
+   586: 
+   587:                         ApplianceUnit.current_work_order_id:
+   588:                             (
+   589:                                 work_order.id
+   590:                                 if work_order is not None
+   591:                                 else None
+   592:                             ),
+   593: 
+   594:                         ApplianceUnit.current_work_order_number:
+   595:                             work_order_number_clean,
+   596: 
+   597:                         ApplianceUnit.updated_at:
+   598:                             now,
+   599: 
+   600:                         ApplianceUnit.updated_by_id:
+   601:                             actor.id,
+   602:                     },
+   603:                     synchronize_session=False,
+   604:                 )
+   605:             )
+   606: 
+   607:             if updated_count != len(
+   608:                 normalized_ids
+   609:             ):
+   610:                 raise ApplianceIssueError(
+   611:                     "One or more appliances were "
+   612:                     "changed by another user. "
+   613:                     "Nothing was issued. Refresh and try again."
+   614:                 )
+   615: 
+   616:             # -------------------------------------------------
+   617:             # Create Issue Lines and immutable Movements.
+   618:             # -------------------------------------------------
+   619: 
+   620:             for line_no, unit in enumerate(
+   621:                 ordered_units,
+   622:                 start=1,
+   623:             ):
+   624: 
+   625:                 category_name = (
+   626:                     unit.category.name
+   627:                     if unit.category is not None
+   628:                     else None
+   629:                 )
+   630: 
+   631:                 line = ApplianceIssueLine(
+   632:                     issue_id=issue.id,
+   633:                     line_no=line_no,
+   634:                     appliance_unit_id=unit.id,
+   635:                     current_work_order_id=(
+   636:                         work_order.id
+   637:                         if work_order is not None
+   638:                         else None
+   639:                     ),
+   640:                     current_work_order_number=(
+   641:                         work_order_number_clean
+   642:                     ),
+   643:                     status=(
+   644:                         ApplianceIssueService
+   645:                         .LINE_STATUS_ISSUED
+   646:                     ),
+   647:                     installed_at=None,
+   648:                     resolved_at=None,
+   649:                     notes=None,
+   650: 
+   651:                     # Historical snapshot for printing.
+   652:                     # NO PRICES.
+   653:                     inventory_number_snapshot=(
+   654:                         unit.inventory_number
+   655:                     ),
+   656:                     appliance_type_snapshot=(
+   657:                         category_name
+   658:                     ),
+   659:                     brand_snapshot=unit.brand,
+   660:                     model_number_snapshot=(
+   661:                         unit.model_number
+   662:                     ),
+   663:                     serial_number_snapshot=(
+   664:                         unit.serial_number
+   665:                     ),
+   666:                     size_value_snapshot=(
+   667:                         unit.size_value
+   668:                     ),
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\services\appliance_issue_service.bak_before_repair_order_service_20260902_114655.py
+MATCHES: 1
+==========================================================================================
+   578:                         .STATUS_AVAILABLE
+   579:                     ),
+   580:                 )
+   581:                 .update(
+   582:                     {
+   583:                         ApplianceUnit.status:
+   584:                             ApplianceIssueService
+   585:                             .STATUS_ISSUED,
+   586: 
+   587:                         ApplianceUnit.current_work_order_id:
+   588:                             (
+   589:                                 work_order.id
+   590:                                 if work_order is not None
+   591:                                 else None
+   592:                             ),
+   593: 
+   594:                         ApplianceUnit.current_work_order_number:
+   595:                             work_order_number_clean,
+   596: 
+   597:                         ApplianceUnit.updated_at:
+   598:                             now,
+   599: 
+   600:                         ApplianceUnit.updated_by_id:
+   601:                             actor.id,
+   602:                     },
+   603:                     synchronize_session=False,
+   604:                 )
+   605:             )
+   606: 
+   607:             if updated_count != len(
+   608:                 normalized_ids
+   609:             ):
+   610:                 raise ApplianceIssueError(
+   611:                     "One or more appliances were "
+   612:                     "changed by another user. "
+   613:                     "Nothing was issued. Refresh and try again."
+   614:                 )
+   615: 
+   616:             # -------------------------------------------------
+   617:             # Create Issue Lines and immutable Movements.
+   618:             # -------------------------------------------------
+   619: 
+   620:             for line_no, unit in enumerate(
+   621:                 ordered_units,
+   622:                 start=1,
+   623:             ):
+   624: 
+   625:                 category_name = (
+   626:                     unit.category.name
+   627:                     if unit.category is not None
+   628:                     else None
+   629:                 )
+   630: 
+   631:                 line = ApplianceIssueLine(
+   632:                     issue_id=issue.id,
+   633:                     line_no=line_no,
+   634:                     appliance_unit_id=unit.id,
+   635:                     current_work_order_id=(
+   636:                         work_order.id
+   637:                         if work_order is not None
+   638:                         else None
+   639:                     ),
+   640:                     current_work_order_number=(
+   641:                         work_order_number_clean
+   642:                     ),
+   643:                     status=(
+   644:                         ApplianceIssueService
+   645:                         .LINE_STATUS_ISSUED
+   646:                     ),
+   647:                     installed_at=None,
+   648:                     resolved_at=None,
+   649:                     notes=None,
+   650: 
+   651:                     # Historical snapshot for printing.
+   652:                     # NO PRICES.
+   653:                     inventory_number_snapshot=(
+   654:                         unit.inventory_number
+   655:                     ),
+   656:                     appliance_type_snapshot=(
+   657:                         category_name
+   658:                     ),
+   659:                     brand_snapshot=unit.brand,
+   660:                     model_number_snapshot=(
+   661:                         unit.model_number
+   662:                     ),
+   663:                     serial_number_snapshot=(
+   664:                         unit.serial_number
+   665:                     ),
+   666:                     size_value_snapshot=(
+   667:                         unit.size_value
+   668:                     ),
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\services\appliance_issue_service.py
+MATCHES: 1
+==========================================================================================
+   610:                         .STATUS_AVAILABLE
+   611:                     ),
+   612:                 )
+   613:                 .update(
+   614:                     {
+   615:                         ApplianceUnit.status:
+   616:                             ApplianceIssueService
+   617:                             .STATUS_ISSUED,
+   618: 
+   619:                         ApplianceUnit.current_work_order_id:
+   620:                             (
+   621:                                 work_order.id
+   622:                                 if work_order is not None
+   623:                                 else None
+   624:                             ),
+   625: 
+   626:                         ApplianceUnit.current_work_order_number:
+   627:                             work_order_number_clean,
+   628: 
+   629:                         ApplianceUnit.updated_at:
+   630:                             now,
+   631: 
+   632:                         ApplianceUnit.updated_by_id:
+   633:                             actor.id,
+   634:                     },
+   635:                     synchronize_session=False,
+   636:                 )
+   637:             )
+   638: 
+   639:             if updated_count != len(
+   640:                 normalized_ids
+   641:             ):
+   642:                 raise ApplianceIssueError(
+   643:                     "One or more appliances were "
+   644:                     "changed by another user. "
+   645:                     "Nothing was issued. Refresh and try again."
+   646:                 )
+   647: 
+   648:             # -------------------------------------------------
+   649:             # Create Issue Lines and immutable Movements.
+   650:             # -------------------------------------------------
+   651: 
+   652:             for line_no, unit in enumerate(
+   653:                 ordered_units,
+   654:                 start=1,
+   655:             ):
+   656: 
+   657:                 category_name = (
+   658:                     unit.category.name
+   659:                     if unit.category is not None
+   660:                     else None
+   661:                 )
+   662: 
+   663:                 line = ApplianceIssueLine(
+   664:                     issue_id=issue.id,
+   665:                     line_no=line_no,
+   666:                     appliance_unit_id=unit.id,
+   667:                     current_work_order_id=(
+   668:                         work_order.id
+   669:                         if work_order is not None
+   670:                         else None
+   671:                     ),
+   672:                     current_work_order_number=(
+   673:                         work_order_number_clean
+   674:                     ),
+   675:                     status=(
+   676:                         ApplianceIssueService
+   677:                         .LINE_STATUS_ISSUED
+   678:                     ),
+   679:                     installed_at=None,
+   680:                     resolved_at=None,
+   681:                     notes=None,
+   682: 
+   683:                     # Historical snapshot for printing.
+   684:                     # NO PRICES.
+   685:                     inventory_number_snapshot=(
+   686:                         unit.inventory_number
+   687:                     ),
+   688:                     appliance_type_snapshot=(
+   689:                         category_name
+   690:                     ),
+   691:                     brand_snapshot=unit.brand,
+   692:                     model_number_snapshot=(
+   693:                         unit.model_number
+   694:                     ),
+   695:                     serial_number_snapshot=(
+   696:                         unit.serial_number
+   697:                     ),
+   698:                     size_value_snapshot=(
+   699:                         unit.size_value
+   700:                     ),
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\templates\issue_ui.html
+MATCHES: 3
+==========================================================================================
+     1: {% extends "base.html" %}
+     2: {% block content %}
+     3: <h3>Issue UI (demo)</h3>
+     4: 
+     5: <div class="mb-3">
+     6:   <label>Issued To (Technician)</label>
+     7:   <input id="tech_name" class="form-control" value="{{ technician_name }}"
+     8:          list="technicianListIssue2">
+     9:     <datalist id="technicianListIssue2"></datalist>
+    10: 
+    11: </div>
+    12: <div class="mb-3">
+    13:   <label>Reference Job</label>
+    14:   <input id="canonical_ref" class="form-control" value="{{ canonical_ref }}">
+    15: </div>
+    16: 
+    17: <div class="d-flex gap-2 mb-3">
+    18:   <button id="btn-issue-all" class="btn btn-primary">Issue All Now</button>
+    19:   <button id="btn-issue-selected" class="btn btn-outline-primary">Issue Selected</button>
+    20: </div>
+    21: 
+    22: <table class="table table-sm table-bordered align-middle">
+    23:   <thead>
+    24:     <tr>
+    25:       <th style="width:36px;"><input type="checkbox" id="chk-all"></th>
+    26:       <th>Part #</th>
+    27:       <th>Name</th>
+    28:       <th class="text-end">On hand</th>
+    29:       <th style="width:120px;">Qty to issue</th>
+    30:       <th style="width:140px;">Unit price (opt)</th>
+    31:       <th style="width:160px;">Actions</th>
+    32:     </tr>
+    33:   </thead>
+    34:   <tbody>
+    35:   {% for p in parts %}
+    36:     <tr data-part-id="{{ p.id }}">
+    37:       <td><input type="checkbox" class="row-chk"></td>
+    38:       <td>{{ p.part_number }}</td>
+    39:       <td>{{ p.name }}</td>
+    40:       <td class="text-end">{{ p.quantity }}</td>
+    41:       <td><input type="number" class="form-control form-control-sm qty-issue" min="0" value="1"></td>
+    42:       <td><input type="text" class="form-control form-control-sm unit-price" placeholder="auto"></td>
+    43:       <td>
+    44:         <!-- C) Issue this line â€” Ð¾ÑÑ‚Ð°Ð²Ð»ÑÐµÐ¼ ÐºÐ°Ðº Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½ÑƒÑŽ ÐºÐ½Ð¾Ð¿Ñƒ -->
+    45:         <button class="btn btn-sm btn-success btn-issue-line">Issue this line</button>
+    46:       </td>
+    47:     </tr>
+    48:   {% endfor %}
+    49:   </tbody>
+    50: </table>
+    51: 
+    52: <!-- ========================== Preview Modal ========================== -->
+    53: <div class="modal fade" id="issuePreviewModal" tabindex="-1" aria-hidden="true">
+    54:   <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    55:     <div class="modal-content">
+    56:       <div class="modal-header">
+    57:         <h5 class="modal-title">Issue preview</h5>
+    58:         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    59:       </div>
+    60:       <div class="modal-body">
+    61:         <table class="table table-sm table-bordered">
+    62:           <thead>
+    63:             <tr>
+    64:               <th>Part #</th>
+    65:               <th>Name</th>
+    66:               <th class="text-end">On hand</th>
+    67:               <th class="text-end">Qty (requested)</th>
+    68:               <th class="text-end">Issue now</th>
+    69:               <th class="text-end">Unit price</th>
+    70:             </tr>
+    71:           </thead>
+    72:           <tbody id="previewTbody"></tbody>
+    73:         </table>
+    74:         <div id="previewNote" class="text-muted small"></div>
+   156:     const price = (found.unit_price ?? "").toString();
+   157: 
+   158:     const trPrev = document.createElement('tr');
+   159:     trPrev.innerHTML = `
+   160:       <td>${pn}</td>
+   161:       <td>${name}</td>
+   162:       <td class="text-end">${onHand}</td>
+   163:       <td class="text-end">${req}</td>
+   164:       <td class="text-end">${issueNow}</td>
+   165:       <td class="text-end">${price || '<span class="text-muted">auto</span>'}</td>
+   166:     `;
+   167:     tbody.appendChild(trPrev);
+   168:     rows++;
+   169:   });
+   170:   document.getElementById('previewNote').textContent =
+   171:     rows ? "Issuing is limited by current on-hand stock (min(requested, on hand))." : "No items to issue.";
+   172: }
+   173: 
+   174: /* Ð¿Ð¾ÐºÐ°Ð·Ð°Ñ‚ÑŒ Ñ‚Ð¾ÑÑ‚ */
+   175: function showToast(msg) {
+   176:   const el = document.getElementById('issueToast');
+   177:   document.getElementById('issueToastBody').textContent = msg;
+   178:   const t = new bootstrap.Toast(el, { delay: 2000 });
+   179:   t.show();
+   180: }
+   181: 
+   182: /* === A) Issue All â†’ ÑÐ½Ð°Ñ‡Ð°Ð»Ð° Ð¼Ð¾Ð´Ð°Ð»ÐºÐ° === */
+   183: document.getElementById('btn-issue-all').onclick = () => {
+   184:   previewMode = "all";
+   185:   previewItems = collectAllItems();
+   186:   buildPreview(previewItems);
+   187:   const modal = new bootstrap.Modal(document.getElementById('issuePreviewModal'));
+   188:   modal.show();
+   189: };
+   190: 
+   191: /* === B) Issue Selected â†’ Ñ‚Ð¾Ð¶Ðµ Ñ‡ÐµÑ€ÐµÐ· Ð¼Ð¾Ð´Ð°Ð»ÐºÑƒ === */
+   192: document.getElementById('btn-issue-selected').onclick = () => {
+   193:   previewMode = "selected";
+   194:   previewItems = collectSelectedItems();
+   195:   if (previewItems.length === 0) { alert('No rows selected'); return; }
+   196:   buildPreview(previewItems);
+   197:   const modal = new bootstrap.Modal(document.getElementById('issuePreviewModal'));
+   198:   modal.show();
+   199: };
+   200: 
+   201: /* ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ðµ Ð² Ð¼Ð¾Ð´Ð°Ð»ÐºÐµ â†’ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²Ð»ÑÐµÐ¼ /issue/batch */
+   202: document.getElementById('btnConfirmIssue').onclick = async () => {
+   203:   if (!previewItems || previewItems.length === 0) return;
+   204: 
+   205:   const payload = {
+   206:     iissued_to: (document.getElementById('tech_name').value || '').trim().toUpperCase(),
+   207:     reference_job: document.getElementById('canonical_ref').value,
+   208:     items: previewItems
+   209:   };
+   210:   const r = await fetch('/issue/batch', {
+   211:     method: 'POST',
+   212:     headers: {'Content-Type':'application/json'},
+   213:     body: JSON.stringify(payload),
+   214:   });
+   215:   const res = await r.json();
+   216:   if (res.ok && res.redirect) {
+   217:     showToast(`Issued ${res.created} line(s). Redirectingâ€¦`);
+   218:     setTimeout(() => { window.location = res.redirect; }, 900);
+   219:   } else {
+   220:     alert(res.error || 'Issue failed');
+   221:   }
+   222: };
+   223: 
+   224: /* === C) Issue this line â€” ÐºÐ°Ðº Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ð°Ñ Ð±Ñ‹ÑÑ‚Ñ€Ð°Ñ ÐºÐ½Ð¾Ð¿ÐºÐ° === */
+   225: document.querySelectorAll('.btn-issue-line').forEach(btn => {
+   226:   btn.addEventListener('click', async (e) => {
+   227:     const tr = e.target.closest('tr');
+   228:     const partId = parseInt(tr.getAttribute('data-part-id'), 10);
+   229:     const qty = parseInt(tr.querySelector('.qty-issue').value || '0', 10);
+   230:     const unitPriceStr = tr.querySelector('.unit-price').value.trim();
+   231:     const unitPrice = unitPriceStr ? parsePrice(unitPriceStr) : null;
+   232: 
+   233:     const payload = {
+   234:       issued_to: (document.getElementById('tech_name').value || '').trim().toUpperCase(),
+   235:       reference_job: document.getElementById('canonical_ref').value,
+   236:       qty, unit_price: unitPrice
+   237:     };
+   238:     const r = await fetch(`/issue/line/${partId}`, {
+   239:       method: 'POST',
+   240:       headers: {'Content-Type':'application/json'},
+   241:       body: JSON.stringify(payload),
+   242:     });
+   243:     const res = await r.json().catch(()=>null);
+   244:     if (res && res.ok && res.redirect) {
+   245:       showToast(`Issued ${res.created} line(s). Redirectingâ€¦`);
+   246:       setTimeout(() => { window.location = res.redirect; }, 900);
+   247:     } else if (res && res.error) {
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\templates\wo_form.html
+MATCHES: 4
+==========================================================================================
+   180:           <td>
+   181:             <input class="form-control wh-input"
+   182:                    name="rows[{{ i }}][warehouse]"
+   183:                    value="{{ p.warehouse or '' }}"
+   184:                    maxlength="120">
+   185:           </td>
+   186:           <td>
+   187:             <input class="form-control supplier-input"
+   188:                    list="suppliers_datalist"
+   189:                    name="rows[{{ i }}][supplier]"
+   190:                    value="{{ p.supplier or '' }}"
+   191:                    maxlength="80">
+   192:           </td>
+   193:           <td class="text-center">
+   194:             <input class="form-check-input"
+   195:                    type="checkbox"
+   196:                    name="rows[{{ i }}][backorder_flag]"
+   197:                    {% if p.backorder_flag %}checked{% endif %}>
+   198:           </td>
+   199: 
+   200:           <!-- Ordered column (visible only when status='ordered') -->
+   201:           <td class="text-center ordered-col">
+   202:             <input type="hidden"
+   203:                    class="ordered-val"
+   204:                    name="rows[{{ i }}][ordered_flag]"
+   205:                    value="{{ 1 if p.ordered_flag else 0 }}">
+   206:             <input type="checkbox"
+   207:                    class="form-check-input ordered-check"
+   208:                    {% if p.ordered_flag %}checked{% endif %}>
+   209:           </td>
+   210: 
+   211:           <td>
+   212:             <span class="hint">â€”</span>
+   213:             <input type="hidden"
+   214:                    class="hint-input"
+   215:                    name="rows[{{ i }}][stock_hint]"
+   216:                    value="">
+   217:           </td>
+   218: 
+   219:           <td class="text-center">
+   220:             <input type="checkbox"
+   221:                    class="form-check-input issue-check"
+   222:                    name="rows[{{ i }}][issue_flag]"
+   223:                    {% if not IS_EDIT or issued_full %}disabled{% endif %}>
+   224:           </td>
+   225: 
+   226:           <td class="text-center">
+   227:             <button type="button"
+   228:                     class="btn btn-sm btn-outline-danger del-row">&times;</button>
+   229:           </td>
+   230:         </tr>
+   231:         {% endfor %}
+   232:       </tbody>
+   233:     </table>
+   234:   </div>
+   235: 
+   236:   <datalist id="suppliers_datalist">
+   237:     {% for s in recent_suppliers or [] %}
+   238:       <option value="{{ s }}"></option>
+   239:     {% endfor %}
+   240:   </datalist>
+   241: 
+   242:   <div class="mb-3">
+   243:     <button type="button" class="btn btn-outline-secondary" id="addRow">+ Add part row</button>
+   244:   </div>
+   245: 
+   246:   <div class="d-flex gap-2">
+   247:     <button type="submit" class="btn btn-primary">Save</button>
+   248: 
+   249:     <button type="button"
+   250:             id="selectAllInStockBtn"
+   251:             class="btn btn-outline-secondary">
+   252:       Select all in-stock
+   253:     </button>
+   254: 
+   255:     <button type="button"
+   256:             id="issueSelectedBtn"
+   257:             class="btn btn-success"
+   258:             {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>
+   259:       Issue selected
+   260:     </button>
+   261: 
+   262:     {% if IS_EDIT %}
+   263:       <a class="btn btn-outline-secondary"
+   264:          href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">
+   265:         Back
+   266:       </a>
+   267:     {% else %}
+   268:       <a class="btn btn-outline-secondary"
+   269:          href="{{ url_for('inventory.wo_list') }}">
+   270:         Cancel
+   271:       </a>
+   272:     {% endif %}
+   273:   </div>
+   274: </form>
+   275: 
+   276: {% set issue_action = IS_EDIT and url_for('inventory.wo_issue_instock', wo_id=wo.id) or '#' %}
+   277: <form id="issueForm" method="post" action="{{ issue_action }}">
+   278:   <input type="hidden" name="wo_id" value="{{ wo.id if IS_EDIT else '' }}">
+   279:   <input type="hidden" name="part_ids" id="issue_part_ids">
+   280:   <input type="hidden" name="set_status" id="issue_set_status" value="">
+   281: </form>
+   282: {% endblock %}
+   283: 
+   284: {% block extra_js %}
+   285: <script>
+   286: (function(){
+   287:   const API_STOCK   = "{{ url_for('inventory.api_stock_hint') }}";
+   288:   const tbody       = document.querySelector('#partsTable tbody');
+   289:   const addBtn      = document.getElementById('addRow');
+   290:   const statusSel   = document.querySelector('select[name="status"]');
+   291:   const selectAllBtn= document.getElementById('selectAllInStockBtn');
+   292: 
+   293:   function updateSupplierRequired(){
+   294:     const must = statusSel && statusSel.value === 'ordered';
+   295:     document.querySelectorAll('.supplier-input').forEach(inp=>{
+   296:       if(must) inp.setAttribute('required','required');
+   297:       else     inp.removeAttribute('required');
+   298:     });
+   299:   }
+   300:   statusSel?.addEventListener('change', updateSupplierRequired);
+   301:   updateSupplierRequired();
+   302: 
+   303:   /* SHOW/HIDE Ordered column and enable/disable checkboxes */
+   304:   function toggleOrderedCol(){
+   305:     const show = statusSel && statusSel.value === 'ordered';
+   306:     document.querySelectorAll('#partsTable .ordered-col').forEach(td=>{
+   307:       td.style.display = show ? '' : 'none';
+   308:       const cb  = td.querySelector('.ordered-check');
+   309:       const hid = td.querySelector('.ordered-val');
+   310:       if (!cb || !hid) return;
+   311:       cb.disabled = !show;
+   312:       if (!show) {
+   313:         cb.checked = false;
+   314:         hid.value  = '0';
+   315:       }
+   316:     });
+   317:   }
+   318:   statusSel?.addEventListener('change', toggleOrderedCol);
+   319: 
+   320:   /* Sync checkbox -> hidden value */
+   321:   tbody.addEventListener('change', (e)=>{
+   322:     if (e.target.classList.contains('ordered-check')){
+   323:       const td  = e.target.closest('td');
+   324:       const hid = td && td.querySelector('.ordered-val');
+   325:       if (hid) {
+   326:         hid.value = e.target.checked ? '1' : '0';
+   327:       }
+   328:     }
+   329:   });
+   330: 
+   331:   function templateRow(i){
+   332:     return `
+   333: <tr data-row>
+   334:   <td><input class="form-control pn" name="rows[${i}][part_number]" maxlength="80"></td>
+   335:   <td><input class="form-control" name="rows[${i}][alt_pn]"></td>
+   336:   <td><input class="form-control part-name" name="rows[${i}][part_name]" maxlength="120"></td>
+   337:   <td><input class="form-control qty" name="rows[${i}][quantity]" type="number" min="0" value="1"></td>
+   338:   <td><input class="form-control unit-cost" name="rows[${i}][unit_cost]" type="number" step="0.01" min="0" value="0.00"></td>
+   339:   <td><input class="form-control total" name="rows[${i}][line_total]" type="number" step="0.01" readonly value="0.00"></td>
+   340:   <td><input class="form-control wh-input" name="rows[${i}][warehouse]" maxlength="120"></td>
+   341:   <td><input class="form-control supplier-input" name="rows[${i}][supplier]" list="suppliers_datalist" maxlength="80"></td>
+   342:   <td class="text-center"><input class="form-check-input" type="checkbox" name="rows[${i}][backorder_flag]"></td>
+   343: 
+   344:   <td class="text-center ordered-col">
+   345:     <input type="hidden" class="ordered-val" name="rows[${i}][ordered_flag]" value="0">
+   346:     <input type="checkbox" class="form-check-input ordered-check">
+   347:   </td>
+   348: 
+   349:   <td><span class="hint">â€”</span><input type="hidden" class="hint-input" name="rows[${i}][stock_hint]" value=""></td>
+   350:   <td class="text-center"><input type="checkbox" class="form-check-input issue-check" name="rows[${i}][issue_flag]"></td>
+   351:   <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger del-row">&times;</button></td>
+   352: </tr>`;
+   353:   }
+   354: 
+   355:   function recalc(tr){
+   356:     const qty  = parseFloat(tr.querySelector('.qty')?.value||'0')||0;
+   357:     const unit = parseFloat(tr.querySelector('.unit-cost')?.value||'0')||0;
+   358:     const total = (qty*unit).toFixed(2);
+   359:     const totalInput = tr.querySelector('.total');
+   360:     if (totalInput) totalInput.value = total;
+   361:   }
+   362: 
+   363:   function setIssueEnabled(tr){
+   364:     const raw = (tr.querySelector('.hint')?.textContent||'').trim().toUpperCase();
+   365:     const status = raw.split('/')[0];
+   366:     const cb = tr.querySelector('.issue-check');
+   367:     if(!cb) return;
+   368:     if (tr.classList.contains('issued-row')){
+   369:       cb.checked=false;
+   370:       cb.disabled=true;
+   371:       return;
+   372:     }
+   373:     if (status === 'STOCK'){
+   374:       cb.disabled=false;
+   375:       cb.removeAttribute('disabled');
+   376:     } else {
+   377:       cb.checked=false;
+   378:       cb.disabled=true;
+   379:       cb.setAttribute('disabled','disabled');
+   380:     }
+   381:   }
+   382: 
+   383:   function extractAvailableCount(j){
+   384:     const keys=['qty_available','available_qty','available','on_hand','onhand','stock','in_stock','qty','count','quantity'];
+   385:     for(const k of keys){
+   386:       const v=j&&j[k];
+   387:       if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
+   388:     }
+   389:     for(const wrap of ['data','result']){
+   390:       const o=j&&j[wrap];
+   391:       if(o && typeof o==='object'){
+   392:         for(const k of keys){
+   393:           const v=o[k];
+   394:           if(v!==undefined && v!==null && !isNaN(Number(v))) return Number(v);
+   395:         }
+   396:       }
+   397:     }
+   398:     const sumArr=a=>Array.isArray(a)?a.reduce((s,x)=>s+(Number.isFinite(extractAvailableCount(x))?extractAvailableCount(x):0),0):0;
+   399:     return sumArr(j) || sumArr(j?.rows) || sumArr(j?.items) || sumArr(j?.data?.rows) || 0;
+   400:   }
+   401: 
+   402:   function pick(j, variants){
+   403:     for(const k of variants){
+   404:       if(j && j[k] !== undefined && j[k] !== null && String(j[k]).trim()!==""){
+
+==========================================================================================
+FILE: C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\templates\wo_form_units.html
+MATCHES: 7
+==========================================================================================
+   653:           </div>
+   654:         </div>
+   655: 
+   656:       </div>
+   657:     </div>
+   658:     {% endfor %}
+   659:   </div>
+   660: 
+   661:   {% if not RO %}
+   662:   <div class="my-3">
+   663:     <button type="button" class="btn btn-outline-primary" id="addUnit">+ Add appliance</button>
+   664:   </div>
+   665:   {% endif %}
+   666: 
+   667:   <div class="d-flex justify-content-between align-items-center my-2">
+   668:     <div></div>
+   669:     <div class="text-end"><strong>Grand total:</strong> <span id="grandTotal">0.00</span></div>
+   670:   </div>
+   671: 
+   672:   <datalist id="suppliers_datalist">
+   673:     {% for s in recent_suppliers or [] %}
+   674:       <option value="{{ s }}"></option>
+   675:     {% endfor %}
+   676:   </datalist>
+   677: 
+   678:   <div class="d-flex gap-2">
+   679:     {% if not RO %}
+   680:       <button type="submit" class="btn btn-primary" id="saveBtn" name="_save_clicked" value="1">Save</button>
+   681: 
+   682:       <button type="button" id="selectAllInStockBtn" class="btn btn-outline-secondary">
+   683:         Select all in-stock
+   684:       </button>
+   685: 
+   686:       <button type="button" id="issueSelectedBtn" class="btn btn-success"
+   687:               {% if not IS_EDIT %}disabled title="Save WO first"{% endif %}>
+   688:         Issue selected
+   689:       </button>
+   690:     {% endif %}
+   691: 
+   692:     {% if IS_EDIT %}
+   693:       <a class="btn btn-outline-secondary"
+   694:            id="backToDetailBtn"
+   695:            href="{{ url_for('inventory.wo_detail', wo_id=wo.id) }}">
+   696:           Back
+   697:         </a>
+   698:     {% else %}
+   699:       <a class="btn btn-outline-secondary" href="{{ url_for('inventory.wo_list') }}">Back</a>
+   700:     {% endif %}
+   701:   </div>
+   702: </form>
+   703: 
+   704: {% endblock %}
+   705: 
+   706: {% block extra_js %}
+   707: 
+   708: {% if IS_EDIT and not RO %}
+   709: <script>
+   710: (function () {
+   711:     const heartbeatUrl =
+   712:         "{{ url_for('inventory.wo_edit_heartbeat', wo_id=wo.id) }}";
+   713: 
+   714:     async function sendWorkOrderHeartbeat() {
+   715:         try {
+   716:             const response = await fetch(heartbeatUrl, {
+   717:                 method: "POST",
+   718:                 credentials: "same-origin",
+   719:                 headers: {
+   720:                     "Accept": "application/json",
+   721:                     "X-Requested-With": "XMLHttpRequest"
+   722:                 }
+   723:             });
+   724: 
+   725:             if (response.status === 409) {
+   726:                 console.warn("Work Order edit lock was lost.");
+   727:             }
+   728: 
+   729:         } catch (err) {
+   730:             console.warn(
+   731:                 "Work Order heartbeat failed:",
+   732:                 err
+   733:             );
+   734:         }
+   735:     }
+   736: 
+   737:     // ÐŸÐµÑ€Ð²Ñ‹Ð¹ heartbeat Ñ‡ÐµÑ€ÐµÐ· 5 ÑÐµÐºÑƒÐ½Ð´.
+   738:     setTimeout(
+   739:         sendWorkOrderHeartbeat,
+   740:         1000
+   741:     );
+   742: 
+   743:     // ÐŸÐ¾Ñ‚Ð¾Ð¼ ÐºÐ°Ð¶Ð´Ñ‹Ðµ 30 ÑÐµÐºÑƒÐ½Ð´.
+   845:       ta.remove();
+   846:     }
+   847:   }
+   848: 
+   849:   unitsWrap.addEventListener('click', async function(e){
+   850:     const target = e.target;
+   851:     if (!(target instanceof HTMLInputElement)) return;
+   852: 
+   853:     const isPart   = target.classList.contains('pn');
+   854:     const isModel  = target.name.includes('[model]');
+   855:     const isSerial = target.name.includes('[serial]');
+   856:     const isName   = target.classList.contains('part-name');
+   857: 
+   858:     if (!isPart && !isModel && !isSerial && !isName) return;
+   859: 
+   860:     const value = (target.value || '').trim();
+   861:     if (!value) return;
+   862: 
+   863:     await copyText(value);
+   864: 
+   865:     if (isPart) {
+   866:       wccrToast('Part number copied');
+   867:     } else if (isModel) {
+   868:       wccrToast('Model copied');
+   869:     } else if (isSerial) {
+   870:       wccrToast('Serial copied');
+   871:     } else if (isName) {
+   872:       wccrToast('Part name copied');
+   873:     }
+   874:   });
+   875: })();
+   876: </script>
+   877: 
+   878: <script>
+   879: (function(){
+   880:   const API_STOCK = "{{ url_for('inventory.api_stock_hint') }}";
+   881:   const API_STOCK_BULK = "{{ url_for('inventory.api_stock_hint_bulk') }}";
+   882:   const API_DUP   = "{{ url_for('inventory.api_job_duplicate_check') }}";
+   883: 
+   884:   const IS_EDIT = !!(document.querySelector('#woForm input[name="wo_id"]')?.value || '').trim();
+   885:   const IS_RO   = {{ 'true' if RO else 'false' }};
+   886: 
+   887:   const form         = document.getElementById('woForm');
+   888:   const unitsWrap    = document.getElementById('unitsWrap');
+   889:   const grandTotalEl = document.getElementById('grandTotal');
+   890:   const deliveryEl   = document.getElementById('deliveryFee');
+   891:   const markupEl     = document.getElementById('markupPercent');
+   892:   const issueBtn     = document.getElementById('issueSelectedBtn');
+   893:   const saveBtn      = document.getElementById('saveBtn');
+   894:   const selectAllBtn = document.getElementById('selectAllInStockBtn');
+   895:   const statusSel    = document.querySelector('select[name="status"]');
+   896:   const addUnitBtn   = document.getElementById('addUnit');
+   897:   const jobTypeSel   = document.querySelector('select[name="job_type"]');
+   898: 
+   899:   unitsWrap?.addEventListener('mouseover', (e)=>{
+   900:     const inp = e.target.closest('input.part-name, input.pn');
+   901:     if (!inp) return;
+   902:     const v = (inp.value || '').trim();
+   903:     if (v) inp.title = v;
+   904:   });
+   905: 
+   906:   function isInsuranceJob(){
+   907:     return jobTypeSel && jobTypeSel.value === 'INSURANCE';
+   908:   }
+   909: 
+   910:   function isRowInsuranceSupplied(tr){
+   911:     if (!tr) return false;
+   912:     const cb = tr.querySelector('.ins-check');
+   913:     return !!(cb && cb.checked);
+   914:   }
+   915:   let isDirty = false;
+   916:   let isSubmitting = false;
+   917:   let saveInProgress = false;
+   918: 
+   919:   function handleBeforeUnload(e) {
+   920:     if (!isDirty || isSubmitting || IS_RO) return;
+   921:     e.preventDefault();
+   922:     e.returnValue = '';
+   923:     return '';
+   924:   }
+   925: 
+   926:   function markDirty() {
+   927:     if (IS_RO) return;
+   928:     if (!isDirty) {
+   929:       isDirty = true;
+   930:       window.addEventListener('beforeunload', handleBeforeUnload);
+   931:     }
+   932:   }
+   933: 
+   934:   if (form && !IS_RO) {
+   935:     form.addEventListener('input', markDirty, { passive: true });
+   936:     form.addEventListener('change', markDirty, { passive: true });
+  1465: 
+  1466:     if (tr.classList.contains('issued-row')){
+  1467:       cb.checked = false;
+  1468:       cb.disabled = true;
+  1469:       cb.setAttribute('disabled','disabled');
+  1470:       cb.title = '';
+  1471:       return;
+  1472:     }
+  1473: 
+  1474:     const isINSJob = (jobTypeSel && jobTypeSel.value === 'INSURANCE');
+  1475:     const insCheckbox = tr.querySelector('.ins-check');
+  1476:     const isINSLine = !!(insCheckbox && insCheckbox.checked);
+  1477:     const allowIssue = enabled || (isINSJob && isINSLine);
+  1478: 
+  1479:     if (!IS_EDIT){
+  1480:       cb.checked = false;
+  1481:       cb.disabled = true;
+  1482:       cb.setAttribute('disabled','disabled');
+  1483:       cb.title = "Save WO first";
+  1484:       return;
+  1485:     }
+  1486: 
+  1487:     if (!allowIssue){
+  1488:       cb.checked = false;
+  1489:       cb.disabled = true;
+  1490:       cb.setAttribute('disabled','disabled');
+  1491:       cb.title = "";
+  1492:       return;
+  1493:     }
+  1494: 
+  1495:     cb.disabled = false;
+  1496:     cb.removeAttribute('disabled');
+  1497:     cb.title = "";
+  1498:   }
+  1499: 
+  1500:   const STOCK_HINT_TTL_MS = 25000;
+  1501:   const stockHintCache = new Map();   // key -> { ts, payload }
+  1502:     const stockHintTimers = new WeakMap();
+  1503:     const stockHintInflight = new WeakMap();
+  1504: 
+  1505: function getHintKey(tr){
+  1506:   const pnMain = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
+  1507:   const pnAlt  = (tr.querySelector('.alt-pn')?.value || '').trim().toUpperCase();
+  1508:   const pn     = pnMain || pnAlt;
+  1509:   const qty    = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
+  1510:   const wh     = (tr.querySelector('.wh-input')?.value || '').trim().toUpperCase();
+  1511:   return `${pn}|${qty}|${wh}`;
+  1512: }
+  1513: 
+  1514: function scheduleFetchHint(tr, delay = 350){
+  1515:   if (!tr) return;
+  1516: 
+  1517:   const prev = stockHintTimers.get(tr);
+  1518:   if (prev) clearTimeout(prev);
+  1519: 
+  1520:   const t = setTimeout(() => fetchHint(tr), delay);
+  1521:   stockHintTimers.set(tr, t);
+  1522: }
+  1523: 
+  1524:   function fetchHint(tr, force = false){
+  1525:   const pnInput  = tr.querySelector('.pn');
+  1526:   const altInput = tr.querySelector('.alt-pn');
+  1527:   const qtyInput = tr.querySelector('.qty');
+  1528:   const whInput  = tr.querySelector('.wh-input');
+  1529:   const nameInp  = tr.querySelector('.part-name');
+  1530:   const costInp  = tr.querySelector('.unit-cost');
+  1531:   const hintEl   = tr.querySelector('.hint');
+  1532: 
+  1533:   const pnMain = (pnInput?.value || '').trim().toUpperCase();
+  1534:   const pnAlt  = (altInput?.value || '').trim().toUpperCase();
+  1535:   const pn     = pnMain || pnAlt;
+  1536:   const qty    = parseInt(qtyInput?.value || '0', 10) || 0;
+  1537:   const wh     = (whInput?.value || '').trim().toUpperCase();
+  1538: 
+  1539:   if (!pn || qty <= 0) {
+  1540:     if (hintEl) hintEl.textContent = 'â€”';
+  1541:     setIssueEnabled(tr, false);
+  1542:     tr.dataset.lastHintKey = '';
+  1543:     return Promise.resolve();
+  1544:   }
+  1545: 
+  1546:   const key = `${pn}|${qty}|${wh}`;
+  1547:   tr.dataset.lastHintKey = key;
+  1548: 
+  1549:   const cached = stockHintCache.get(key);
+  1550:   const isFresh = cached && ((Date.now() - cached.ts) < STOCK_HINT_TTL_MS);
+  1551: 
+  1552:   if (!force && isFresh) {
+  1553:     applyHintResult(tr, cached.payload);
+  1554:     return Promise.resolve(cached.payload);
+  1555:   }
+  1556: 
+  1557:   const prevController = stockHintInflight.get(tr);
+  1558:   if (prevController) prevController.abort();
+  1559: 
+  1560:   const controller = new AbortController();
+  1561:   stockHintInflight.set(tr, controller);
+  1562: 
+  1563:   if (hintEl) hintEl.textContent = '...';
+  1564: 
+  1565:   const url =
+  1566:     API_STOCK +
+  1567:     '?pn=' + encodeURIComponent(pn) +
+  1568:     '&qty=' + qty +
+  1569:     '&wh=' + encodeURIComponent(wh);
+  1570: 
+  1571:   return fetch(url, { signal: controller.signal })
+  1572:     .then(r => r.ok ? r.json() : Promise.reject())
+  1573:     .then(j => {
+  1574:       stockHintCache.set(key, { ts: Date.now(), payload: j });
+  1575:       applyHintResult(tr, j);
+  1576:       return j;
+  1577:     })
+  1578:     .catch((err) => {
+  1579:       if (err?.name === 'AbortError') return;
+  1580:       if (hintEl) hintEl.textContent = 'â€”';
+  1581:       setIssueEnabled(tr, false);
+  1582:     })
+  1583:     .finally(() => {
+  1584:       if (stockHintInflight.get(tr) === controller) {
+  1585:         stockHintInflight.delete(tr);
+  1586:       }
+  1587:     });
+  1588: }
+  1589: 
+  1590: function applyHintResult(tr, j){
+  1591:   const whInput  = tr.querySelector('.wh-input');
+  1592:   const nameInp  = tr.querySelector('.part-name');
+  1593:   const costInp  = tr.querySelector('.unit-cost');
+  1594:   const hintEl   = tr.querySelector('.hint');
+  1595: 
+  1596:   const flat = Object.assign({}, j, j.data || {}, j.result || {});
+  1597: 
+  1598:   const qa = Number(
+  1599:     flat.qty_available ||
+  1600:     flat.available_qty ||
+  1601:     flat.available ||
+  1602:     flat.qty ||
+  1603:     flat.quantity ||
+  1604:     0
+  1605:   ) || 0;
+  1722: 
+  1723:   } catch (err) {
+  1724:   console.warn('Bulk failed, fallback to limited fetch');
+  1725: 
+  1726:   rows.slice(0, 5).forEach((tr) => fetchHint(tr));
+  1727: }
+  1728: }
+  1729: async function refreshVisibleHints(force = false){
+  1730:   if (window._wccrHintsRefreshing) return;
+  1731: 
+  1732:   const rows = [...document.querySelectorAll('#unitsWrap .unit-table tbody tr')];
+  1733: 
+  1734: 
+  1735:   window._wccrHintsRefreshing = true;
+  1736:   const targets = rows.filter(tr => {
+  1737:     const pnMain = (tr.querySelector('.pn')?.value || '').trim();
+  1738:     const pnAlt  = (tr.querySelector('.alt-pn')?.value || '').trim();
+  1739:     const qty    = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
+  1740:     return (pnMain || pnAlt) && qty > 0;
+  1741:   });
+  1742: 
+  1743:   if (!targets.length) return;
+  1744: 
+  1745:   const items = [];
+  1746:   const rowMap = new Map();
+  1747: 
+  1748:   targets.forEach((tr) => {
+  1749:     const pnMain = (tr.querySelector('.pn')?.value || '').trim().toUpperCase();
+  1750:     const pnAlt  = (tr.querySelector('.alt-pn')?.value || '').trim().toUpperCase();
+  1751:     const pn     = pnMain || pnAlt;
+  1752:     const qty    = parseInt(tr.querySelector('.qty')?.value || '0', 10) || 0;
+  1753:     const wh     = (tr.querySelector('.wh-input')?.value || '').trim().toUpperCase();
+  1754:     const key    = `${pn}|${qty}|${wh}`;
+  1755: 
+  1756:     const cached = stockHintCache.get(key);
+  1757:     const isFresh = cached && ((Date.now() - cached.ts) < STOCK_HINT_TTL_MS);
+  1758: 
+  1759:     if (!force && isFresh) {
+  1760:       applyHintResult(tr, cached.payload);
+  1761:       return;
+  1762:     }
+  1763: 
+  1764:     if (!rowMap.has(key)) {
+  1765:       rowMap.set(key, []);
+  1766:       items.push({ pn, qty, wh });
+  1767:     }
+  1768:     rowMap.get(key).push(tr);
+  1769:   });
+  1770: 
+  1771:   if (!items.length) return;
+  1772: 
+  1773:   try {
+  1774:     const resp = await fetch(API_STOCK_BULK, {
+  1775:       method: 'POST',
+  1776:       credentials: 'same-origin',
+  1777:       headers: {
+  1778:         'Content-Type': 'application/json',
+  1779:         'Accept': 'application/json'
+  1780:       },
+  1781:       body: JSON.stringify({ items })
+  1782:     });
+  1783: 
+  1784:     if (!resp.ok) throw new Error('bulk failed');
+  1785: 
+  1786:     const data = await resp.json();
+  1787:     const payloads = data.items || {};
+  1788: 
+  1789:     Object.entries(payloads).forEach(([key, payload]) => {
+  1790:       stockHintCache.set(key, { ts: Date.now(), payload });
+  1791: 
+  1792:       const linkedRows = rowMap.get(key) || [];
+  1793:       linkedRows.forEach((tr) => {
+  1794:         tr.dataset.lastHintKey = key;
+  1795:         applyHintResult(tr, payload);
+  1796:       });
+  1797:     });
+  1798:     } catch (err) {
+  1799:         await Promise.allSettled(targets.slice(0, 5).map(tr => fetchHint(tr, true)));
+  1800:       } finally {
+  1801:         window._wccrHintsRefreshing = false;
+  1802:       }
+  1803:     }
+  1804: 
+  1805: function clearHintCacheForRow(tr){
+  1806:   if (!tr) return;
+  1807:   const oldKey = tr.dataset.lastHintKey;
+  1808:   if (oldKey) stockHintCache.delete(oldKey);
+  1809:   tr.dataset.lastHintKey = '';
+  1810: }
+  1811: 
+  1812:   function rowTemplate(ui, ri){
+  2380:     );
+  2381:   }
+  2382: 
+  2383:   issueBtn.textContent = 'Issuing...';
+  2384: 
+  2385:   /*
+  2386:    * Save succeeded.
+  2387:    * Submit the same form directly to the existing Issue route.
+  2388:    *
+  2389:    * No intermediate wo_edit page load.
+  2390:    */
+  2391:   form.action =
+  2392:     result.issue_url
+  2393:     || issueUrl;
+  2394: 
+  2395:   form.method = 'post';
+  2396: 
+  2397:   HTMLFormElement.prototype.submit.call(form);
+  2398: 
+  2399: } catch (error) {
+  2400:   console.error(
+  2401:     'Save before issue failed:',
+  2402:     error
+  2403:   );
+  2404: 
+  2405:   isSubmitting = false;
+  2406:   isDirty = true;
+  2407:   window.WCCR_NAVIGATING_TO_DETAIL = false;
+  2408: 
+  2409:   window.addEventListener(
+  2410:     'beforeunload',
+  2411:     handleBeforeUnload
+  2412:   );
+  2413: 
+  2414:   issueBtn.disabled = false;
+  2415:   issueBtn.textContent = 'Issue selected';
+  2416: 
+  2417:   alert(
+  2418:     error?.message
+  2419:     || 'Unable to save Work Order before issuing.'
+  2420:   );
+  2421: }
+  2422: 
+  2423: return;
+  2424: 
+  2425:     });
+  2426: 
+  2427:     let stockRefreshTimer = null;
+  2428: 
+  2429:   document
+  2430:   .getElementById('backToDetailBtn')
+  2431:   ?.addEventListener('click', async function(e){
+  2432:     e.preventDefault();
+  2433: 
+  2434:     isSubmitting = true;
+  2435:     isDirty = false;
+  2436:     window.WCCR_NAVIGATING_TO_DETAIL = true;
+  2437: 
+  2438:     window.removeEventListener(
+  2439:       'beforeunload',
+  2440:       handleBeforeUnload
+  2441:     );
+  2442: 
+  2443:     if (stockRefreshTimer) {
+  2444:       clearTimeout(stockRefreshTimer);
+  2445:       stockRefreshTimer = null;
+  2446:     }
+  2447: 
+  2448:     await releaseWorkOrderLock();
+  2449: 
+  2450:     window.location.href = this.href;
+  2451:   });
+  2452: 
+  2453:   function scheduleVisibleRefresh(delay = 150){
+  2454:     if (
+  2455:       isSubmitting
+  2456:       || window.WCCR_NAVIGATING_TO_DETAIL
+  2457:     ) {
+  2458:       return;
+  2459:     }
+  2460: 
+  2461:     if (stockRefreshTimer) {
+  2462:       clearTimeout(stockRefreshTimer);
+  2463:     }
+  2464: 
+  2465:     stockRefreshTimer = setTimeout(() => {
+  2466:       refreshVisibleHints(true);
+  2467:     }, delay);
+  2468:   }
+  2469: 
+  2470:   // ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ°, Ð½Ðµ Ð±Ñ‹Ð» Ð»Ð¸ WO Ð¸Ð·Ð¼ÐµÐ½Ñ‘Ð½ Ð² Ð´Ñ€ÑƒÐ³Ð¾Ð¼ Ð¾ÐºÐ½Ðµ.
+
+==========================================================================================
+SUMMARY
+Matched files: 13
+Matched lines: 42
+==========================================================================================

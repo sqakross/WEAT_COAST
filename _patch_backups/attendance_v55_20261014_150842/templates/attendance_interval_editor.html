@@ -1,0 +1,169 @@
+
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4" style="max-width:1100px">
+  <div class="d-flex justify-content-between
+              align-items-center mb-3">
+    <div>
+      <h3>Advanced Interval Editor ? Shift #{{ shift.id }}</h3>
+      <p class="text-muted mb-0">
+        Employee #{{ shift.user_id }} ? Pacific Time
+      </p>
+    </div>
+    <a class="btn btn-outline-secondary"
+       href="{{ url_for(
+         'inventory.attendance_shift_edit',
+         shift_id=shift.id) }}">
+      Back to Shift
+    </a>
+  </div>
+
+  <div class="alert alert-warning">
+    <strong>Proposal mode only.</strong>
+    Original events and payroll hours will not change.
+    Interval proposals require separate review and approval.
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h5>Shift Boundaries</h5>
+      <p class="mb-1">
+        <strong>Start:</strong> {{ pt(shift.started_at) }}
+      </p>
+      <p class="mb-0">
+        <strong>End:</strong> {{ pt(shift.ended_at) }}
+      </p>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h5>Original Event Timeline</h5>
+      <div class="table-responsive">
+        <table class="table table-sm table-striped">
+          <thead>
+            <tr>
+              <th>ID</th><th>Event</th>
+              <th>Time (PT)</th><th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in events %}
+            <tr>
+              <td>{{ e.id }}</td>
+              <td>{{ e.event_type }}</td>
+              <td>{{ pt(e.occurred_at) }}</td>
+              <td>{{ e.note or '' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="4">No events found.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h5>Propose Interval Correction</h5>
+      <p class="text-muted small">
+        Correct Interval records a proposed interval for
+        later review; it does not yet change event times.
+        Exclude Interval requests removal of a genuinely
+        non-worked period from future approved calculations.
+      </p>
+
+      <form method="post">
+        <input type="hidden" name="csrf_token"
+               value="{{ csrf_token }}">
+
+        <div class="mb-3">
+          <label class="form-label">Action</label>
+          <select name="action_type" class="form-select"
+                  required>
+            <option value="correct_interval">
+              Correct Interval
+            </option>
+            <option value="exclude_interval">
+              Exclude Non-Worked Interval
+            </option>
+          </select>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label">Start (PT)</label>
+            <input type="datetime-local"
+                   name="start"
+                   class="form-control"
+                   value="{{ started_at }}" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">End (PT)</label>
+            <input type="datetime-local"
+                   name="end"
+                   class="form-control"
+                   value="{{ ended_at }}" required>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">
+            Reason for Correction
+          </label>
+          <textarea name="reason"
+                    class="form-control"
+                    minlength="4" maxlength="1000"
+                    rows="3" required></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary">
+          Save Proposal
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <h5>Interval Proposal History</h5>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>ID</th><th>Action</th>
+              <th>Start (PT)</th><th>End (PT)</th>
+              <th>Reason</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in proposals %}
+            <tr>
+              <td>#{{ p.id }}</td>
+              <td>{{ p.action_type }}</td>
+              <td>{{ pt(p.start_utc) }}</td>
+              <td>{{ pt(p.end_utc) }}</td>
+              <td>{{ p.reason }}</td>
+              <td>
+                <span class="badge bg-warning text-dark">
+                  {{ p.status }}
+                </span>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="6" class="text-muted">
+                No interval proposals yet.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

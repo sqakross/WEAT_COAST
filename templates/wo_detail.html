@@ -176,56 +176,6 @@
     <div>{{ wo.serial or (u0 and u0.serial) or '—' }}</div>
   </div>
 
-  <!-- APPLIANCE HISTORY DETAIL -->
-  <div class="col-12">
-    <div class="card border-primary-subtle mt-2">
-      <div class="card-header py-2">
-        <strong>Previous Service History</strong>
-      </div>
-
-      <div class="card-body py-2">
-        {% for hu in (wo.units or []) %}
-          <div class="appliance-history-detail mb-3"
-               data-serial="{{ (hu.serial or '')|e }}"
-               data-current-wo="{{ wo.id }}">
-            <div class="small text-muted">
-              <strong>Appliance #{{ loop.index }}</strong>
-              {% if hu.model %}
-                — Model {{ hu.model }}
-              {% endif %}
-              {% if hu.serial %}
-                — Serial {{ hu.serial }}
-              {% endif %}
-            </div>
-
-            <div class="appliance-history-detail-result mt-1">
-              {% if hu.serial %}
-                Checking previous service...
-              {% else %}
-                No serial number — history lookup skipped.
-              {% endif %}
-            </div>
-          </div>
-        {% else %}
-          <div class="appliance-history-detail"
-               data-serial="{{ (wo.serial or '')|e }}"
-               data-current-wo="{{ wo.id }}">
-            <div class="small text-muted">
-              Serial {{ wo.serial or '—' }}
-            </div>
-            <div class="appliance-history-detail-result mt-1">
-              {% if wo.serial %}
-                Checking previous service...
-              {% else %}
-                No serial number — history lookup skipped.
-              {% endif %}
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-
   <div class="col-md-3">
     <div><strong>Type:</strong></div>
     <div>
@@ -275,6 +225,220 @@
       </div>
     </div>
 
+</div>
+
+
+
+
+<!-- WCCR_WO_NOTES_LAYOUT_V12 -->
+<style>
+.wccr-wo-overview-v12 {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 12px 0 14px;
+    width: 100%;
+}
+.wccr-wo-overview-v12 > section {
+    width: 100%;
+    min-width: 0;
+}
+.wccr-wo-overview-v12 .wccr-wo-notes {
+    margin: 0;
+    min-height: 0;
+    padding: 12px 15px;
+    background: #fff9eb;
+    border-color: #efdba8;
+    border-left-color: #d99a20;
+}
+.wccr-wo-overview-v12 .wccr-wo-notes-text {
+    font-size: 14px;
+    line-height: 1.45;
+}
+.wccr-wo-overview-v12 .wccr-history-inner {
+    width: 100%;
+}
+.wccr-wo-overview-v12 .wccr-history-inner .card {
+    margin: 0 !important;
+    width: 100%;
+    border: 1px solid #c9dcf4;
+    border-radius: 7px;
+    overflow: hidden;
+}
+.wccr-wo-overview-v12 .wccr-history-inner .card-header {
+    background: #edf5ff;
+    color: #244c73;
+    padding: 9px 13px;
+}
+.wccr-wo-overview-v12 .wccr-history-inner .card-body {
+    max-height: 300px;
+    overflow-y: auto;
+    overflow-x: auto;
+}
+.wccr-wo-overview-v12 .wccr-history-inner table {
+    width: 100%;
+}
+.wccr-wo-overview-v12 .wccr-history-inner th,
+.wccr-wo-overview-v12 .wccr-history-inner td {
+    overflow-wrap: normal;
+    word-break: normal;
+}
+@media (max-width: 767px) {
+    .wccr-wo-overview-v12 {
+        gap: 10px;
+    }
+    .wccr-wo-overview-v12 .wccr-history-inner table {
+        min-width: 650px;
+    }
+}
+</style>
+
+<div class="wccr-wo-overview-v12">
+  <section class="wccr-wo-notes-section">
+{# WCCR_WO_NOTES_V1 #}
+{% set wo_notes_can_edit =
+    erp_access_allowed(
+        current_user,
+        'erp.work_orders.edit_notes',
+        False
+    )
+%}
+
+{% if (wo.note or '')|trim or wo_notes_can_edit %}
+<style>
+.wccr-wo-notes {
+    background: #fff9e9;
+    border: 1px solid #f0dfad;
+    border-left: 4px solid #d99a20;
+    border-radius: 8px;
+    padding: 13px 16px;
+    margin: 14px 0;
+    color: #292524;
+}
+.wccr-wo-notes-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 15px;
+    line-height: 1.55;
+}
+.wccr-wo-notes textarea {
+    width: 100%;
+    min-height: 110px;
+    font-size: 14px;
+}
+</style>
+
+<div class="wccr-wo-notes" id="wccr-wo-notes">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <strong>Work Order Notes</strong>
+    {% if wo_notes_can_edit %}
+    <button type="button"
+            class="btn btn-sm btn-outline-secondary"
+            id="wccr-notes-edit"
+            onclick="wccrNotesEdit()">
+      Edit
+    </button>
+    {% endif %}
+  </div>
+
+  <div id="wccr-notes-display"
+       class="wccr-wo-notes-text">{{ wo.note or '' }}</div>
+
+  {% if wo_notes_can_edit %}
+  <form id="wccr-notes-form"
+        method="post"
+        action="{{ url_for('inventory.wo_notes_save', wo_id=wo.id) }}"
+        style="display:none">
+
+    <input type="hidden"
+           name="wo_notes_csrf"
+           value="{{ session.get('wo_notes_csrf', '') }}">
+
+    <textarea name="original_note"
+              hidden>{{ wo.note or '' }}</textarea>
+
+    <textarea name="note"
+              id="wccr-notes-input"
+              maxlength="20000"
+              class="form-control mb-2">{{ wo.note or '' }}</textarea>
+
+    <div class="d-flex gap-2">
+      <button type="submit"
+              class="btn btn-sm btn-primary">Save</button>
+      <button type="button"
+              class="btn btn-sm btn-outline-secondary"
+              onclick="wccrNotesCancel()">Cancel</button>
+    </div>
+  </form>
+
+  <script>
+  function wccrNotesEdit() {
+    document.getElementById('wccr-notes-display').style.display = 'none';
+    document.getElementById('wccr-notes-form').style.display = 'block';
+    document.getElementById('wccr-notes-edit').style.display = 'none';
+    document.getElementById('wccr-notes-input').focus();
+  }
+  function wccrNotesCancel() {
+    document.getElementById('wccr-notes-form').reset();
+    document.getElementById('wccr-notes-form').style.display = 'none';
+    document.getElementById('wccr-notes-display').style.display = 'block';
+    document.getElementById('wccr-notes-edit').style.display = 'inline-block';
+  }
+  </script>
+  {% endif %}
+</div>
+{% endif %}
+  </section>
+  <section class="wccr-wo-history-section">
+<div class="wccr-history-inner">
+    <div class="card border-primary-subtle mt-2">
+      <div class="card-header py-2">
+        <strong>Previous Service History</strong>
+      </div>
+
+      <div class="card-body py-2">
+        {% for hu in (wo.units or []) %}
+          <div class="appliance-history-detail mb-3"
+               data-serial="{{ (hu.serial or '')|e }}"
+               data-current-wo="{{ wo.id }}">
+            <div class="small text-muted">
+              <strong>Appliance #{{ loop.index }}</strong>
+              {% if hu.model %}
+                — Model {{ hu.model }}
+              {% endif %}
+              {% if hu.serial %}
+                — Serial {{ hu.serial }}
+              {% endif %}
+            </div>
+
+            <div class="appliance-history-detail-result mt-1">
+              {% if hu.serial %}
+                Checking previous service...
+              {% else %}
+                No serial number — history lookup skipped.
+              {% endif %}
+            </div>
+          </div>
+        {% else %}
+          <div class="appliance-history-detail"
+               data-serial="{{ (wo.serial or '')|e }}"
+               data-current-wo="{{ wo.id }}">
+            <div class="small text-muted">
+              Serial {{ wo.serial or '—' }}
+            </div>
+            <div class="appliance-history-detail-result mt-1">
+              {% if wo.serial %}
+                Checking previous service...
+              {% else %}
+                No serial number — history lookup skipped.
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  </section>
 </div>
 
 {# =========================================================
@@ -442,82 +606,408 @@
   <p class="text-muted">No parts listed for this work order.</p>
 {% endif %}
 
+
 {# =========================================================
-   ISSUED ITEMS
+   WCCR_ISSUED_ITEMS_UI_V1
+   Display only - no inventory or financial calculations changed
    ========================================================= #}
 
-<h5 class="mt-4">Issued Items (this WO)</h5>
-
 <style>
-  .row-ret   { background:#fff5f5; }
-  .inv-badge { font-size:.75rem; }
-  .num       { text-align:right; font-variant-numeric: tabular-nums; }
+.wccr-issue-section {
+    margin: 22px 0 26px;
+}
+.wccr-issue-heading {
+    font-size: 1.08rem;
+    font-weight: 650;
+    margin-bottom: 13px;
+}
+.wccr-issue-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+}
+.wccr-issue-stat {
+    border: 1px solid #dee3e9;
+    border-radius: 7px;
+    background: #fff;
+    padding: 12px 14px;
+    min-width: 0;
+}
+.wccr-issue-stat-label {
+    font-size: 12px;
+    font-weight: 650;
+    color: #5b6572;
+    margin-bottom: 5px;
+}
+.wccr-issue-stat-value {
+    font-size: 19px;
+    font-weight: 700;
+    color: #243448;
+    font-variant-numeric: tabular-nums;
+}
+.wccr-issue-stat-sub {
+    color: #697482;
+    font-size: 12px;
+    margin-top: 3px;
+}
+.wccr-issue-stat.net {
+    border-left: 3px solid #4878b8;
+    background: #f7faff;
+}
+.wccr-issue-group {
+    border: 1px solid #dce2e9;
+    border-radius: 7px;
+    overflow: hidden;
+    margin-bottom: 13px;
+    background: #fff;
+}
+.wccr-issue-group-head {
+    padding: 10px 13px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.wccr-issue-group-head.issued {
+    background: #eff8f2;
+    border-bottom: 1px solid #d6e9dc;
+}
+.wccr-issue-group-head.returned {
+    background: #fff6e9;
+    border-bottom: 1px solid #f1dfc2;
+}
+.wccr-issue-group-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .025em;
+}
+.wccr-issue-group-title.issued {
+    color: #236c45;
+}
+.wccr-issue-group-title.returned {
+    color: #946016;
+}
+.wccr-issue-group-count {
+    font-size: 12px;
+    color: #697482;
+}
+.wccr-issue-table {
+    width: 100%;
+    margin-bottom: 0 !important;
+    font-size: 13px;
+}
+.wccr-issue-table th {
+    background: #fafbfc;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+    color: #526070;
+    white-space: nowrap;
+}
+.wccr-issue-table td,
+.wccr-issue-table th {
+    padding: 8px 10px !important;
+    vertical-align: middle;
+}
+.wccr-issue-table .part-number {
+    font-size: 12px;
+    font-weight: 650;
+}
+.wccr-issue-table .part-name {
+    font-weight: 500;
+    color: #263445;
+}
+.wccr-issue-table .date-cell {
+    white-space: nowrap;
+    color: #5d6978;
+}
+.wccr-issue-table .numeric {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.wccr-issue-empty {
+    padding: 12px 14px;
+    color: #718096;
+    font-size: 13px;
+}
+@media (max-width: 700px) {
+    .wccr-issue-summary {
+        grid-template-columns: 1fr;
+    }
+    .wccr-issue-table {
+        min-width: 690px;
+    }
+}
+
+/* WCCR_ISSUED_ITEMS_COMPACT_V11 */
+.wccr-issue-section {
+    margin: 16px 0 19px;
+}
+.wccr-issue-heading {
+    margin-bottom: 9px;
+}
+.wccr-issue-group {
+    margin-bottom: 10px;
+}
+.wccr-issue-group-head {
+    padding: 7px 10px;
+}
+.wccr-issue-table {
+    font-size: 12px;
+    line-height: 1.2;
+}
+.wccr-issue-table th {
+    padding: 5px 8px !important;
+    font-size: 10.5px;
+}
+.wccr-issue-table td {
+    padding: 5px 8px !important;
+    line-height: 1.25;
+}
+.wccr-part-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+}
+.wccr-part-inline .part-number {
+    font-size: 11.5px;
+    white-space: nowrap;
+}
+.wccr-part-inline .part-name {
+    font-size: 12px;
+    font-weight: 500;
+}
+.wccr-issue-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #f8fafc;
+    border-top: 1px solid #dce2e9;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+}
+.wccr-issue-footer-qty {
+    color: #64748b;
+    font-size: 11.5px;
+    font-weight: 400;
+    margin-right: 14px;
+}
+.wccr-issue-net {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 13px;
+    border: 1px solid #c9d8ec;
+    border-left: 3px solid #4878b8;
+    border-radius: 6px;
+    background: #f3f7fc;
+    font-size: 12.5px;
+}
+.wccr-issue-net-value {
+    font-size: 17px;
+    color: #243448;
+    font-variant-numeric: tabular-nums;
+}
+@media (max-width: 700px) {
+    .wccr-issue-footer-qty {
+        margin-right: 6px;
+    }
+    .wccr-issue-net {
+        flex-wrap: wrap;
+    }
+}
+
 </style>
 
-<div class="table-responsive mb-2">
-  <table class="table table-sm table-bordered align-middle">
-    <thead class="table-light">
-      <tr>
-        <th>Issued At</th>
-        <th>Invoice #</th>
-        <th>Part #</th>
-        <th>Name</th>
-        <th class="text-end">Qty</th>
-        <th class="text-end">Unit ($)</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% if issued_items and (issued_items|length) > 0 %}
-        {% for r in issued_items %}
-          {% set is_ret = (r.quantity or 0) < 0 %}
-          <tr class="{% if is_ret %}row-ret{% endif %}">
-            <td>{{ r.issue_date|local_dt }}</td>
+<section class="wccr-issue-section">
+
+  <h5 class="wccr-issue-heading">Issued Items (this WO)</h5>
+
+  {# Preserve all existing totals from the WO detail route. #}
+  
+  <!-- WCCR_ISSUED_ITEMS_UI_V12_FINAL -->
+  <div class="wccr-issue-summary">
+
+    <div class="wccr-issue-stat">
+      <div class="wccr-issue-stat-label">ISSUED TOTAL</div>
+      <div class="wccr-issue-stat-value">
+        ${{ '%.2f'|format(issued_total or 0) }}
+      </div>
+      <div class="wccr-issue-stat-sub">
+        Quantity: {{ issued_qty or 0 }}
+      </div>
+    </div>
+
+    <div class="wccr-issue-stat">
+      <div class="wccr-issue-stat-label">RETURNED TOTAL</div>
+      <div class="wccr-issue-stat-value">
+        ${{ '%.2f'|format(returned_total or 0) }}
+      </div>
+      <div class="wccr-issue-stat-sub">
+        Quantity: {{ returned_qty or 0 }}
+      </div>
+    </div>
+
+    <div class="wccr-issue-stat net">
+      <div class="wccr-issue-stat-label">
+        NET TOTAL (ISSUED − RETURNS)
+      </div>
+      <div class="wccr-issue-stat-value">
+        ${{ '%.2f'|format(net_total or 0) }}
+      </div>
+      <div class="wccr-issue-stat-sub">
+        Net quantity: {{ net_qty or 0 }}
+      </div>
+    </div>
+
+  </div>
+
+{# ISSUED: only positive-quantity operations. #}
+  <div class="wccr-issue-group">
+
+    <div class="wccr-issue-group-head issued">
+      <div class="wccr-issue-group-title issued">
+        ↑ ISSUED — Parts issued from inventory
+      </div>
+      <div class="wccr-issue-group-count">
+        {{ issued_qty or 0 }} units
+      </div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered wccr-issue-table">
+        <thead>
+          <tr>
+            <th>Part / Name</th>
+            <th>Issued At</th>
+            <th>Invoice #</th>
+            <th class="text-end">Qty</th>
+            <th class="text-end">Unit ($)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in issued_items
+             if (r.quantity or 0) > 0 %}
+          <tr>
+            <td>
+              <div class="wccr-part-inline">
+                <code class="part-number">{{ r.part.part_number if r.part else r.part_id }}</code>
+                <span class="part-name">{{ r.part.name if r.part else '—' }}</span>
+              </div>
+            </td>
+            <td class="date-cell">
+              {{ r.issue_date|local_dt }}
+            </td>
             <td class="text-nowrap">
               {% if r.invoice_number %}
-                <a href="{{ url_for('inventory.reports_grouped', q=('%06d'|format(r.invoice_number)), invoice_number=r.invoice_number) }}#invoice-{{ r.invoice_number }}"
-                   target="_blank"
-                   rel="noopener"
-                   class="fw-bold text-decoration-none">
-                  {{ '%06d'|format(r.invoice_number) }}
-                </a>
+              <a href="{{ url_for('inventory.reports_grouped',
+                       q=('%06d'|format(r.invoice_number)),
+                       invoice_number=r.invoice_number) }}#invoice-{{ r.invoice_number }}"
+                 target="_blank"
+                 rel="noopener"
+                 class="fw-bold text-decoration-none">
+                {{ '%06d'|format(r.invoice_number) }}
+              </a>
               {% else %}
                 —
               {% endif %}
             </td>
-            <td><code>{{ r.part.part_number if r.part else r.part_id }}</code></td>
-            <td>{{ r.part.name if r.part else '—' }}</td>
-            <td class="num">{{ r.quantity }}</td>
-            <td class="num">{{ '%.2f'|format(r.unit_cost_at_issue or 0) }}</td>
+            <td class="numeric">
+              +{{ r.quantity }}
+            </td>
+            <td class="numeric">
+              {{ '%.2f'|format(r.unit_cost_at_issue or 0) }}
+            </td>
           </tr>
-        {% endfor %}
-      {% else %}
-        <tr>
-          <td colspan="6" class="text-muted">No issued items yet.</td>
-        </tr>
-      {% endif %}
-    </tbody>
-  </table>
-</div>
+          {% else %}
+          <tr>
+            <td colspan="5" class="wccr-issue-empty">
+              No parts issued yet.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 
-<div class="small mb-4">
-  <span class="me-3">
-    <strong>Issued total:</strong>
-    ${{ '%.2f'|format(issued_total or 0) }}
-    <span class="text-muted">(qty {{ issued_qty or 0 }})</span>
-  </span>
+  {# RETURNED: only negative-quantity operations. #}
+  <div class="wccr-issue-group">
 
-  <span class="me-3">
-    <strong>Returned total:</strong>
-    ${{ '%.2f'|format(returned_total or 0) }}
-    <span class="text-muted">(qty {{ returned_qty or 0 }})</span>
-  </span>
+    <div class="wccr-issue-group-head returned">
+      <div class="wccr-issue-group-title returned">
+        ↩ RETURNED — Parts returned to inventory
+      </div>
+      <div class="wccr-issue-group-count">
+        {{ returned_qty or 0 }} units
+      </div>
+    </div>
 
-  <span>
-    <strong>Grand total (Issued − Returns):</strong>
-    ${{ '%.2f'|format(net_total or 0) }}
-    <span class="text-muted">(qty {{ net_qty or 0 }})</span>
-  </span>
-</div>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered wccr-issue-table">
+        <thead>
+          <tr>
+            <th>Part / Name</th>
+            <th>Returned At</th>
+            <th>Invoice #</th>
+            <th class="text-end">Qty</th>
+            <th class="text-end">Unit ($)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in issued_items
+             if (r.quantity or 0) < 0 %}
+          <tr>
+            <td>
+              <div class="wccr-part-inline">
+                <code class="part-number">{{ r.part.part_number if r.part else r.part_id }}</code>
+                <span class="part-name">{{ r.part.name if r.part else '—' }}</span>
+              </div>
+            </td>
+            <td class="date-cell">
+              {{ r.issue_date|local_dt }}
+            </td>
+            <td class="text-nowrap">
+              {% if r.invoice_number %}
+              <a href="{{ url_for('inventory.reports_grouped',
+                       q=('%06d'|format(r.invoice_number)),
+                       invoice_number=r.invoice_number) }}#invoice-{{ r.invoice_number }}"
+                 target="_blank"
+                 rel="noopener"
+                 class="fw-bold text-decoration-none">
+                {{ '%06d'|format(r.invoice_number) }}
+              </a>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td class="numeric">
+              {{ r.quantity }}
+            </td>
+            <td class="numeric">
+              {{ '%.2f'|format(r.unit_cost_at_issue or 0) }}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="wccr-issue-empty">
+              No returned parts.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+
+</section>
 
 <!-- =========================================================
      ASSIGNED ASSETS (NEW)

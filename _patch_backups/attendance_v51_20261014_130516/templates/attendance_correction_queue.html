@@ -1,0 +1,84 @@
+
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h3>Correction Requests</h3>
+      <p class="text-muted mb-0">
+        Employee requests and decision history.
+        Times are stored in UTC.
+      </p>
+    </div>
+    <a class="btn btn-outline-secondary"
+       href="{{ url_for('inventory.attendance_payroll_dashboard') }}">
+       Attendance &amp; Payroll
+    </a>
+  </div>
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Request</th>
+              <th>User ID</th>
+              <th>Shift</th>
+              <th>Original UTC</th>
+              <th>Requested UTC</th>
+              <th>Reason</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Review</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in records %}
+            <tr>
+              <td>#{{ r.id }}</td>
+              <td>{{ r.user_id }}</td>
+              <td>#{{ r.shift_id }}</td>
+              <td class="small">
+                {{ r.original_start_utc }}
+                <div>{{ r.original_end_utc }}</div>
+              </td>
+              <td class="small">
+                {{ r.requested_start_utc }}
+                <div>{{ r.requested_end_utc }}</div>
+              </td>
+              <td style="min-width:160px">{{ r.reason }}</td>
+              <td>
+                {% if r.status == 'pending' %}
+                  <span class="badge bg-warning text-dark">
+                    Pending
+                  </span>
+                {% else %}
+                  <span class="badge bg-secondary">
+                    {{ r.status }}
+                  </span>
+                {% endif %}
+              </td>
+              <td class="small">{{ r.created_at_utc }}</td>
+              <td class="small">
+                {% if r.reviewed_at_utc %}
+                  {{ r.reviewed_at_utc }}
+                  <div>{{ r.review_note or '' }}</div>
+                {% else %}
+                  Awaiting decision
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="9" class="text-muted">
+                No correction requests.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,287 @@
+{% if attendance_data and access.attendance_view %}
+<section id="wccr-attendance-live" class="mt-4">
+
+  <div class="alert alert-info py-2">
+    Preliminary attendance information.
+    Not approved for payroll.
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card card-body">
+        <small>Currently Working</small>
+        <h3>{{ attendance_data.working|length }}</h3>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card card-body">
+        <small>Today's Worked Hours</small>
+        <h3>{{ '%.2f'|format(
+          (attendance_data.today_totals.values()|sum) / 3600
+        ) }}</h3>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card card-body">
+        <small>Overnight Alerts</small>
+        <h3>{{ attendance_data.overnight|length }}</h3>
+      </div>
+    </div>
+    {% if access.attendance_review %}
+    <div class="col-md-3">
+      <div class="card card-body">
+        <small>Pending Review</small>
+        <h3>{{ attendance_data.pending_review|length }}</h3>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if section in ["overview", "attendance"] %}
+  <h5>Currently Working</h5>
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-striped">
+      <thead>
+        <tr>
+          <th>EMPLOYEE</th>
+          <th>Shift</th>
+          <th>Started</th>
+          <th>Hours Open</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in attendance_data.working %}
+        <tr>
+          <td>{{ row.employee_name }} <small class="text-muted">(ID {{ row.user_id }})</small></td>
+          <td>{{ row.shift_id }}</td>
+          <td>{{ row.started }}</td>
+          <td>{{ '%.2f'|format(row.elapsed_hours) }}</td>
+          <td>{% if row.active_pause %}
+            <span class="badge bg-warning text-dark">
+              {{ row.active_pause }} in progress
+            </span>
+          {% elif row.open %}
+            <span class="badge bg-primary">Open Shift</span>
+          {% else %}
+            <span class="badge bg-secondary">{{ row.status }}</span>
+          {% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">No active shifts</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if access.attendance_review %}
+  <h5>Pending Review</h5>
+  <div class="table-responsive mb-4">
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th>EMPLOYEE</th>
+          <th>Shift</th>
+          <th>Started</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in attendance_data.pending_review %}
+        <tr>
+          <td>{{ row.employee_name }} <small class="text-muted">(ID {{ row.user_id }})</small></td>
+          <td>{{ row.shift_id }}</td>
+          <td>{{ row.started }}</td>
+          <td><span class="badge bg-warning text-dark">Requires Review</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">No pending reviews</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <h5>Overnight Alerts (over 12 hours)</h5>
+  <div class="table-responsive mb-4">
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th>EMPLOYEE</th>
+          <th>Shift</th>
+          <th>Hours Open</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in attendance_data.overnight %}
+        <tr>
+          <td>{{ row.employee_name }} <small class="text-muted">(ID {{ row.user_id }})</small></td>
+          <td>{{ row.shift_id }}</td>
+          <td>{{ '%.2f'|format(row.elapsed_hours) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3">No overnight alerts</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if section in ["overview", "timesheets"] %}
+
+
+  {# WCCR_ACCOUNTING_TIMESHEET_V61 #}
+  <h4>Employee Timesheet</h4>
+
+  {% if section == "timesheets" %}
+  <form method="get" class="row g-2 mb-3 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label">From</label>
+      <input class="form-control" type="date" name="from"
+             value="{{ timesheet_from }}" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">To</label>
+      <input class="form-control" type="date" name="to"
+             value="{{ timesheet_to }}" required>
+    </div>
+    <div class="col-md-3">
+      <button type="submit" class="btn btn-primary">
+        Show Period
+      </button>
+    </div>
+  </form>
+  {% endif %}
+
+  <p class="text-muted small">
+    Pacific Time. Preliminary attendance, not approved payroll.
+  </p>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Work Date</th>
+          <th>Employee</th>
+          <th>Shift Start / End</th>
+          <th>Worked</th>
+          <th>Lunch</th>
+          <th>Break</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in attendance_data.daily_timesheets %}
+        <tr>
+          <td>{{ row.date }}</td>
+          <td>{{ row.employee_name }}</td>
+          <td>
+            {{ row.started }} ? {{ row.ended }}
+            {% if row.parts|length > 1 %}
+            <div class="small text-muted">
+              {{ row.parts|length }} segments
+            </div>
+            {% endif %}
+          </td>
+          {% for seconds in [row.worked, row.lunch, row.break] %}
+          <td>
+            {% if seconds is none %}
+            <span class="text-warning">Review</span>
+            {% else %}
+            {{ '%02d:%02d'|format(
+              seconds // 3600,
+              (seconds % 3600) // 60
+            ) }}
+            {% endif %}
+          </td>
+          {% endfor %}
+          <td>
+            {% if row.needs_review %}
+            <span class="badge bg-warning text-dark">
+              Needs Review
+            </span>
+            {% elif row.open %}
+            <span class="badge bg-primary">
+              In Progress
+            </span>
+            {% else %}
+            <span class="badge bg-secondary">Normal</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.needs_review and access.attendance_review %}
+            <button class="btn btn-outline-primary btn-sm"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#review-{{ loop.index }}">
+              Review
+            </button>
+            {% else %}
+            <span class="text-muted">?</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% if row.needs_review and access.attendance_review %}
+        <tr>
+          <td colspan="8" class="p-0">
+            <div class="collapse" id="review-{{ loop.index }}">
+              <div class="card card-body m-2">
+                <strong>
+                  {{ row.employee_name }} ? {{ row.date }}
+                </strong>
+                {% if row.unverified %}
+                <div class="alert alert-warning mt-2">
+                  Repeated LOGIN without a matching LOGOUT.
+                  Worked hours are unverified.
+                  Administrator review is required.
+                </div>
+                {% endif %}
+                {% if row.overlap %}
+                <div class="alert alert-warning mt-2">
+                  Overlapping intervals. Daily totals
+                  require verification.
+                </div>
+                {% endif %}
+                <table class="table table-sm mt-2">
+                  <thead>
+                    <tr>
+                      <th>Shift</th>
+                      <th>Start</th>
+                      <th>End</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for part in row.parts %}
+                    <tr>
+                      <td>#{{ part.shift_id }}</td>
+                      <td>{{ part.daily_start }}</td>
+                      <td>{{ part.daily_end }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+                <div class="text-muted small">
+                  Read-only review. No attendance
+                  changes are saved here.
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+        {% else %}
+        <tr>
+          <td colspan="8" class="text-center text-muted py-4">
+            No attendance records for this period.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+</section>
+{% endif %}
+{# WCCR_EDIT_SHIFT_V40 #}

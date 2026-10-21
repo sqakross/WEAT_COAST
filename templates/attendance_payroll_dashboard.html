@@ -6,24 +6,51 @@
     Employee attendance, timesheets and payroll preparation.
   </p>
 
-  <div class="d-flex flex-wrap gap-2 mb-4">
-    {% set tabs = [
-      ('overview', 'Overview'),
-      ('attendance', 'Attendance'),
+  {# WCCR_UI_V64 #}
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    {% for key, label in [
       ('timesheets', 'Timesheets'),
-      ('pay-settings', 'Employee Pay Settings'),
-      ('payroll-preview', 'Payroll Preview'),
-      ('payroll-approval', 'Payroll Approval'),
-      ('my-access', 'My Access')
+      ('attendance', 'Live Attendance')
     ] %}
-    {% for key, label in tabs %}
-      <a class="btn btn-sm
-        {{ 'btn-primary' if section == key else 'btn-outline-secondary' }}"
-        href="{{ url_for('inventory.attendance_payroll_dashboard',
-                         section=key) }}">
-        {{ label }}
-      </a>
+    <a class="btn btn-sm
+       {{ 'btn-primary' if section == key else 'btn-outline-secondary' }}"
+       href="{{ url_for('inventory.attendance_payroll_dashboard',
+                        section=key) }}">
+      {{ label }}
+    </a>
     {% endfor %}
+
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-secondary dropdown-toggle"
+              type="button" data-bs-toggle="dropdown"
+              aria-expanded="false">
+        More
+      </button>
+      <ul class="dropdown-menu">
+        {% for key, label in [
+          ('overview', 'Overview'),
+          ('pay-settings', 'Employee Pay Settings'),
+          ('payroll-preview', 'Payroll Preview'),
+          ('payroll-approval', 'Payroll Approval'),
+          ('my-access', 'My Access')
+        ] %}
+        <li>
+          <a class="dropdown-item"
+             href="{{ url_for('inventory.attendance_payroll_dashboard',
+                              section=key) }}">
+            {{ label }}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    {% if access.attendance_review %}
+    <a class="btn btn-sm btn-outline-secondary ms-auto"
+       href="{{ url_for('auth.attendance_correction_requests') }}">
+      Correction Requests
+    </a>
+    {% endif %}
   </div>
 
   {% if section == 'overview' %}
@@ -71,17 +98,11 @@
 
   {% elif section == 'attendance' %}
     <h5>Attendance Dashboard</h5>
-    <div class="alert alert-info">
-      Live attendance information is displayed below.
-      Open shifts and review items require verification.
-    </div>
+
 
   {% elif section == 'timesheets' %}
-    <h5>Employee Timesheets</h5>
-    <div class="alert alert-info">
-      Daily attendance totals are displayed below.
-      All hours remain preliminary until reviewed.
-    </div>
+
+
 
   {% elif section == 'pay-settings' %}
     <h5>Employee Pay Settings</h5>

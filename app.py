@@ -513,6 +513,7 @@ def download_ca():
 ALLOWED_TECH_ENDPOINTS = {
     "inventory.wo_list",
     "inventory.wo_detail",
+    "inventory.wo_notes_save",
     "inventory.wo_confirm_lines",
     "inventory.issued_confirm_toggle",
     "inventory.reports_grouped",
@@ -526,6 +527,7 @@ ALLOWED_TECH_ENDPOINTS = {
 ALLOWED_VIEWER_ENDPOINTS = {
     "inventory.wo_list",
     "inventory.wo_detail",
+    "inventory.wo_notes_save",
     "inventory.reports_grouped",
     "inventory.change_password",
     "auth.logout",

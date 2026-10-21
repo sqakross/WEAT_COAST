@@ -1,3 +1,4 @@
+{# WCCR_CLOCK_V66C_V2 #}
 {% extends "base.html" %}
 {% block content %}
 <div class="container py-4" style="max-width:960px">
@@ -32,7 +33,7 @@
       {% if shift %}
         <div class="d-flex flex-wrap justify-content-between gap-3 mb-3">
           <div>
-            <div class="text-muted small">Shift started</div>
+            <div class="text-muted small">Clocked in</div>
             <strong>{{ started }}</strong>
           </div>
           <div>
@@ -105,43 +106,36 @@
             </form>
           {% endif %}
 
+          {# WCCR_CLOCK_V66B #}
           <form method="post"
-                action="{{ url_for('auth.my_time_action') }}"
-                onsubmit="return confirm('End this shift?');">
-            <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
-            <input type="hidden" name="action" value="end_shift">
-            <button class="btn btn-danger" type="submit">End Shift</button>
+                action="{{ url_for('auth.my_time_action') }}">
+            <input type="hidden" name="employee_time_csrf"
+                   value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="clock_out">
+            <button class="btn btn-danger" type="submit">
+              Clock Out
+            </button>
           </form>
         </div>
 
       {% else %}
-        <span class="badge bg-secondary mb-3">No Active Shift</span>
-        {# WCCR_SMART_SHIFT_RECOVERY_4A #}
-        {% if recovery_candidate %}
-          <p class="text-muted">
-            Your previous shift ended today. You can resume it.
-            Time between End Shift and Resume Shift is unpaid.
-          </p>
-          <form method="post" action="{{ url_for('auth.my_time_action') }}" class="mb-3">
-            <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
-            <input type="hidden" name="action" value="resume">
-            <button class="btn btn-primary" type="submit">Resume Shift</button>
-          </form>
-        {% else %}
-          <p class="text-muted">Start a new shift when you begin working.</p>
-        {% endif %}
-
-        {# WCCR_SMART_SHIFT_RECOVERY_4B #}
-        {% if not recovery_candidate %}
-        <form method="post" action="{{ url_for('auth.my_time_action') }}">
-          <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
-          <input type="hidden" name="action" value="start">
-          <button class="btn btn-success" type="submit">Start Shift</button>
+        <span class="badge bg-secondary mb-3">
+          Clocked Out
+        </span>
+        <p class="text-muted">
+          Clock In starts a new work interval.
+        </p>
+        <form method="post"
+              action="{{ url_for('auth.my_time_action') }}">
+          <input type="hidden" name="employee_time_csrf"
+                 value="{{ csrf_token }}">
+          <input type="hidden" name="action" value="clock_in">
+          <button class="btn btn-success" type="submit">
+            Clock In
+          </button>
         </form>
-        {% endif %}
       {% endif %}
-
-    </div>
+</div>
   </div>
 
 
@@ -236,7 +230,7 @@
 
   <div class="card shadow-sm border-0 rounded-4">
     <div class="card-body p-4">
-      <h5 class="mb-3">Recent Shifts</h5>
+      <h5 class="mb-3">Recent Work Intervals</h5>
       <div class="table-responsive">
         <table class="table table-sm align-middle">
           <thead>
@@ -244,6 +238,7 @@
               <th>Start (PT)</th>
               <th>End (PT)</th>
               <th>Status</th>
+              <th>Correction</th>
             </tr>
           </thead>
           <tbody>
@@ -252,10 +247,32 @@
                 <td>{{ la_time(item.started_at) }}</td>
                 <td>{{ la_time(item.ended_at) }}</td>
                 <td>{{ 'Pending review' if item.requires_review else item.status }}</td>
+                <td>
+                {% if item.ended_at and correction_can_edit %}
+                  <a class="btn btn-sm btn-outline-secondary"
+                     href="{{ url_for(
+                       'inventory.attendance_shift_edit',
+                       shift_id=item.id) }}">
+                    Edit Shift
+                  </a>
+                {% endif %}
+                {% if correction_statuses.get(item.id) == 'pending' %}
+                  <span class="badge bg-warning text-dark">
+                    Pending Review
+                  </span>
+                {% elif item.ended_at %}
+                  <a class="btn btn-sm btn-outline-primary"
+                     href="{{ url_for(
+                       'auth.my_time_correction',
+                       shift_id=item.id) }}">
+                    Request Correction
+                  </a>
+                {% endif %}
+                </td>
               </tr>
             {% else %}
               <tr>
-                <td colspan="3" class="text-muted">No shifts yet</td>
+                <td colspan="4" class="text-muted">No shifts yet</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -265,6 +282,57 @@
   </div>
 
 </div>
+
+  {# WCCR_ATTENDANCE_V50_CORE #}
+  <div class="card shadow-sm border-0 rounded-4 mt-4">
+    <div class="card-body p-4">
+      <div class="d-flex justify-content-between align-items-center">
+        <h5>My Correction Requests</h5>
+        {% if correction_can_review %}
+        <a class="btn btn-sm btn-outline-primary"
+           href="{{ url_for('auth.attendance_correction_requests') }}">
+          Management Queue
+        </a>
+        {% endif %}
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Request</th><th>Shift</th>
+              <th>Submitted</th><th>Status</th>
+              <th>Review Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in correction_history %}
+            <tr>
+              <td>#{{ r.id }}</td>
+              <td>#{{ r.shift_id }}</td>
+              <td>{{ r.created_at_utc }}</td>
+              <td>
+                {% if r.status == 'pending' %}
+                <span class="badge bg-warning text-dark">
+                  Pending Review
+                </span>
+                {% else %}
+                {{ r.status }}
+                {% endif %}
+              </td>
+              <td>{{ r.review_note or '' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="5" class="text-muted">
+                No correction requests.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
 <script>
 (function () {
@@ -358,3 +426,5 @@
 })();
 </script>
 {% endblock %}
+
+{# WCCR_MY_TIME_CORRECTION_V41 #}

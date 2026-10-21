@@ -96,6 +96,13 @@ ERP_PERMISSION_GROUPS = [
                 "name": "Edit Work Orders",
                 "description": "Edit work orders.",
             },
+
+            # WCCR_WO_NOTES_V1
+            {
+                "code": "erp.work_orders.edit_notes",
+                "name": "Edit Work Order Notes",
+                "description": "Edit notes directly on a Work Order.",
+            },
             {
                 "code": "erp.work_orders.cancel",
                 "name": "Cancel Work Orders",
@@ -387,6 +394,22 @@ ERP_PERMISSION_GROUPS.append({
             "code": "erp.attendance.review_shifts",
             "name": "Review Shifts",
             "description": "Review Shifts.",
+        },
+        # WCCR_ATTENDANCE_REVIEW_PERMISSIONS_V2
+        {
+            "code": "erp.attendance.edit_shifts",
+            "name": "Edit Shifts",
+            "description": "Correct employee shift and break times with mandatory reason.",
+        },
+        {
+            "code": "erp.attendance.approve_shifts",
+            "name": "Approve Shifts",
+            "description": "Approve employee shifts separately from Payroll approval.",
+        },
+        {
+            "code": "erp.attendance.view_audit",
+            "name": "View Time Audit",
+            "description": "View employee shift corrections and approval history.",
         },
         {
             "code": "erp.attendance.manage_users",

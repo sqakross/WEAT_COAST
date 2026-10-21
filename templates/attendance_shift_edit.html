@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4" style="max-width:760px">
+  <h3>Edit Shift #{{ shift.id }}</h3>
+  <p class="text-muted">
+    Employee ID: {{ shift.user_id }} |
+    Status: {{ shift.status }}
+  </p>
+  <div class="alert alert-warning">
+    California local time. Original events are preserved.
+    This edit will require approval.
+  </div>
+  
+{# WCCR_ATTENDANCE_V53_CORE #}
+{% if edit_blocked_reason %}
+<div class="alert alert-warning">
+  <strong>Advanced editing required.</strong>
+  <div class="mt-3">
+    <a class="btn btn-primary btn-sm"
+       href="{{ url_for(
+         'auth.attendance_interval_editor',
+         shift_id=shift.id) }}">
+      Open Advanced Interval Editor
+    </a>
+  </div>
+
+  <div>{{ edit_blocked_reason }}</div>
+  <div class="small mt-2">
+    This shift contains events that cannot safely be edited
+    with the basic Start / End editor.
+    Original time records have not been changed.
+  </div>
+</div>
+{% else %}
+<form method="post">
+    <input type="hidden" name="csrf_token"
+           value="{{ csrf_token }}">
+    <input type="hidden" name="expected_start"
+           value="{{ expected_start }}">
+    <input type="hidden" name="expected_end"
+           value="{{ expected_end }}">
+    <div class="mb-3">
+      <label class="form-label">Shift Start</label>
+      <input class="form-control" type="datetime-local"
+             name="started_at" value="{{ started_at }}"
+             required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Shift End</label>
+      <input class="form-control" type="datetime-local"
+             name="ended_at" value="{{ ended_at }}"
+             required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Reason for Correction</label>
+      <textarea class="form-control" name="reason"
+                minlength="10" maxlength="1000"
+                rows="3" required></textarea>
+    </div>
+    <button class="btn btn-primary" type="submit">
+      Save Correction
+    </button>
+    <a class="btn btn-outline-secondary"
+       href="{{ url_for(
+         'inventory.attendance_payroll_dashboard',
+         section='timesheets') }}">Cancel</a>
+  </form>
+{% endif %}
+
+</div>
+{% endblock %}
