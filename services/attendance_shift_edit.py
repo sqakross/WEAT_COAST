@@ -23,6 +23,9 @@ def aware(value):
 
 
 def local_string(value):
+    # WCCR_OPEN_SHIFT_NONE_FIX_V54
+    if value is None:
+        return ""
     return aware(value).astimezone(LA).strftime("%Y-%m-%dT%H:%M")
 
 
@@ -110,10 +113,16 @@ def save_shift(shift_id, actor_id, start_text, end_text,
                 "Shift changed. Reload before editing."
             )
 
-        # Original events remain untouched and inside the interval.
+        # WCCR_EDIT_SHIFT_V52_PRECISION
+        # Original events remain unchanged. datetime-local inputs
+        # contain minutes, while stored events include seconds.
+        # Treat the selected Clock Out minute as inclusive for
+        # validation, without changing the submitted end timestamp.
+        event_validation_end = end + timedelta(minutes=1)
+
         for event in events:
             at = aware(event.occurred_at)
-            if at < start or at > end:
+            if at < start or at >= event_validation_end:
                 raise ShiftEditError(
                     "An original event is outside the proposed "
                     "interval. Advanced editing is required."

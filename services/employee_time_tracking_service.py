@@ -634,10 +634,25 @@ class EmployeeTimeTrackingService:
             # WCCR_ATTENDANCE_ATOMIC_V22
             try:
                 shift = cls._lock_open_shift_for_pause(user.id)
+                # WCCR_MIDNIGHT_LOGIN_RECOVERY_V1
+                from services.employee_midnight_engine import close_expired_shift
+                from zoneinfo import ZoneInfo
+                from datetime import timezone
+                _wccr_today = cls.now().astimezone(ZoneInfo('America/Los_Angeles')).date()
+                _wccr_started = shift.started_at
+                if _wccr_started.tzinfo is None:
+                    _wccr_started = _wccr_started.replace(tzinfo=timezone.utc)
+                if _wccr_started.astimezone(ZoneInfo('America/Los_Angeles')).date() < _wccr_today:
+                    _wccr_shift_id = shift.id
+                    db.session.rollback()
+                    if not close_expired_shift(_wccr_shift_id, now=cls.now()):
+                        cls._wccr_v22i_check_login_day(shift)
+                    return cls.login(user)
                 cls._wccr_v22i_check_login_day(shift)
                 if not shift.requires_review:
                     shift.status = "open"
-                cls.record_event(shift, "LOGIN")
+                # WCCR_MULTI_BROWSER_LOGIN_V1
+                # Existing shift: no duplicate LOGIN event.
                 db.session.commit()
                 return shift
             except TimeTrackingError as exc:
@@ -773,8 +788,23 @@ class EmployeeTimeTrackingService:
 
 
 
+            # WCCR_MIDNIGHT_LOGIN_RECOVERY_V1
+            from services.employee_midnight_engine import close_expired_shift
+            from zoneinfo import ZoneInfo
+            from datetime import timezone
+            _wccr_today = cls.now().astimezone(ZoneInfo('America/Los_Angeles')).date()
+            _wccr_started = existing.started_at
+            if _wccr_started.tzinfo is None:
+                _wccr_started = _wccr_started.replace(tzinfo=timezone.utc)
+            if _wccr_started.astimezone(ZoneInfo('America/Los_Angeles')).date() < _wccr_today:
+                _wccr_shift_id = existing.id
+                db.session.rollback()
+                if not close_expired_shift(_wccr_shift_id, now=cls.now()):
+                    cls._wccr_v22i_check_login_day(existing)
+                return cls.login(user)
             cls._wccr_v22i_check_login_day(existing)
-            cls.record_event(existing, "LOGIN")
+            # WCCR_MULTI_BROWSER_LOGIN_V1
+            # Concurrent login: keep existing shift.
 
 
             db.session.commit()
@@ -855,7 +885,7 @@ class EmployeeTimeTrackingService:
 
     @classmethod
 
-    def end_shift(cls, user):
+    def end_shift(cls, user, expected_shift_id=None):
 
         if not cls.eligible(user):
 
@@ -869,7 +899,24 @@ class EmployeeTimeTrackingService:
 
         try:
 
+            if expected_shift_id is not None:
+                current_shift = cls.get_open_shift(user.id)
+                if (
+                    current_shift is None
+                    or current_shift.id != expected_shift_id
+                ):
+                    return None
+
             shift = cls._lock_open_shift_for_pause(user.id)
+
+            # WCCR_MULTI_BROWSER_LOGOUT_V2
+            # Verify identity while holding the shift write lock.
+            if (
+                expected_shift_id is not None
+                and shift.id != expected_shift_id
+            ):
+                db.session.rollback()
+                return None
 
 
 

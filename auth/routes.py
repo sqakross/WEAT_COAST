@@ -1,3 +1,5 @@
+# WCCR_MY_TIME_FILTERS_V68
+# WCCR_MY_TIME_SIMPLE_V671
 import time
 from flask import Blueprint, render_template, redirect, url_for, flash, request, session
 from flask_login import login_user, logout_user, login_required, current_user
@@ -43,11 +45,17 @@ def login():
         user = User.query.filter(func.lower(User.username) == username.lower()).first()
         if user and user.check_password(password):
             login_user(user)
+            # WCCR_MULTI_BROWSER_LOGOUT_V2
+            session.pop("_wccr_auto_shift_id_v2", None)
 
             # WCCR_EMPLOYEE_TIME_LOGIN_START
             if (EmployeeTimeTrackingService.eligible(user) and user.employee_time_tracking_mode == 'automatic'):
                 try:
-                    EmployeeTimeTrackingService.login(user)
+                    _wccr_bound_shift = EmployeeTimeTrackingService.login(user)
+                    if _wccr_bound_shift is not None:
+                        session["_wccr_auto_shift_id_v2"] = int(
+                            _wccr_bound_shift.id
+                        )
                 except Exception:
                     db.session.rollback()
                     logging.exception(
@@ -135,7 +143,20 @@ def logout():
         try:
             # WCCR_CLOCK_V66A
             # Sign Out closes the current work interval.
-            EmployeeTimeTrackingService.end_shift(current_user)
+            # WCCR_MULTI_BROWSER_LOGOUT_V2
+            _wccr_bound_id = session.get("_wccr_auto_shift_id_v2")
+            if _wccr_bound_id is not None:
+                EmployeeTimeTrackingService.end_shift(
+                    current_user,
+                    expected_shift_id=int(_wccr_bound_id),
+                )
+            else:
+                flash(
+                    "Automatic Clock Out was not performed: "
+                    "this browser session predates shift protection. "
+                    "Please verify your time in My Time.",
+                    "warning",
+                )
         except Exception:
             db.session.rollback()
             logging.exception(
@@ -230,6 +251,7 @@ def my_time():
     active_pause = None
     current = {
         "total": 0, "worked": 0, "lunch": 0, "break": 0,
+        "actual_work": 0, "paid_time": 0,
         "paid_break": 0, "unpaid_break": 0
     }
 
@@ -246,32 +268,64 @@ def my_time():
         )
         active_pause = current_info["active_pause"]
 
-    period = request.args.get("period", "week").lower()
-    if period not in ("day", "week", "month"):
-        period = "week"
+    # WCCR_MY_TIME_FILTERS_V68
+    from datetime import date
+    from flask import flash
 
     today = now.astimezone(tz).date()
+    period = request.args.get("period", "today").lower()
 
-    if period == "day":
+    allowed_periods = {
+        "today", "yesterday", "week", "two_weeks",
+        "month", "year", "custom"
+    }
+
+    # Preserve existing URLs.
+    aliases = {"day": "today"}
+    period = aliases.get(period, period)
+
+    if period not in allowed_periods:
+        period = "today"
+
+    if period == "today":
         first_day = today
+        last_day = today
+    elif period == "yesterday":
+        first_day = today - timedelta(days=1)
+        last_day = first_day
     elif period == "week":
         first_day = today - timedelta(days=today.weekday())
-    else:
+        last_day = today
+    elif period == "two_weeks":
+        first_day = today - timedelta(days=13)
+        last_day = today
+    elif period == "month":
         first_day = today.replace(day=1)
-
-    if period == "month":
-        if first_day.month == 12:
-            next_day = first_day.replace(
-                year=first_day.year + 1, month=1
-            )
-        else:
-            next_day = first_day.replace(
-                month=first_day.month + 1
-            )
-    elif period == "week":
-        next_day = first_day + timedelta(days=7)
+        last_day = today
+    elif period == "year":
+        first_day = today.replace(month=1, day=1)
+        last_day = today
     else:
-        next_day = first_day + timedelta(days=1)
+        try:
+            first_day = date.fromisoformat(
+                request.args.get("from", "")
+            )
+            last_day = date.fromisoformat(
+                request.args.get("to", "")
+            )
+            if first_day > last_day:
+                raise ValueError("Start date is after end date")
+            if last_day > today:
+                raise ValueError("Future dates are not allowed")
+            if (last_day - first_day).days > 3660:
+                raise ValueError("Range exceeds 10 years")
+        except (TypeError, ValueError):
+            flash("Invalid date range. Showing today.", "warning")
+            period = "today"
+            first_day = today
+            last_day = today
+
+    next_day = last_day + timedelta(days=1)
 
     left = utc_midnight(first_day)
     right = min(now, utc_midnight(next_day))
@@ -311,8 +365,10 @@ def my_time():
     ]
 
     rows = []
+    # WCCR_MY_TIME_REPORT_V664
     report_total = {
         "total": 0, "worked": 0,
+        "actual_work": 0, "paid_time": 0,
         "lunch": 0, "break": 0,
         "paid_break": 0, "unpaid_break": 0
     }
@@ -326,6 +382,7 @@ def my_time():
 
         amounts = {
             "total": 0, "worked": 0,
+            "actual_work": 0, "paid_time": 0,
             "lunch": 0, "break": 0,
             "paid_break": 0, "unpaid_break": 0
         }
@@ -351,15 +408,67 @@ def my_time():
         for key in report_total:
             report_total[key] += amounts[key]
 
-        rows.append({
-            "date": day.strftime("%b %d, %Y"),
-            **amounts,
-            "review": review,
-            "open": open_shift,
-            "idle": idle,
-        })
+        # WCCR_MY_TIME_REAL_DAYS_V1
+        # Display only days with recorded time intervals.
+        # Keep report totals and payroll calculations unchanged.
+        if amounts["total"] > 0:
+            rows.append({
+                "date": day.strftime("%b %d, %Y"),
+                **amounts,
+                "review": review,
+                "open": open_shift,
+                "idle": idle,
+            })
 
         day += timedelta(days=1)
+
+
+    # Independent today summary, even for historical filters.
+    today_left = utc_midnight(today)
+    today_right = now
+
+    if first_day <= today <= last_day:
+        today_worked = next(
+            (r["worked"] for r in rows
+             if r["date"] == today.strftime("%b %d, %Y")),
+            0
+        )
+    else:
+        today_shifts = db.session.execute(
+            select(EmployeeShift).where(
+                EmployeeShift.user_id == current_user.id,
+                EmployeeShift.started_at < today_right,
+                or_(
+                    EmployeeShift.ended_at.is_(None),
+                    EmployeeShift.ended_at > today_left,
+                ),
+            )
+        ).scalars().all()
+
+        today_ids = [s.id for s in today_shifts]
+        today_events = {sid: [] for sid in today_ids}
+
+        if today_ids:
+            events_today = db.session.execute(
+                select(EmployeeTimeEvent)
+                .where(EmployeeTimeEvent.shift_id.in_(today_ids))
+                .order_by(
+                    EmployeeTimeEvent.shift_id,
+                    EmployeeTimeEvent.id
+                )
+            ).scalars().all()
+
+            for event in events_today:
+                today_events[event.shift_id].append(event)
+
+        today_worked = 0
+        for item in today_shifts:
+            info = summary(
+                item, today_events.get(item.id, []), now
+            )
+            today_worked += totals(
+                info, today_left, today_right
+            )["worked"]
 
     recent = db.session.execute(
         select(EmployeeShift)
@@ -381,6 +490,37 @@ def my_time():
         "my_time.html",
         shift=shift,
         recent=recent,
+
+        # WCCR_V73H4_UNIFIED_REVIEW
+        attendance_review_statuses={
+            row.shift_id: row.status
+            for row in (
+                db.session.execute(
+                    __import__("sqlalchemy").select(
+                        __import__(
+                            "services.attendance_review_v73",
+                            fromlist=["AttendanceReviewRevision"]
+                        ).AttendanceReviewRevision
+                    ).where(
+                        __import__(
+                            "services.attendance_review_v73",
+                            fromlist=["AttendanceReviewRevision"]
+                        ).AttendanceReviewRevision.shift_id.in_(
+                            [item.id for item in recent]
+                        )
+                    ).order_by(
+                        __import__(
+                            "services.attendance_review_v73",
+                            fromlist=["AttendanceReviewRevision"]
+                        ).AttendanceReviewRevision.revision.desc(),
+                        __import__(
+                            "services.attendance_review_v73",
+                            fromlist=["AttendanceReviewRevision"]
+                        ).AttendanceReviewRevision.id.desc()
+                    )
+                ).scalars().all()
+            )[::-1]
+        },
 
         correction_history=db.session.execute(
             __import__("sqlalchemy").text(
@@ -422,16 +562,19 @@ def my_time():
         worked_seconds=current["worked"],
         current=current,
         period=period,
+        filter_from=first_day.isoformat(),
+        filter_to=last_day.isoformat(),
+        report_includes_today=first_day <= today <= last_day,
+        today_date_label=today.strftime("%b %d, %Y"),
         report_rows=list(reversed(rows)),
+        today_worked=today_worked,
         report_total=report_total,
         report_label=(
             first_day.strftime("%b %d, %Y")
-            if period == "day"
+            if first_day == last_day
             else first_day.strftime("%b %d, %Y")
             + " - "
-            + (next_day - timedelta(days=1)).strftime(
-                "%b %d, %Y"
-            )
+            + last_day.strftime("%b %d, %Y")
         ),
         csrf_token=csrf,
         recovery_candidate=recovery_candidate,
@@ -1317,6 +1460,244 @@ def attendance_targeted_correction(shift_id):
         )
     ).scalars().all()
 
+    # WCCR_V73H3C_ONE_CLICK
+    if (
+        request.method == "POST"
+        and request.form.get("action_type") == "save_and_approve_review"
+    ):
+        import json as _one_click_json
+        from flask import jsonify
+        from services.attendance_review_v73 import AttendanceReviewError
+        from services.attendance_review_save_v73 import save_revision
+        from services.attendance_review_approve_v73 import approve_revision
+
+        if not (
+            can_review_action(current_user, "edit")
+            and can_review_action(current_user, "approve")
+        ):
+            abort(403)
+
+        if set(request.form.keys()) != {
+            "csrf_token", "action_type", "payload"
+        }:
+            abort(400)
+
+        try:
+            _token = serializer.loads(
+                request.form["csrf_token"], max_age=1800
+            )
+        except (BadSignature, SignatureExpired):
+            abort(400)
+
+        if not isinstance(_token, dict) or (
+            _token.get("uid") != current_user.id
+            or _token.get("shift") != shift_id
+            or _token.get("sid") != session.get("_id", "")
+        ):
+            abort(400)
+
+        try:
+            raw = request.form["payload"]
+            if len(raw) > 30000:
+                raise AttendanceReviewError("Payload too large.")
+
+            data = _one_click_json.loads(raw)
+            if not isinstance(data, dict) or set(data) != {
+                "expected_revision", "expected_source",
+                "started_at", "ended_at", "periods", "reason"
+            }:
+                raise AttendanceReviewError(
+                    "Invalid correction payload."
+                )
+
+            revision_id, number = save_revision(
+                shift_id=shift_id,
+                actor_id=current_user.id,
+                expected_revision=data["expected_revision"],
+                expected_source=data["expected_source"],
+                started_at=data["started_at"],
+                ended_at=data["ended_at"],
+                periods=data["periods"],
+                reason=data["reason"],
+                commit=False,
+            )
+
+            result = approve_revision(
+                shift_id=shift_id,
+                actor_id=current_user.id,
+                revision_id=revision_id,
+                expected_source=data["expected_source"],
+                commit=False,
+            )
+
+            db.session.commit()
+            return jsonify({"ok": True, **result})
+
+        except (
+            AttendanceReviewError, ValueError, TypeError, KeyError
+        ) as exc:
+            db.session.rollback()
+            return jsonify({
+                "ok": False, "error": str(exc)
+            }), 409
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "V7.3H.3C approval failed: shift=%s", shift_id
+            )
+            return jsonify({
+                "ok": False,
+                "error": "Unable to approve shift."
+            }), 500
+
+    # WCCR_ATTENDANCE_V73F_APPROVE
+    if (
+        request.method == "POST"
+        and request.form.get("action_type") == "approve_review_revision"
+    ):
+        from flask import jsonify
+        from services.attendance_review_v73 import AttendanceReviewError
+        from services.attendance_review_approve_v73 import approve_revision
+
+        if not can_review_action(current_user, "approve"):
+            abort(403)
+
+        if set(request.form.keys()) != {
+            "csrf_token", "action_type",
+            "revision_id", "expected_source"
+        }:
+            abort(400)
+
+        try:
+            _approval_token = serializer.loads(
+                request.form["csrf_token"], max_age=1800
+            )
+        except (BadSignature, SignatureExpired):
+            abort(400)
+
+        if not isinstance(_approval_token, dict) or (
+            _approval_token.get("uid") != current_user.id
+            or _approval_token.get("shift") != shift_id
+            or _approval_token.get("sid") != session.get("_id", "")
+        ):
+            abort(400)
+
+        try:
+            _raw_id = request.form["revision_id"]
+            if not _raw_id.isdecimal():
+                raise AttendanceReviewError(
+                    "Invalid revision ID."
+                )
+
+            _result = approve_revision(
+                shift_id=shift_id,
+                actor_id=current_user.id,
+                revision_id=int(_raw_id),
+                expected_source=request.form["expected_source"],
+            )
+
+            return jsonify({
+                "ok": True,
+                **_result
+            })
+
+        except AttendanceReviewError as exc:
+            db.session.rollback()
+            return jsonify({
+                "ok": False,
+                "error": str(exc)
+            }), 409
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "V7.3F approval failed: shift=%s", shift_id
+            )
+            return jsonify({
+                "ok": False,
+                "error": "Unable to approve revision."
+            }), 500
+
+    # WCCR_ATTENDANCE_V73C_SAVE
+    if (
+        request.method == "POST"
+        and request.form.get("action_type") == "save_review_revision"
+    ):
+        import json as _review_json
+        from flask import jsonify
+        from services.attendance_review_v73 import AttendanceReviewError
+        from services.attendance_review_save_v73 import save_revision
+
+        if not can_review_action(current_user, "edit"):
+            abort(403)
+
+        required_save = {
+            "csrf_token", "action_type", "payload"
+        }
+        if set(request.form.keys()) != required_save:
+            abort(400)
+
+        try:
+            _token = serializer.loads(
+                request.form["csrf_token"], max_age=1800
+            )
+        except (BadSignature, SignatureExpired):
+            abort(400)
+
+        if not isinstance(_token, dict) or (
+            _token.get("uid") != current_user.id
+            or _token.get("shift") != shift_id
+            or _token.get("sid") != session.get("_id", "")
+        ):
+            abort(400)
+
+        try:
+            raw = request.form["payload"]
+            if len(raw) > 30000:
+                raise AttendanceReviewError("Payload too large.")
+
+            data = _review_json.loads(raw)
+            if not isinstance(data, dict) or set(data) != {
+                "expected_revision", "expected_source",
+                "started_at", "ended_at", "periods", "reason"
+            }:
+                raise AttendanceReviewError("Invalid correction payload.")
+
+            revision_id, revision_number = save_revision(
+                shift_id=shift_id,
+                actor_id=current_user.id,
+                expected_revision=data["expected_revision"],
+                expected_source=data["expected_source"],
+                started_at=data["started_at"],
+                ended_at=data["ended_at"],
+                periods=data["periods"],
+                reason=data["reason"],
+            )
+            return jsonify({
+                "ok": True,
+                "revision_id": revision_id,
+                "revision": revision_number,
+                "status": "pending",
+            })
+
+        except (
+            AttendanceReviewError, ValueError,
+            TypeError, KeyError
+        ) as exc:
+            db.session.rollback()
+            return jsonify({
+                "ok": False,
+                "error": str(exc),
+            }), 409
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "V7.3C save failed: shift=%s", shift_id
+            )
+            return jsonify({
+                "ok": False,
+                "error": "Unable to save correction."
+            }), 500
+
     if request.method == "POST":
         required = {
             "csrf_token", "action_type", "event_id",
@@ -1470,6 +1851,89 @@ def attendance_targeted_correction(shift_id):
     )
     timeline = reconstruct_preview(events)
 
+    # WCCR V7.3D: read-only source/version context.
+    from services.attendance_review_save_v73 import (
+        source_fingerprint, latest_revision_number
+    )
+    review_source = source_fingerprint(shift, events)
+    review_revision = latest_revision_number(shift_id)
+
+
+    # WCCR_ATTENDANCE_V73E_RESTORE
+    # The latest saved revision is the editor's visible draft.
+    # Source shift/events remain immutable.
+    import json as _v73_json
+    from types import SimpleNamespace as _V73NS
+    from services.attendance_review_v73 import (
+        AttendanceReviewRevision as _V73Revision,
+        AttendanceReviewPeriod as _V73Period,
+    )
+
+    display_shift = shift
+    display_timeline = timeline
+    saved_review = None
+
+    _latest_review = db.session.execute(
+        select(_V73Revision)
+        .where(_V73Revision.shift_id == shift_id)
+        .order_by(
+            _V73Revision.revision.desc(),
+            _V73Revision.id.desc()
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if _latest_review is not None:
+        _saved_periods = db.session.execute(
+            select(_V73Period)
+            .where(
+                _V73Period.revision_id == _latest_review.id
+            )
+            .order_by(
+                _V73Period.started_at_utc,
+                _V73Period.id
+            )
+        ).scalars().all()
+
+        _rows = []
+
+        for _period in _saved_periods:
+            _ids = _v73_json.loads(
+                _period.source_event_ids or "[]"
+            )
+
+            if not isinstance(_ids, list):
+                raise ValueError(
+                    "Invalid saved period source references."
+                )
+
+            _rows.append(_V73NS(
+                type=_period.kind,
+                start=local_input(_period.started_at_utc),
+                end=local_input(_period.ended_at_utc),
+                event_ids=_ids,
+                saved_start=local_input(
+                    _period.started_at_utc
+                ),
+                saved_end=local_input(
+                    _period.ended_at_utc
+                ),
+            ))
+
+        display_shift = _V73NS(
+            started_at=_latest_review.started_at_utc,
+            ended_at=_latest_review.ended_at_utc,
+        )
+
+        display_timeline = _V73NS(rows=_rows)
+
+        saved_review = {
+            "id": _latest_review.id,
+            "revision": _latest_review.revision,
+            "status": _latest_review.status,
+            "reason": _latest_review.reason,
+        }
+
     return render_template(
         "attendance_targeted_correction.html",
         shift=shift,
@@ -1478,5 +1942,10 @@ def attendance_targeted_correction(shift_id):
         proposals=proposals,
         display=display,
         local_input=local_input,
-        csrf_token=token
+        csrf_token=token,
+        review_source=review_source,
+        review_revision=review_revision,
+        display_shift=display_shift,
+        display_timeline=display_timeline,
+        saved_review=saved_review
     )

@@ -1,3 +1,6 @@
+{# WCCR_MY_TIME_FILTERS_V68 #}
+{# WCCR_MY_TIME_SIMPLE_V671 #}
+{# WCCR_MY_TIME_ACTUAL_WORK_V663 #}
 {# WCCR_CLOCK_V66C_V2 #}
 {% extends "base.html" %}
 {% block content %}
@@ -47,39 +50,46 @@
           </div>
         </div>
 
-        {# WCCR_MY_TIME_REPORTS_V1 #}
+
+        {# WCCR_MY_TIME_SIMPLE_V671 #}
+        <div class="border rounded-4 bg-light p-4 mb-3 text-center">
+          <div class="fw-semibold">Hours Worked Today</div>
+          <div class="display-5 fw-bold"
+               id="wccr-today-hours"
+               data-seconds="{{ today_worked }}">
+            00:00:00
+          </div>
+          <div class="small text-muted">
+            Includes eligible paid breaks ? Excludes unpaid lunch
+          </div>
+        </div>
+
         <div class="row g-2 mb-3">
           {% for key, label in [
-            ('total', 'Total Shift'),
-            ('worked', 'Worked Time'),
-            ('lunch', 'Lunch'),
-            ('break', 'Total Break'),
-            ('paid_break', 'Paid Break'),
-            ('unpaid_break', 'Unpaid Break')
+            ('total', 'Current Shift'),
+            ('break', 'Break'),
+            ('lunch', 'Lunch')
           ] %}
-          <div class="col-6 col-md-4">
-            <div class="border rounded-3 p-3 h-100">
+          <div class="col-4">
+            <div class="border rounded-3 p-2 h-100">
               <div class="text-muted small">{{ label }}</div>
-              <div class="fs-4 fw-semibold wccr-live-time"
+              <div class="fs-5 fw-semibold wccr-live-time"
                    data-key="{{ key }}"
-                   data-seconds="{{ current[key] }}"
-                   data-running="{{
-                     '1' if
-                       (key == 'total' or
-                        (key == 'worked' and not active_pause) or
-                        (key == 'lunch' and active_pause == 'LUNCH') or
-                        (key == 'break' and active_pause == 'BREAK'))
-                       else '0'
-                   }}">00:00:00</div>
+                   data-seconds="{{ current[key] }}">
+                00:00:00
+              </div>
             </div>
           </div>
           {% endfor %}
         </div>
 
+        <div class="d-none">
+          <span id="wccr-paid-break-used"
+                data-seconds="{{ current['paid_break'] }}"></span>
+        </div>
+
         <p class="text-muted small mb-4">
-          Lunch and Break beyond the first {{ paid_break_limit_minutes }} minutes per shift are
-          excluded from Worked Time. Preliminary estimate,
-          not an approved payroll record.
+          Preliminary hours, subject to administrative review.
         </p>
 
         <div class="d-flex flex-wrap gap-2">
@@ -119,6 +129,18 @@
         </div>
 
       {% else %}
+
+        <div class="border rounded-4 bg-light p-4 mb-3 text-center">
+          <div class="fw-semibold">Hours Worked Today</div>
+          <div class="display-5 fw-bold"
+               id="wccr-today-hours"
+               data-seconds="{{ today_worked }}">
+            00:00:00
+          </div>
+          <div class="small text-muted">
+            Includes eligible paid breaks ? Excludes unpaid lunch
+          </div>
+        </div>
         <span class="badge bg-secondary mb-3">
           Clocked Out
         </span>
@@ -146,34 +168,84 @@
           <h5 class="mb-1">Time Report</h5>
           <div class="text-muted small">{{ report_label }} ? Pacific Time</div>
         </div>
-        <div class="btn-group btn-group-sm">
-          {% for value, label in [
-            ('day', 'Day'),
-            ('week', 'Week'),
-            ('month', 'Month')
-          ] %}
-          <a href="{{ url_for('auth.my_time', period=value) }}"
-             class="btn {{ 'btn-primary' if period == value else 'btn-outline-primary' }}">
-            {{ label }}
-          </a>
-          {% endfor %}
-        </div>
+        
+        {# WCCR_MY_TIME_FILTERS_V68 #}
+        <form method="get"
+              action="{{ url_for('auth.my_time') }}"
+              class="d-flex flex-wrap align-items-end gap-2"
+              id="wccr-time-filter">
+
+          <div>
+            <label for="wccr-period"
+                   class="form-label small mb-1">
+              Period
+            </label>
+            <select class="form-select form-select-sm"
+                    name="period"
+                    id="wccr-period">
+              {% for value, label in [
+                ('today', 'Today'),
+                ('yesterday', 'Yesterday'),
+                ('week', 'This Week'),
+                ('two_weeks', 'Last 14 Days'),
+                ('month', 'This Month'),
+                ('year', 'This Year'),
+                ('custom', 'Custom Range')
+              ] %}
+              <option value="{{ value }}"
+                {{ 'selected' if period == value else '' }}>
+                {{ label }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div id="wccr-custom-dates"
+               class="d-flex flex-wrap gap-2"
+               style="{{ '' if period == 'custom' else 'display:none!important' }}">
+            <div>
+              <label for="wccr-from"
+                     class="form-label small mb-1">From</label>
+              <input type="date"
+                     class="form-control form-control-sm"
+                     id="wccr-from"
+                     name="from"
+                     value="{{ filter_from }}">
+            </div>
+            <div>
+              <label for="wccr-to"
+                     class="form-label small mb-1">To</label>
+              <input type="date"
+                     class="form-control form-control-sm"
+                     id="wccr-to"
+                     name="to"
+                     value="{{ filter_to }}">
+            </div>
+          </div>
+
+          <button type="submit"
+                  class="btn btn-primary btn-sm">
+            Apply
+          </button>
+        </form>
+
       </div>
+
 
       <div class="row g-2 mb-3">
         {% for key, label in [
-          ('total', 'Total Shift'),
-          ('worked', 'Worked Time'),
-          ('lunch', 'Lunch'),
-          ('break', 'Total Break'),
-            ('paid_break', 'Paid Break'),
-            ('unpaid_break', 'Unpaid Break')
+          ('worked', 'Hours Worked'),
+          ('break', 'Break'),
+          ('lunch', 'Lunch')
         ] %}
-        <div class="col-6 col-md-4">
+        <div class="col-4">
           <div class="border rounded-3 p-2">
             <div class="text-muted small">{{ label }}</div>
             <strong class="wccr-report-time"
-                    data-seconds="{{ report_total[key] }}">?</strong>
+                    data-seconds="{{ report_total[key] }}"
+                    data-report-key="{{ key }}">
+              00:00:00
+            </strong>
           </div>
         </div>
         {% endfor %}
@@ -185,7 +257,7 @@
             <tr>
               <th>Date</th>
               <th>Shift</th>
-              <th>Worked</th>
+              <th>Hours Worked</th>
               <th>Lunch</th>
               <th>Total Break</th>
               <th>Paid Break</th>
@@ -200,7 +272,9 @@
               {% for key in ['total', 'worked', 'lunch', 'break', 'paid_break', 'unpaid_break'] %}
               <td>
                 <span class="wccr-report-time"
-                      data-seconds="{{ row[key] }}">?</span>
+                      data-seconds="{{ row[key] }}"
+                       data-row-key="{{ key }}"
+                       data-today-row="{{ '1' if row.date == today_date_label else '0' }}">?</span>
               </td>
               {% endfor %}
               <td>
@@ -214,6 +288,13 @@
                 {% if row.idle %}
                   <span class="badge bg-warning text-dark">Idle event</span>
                 {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            {# WCCR_MY_TIME_REAL_DAYS_V1 #}
+            <tr>
+              <td colspan="8" class="text-center text-muted py-4">
+                No time records yet
               </td>
             </tr>
             {% endfor %}
@@ -246,7 +327,7 @@
               <tr>
                 <td>{{ la_time(item.started_at) }}</td>
                 <td>{{ la_time(item.ended_at) }}</td>
-                <td>{{ 'Pending review' if item.requires_review else item.status }}</td>
+                <td>{% if attendance_review_statuses.get(item.id) == 'approved' %}Approved{% elif item.requires_review %}Pending review{% else %}{{ item.status }}{% endif %}</td>
                 <td>
                 {% if item.ended_at and correction_can_edit %}
                   <a class="btn btn-sm btn-outline-secondary"
@@ -338,47 +419,109 @@
 (function () {
   "use strict";
 
-  // WCCR_PAID_BREAK_UI_V2B
-  const PAID_LIMIT = {{ paid_break_limit_seconds|tojson }};
-  const activePause = {{ (active_pause or '')|tojson }};
+  // WCCR_MY_TIME_SIMPLE_V671
+  const paidLimit = {{ paid_break_limit_seconds|tojson }};
+  const pause = {{ (active_pause or '')|tojson }};
   const shiftActive = {{ (true if shift else false)|tojson }};
+  const todayEl = document.getElementById("wccr-today-hours");
+  const paidUsedEl = document.getElementById("wccr-paid-break-used");
 
-  function formatSeconds(value) {
+  function fmt(value) {
     const s = Math.max(0, Math.floor(value));
     return [
       Math.floor(s / 3600),
       Math.floor(s / 60) % 60,
       s % 60
-    ].map(n => String(n).padStart(2, "0")).join(":");
+    ].map(x => String(x).padStart(2, "0")).join(":");
   }
 
   document.querySelectorAll(".wccr-report-time").forEach(el => {
-    el.textContent = formatSeconds(Number(el.dataset.seconds || 0));
+    el.textContent = fmt(Number(el.dataset.seconds || 0));
   });
 
   const counters = {};
   document.querySelectorAll(".wccr-live-time").forEach(el => {
-    const key = el.dataset.key;
-    counters[key] = {
+    counters[el.dataset.key] = {
       el: el,
-      seconds: Number(el.dataset.seconds || 0)
+      value: Number(el.dataset.seconds || 0)
     };
   });
 
+  let todayValue = Number(todayEl.dataset.seconds || 0);
+  let paidUsed = paidUsedEl
+    ? Number(paidUsedEl.dataset.seconds || 0)
+    : 0;
+
+  const reportIncludesToday =
+    {{ report_includes_today|tojson }};
+
+  const initialToday = todayValue;
+  const initialBreak = counters.break
+    ? counters.break.value : 0;
+  const initialLunch = counters.lunch
+    ? counters.lunch.value : 0;
+
   function render() {
-    Object.keys(counters).forEach(key => {
-      const c = counters[key];
-      c.el.textContent = formatSeconds(c.seconds);
+    todayEl.textContent = fmt(todayValue);
+
+    Object.values(counters).forEach(c => {
+      c.el.textContent = fmt(c.value);
     });
+
+    if (!reportIncludesToday) return;
+
+    const deltaWorked = todayValue - initialToday;
+    const deltaBreak = counters.break
+      ? counters.break.value - initialBreak : 0;
+    const deltaLunch = counters.lunch
+      ? counters.lunch.value - initialLunch : 0;
+
+    const deltas = {
+      worked: deltaWorked,
+      break: deltaBreak,
+      lunch: deltaLunch
+    };
+
+    document.querySelectorAll("[data-report-key]").forEach(el => {
+      const key = el.dataset.reportKey;
+      const base = Number(el.dataset.seconds || 0);
+      el.textContent = fmt(base + (deltas[key] || 0));
+    });
+
+    document.querySelectorAll(
+      '[data-today-row="1"]'
+    ).forEach(el => {
+      const key = el.dataset.rowKey;
+      if (!(key in deltas)) return;
+      const base = Number(el.dataset.seconds || 0);
+      el.textContent = fmt(base + deltas[key]);
+    });
+  }
+
+  const filter = document.getElementById("wccr-period");
+  const custom = document.getElementById("wccr-custom-dates");
+
+  function updateCustom() {
+    if (!filter || !custom) return;
+    custom.style.setProperty(
+      "display",
+      filter.value === "custom" ? "flex" : "none",
+      "important"
+    );
+  }
+
+  if (filter) {
+    filter.addEventListener("change", updateCustom);
+    updateCustom();
   }
 
   render();
 
-  if (!shiftActive || !counters.total) return;
+  if (!shiftActive) return;
 
   let lastTick = Date.now();
 
-  setInterval(function () {
+  setInterval(() => {
     const now = Date.now();
     const elapsed = Math.max(
       0,
@@ -386,40 +529,28 @@
     );
 
     if (elapsed < 1) return;
-
     lastTick += elapsed * 1000;
 
-    const values = {};
-    Object.keys(counters).forEach(key => {
-      values[key] = counters[key].seconds;
-    });
-
-    values.total += elapsed;
-
-    if (activePause === "LUNCH") {
-      values.lunch += elapsed;
-    } else if (activePause === "BREAK") {
-      const paidRemaining = Math.max(
-        0,
-        PAID_LIMIT - values.paid_break
-      );
-
-      const newlyPaid = Math.min(
-        elapsed,
-        paidRemaining
-      );
-
-      values.break += elapsed;
-      values.paid_break += newlyPaid;
-      values.unpaid_break += elapsed - newlyPaid;
-      values.worked += newlyPaid;
-    } else {
-      values.worked += elapsed;
+    if (counters.total) {
+      counters.total.value += elapsed;
     }
 
-    Object.keys(counters).forEach(key => {
-      counters[key].seconds = values[key];
-    });
+    if (pause === "LUNCH") {
+      if (counters.lunch) {
+        counters.lunch.value += elapsed;
+      }
+    } else if (pause === "BREAK") {
+      if (counters.break) {
+        counters.break.value += elapsed;
+      }
+
+      const remaining = Math.max(0, paidLimit - paidUsed);
+      const eligible = Math.min(elapsed, remaining);
+      paidUsed += eligible;
+      todayValue += eligible;
+    } else {
+      todayValue += elapsed;
+    }
 
     render();
   }, 1000);

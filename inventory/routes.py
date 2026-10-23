@@ -24556,6 +24556,7 @@ def attendance_payroll_dashboard(section="overview"):
     methods=["GET", "POST"]
 )
 @login_required
+# WCCR_OPEN_SHIFT_EDIT_GUARD_V55
 def attendance_shift_edit(shift_id):
     import secrets
     from flask import (
@@ -24575,6 +24576,18 @@ def attendance_shift_edit(shift_id):
         require_review_action(current_user, "edit")
     except PermissionError:
         abort(403)
+
+    # WCCR_UNIFIED_ATTENDANCE_EDITOR_V73H1
+    # One editor for all closed shifts.
+    # Preserve the existing permission guard and legacy POST.
+    if request.method == "GET":
+        return redirect(
+            url_for(
+                "auth.attendance_targeted_correction",
+                shift_id=shift_id,
+            ),
+            code=302,
+        )
 
     # WCCR_ATTENDANCE_V53_CORE
     from services.employee_time_tracking_models import (
@@ -24659,9 +24672,10 @@ def attendance_shift_edit(shift_id):
         events=events,
         edit_blocked_reason=edit_blocked_reason,
         csrf_token=session[token_key],
+        local_string=local_string,
         started_at=local_string(shift.started_at),
         ended_at=local_string(shift.ended_at),
         expected_start=aware(shift.started_at).isoformat(),
-        expected_end=aware(shift.ended_at).isoformat(),
+        expected_end=(aware(shift.ended_at).isoformat() if shift.ended_at is not None else ''),
     )
 

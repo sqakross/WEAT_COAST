@@ -1,560 +1,1876 @@
 
 {% extends "base.html" %}
 {% block content %}
-<div class="container py-4" style="max-width:1100px">
+{# WCCR_PROFESSIONAL_UI_V695 WCCR_V7_PERIOD_DRAFT_UI #}
+<style>
+.wtime-pro{
+  max-width:1120px;
+  margin:0 auto;
+  padding-bottom:40px;
+  color:#263347;
+}
+.wtime-pro .page-title{
+  font-size:1.65rem;
+  font-weight:700;
+  letter-spacing:-.035em;
+}
+.wtime-pro .subtle{
+  color:#718096;
+  font-size:.83rem;
+}
+.wtime-pro .panel{
+  background:#fff;
+  border:1px solid #e5eaf0;
+  border-radius:13px;
+  box-shadow:0 2px 10px rgba(20,35,60,.035);
+  padding:22px 24px;
+  margin-bottom:15px;
+}
+.wtime-pro .section-title{
+  font-size:1rem;
+  font-weight:700;
+  margin-bottom:14px;
+}
+.wtime-pro .clock-card{
+  background:#f7f9fc;
+  border:1px solid #e6ebf2;
+  border-radius:11px;
+  padding:14px 16px;
+}
+.wtime-pro .clock-card label{
+  color:#6b788b;
+  font-size:.8rem;
+  font-weight:600;
+  margin-bottom:8px;
+}
+.wtime-pro .clock-card input{
+  font-size:1.05rem;
+  font-weight:650;
+  background:#fff;
+  border-color:#dce4ee;
+  min-height:43px;
+}
+.wtime-pro .review-notice{
+  margin-top:15px;
+  padding:11px 14px;
+  background:#fff8e8;
+  border:1px solid #f2dfac;
+  border-radius:9px;
+  font-size:.85rem;
+  color:#745416;
+}
+.wtime-pro .period-row{
+  border-bottom:1px solid #edf0f4;
+  padding:11px 0;
+}
+.wtime-pro .period-row:last-child{
+  border-bottom:0;
+}
+.wtime-pro .period-name{
+  font-weight:650;
+  font-size:.9rem;
+}
+.wtime-pro .period-duration{
+  font-size:.8rem;
+  color:#718096;
+  white-space:nowrap;
+}
+.wtime-pro .period-display{
+  font-size:.88rem;
+  color:#455468;
+}
+.wtime-pro .period-editor{
+  background:#f8fafc;
+  border:1px solid #e8edf3;
+  border-radius:9px;
+  padding:14px;
+  margin-top:10px;
+}
+.wtime-pro .period-editor label{
+  font-size:.78rem;
+  color:#6b788b;
+  margin-bottom:5px;
+}
+.wtime-pro .metric{
+  background:#f6f8fb;
+  border-radius:10px;
+  padding:15px;
+  height:100%;
+}
+.wtime-pro .metric-value{
+  font-size:1.35rem;
+  font-weight:750;
+  letter-spacing:-.035em;
+}
+.wtime-pro .paid-panel{
+  border-top:1px solid #edf0f4;
+  margin-top:17px;
+  padding-top:17px;
+}
+.wtime-pro .action-bar{
+  display:flex;
+  justify-content:flex-end;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.wtime-pro .action-bar .btn{
+  min-width:125px;
+}
+@media(max-width:600px){
+  .wtime-pro .panel{padding:16px}
+  .wtime-pro .page-title{font-size:1.35rem}
+  .wtime-pro .action-bar .btn{flex:1;min-width:0}
+}
 
-  {# WCCR_ATTENDANCE_V56_UNIFIED_UI #}
+/* WCCR V7 period editor */
+.wtime-pro .period-row {
+  transition: background .15s ease;
+}
+.wtime-pro .period-row:hover {
+  background: #fafbfd;
+}
+.wtime-pro .delete-period-btn {
+  border-color: #f0d7d7;
+}
+.wtime-pro .period-editor[hidden] {
+  display: none !important;
+}
+.wtime-pro .period-display {
+  font-variant-numeric: tabular-nums;
+}
+.wtime-pro .period-duration {
+  min-width: 55px;
+  text-align: right;
+}
+@media(max-width:600px) {
+  .wtime-pro .period-row > .d-flex {
+    flex-wrap: wrap;
+    gap: 8px !important;
+  }
+}
 
-  <div class="d-flex justify-content-between align-items-center mb-3">
+
+/* WCCR_TIME_EDITOR_V71 */
+.wtime-pro .v71-time-input {
+  font-size:1.35rem;
+  font-weight:650;
+  letter-spacing:.015em;
+  font-variant-numeric:tabular-nums;
+  text-align:center;
+  min-height:48px;
+}
+.wtime-pro .v71-time-group {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 95px;
+  gap:8px;
+}
+.wtime-pro .v71-ampm {
+  min-height:48px;
+  font-weight:650;
+  text-align:center;
+}
+.wtime-pro .v71-date-toggle {
+  font-size:.8rem;
+  border:0;
+  padding:4px 0;
+  background:transparent;
+  color:#5274a1;
+  cursor:pointer;
+}
+.wtime-pro .v71-date-wrap[hidden],
+.wtime-pro .v71-editor[hidden] {
+  display:none!important;
+}
+.wtime-pro .v71-date-wrap {
+  padding-top:8px;
+}
+.wtime-pro .v71-date-wrap input {
+  max-width:240px;
+}
+.wtime-pro .v71-editor {
+  margin-top:12px;
+  padding:17px;
+  border:1px solid #dce5f0;
+  border-radius:12px;
+  background:#f8fafc;
+}
+.wtime-pro .v71-editor-title {
+  font-weight:700;
+  margin-bottom:14px;
+}
+.wtime-pro .v71-editor-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:15px;
+}
+.wtime-pro .v71-error {
+  color:#b42318;
+  font-size:.82rem;
+  min-height:18px;
+  margin-top:8px;
+}
+.wtime-pro .v71-clock-wrap {
+  margin-top:2px;
+}
+.wtime-pro .v71-date-caption {
+  color:#697586;
+  font-size:.78rem;
+  margin-top:6px;
+}
+@media(max-width:600px) {
+  .wtime-pro .v71-time-input {
+    font-size:1.1rem;
+  }
+  .wtime-pro .v71-time-group {
+    grid-template-columns:minmax(0,1fr) 76px;
+  }
+  .wtime-pro .v71-editor {
+    padding:12px;
+  }
+}
+
+</style>
+
+<div class="container-fluid py-4 wtime-pro">
+
+  <div class="d-flex justify-content-between align-items-start mb-4">
     <div>
-      <h3 class="mb-1">Edit Employee Time</h3>
-      <div class="text-muted">
-        Employee #{{ shift.user_id }} ? Shift #{{ shift.id }}
-        ? Pacific Time
+      {# WCCR_ATTENDANCE_BACK_TO_TIMESHEETS_V1 #}
+      <a class="btn btn-outline-secondary btn-sm mb-3"
+         href="{{ url_for('inventory.attendance_payroll_dashboard', section='timesheets') }}">
+        &#8592; Back to Timesheets
+      </a>
+      <h2 class="page-title mb-1">Employee Time Review</h2>
+      <div class="subtle">
+        Employee #{{ shift.user_id }} ?
+        Shift #{{ shift.id }} ? Pacific Time
       </div>
     </div>
-    <a class="btn btn-outline-secondary btn-sm"
-       href="{{ url_for('auth.attendance_interval_editor',
-                        shift_id=shift.id) }}">
-      Back
-    </a>
+    {% if saved_review and saved_review.status == 'approved' %}
+      <span class="badge bg-success">Approved</span>
+    {% elif shift.requires_review %}
+      <span class="badge bg-warning text-dark">Needs Review</span>
+    {% else %}
+      <span class="badge bg-secondary">Recorded</span>
+    {% endif %}
   </div>
 
-  <div class="alert alert-warning">
-    <strong>Correction proposal only.</strong>
-    Original events and recorded hours are unchanged.
-    Approval is not enabled yet.
-  </div>
-
-  <div class="card shadow-sm mb-3">
-    <div class="card-body">
-      <h5>Shift Overview</h5>
-      <div class="row">
-        <div class="col-md-6">
-          <strong>Start:</strong> {{ display(shift.started_at) }}
+  <section class="panel">
+    <div class="section-title">Work Hours</div>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="clock-card">
+          <label for="clock-in">Clock In</label>
+          <input class="form-control" type="datetime-local"
+                 id="clock-in"
+                 value="{{ local_input(display_shift.started_at) }}">
         </div>
-        <div class="col-md-6">
-          <strong>End:</strong> {{ display(shift.ended_at) }}
+      </div>
+      <div class="col-md-6">
+        <div class="clock-card">
+          <label for="clock-out">Clock Out</label>
+          <input class="form-control" type="datetime-local"
+                 id="clock-out"
+                 value="{{ local_input(display_shift.ended_at) }}">
         </div>
       </div>
     </div>
-  </div>
 
+    {% if shift.requires_review %}
+    <div class="review-notice">
+      Verify the actual Clock Out time before approving this shift.
+      Automatically closed shifts require review.
+    </div>
+    {% endif %}
+  </section>
 
+  <section class="panel">
+    <div class="d-flex justify-content-between align-items-center">
+      <div class="section-title mb-0">Breaks &amp; Lunch</div>
+      <span class="subtle" id="period-count"></span>
+    </div>
 
-  {# WCCR_V58_PERIOD_EDITOR #}
-  <div class="card shadow-sm mb-3">
-    <div class="card-body">
-      <h5>Work &amp; Time Periods</h5>
-      <p class="text-muted small">
-        Preliminary reconstruction. These periods have not
-        been verified for payroll.
-      </p>
-
-      {% if timeline.warnings %}
-      <div class="alert alert-warning">
-        <strong>Review Required</strong>
-        ? recovery or event inconsistencies detected.
-        <details class="mt-2">
-          <summary>Show warnings</summary>
-          <ul class="mt-2 mb-0">
-            {% for warning in timeline.warnings %}
-            <li>{{ warning }}</li>
-            {% endfor %}
-          </ul>
-        </details>
-      </div>
-      {% endif %}
-
-      <div class="table-responsive">
-        <table class="table table-sm table-striped align-middle">
-          <thead>
-            <tr>
-              <th>Period</th>
-              <th>Start (PT)</th>
-              <th>End (PT)</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in timeline.rows %}
-            <tr>
-              <td>
-                <strong>{{ row.type }}</strong>
-                {% if row.status != 'Candidate' %}
-                <div class="text-muted small">
-                  {{ row.detail }}
-                </div>
-                {% endif %}
-              </td>
-              <td>{{ row.start }}</td>
-              <td>{{ row.end }}</td>
-              <td>
-                {% if row.status == 'Candidate' %}
-                  <span class="badge bg-secondary">
-                    Candidate
-                  </span>
-                {% else %}
-                  <span class="badge bg-warning text-dark">
-                    Review Required
-                  </span>
-                {% endif %}
-              </td>
-              <td>
-                {% if row.end != '?'
-                      and row.start != '?'
-                      and row.type in
-                        ('Work candidate', 'Lunch', 'Break') %}
-                <button type="button"
-                  class="btn btn-outline-primary btn-sm edit-period"
-                  data-type="{{ row.type }}"
-                  data-start="{{ row.start }}"
-                  data-end="{{ row.end }}"
-                  data-status="{{ row.status }}"
-                  data-events="{{ row.event_ids }}">
-                  Edit Period
-                </button>
-                {% else %}
-                <span class="text-muted small">
-                  Review event
+    <div class="mt-3" id="period-list">
+      {% set ns = namespace(break_num=0) %}
+      {% for row in display_timeline.rows %}
+        {% if row.type in ('Lunch','Break')
+              and row.start != '?' and row.end != '?' %}
+          {% if row.type == 'Break' %}
+            {% set ns.break_num = ns.break_num + 1 %}
+          {% endif %}
+          <div class="period-row correction-period"
+               data-kind="{{ row.type }}"
+               data-event-ids="{{ row.event_ids }}"
+               data-saved-start="{{ row.saved_start|default('') }}"
+               data-saved-end="{{ row.saved_end|default('') }}">
+            <div class="d-flex align-items-center gap-3">
+              <div style="width:100px;flex-shrink:0">
+                <span class="period-name">
+                  {% if row.type == 'Break' %}
+                    Break {{ ns.break_num }}
+                  {% else %}
+                    Lunch
+                  {% endif %}
                 </span>
-                {% endif %}
-              </td>
-            </tr>
-            {% else %}
-            <tr>
-              <td colspan="5">No reconstructed periods.</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
+              </div>
+              <div class="period-display flex-grow-1"></div>
+              <span class="period-duration"></span>
+              <button class="btn btn-outline-secondary btn-sm edit-period-btn"
+                      type="button" aria-label="Edit period">
+                Edit
+              </button>
+              <button class="btn btn-outline-danger btn-sm delete-period-btn"
+                      type="button" aria-label="Delete period"
+                      title="Remove from draft">
+                Delete
+              </button>
+            </div>
 
-  <div class="card shadow-sm mb-3" id="period-editor"
-       hidden>
-    <div class="card-body">
-      <h5>Edit Selected Period</h5>
-
-      <div class="alert alert-info">
-        <strong>Preview only.</strong>
-        This form calculates a proposed change locally.
-        It does not submit or apply the correction.
-      </div>
-
-      <div class="mb-3">
-        <strong>Selected:</strong>
-        <span id="period-description"></span>
-      </div>
-
-      <div class="row">
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Original Start (PT)</label>
-          <input class="form-control" id="original-start"
-                 readonly>
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Original End (PT)</label>
-          <input class="form-control" id="original-end"
-                 readonly>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="col-md-6 mb-3">
-          <label class="form-label">New Start (PT)</label>
-          <input class="form-control" type="datetime-local"
-                 id="period-new-start">
-        </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">New End (PT)</label>
-          <input class="form-control" type="datetime-local"
-                 id="period-new-end">
-        </div>
-      </div>
-
-      <div class="mb-3">
-        <label class="form-label">Reason for Correction</label>
-        <textarea class="form-control"
-                  id="period-reason"
-                  minlength="4" maxlength="1000"
-                  rows="2"></textarea>
-      </div>
-
-      <div id="period-warning" class="alert alert-warning"
-           hidden>
-        This period has ambiguous recovery events.
-        It cannot be approved without further validation.
-      </div>
-
-      <div id="period-result" class="alert alert-secondary"
-           aria-live="polite">
-        Select corrected start and end times.
-      </div>
-
-      <button type="button" class="btn btn-primary"
-              id="preview-period">
-        Preview Changes
-      </button>
-      <button type="button" class="btn btn-outline-secondary"
-              id="cancel-period">
-        Cancel
-      </button>
-
-      <div class="text-muted small mt-3">
-        This preview is not a payroll calculation.
-        Saving period-level corrections requires
-        a validated server-side approval workflow.
-      </div>
-    </div>
-  </div>
-
-  <div class="card shadow-sm mb-3" id="correction-card">
-    <div class="card-body">
-      <h5>Event-Level Correction (Advanced)</h5>
-      <p class="text-muted small">
-        This existing form submits changes to one original
-        event, not to an entire reconstructed period.
-      </p>
-
-      <form method="post" id="correction-form">
-        <input type="hidden" name="csrf_token"
-               value="{{ csrf_token }}">
-
-        <div class="mb-3">
-          <label class="form-label">Correction Type</label>
-          <select name="action_type" id="action-type"
-                  class="form-select" required>
-            <option value="correct_event_time">
-              Change Start / End Time
-            </option>
-            <option value="exclude_entire_shift">
-              Exclude Entire Shift ? No Work Performed
-            </option>
-          </select>
-        </div>
-
-        <div id="event-fields">
-          <div class="mb-3">
-            <label class="form-label">Selected Event</label>
-            <select name="event_id" id="event-id"
-                    class="form-select" required>
-              <option value="">Choose a row above...</option>
-              {% for e in events %}
-              <option value="{{ e.id }}"
-                      data-time="{{ local_input(e.occurred_at) }}"
-                      data-type="{{ e.event_type }}"
-                      data-original="{{ display(e.occurred_at) }}">
-                {{ e.event_type }} ?
-                {{ display(e.occurred_at) }}
-              </option>
-              {% endfor %}
-            </select>
+            <div class="period-editor" hidden>
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label class="form-label">Start (Pacific Time)</label>
+                  <input class="form-control period-start"
+                         type="datetime-local">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">End (Pacific Time)</label>
+                  <input class="form-control period-end"
+                         type="datetime-local">
+                </div>
+              </div>
+            </div>
           </div>
-
-          <div class="alert alert-info" id="selected-details"
-               style="display:none"></div>
-
-          <div class="mb-3">
-            <label class="form-label">
-              Corrected Time (PT)
-            </label>
-            <input type="datetime-local" name="new_time"
-                   id="new-time" class="form-control" required>
-          </div>
-        </div>
-
-        <div class="mb-3">
-          <label class="form-label">
-            Reason for Correction
-          </label>
-          <textarea name="reason" class="form-control"
-                    minlength="4" maxlength="1000"
-                    rows="3" required></textarea>
-        </div>
-
-        <button type="submit" class="btn btn-primary">
-          Save Correction Proposal
-        </button>
-      </form>
+        {% endif %}
+      {% endfor %}
     </div>
-  </div>
+    <div class="d-flex align-items-center flex-wrap gap-2 mt-3">
+      <button type="button"
+              class="btn btn-outline-primary btn-sm"
+              id="add-period">
+        + Add Break / Lunch
+      </button>
+      <button type="button"
+              class="btn btn-outline-secondary btn-sm"
+              id="undo-period" disabled>
+        Undo
+      </button>
+      <span class="subtle" id="draft-message"
+            aria-live="polite"></span>
+    </div>
+  </section>
 
-  <div class="card shadow-sm mb-3">
-    <div class="card-body">
-      <h5>Correction History</h5>
+  <section class="panel">
+    <div class="section-title">Time Summary</div>
+    <div class="row g-3">
+      <div class="col-md-4">
+        <div class="metric">
+          <div class="subtle">Total Shift</div>
+          <div class="metric-value" id="shift-duration">?</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="metric">
+          <div class="subtle">Lunch</div>
+          <div class="metric-value" id="lunch-duration">?</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="metric">
+          <div class="subtle">Breaks</div>
+          <div class="metric-value" id="break-duration">?</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="paid-panel">
+      <div class="subtle">Paid Hours Worked</div>
+      <div class="fw-bold fs-5 mt-1">
+        {% if saved_review and saved_review.status == 'approved' %}
+          See approved hours in Timesheets
+        {% else %}
+          Pending Verification
+        {% endif %}
+      </div>
+      <div class="subtle mt-1" id="time-warning">
+        Final paid hours require server-side validation.
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <label class="section-title d-block" for="change-reason">
+      Reason for Correction
+    </label>
+    <textarea class="form-control mb-3"
+              id="change-reason" rows="2"
+              placeholder="Describe the correction...">{{ saved_review.reason if saved_review else '' }}</textarea>
+
+    {# WCCR V7.3E: latest persisted revision #}
+    {% if saved_review %}
+    <div class="subtle mb-2" id="v73-loaded-revision">
+      Saved revision #{{ saved_review.revision }}
+      ? {{ saved_review.status|replace('_', ' ')|title }}.
+      {% if saved_review.status == 'approved' %}
+        Approved correction is available to Timesheets.
+      {% else %}
+        Saved draft is awaiting approval.
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="action-bar">
+      <button class="btn btn-outline-secondary"
+              type="button" id="reset-times">Reset</button>
+      <button class="btn btn-primary" type="button"
+              id="v73-save-changes">
+        Save Changes
+      </button>
+      <button class="btn btn-success" type="button"
+              id="v73-approve-shift"
+              {% if saved_review and saved_review.status == 'approved' %}
+               disabled
+               {% endif %}>
+        {% if saved_review and saved_review.status == 'approved' %}
+          Approved
+        {% else %}
+          Approve Shift
+        {% endif %}
+      </button>
+    </div>
+    <div class="subtle mt-3">
+      Save Changes saves a draft.
+      Approve Shift saves current changes and approves Attendance.
+      Payroll approval is separate.
+      <span id="v73-save-status" role="status"
+            aria-live="polite"></span>
+    </div>
+  </section>
+
+  <details class="panel">
+    <summary style="cursor:pointer;font-weight:650">
+      Change History &amp; Technical Details
+    </summary>
+    <div class="mt-3">
+      <h6>Correction History</h6>
+      {% for p in proposals %}
+        <div class="border-bottom py-2">
+          {{ p.action_type }} ? {{ p.status }} ? {{ p.reason }}
+        </div>
+      {% else %}
+        <p class="subtle">No correction proposals.</p>
+      {% endfor %}
+      <h6 class="mt-3">Original Events</h6>
       <div class="table-responsive">
         <table class="table table-sm">
           <thead>
-            <tr>
-              <th>Action</th><th>Original</th>
-              <th>Proposed</th><th>Reason</th><th>Status</th>
-            </tr>
+            <tr><th>Event</th><th>Time</th></tr>
           </thead>
           <tbody>
-            {% for p in proposals %}
+          {% for e in events %}
             <tr>
-              <td>{{ p.action_type }}</td>
-              <td>{{ display(p.original_time_utc) }}</td>
-              <td>{{ display(p.proposed_time_utc) }}</td>
-              <td>{{ p.reason }}</td>
-              <td>{{ p.status }}</td>
+              <td>{{ e.event_type }}</td>
+              <td>{{ display(e.occurred_at) }}</td>
             </tr>
-            {% else %}
-            <tr>
-              <td colspan="5" class="text-muted">
-                No corrections submitted.
-              </td>
-            </tr>
-            {% endfor %}
+          {% endfor %}
           </tbody>
         </table>
       </div>
-    </div>
-  </div>
-
-  <details class="card shadow-sm">
-    <summary class="card-body" style="cursor:pointer">
-      Technical Event Details
-    </summary>
-    <div class="card-body pt-0">
-      <table class="table table-sm">
-        <thead>
-          <tr><th>ID</th><th>Event</th><th>Time</th><th>Note</th></tr>
-        </thead>
-        <tbody>
-          {% for e in events %}
-          <tr>
-            <td>{{ e.id }}</td>
-            <td>{{ e.event_type }}</td>
-            <td>{{ display(e.occurred_at) }}</td>
-            <td>{{ e.note or '' }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
     </div>
   </details>
 </div>
 
 <script>
 (function () {
-  const action = document.getElementById("action-type");
-  const fields = document.getElementById("event-fields");
-  const selected = document.getElementById("event-id");
-  const newTime = document.getElementById("new-time");
-  const details = document.getElementById("selected-details");
+  "use strict";
 
-  function sync() {
-    const editing = action.value === "correct_event_time";
-    fields.hidden = !editing;
-    selected.disabled = !editing;
-    newTime.disabled = !editing;
-    selected.required = editing;
-    newTime.required = editing;
+  const eventTimes = {
+    {% for e in events %}
+    "{{ e.id }}": {{ local_input(e.occurred_at)|tojson }},
+    {% endfor %}
+  };
 
-    if (!editing) {
-      selected.value = "";
-      newTime.value = "";
-      details.style.display = "none";
-    }
+  const list = document.getElementById("period-list");
+  const addButton = document.getElementById("add-period");
+  const undoButton = document.getElementById("undo-period");
+  const resetButton = document.getElementById("reset-times");
+  const message = document.getElementById("draft-message");
+  const count = document.getElementById("period-count");
+  const clockIn = document.getElementById("clock-in");
+  const clockOut = document.getElementById("clock-out");
+
+  if (!list || !addButton || !undoButton ||
+      !resetButton || !clockIn || !clockOut) {
+    return;
   }
 
-  function selectEvent(id) {
-    selected.value = id;
-    const opt = selected.selectedOptions[0];
+  const initialHTML = list.innerHTML;
+  const originalIn = clockIn.value;
+  const originalOut = clockOut.value;
 
-    if (!opt || !opt.value) {
-      newTime.value = "";
-      details.style.display = "none";
+  let undoStack = [];
+
+  function minutes(a, b) {
+    if (!a || !b) return NaN;
+    return (
+      new Date(b).getTime() - new Date(a).getTime()
+    ) / 60000;
+  }
+
+  function formatDuration(n) {
+    if (!Number.isFinite(n) || n < 0) {
+      return "Check time";
+    }
+
+    n = Math.round(n);
+
+    return Math.floor(n / 60) + "h " +
+      String(n % 60).padStart(2, "0") + "m";
+  }
+
+  function shortTime(value) {
+    if (!value) return "?";
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return "?";
+    }
+
+    return date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  function rows() {
+    return Array.from(
+      list.querySelectorAll(".correction-period")
+    );
+  }
+
+  function snapshot() {
+    return {
+      html: list.innerHTML,
+      clockIn: clockIn.value,
+      clockOut: clockOut.value
+    };
+  }
+
+  function saveUndo() {
+    undoStack.push(snapshot());
+
+    if (undoStack.length > 20) {
+      undoStack.shift();
+    }
+
+    undoButton.disabled = false;
+  }
+
+  function renameRows() {
+    let breakNumber = 0;
+
+    rows().forEach(function (row) {
+      const name = row.querySelector(".period-name");
+
+      if (row.dataset.kind === "Break") {
+        breakNumber++;
+        name.textContent = "Break " + breakNumber;
+      } else {
+        name.textContent = "Lunch";
+      }
+    });
+
+    count.textContent = rows().length + " periods";
+  }
+
+  function update() {
+    const shift = minutes(clockIn.value, clockOut.value);
+
+    let lunch = 0;
+    let breaks = 0;
+    let invalid = !Number.isFinite(shift) || shift <= 0;
+
+    const intervals = [];
+
+    rows().forEach(function (row) {
+      const start = row.querySelector(".period-start").value;
+      const end = row.querySelector(".period-end").value;
+      const duration = minutes(start, end);
+
+      row.querySelector(".period-duration").textContent =
+        formatDuration(duration);
+
+      row.querySelector(".period-display").textContent =
+        shortTime(start) + " ? " + shortTime(end);
+
+      if (!Number.isFinite(duration) ||
+          duration < 0 ||
+          minutes(clockIn.value, start) < 0 ||
+          minutes(end, clockOut.value) < 0) {
+        invalid = true;
+      } else {
+        intervals.push([
+          new Date(start).getTime(),
+          new Date(end).getTime()
+        ]);
+
+        if (row.dataset.kind === "Lunch") {
+          lunch += duration;
+        } else {
+          breaks += duration;
+        }
+      }
+    });
+
+    intervals.sort(function (a, b) {
+      return a[0] - b[0];
+    });
+
+    for (let i = 1; i < intervals.length; i++) {
+      if (intervals[i][0] < intervals[i - 1][1]) {
+        invalid = true;
+      }
+    }
+
+    document.getElementById("shift-duration").textContent =
+      formatDuration(shift);
+
+    document.getElementById("lunch-duration").textContent =
+      formatDuration(lunch);
+
+    document.getElementById("break-duration").textContent =
+      formatDuration(breaks);
+
+    const warning = document.getElementById("time-warning");
+
+    warning.textContent = invalid
+      ? "Check times: invalid or overlapping periods."
+      : "Draft preview. Paid hours require Attendance Engine validation.";
+
+    warning.style.color = invalid ? "#b45309" : "";
+
+    renameRows();
+  }
+
+  function prepareExisting() {
+    rows().forEach(function (row) {
+      // V7.3E: saved revision overrides source-event times.
+      if (row.dataset.savedStart && row.dataset.savedEnd) {
+        row.querySelector(".period-start").value =
+          row.dataset.savedStart;
+        row.querySelector(".period-end").value =
+          row.dataset.savedEnd;
+        return;
+      }
+
+      const ids = (row.dataset.eventIds || "")
+        .split(",")
+        .map(function (x) { return x.trim(); });
+
+      if (ids.length === 2 &&
+          eventTimes[ids[0]] &&
+          eventTimes[ids[1]]) {
+
+        row.querySelector(".period-start").value =
+          eventTimes[ids[0]];
+
+        row.querySelector(".period-end").value =
+          eventTimes[ids[1]];
+      }
+    });
+  }
+
+  function newPeriod(kind) {
+    const row = document.createElement("div");
+
+    row.className = "period-row correction-period";
+    row.dataset.kind = kind;
+    row.dataset.eventIds = "";
+
+    row.innerHTML = `
+      <div class="d-flex align-items-center gap-3">
+        <div style="width:100px;flex-shrink:0">
+          <span class="period-name"></span>
+        </div>
+        <div class="period-display flex-grow-1">New period</div>
+        <span class="period-duration">?</span>
+        <button type="button"
+          class="btn btn-outline-secondary btn-sm edit-period-btn">
+          Edit
+        </button>
+        <button type="button"
+          class="btn btn-outline-danger btn-sm delete-period-btn">
+          Delete
+        </button>
+      </div>
+      <div class="period-editor">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Start (Pacific Time)</label>
+            <input class="form-control period-start"
+                   type="datetime-local">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">End (Pacific Time)</label>
+            <input class="form-control period-end"
+                   type="datetime-local">
+          </div>
+        </div>
+      </div>`;
+
+    return row;
+  }
+
+  list.addEventListener("click", function (event) {
+    const button = event.target.closest("button");
+
+    if (!button) return;
+
+    const row = button.closest(".correction-period");
+
+    if (!row) return;
+
+    if (button.classList.contains("edit-period-btn")) {
+      const editor = row.querySelector(".period-editor");
+
+      editor.hidden = !editor.hidden;
+      button.textContent = editor.hidden ? "Edit" : "Close";
+    }
+
+    if (button.classList.contains("delete-period-btn")) {
+      saveUndo();
+      row.remove();
+
+      message.textContent =
+        "Period removed from draft. Use Undo to restore.";
+
+      update();
+    }
+  });
+
+  list.addEventListener("input", function (event) {
+    if (event.target.matches(
+      ".period-start, .period-end"
+    )) {
+      update();
+    }
+  });
+
+  addButton.addEventListener("click", function () {
+    const choice = window.prompt(
+      "Enter Break or Lunch", "Break"
+    );
+
+    if (choice === null) return;
+
+    const type = choice.trim().toLowerCase();
+
+    if (type !== "break" && type !== "lunch") {
+      message.textContent = "Choose Break or Lunch.";
       return;
     }
 
-    newTime.value = opt.dataset.time || "";
-    details.textContent =
-      "Editing: " + (opt.dataset.type || "") +
-      " | Original: " + (opt.dataset.original || "");
-    details.style.display = "block";
-  }
+    saveUndo();
 
-  action.addEventListener("change", sync);
-  selected.addEventListener("change", function () {
-    selectEvent(selected.value);
+    const row = newPeriod(
+      type === "break" ? "Break" : "Lunch"
+    );
+
+    list.appendChild(row);
+
+    message.textContent = "Period added to draft.";
+
+    update();
+
+    row.querySelector(".period-start").focus();
   });
 
-  document.querySelectorAll(".choose-event").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      action.value = "correct_event_time";
-      sync();
-      selectEvent(btn.dataset.id);
-      document.getElementById("correction-card")
-        .scrollIntoView({behavior:"smooth",block:"start"});
-    });
+  undoButton.addEventListener("click", function () {
+    const previous = undoStack.pop();
+
+    if (!previous) return;
+
+    list.innerHTML = previous.html;
+    clockIn.value = previous.clockIn;
+    clockOut.value = previous.clockOut;
+
+    undoButton.disabled = undoStack.length === 0;
+
+    message.textContent = "Last change undone.";
+
+    update();
   });
 
-  sync();
+  resetButton.addEventListener("click", function () {
+    list.innerHTML = initialHTML;
+
+    prepareExisting();
+
+    clockIn.value = originalIn;
+    clockOut.value = originalOut;
+
+    document.getElementById("change-reason").value = "";
+
+    undoStack = [];
+    undoButton.disabled = true;
+
+    message.textContent = "Draft reset.";
+
+    update();
+  });
+
+  clockIn.addEventListener("input", update);
+  clockOut.addEventListener("input", update);
+
+  prepareExisting();
+  update();
 })();
 </script>
 
 <script>
+/* WCCR_TIME_EDITOR_V71 */
 (function () {
   "use strict";
 
-  const editor = document.getElementById("period-editor");
-  const description = document.getElementById("period-description");
-  const originalStart = document.getElementById("original-start");
-  const originalEnd = document.getElementById("original-end");
-  const newStart = document.getElementById("period-new-start");
-  const newEnd = document.getElementById("period-new-end");
-  const reason = document.getElementById("period-reason");
-  const warning = document.getElementById("period-warning");
-  const result = document.getElementById("period-result");
+  const scope = document.querySelector(".wtime-pro");
+  if (!scope) return;
 
-  let selected = null;
+  const periodList = document.getElementById("period-list");
+  const clockIn = document.getElementById("clock-in");
+  const clockOut = document.getElementById("clock-out");
+  if (!periodList || !clockIn || !clockOut) return;
 
-  function parsePacificDisplay(value) {
-    const match = value.match(
-      /^([A-Za-z]{3}) (\d{1,2}), (\d{4}) (\d{1,2}):(\d{2}) (AM|PM)$/
-    );
-    if (!match) return null;
-
-    const months = {
-      Jan: 1, Feb: 2, Mar: 3, Apr: 4,
-      May: 5, Jun: 6, Jul: 7, Aug: 8,
-      Sep: 9, Oct: 10, Nov: 11, Dec: 12
+  function splitDateTime(value) {
+    const parts = String(value || "").split("T");
+    return {
+      date: parts[0] || "",
+      time: parts[1] || ""
     };
-
-    const month = months[match[1]];
-    if (!month) return null;
-
-    let hour = Number(match[4]) % 12;
-    if (match[6] === "PM") hour += 12;
-
-    const pad = x => String(x).padStart(2, "0");
-    return (
-      match[3] + "-" + pad(month) + "-" +
-      pad(match[2]) + "T" +
-      pad(hour) + ":" + match[5]
-    );
   }
 
-  function localMinutes(value) {
-    const match = value.match(
-      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/
+  function to12(value) {
+    const match = /^(\d{2}):(\d{2})$/.exec(value || "");
+    if (!match) return { time:"", period:"AM" };
+    const hour = Number(match[1]);
+    return {
+      time: String(hour % 12 || 12) + ":" + match[2],
+      period: hour >= 12 ? "PM" : "AM"
+    };
+  }
+
+  function to24(value, period) {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(
+      String(value || "").trim()
     );
     if (!match) return null;
-
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const hour = Number(match[4]);
-    const minute = Number(match[5]);
-
-    const utc = Date.UTC(
-      year, month - 1, day, hour, minute
-    );
-    const check = new Date(utc);
-
-    if (
-      check.getUTCFullYear() !== year ||
-      check.getUTCMonth() + 1 !== month ||
-      check.getUTCDate() !== day ||
-      check.getUTCHours() !== hour ||
-      check.getUTCMinutes() !== minute
-    ) return null;
-
-    return utc / 60000;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hour < 1 || hour > 12 || minute > 59) return null;
+    const converted = hour % 12 + (period === "PM" ? 12 : 0);
+    return String(converted).padStart(2,"0") +
+      ":" + String(minute).padStart(2,"0");
   }
 
-  function formatDuration(minutes) {
-    const abs = Math.abs(minutes);
-    const h = Math.floor(abs / 60);
-    const m = abs % 60;
-    return h + "h " + String(m).padStart(2, "0") + "m";
+  function emitChange(input, value) {
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles:true }));
+    input.dispatchEvent(new Event("change", { bubbles:true }));
   }
 
-  document.querySelectorAll(".edit-period").forEach(button => {
-    button.addEventListener("click", function () {
-      selected = {
-        type: button.dataset.type,
-        start: button.dataset.start,
-        end: button.dataset.end,
-        status: button.dataset.status,
-        events: button.dataset.events
-      };
+  function makeTimeField(label, originalValue, defaultDate) {
+    const initial = splitDateTime(originalValue);
+    const shown = to12(initial.time);
+    const outer = document.createElement("div");
+    outer.className = "v71-field";
+    outer.innerHTML = `
+      <label class="form-label small fw-semibold"></label>
+      <div class="v71-time-group">
+        <input class="form-control v71-time-input"
+          type="text" inputmode="numeric"
+          placeholder="12:30" maxlength="5"
+          autocomplete="off">
+        <select class="form-select v71-ampm"
+          aria-label="AM or PM">
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+      </div>
+      <div class="v71-date-caption"></div>
+      <button type="button" class="v71-date-toggle">
+        Change Date
+      </button>
+      <div class="v71-date-wrap" hidden>
+        <input type="date" class="form-control form-control-sm">
+      </div>`;
 
-      originalStart.value = selected.start;
-      originalEnd.value = selected.end;
-      newStart.value = parsePacificDisplay(selected.start) || "";
-      newEnd.value = parsePacificDisplay(selected.end) || "";
-      reason.value = "";
+    outer.querySelector("label").textContent = label;
 
-      description.textContent = selected.type;
-      warning.hidden = selected.status === "Candidate";
-      result.textContent =
-        "Edit the times and click Preview Changes.";
+    const time = outer.querySelector(".v71-time-input");
+    const period = outer.querySelector(".v71-ampm");
+    const date = outer.querySelector('input[type="date"]');
+    const caption = outer.querySelector(".v71-date-caption");
+    const dateWrap = outer.querySelector(".v71-date-wrap");
+    const toggle = outer.querySelector(".v71-date-toggle");
 
-      editor.hidden = false;
-      editor.scrollIntoView({
-        behavior: "smooth", block: "start"
+    time.value = shown.time;
+    period.value = shown.period;
+    date.value = initial.date || defaultDate || "";
+
+    function updateCaption() {
+      if (!date.value) {
+        caption.textContent = "Choose a date";
+        return;
+      }
+      const d = new Date(date.value + "T12:00:00");
+      caption.textContent = d.toLocaleDateString("en-US", {
+        month:"short", day:"numeric", year:"numeric"
       });
+    }
+
+    toggle.addEventListener("click", function () {
+      dateWrap.hidden = !dateWrap.hidden;
+      toggle.textContent = dateWrap.hidden
+        ? "Change Date" : "Hide Date";
     });
+
+    date.addEventListener("change", updateCaption);
+    updateCaption();
+
+    return {
+      element:outer,
+      getValue:function () {
+        const converted = to24(time.value, period.value);
+        if (!converted || !date.value) return null;
+        return date.value + "T" + converted;
+      },
+      reset:function (value) {
+        const parts = splitDateTime(value);
+        const t = to12(parts.time);
+        time.value = t.time;
+        period.value = t.period;
+        date.value = parts.date || defaultDate || "";
+        updateCaption();
+      },
+      focus:function () {
+        time.focus();
+        time.select();
+      }
+    };
+  }
+
+  function setupClock(input, label) {
+    const container = input.parentElement;
+    const initial = input.value;
+    const field = makeTimeField(
+      label, initial, splitDateTime(initial).date
+    );
+    const wrap = document.createElement("div");
+    wrap.className = "v71-clock-wrap";
+    wrap.appendChild(field.element);
+
+    input.style.display = "none";
+    container.appendChild(wrap);
+
+    const error = document.createElement("div");
+    error.className = "v71-error";
+    wrap.appendChild(error);
+
+    function applyClock() {
+      const value = field.getValue();
+      if (!value) {
+        error.textContent = "Enter a valid time, e.g. 10:34";
+        return;
+      }
+      error.textContent = "";
+      emitChange(input, value);
+    }
+
+    wrap.addEventListener("change", applyClock);
+
+    wrap.addEventListener("focusout", function (event) {
+      if (!wrap.contains(event.relatedTarget)) applyClock();
+    });
+
+    return {
+      reset:function () {
+        field.reset(input.value);
+        error.textContent = "";
+      }
+    };
+  }
+
+  const clockEditorIn = setupClock(clockIn, "Clock In");
+  const clockEditorOut = setupClock(clockOut, "Clock Out");
+
+  let activeRow = null;
+
+  function closeEditor(row) {
+    if (!row) return;
+    const panel = row.querySelector(".v71-editor");
+    if (panel) panel.remove();
+    const button = row.querySelector(".edit-period-btn");
+    if (button) button.textContent = "Edit";
+    if (activeRow === row) activeRow = null;
+  }
+
+  function openEditor(row) {
+    if (activeRow) closeEditor(activeRow);
+
+    const startInput = row.querySelector(".period-start");
+    const endInput = row.querySelector(".period-end");
+    if (!startInput || !endInput) return;
+
+    const originalStart = startInput.value;
+    const originalEnd = endInput.value;
+    const fallbackDate = splitDateTime(clockIn.value).date;
+
+    const startField = makeTimeField(
+      "Start Time", originalStart, fallbackDate
+    );
+    const endField = makeTimeField(
+      "End Time", originalEnd, fallbackDate
+    );
+
+    const panel = document.createElement("div");
+    panel.className = "v71-editor";
+    panel.innerHTML = `
+      <div class="v71-editor-title">Edit Period</div>
+      <div class="row g-3 v71-fields"></div>
+      <div class="v71-error" role="alert"></div>
+      <div class="v71-editor-actions">
+        <button type="button"
+          class="btn btn-outline-secondary btn-sm v71-cancel">
+          Cancel
+        </button>
+        <button type="button"
+          class="btn btn-primary btn-sm v71-apply">
+          Apply
+        </button>
+      </div>`;
+
+    const fields = panel.querySelector(".v71-fields");
+
+    [startField, endField].forEach(function (field) {
+      const col = document.createElement("div");
+      col.className = "col-md-6";
+      col.appendChild(field.element);
+      fields.appendChild(col);
+    });
+
+    row.appendChild(panel);
+    activeRow = row;
+
+    const button = row.querySelector(".edit-period-btn");
+    if (button) button.textContent = "Close";
+
+    panel.querySelector(".v71-cancel").addEventListener(
+      "click", function () { closeEditor(row); }
+    );
+
+    panel.querySelector(".v71-apply").addEventListener(
+      "click", function () {
+        const start = startField.getValue();
+        const end = endField.getValue();
+        const error = panel.querySelector(".v71-error");
+
+        if (!start || !end) {
+          error.textContent =
+            "Enter valid Start and End times (HH:MM AM/PM).";
+          return;
+        }
+
+        const startMs = new Date(start).getTime();
+        const endMs = new Date(end).getTime();
+
+        if (!Number.isFinite(startMs) ||
+            !Number.isFinite(endMs) ||
+            endMs < startMs) {
+          error.textContent =
+            "End Time cannot be earlier than Start Time.";
+          return;
+        }
+
+        const shiftStart = new Date(clockIn.value).getTime();
+        const shiftEnd = new Date(clockOut.value).getTime();
+
+        if (startMs < shiftStart || endMs > shiftEnd) {
+          error.textContent =
+            "This period must be inside the work shift.";
+          return;
+        }
+
+        const otherRows = Array.from(
+          periodList.querySelectorAll(".correction-period")
+        ).filter(function (other) {
+          return other !== row;
+        });
+
+        const overlaps = otherRows.some(function (other) {
+          const a = new Date(
+            other.querySelector(".period-start").value
+          ).getTime();
+          const b = new Date(
+            other.querySelector(".period-end").value
+          ).getTime();
+
+          return Number.isFinite(a) &&
+            Number.isFinite(b) &&
+            startMs < b && endMs > a;
+        });
+
+        if (overlaps) {
+          error.textContent =
+            "This period overlaps another Break or Lunch.";
+          return;
+        }
+
+        emitChange(startInput, start);
+        emitChange(endInput, end);
+        closeEditor(row);
+      }
+    );
+
+    startField.focus();
+  }
+
+  // Capture clicks before the V7 handler, so its old
+  // datetime-local editor never opens.
+  periodList.addEventListener("click", function (event) {
+    const button = event.target.closest(".edit-period-btn");
+    if (!button) return;
+
+    const row = button.closest(".correction-period");
+    if (!row) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (activeRow === row) {
+      closeEditor(row);
+    } else {
+      openEditor(row);
+    }
+  }, true);
+
+  // V7 Add/Delete/Undo/Reset rebuilds row HTML.
+  // Remove stale references and keep clock controls synchronized.
+  const observer = new MutationObserver(function () {
+    if (activeRow && !periodList.contains(activeRow)) {
+      activeRow = null;
+    }
   });
 
-  document.getElementById("preview-period")
-    .addEventListener("click", function () {
-      if (!selected) return;
+  observer.observe(periodList, {
+    childList:true,
+    subtree:true
+  });
 
-      const oldS = localMinutes(
-        parsePacificDisplay(selected.start) || ""
-      );
-      const oldE = localMinutes(
-        parsePacificDisplay(selected.end) || ""
-      );
-      const nextS = localMinutes(newStart.value);
-      const nextE = localMinutes(newEnd.value);
+  const resetButton = document.getElementById("reset-times");
+  if (resetButton) {
+    resetButton.addEventListener("click", function () {
+      if (activeRow) closeEditor(activeRow);
+      clockEditorIn.reset();
+      clockEditorOut.reset();
+    });
+  }
 
-      if (
-        oldS === null || oldE === null ||
-        nextS === null || nextE === null ||
-        nextE <= nextS
-      ) {
-        result.textContent =
-          "Invalid interval. End must be after Start.";
-        return;
-      }
+  const undoButton = document.getElementById("undo-period");
+  if (undoButton) {
+    undoButton.addEventListener("click", function () {
+      activeRow = null;
+      clockEditorIn.reset();
+      clockEditorOut.reset();
+    });
+  }
+})();
+</script>
 
-      if (reason.value.trim().length < 4) {
-        result.textContent =
-          "Please enter a reason (at least 4 characters).";
-        return;
-      }
 
-      const before = oldE - oldS;
-      const after = nextE - nextS;
-      const difference = after - before;
+<style>
+/* WCCR_TIME_INPUT_V72A */
+.wtime-pro .v72-ampm-buttons {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:4px;
+  padding:4px;
+  background:#eef2f7;
+  border:1px solid #dce4ee;
+  border-radius:9px;
+  min-height:48px;
+}
+.wtime-pro .v72-ampm-button {
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:#526176;
+  font-weight:700;
+  cursor:pointer;
+  padding:7px 10px;
+}
+.wtime-pro .v72-ampm-button.active {
+  background:#fff;
+  color:#155eae;
+  box-shadow:0 1px 5px rgba(0,0,0,.12);
+}
+.wtime-pro .v71-time-group {
+  grid-template-columns:minmax(0,1fr) 132px;
+}
+.wtime-pro .v71-time-input:focus {
+  border-color:#5b91d0;
+  box-shadow:0 0 0 3px rgba(44,117,204,.12);
+}
+@media(max-width:600px) {
+  .wtime-pro .v71-time-group {
+    grid-template-columns:minmax(0,1fr) 116px;
+  }
+  .wtime-pro .v72-ampm-button {
+    padding:6px;
+  }
+}
+</style>
 
-      result.textContent =
-        "Before: " + formatDuration(before) +
-        " | After: " + formatDuration(after) +
-        " | Difference: " +
-        (difference >= 0 ? "+" : "-") +
-        formatDuration(difference) +
-        ". Preliminary wall-clock comparison only; " +
-        "not approved payable hours.";
+<script>
+/* WCCR_TIME_INPUT_V72A */
+(function () {
+  "use strict";
 
-      if (selected.status !== "Candidate") {
-        warning.hidden = false;
+  const root = document.querySelector(".wtime-pro");
+  if (!root) return;
+
+  function normalize(value) {
+    const raw = String(value || "").trim();
+
+    if (/^\d{1,2}:\d{2}$/.test(raw)) {
+      return raw;
+    }
+
+    const digits = raw.replace(/\D/g, "");
+
+    if (!digits || digits.length > 4) {
+      return raw;
+    }
+
+    let hours;
+    let minutes;
+
+    if (digits.length <= 2) {
+      hours = Number(digits);
+      minutes = 0;
+    } else {
+      hours = Number(digits.slice(0, -2));
+      minutes = Number(digits.slice(-2));
+    }
+
+    if (hours < 1 || hours > 12 || minutes > 59) {
+      return raw;
+    }
+
+    return String(hours) + ":" +
+      String(minutes).padStart(2, "0");
+  }
+
+  function enhance(field) {
+    if (field.dataset.v72Enhanced === "1") return;
+
+    const input = field.querySelector(".v71-time-input");
+    const select = field.querySelector(".v71-ampm");
+
+    if (!input || !select) return;
+
+    field.dataset.v72Enhanced = "1";
+
+    input.setAttribute("inputmode", "numeric");
+    input.setAttribute("placeholder", "1034 or 10:34");
+    input.setAttribute("maxlength", "5");
+
+    input.addEventListener("blur", function () {
+      const next = normalize(input.value);
+
+      if (next !== input.value) {
+        input.value = next;
+        input.dispatchEvent(
+          new Event("change", { bubbles:true })
+        );
       }
     });
 
-  document.getElementById("cancel-period")
-    .addEventListener("click", function () {
-      editor.hidden = true;
-      selected = null;
+    input.addEventListener("input", function () {
+      const raw = input.value.trim();
+
+      if (/^\d{4}$/.test(raw)) {
+        const next = normalize(raw);
+
+        if (next !== raw) {
+          input.value = next;
+          input.dispatchEvent(
+            new Event("change", { bubbles:true })
+          );
+        }
+      }
     });
+
+    const buttons = document.createElement("div");
+    buttons.className = "v72-ampm-buttons";
+    buttons.setAttribute("role", "group");
+    buttons.setAttribute("aria-label", "AM or PM");
+
+    function refresh() {
+      buttons.querySelectorAll("button").forEach(function (button) {
+        const selected = button.dataset.period === select.value;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-pressed", String(selected));
+      });
+    }
+
+    ["AM", "PM"].forEach(function (value) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "v72-ampm-button";
+      button.dataset.period = value;
+      button.textContent = value;
+
+      button.addEventListener("click", function () {
+        select.value = value;
+        refresh();
+
+        select.dispatchEvent(
+          new Event("change", { bubbles:true })
+        );
+
+        input.dispatchEvent(
+          new Event("change", { bubbles:true })
+        );
+      });
+
+      buttons.appendChild(button);
+    });
+
+    select.style.display = "none";
+    select.parentElement.appendChild(buttons);
+
+    select.addEventListener("change", refresh);
+
+    refresh();
+  }
+
+  function scan() {
+    root.querySelectorAll(".v71-field").forEach(enhance);
+  }
+
+  scan();
+
+  const list = document.getElementById("period-list");
+
+  if (list) {
+    const observer = new MutationObserver(scan);
+    observer.observe(list, {
+      childList:true,
+      subtree:true
+    });
+  }
+})();
+</script>
+
+
+<style>
+/* WCCR_DATE_ALWAYS_VISIBLE_V72B */
+.wtime-pro .v72-date-always {
+    display:flex !important;
+    flex-direction:column;
+    gap:5px;
+    margin-top:9px;
+}
+.wtime-pro .v72-date-always input[type="date"] {
+    display:block !important;
+    width:100%;
+    max-width:none;
+    min-height:39px;
+    padding:7px 10px;
+    border:1px solid #d7e0ec;
+    border-radius:7px;
+    background:#fff;
+    color:#26364c;
+    font:inherit;
+    box-sizing:border-box;
+}
+.wtime-pro .v72-date-always .v72-date-label {
+    font-size:11px;
+    font-weight:700;
+    color:#526176;
+}
+.wtime-pro .v72-date-always input[type="date"]:focus {
+    outline:none;
+    border-color:#5b91d0;
+    box-shadow:0 0 0 3px rgba(44,117,204,.12);
+}
+.wtime-pro .v72-date-always .v71-date-toggle,
+.wtime-pro .v72-date-always button {
+    display:none !important;
+}
+</style>
+
+<script>
+/* WCCR_DATE_ALWAYS_VISIBLE_V72B */
+(function () {
+    "use strict";
+
+    const root = document.querySelector(".wtime-pro");
+    if (!root) return;
+
+    function enhance() {
+        root.querySelectorAll(".v71-field").forEach(function (field) {
+            const dateInput = field.querySelector('input[type="date"]');
+            if (!dateInput) return;
+
+            const wrapper = dateInput.parentElement;
+            if (!wrapper) return;
+
+            if (wrapper.dataset.v72DateReady === "1") return;
+            wrapper.dataset.v72DateReady = "1";
+
+            wrapper.classList.add("v72-date-always");
+            wrapper.hidden = false;
+            wrapper.style.display = "flex";
+
+            dateInput.hidden = false;
+            dateInput.style.display = "block";
+
+            const label = document.createElement("label");
+            label.className = "v72-date-label";
+            label.textContent = "Date";
+            label.htmlFor = dateInput.id || "";
+
+            wrapper.insertBefore(label, dateInput);
+
+            const buttons = wrapper.querySelectorAll("button");
+            buttons.forEach(function (button) {
+                button.style.display = "none";
+            });
+
+            const parent = wrapper.parentElement;
+            if (parent) {
+                parent.querySelectorAll("button").forEach(function (button) {
+                    if (/change date|hide date/i.test(
+                        button.textContent || ""
+                    )) {
+                        button.style.display = "none";
+                    }
+                });
+            }
+        });
+    }
+
+    enhance();
+
+    const observer = new MutationObserver(function () {
+        enhance();
+    });
+
+    observer.observe(root, {
+        childList:true,
+        subtree:true
+    });
+})();
+</script>
+
+
+<script>
+/* WCCR V7.3H.4: shared editor state */
+window.wccrAttendanceReviewState = {
+  revision: {{ review_revision|tojson }},
+  savedRevisionId: {% if saved_review and saved_review.status == 'pending' %}{{ saved_review.id|tojson }}{% else %}null{% endif %},
+  savedPayload: null,
+  busy: false
+};
+/* WCCR_ATTENDANCE_V73D_SAVE_UI */
+(function () {
+  "use strict";
+
+  const button = document.getElementById("v73-save-changes");
+  const status = document.getElementById("v73-save-status");
+  const list = document.getElementById("period-list");
+  const clockIn = document.getElementById("clock-in");
+  const clockOut = document.getElementById("clock-out");
+  const reason = document.getElementById("change-reason");
+
+  if (!button || !status || !list ||
+      !clockIn || !clockOut || !reason) {
+    console.error("V7.3D: Required editor elements missing.");
+    return;
+  }
+
+  const csrf = {{ csrf_token|tojson }};
+  const expectedSource = {{ review_source|tojson }};
+  const reviewState = window.wccrAttendanceReviewState;
+
+  let saving = false;
+  let saved = false;
+
+  function show(message, isError) {
+    status.textContent = " " + message;
+    status.style.color = isError ? "#b42318" : "#176b45";
+  }
+
+  function localValue(input, name) {
+    if (!input || !input.value) {
+      throw new Error(name + " is required.");
+    }
+
+    const value = input.value.slice(0, 16);
+
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
+      throw new Error("Invalid " + name + " date/time.");
+    }
+
+    return value;
+  }
+
+  function readPeriods() {
+    const result = [];
+
+    for (const row of list.querySelectorAll(
+      ".correction-period"
+    )) {
+      const start = row.querySelector(".period-start");
+      const end = row.querySelector(".period-end");
+      const kind = row.dataset.kind;
+
+      if (kind !== "Break" && kind !== "Lunch") {
+        throw new Error("Invalid Break/Lunch type.");
+      }
+
+      const rawIds = (row.dataset.eventIds || "")
+        .split(",")
+        .map(value => value.trim())
+        .filter(Boolean);
+
+      const ids = rawIds.map(Number);
+
+      if (ids.length > 2 || ids.some(
+        value => !Number.isSafeInteger(value) || value <= 0
+      )) {
+        throw new Error("Invalid source event IDs.");
+      }
+
+      result.push({
+        kind: kind,
+        start: localValue(start, kind + " start"),
+        end: localValue(end, kind + " end"),
+        source_event_ids: ids
+      });
+    }
+
+    return result;
+  }
+
+  button.addEventListener("click", async function () {
+    if (saving || reviewState.busy) return;
+
+    const active = document.activeElement;
+
+    if (active && typeof active.blur === "function") {
+      active.blur();
+    }
+
+    let payload;
+
+    try {
+      const text = reason.value.trim();
+
+      if (text.length < 4 || text.length > 1000) {
+        throw new Error(
+          "Reason must contain 4?1000 characters."
+        );
+      }
+
+      payload = {
+        expected_revision: reviewState.revision,
+        expected_source: expectedSource,
+        started_at: localValue(clockIn, "Clock In"),
+        ended_at: localValue(clockOut, "Clock Out"),
+        periods: readPeriods(),
+        reason: text
+      };
+
+    } catch (error) {
+      show(error.message, true);
+      return;
+    }
+
+    saving = true;
+    reviewState.busy = true;
+    button.disabled = true;
+    button.textContent = "Saving...";
+    show("Saving correction...", false);
+
+    try {
+      const form = new FormData();
+
+      form.append("csrf_token", csrf);
+      form.append("action_type", "save_review_revision");
+      form.append("payload", JSON.stringify(payload));
+
+      const response = await fetch(
+        window.location.pathname,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          body: form,
+          headers: { "Accept": "application/json" }
+        }
+      );
+
+      const contentType =
+        response.headers.get("content-type") || "";
+
+      if (!contentType.includes("application/json")) {
+        throw new Error(
+          "Server returned an unexpected response (" +
+          response.status + ")."
+        );
+      }
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.error ||
+          "Server rejected the correction (" +
+          response.status + ")."
+        );
+      }
+
+      saved = true;
+      reviewState.revision = data.revision;
+      reviewState.savedRevisionId = data.revision_id;
+      reviewState.savedPayload = JSON.stringify({
+        ...payload,
+        expected_revision: data.revision
+      });
+      button.textContent = "Saved";
+
+      show(
+        "Revision #" + data.revision +
+        " saved successfully. Pending review.",
+        false
+      );
+
+      // Stay in the editor. Approve uses this saved revision.
+      // A subsequent edit may be saved as another revision.
+
+    } catch (error) {
+      show(error.message || "Save failed.", true);
+      button.disabled = false;
+      button.textContent = "Save Changes";
+
+    } finally {
+      saving = false;
+      reviewState.busy = false;
+    }
+  });
+
+  function markEdited() {
+    if (!saved || saving) return;
+    saved = false;
+    button.disabled = false;
+    button.textContent = "Save Changes";
+  }
+
+  document.querySelector(".wtime-pro").addEventListener(
+    "input", markEdited
+  );
+  document.querySelector(".wtime-pro").addEventListener(
+    "change", markEdited
+  );
+  document.getElementById("add-period").addEventListener(
+    "click", markEdited
+  );
+  document.getElementById("undo-period").addEventListener(
+    "click", markEdited
+  );
+  document.getElementById("reset-times").addEventListener(
+    "click", markEdited
+  );
+  document.getElementById("period-list").addEventListener(
+    "click", function (event) {
+      if (event.target.closest(".delete-period-btn") ||
+          event.target.closest(".v71-apply")) {
+        markEdited();
+      }
+    }
+  );
+})();
+</script>
+
+{# WCCR_ATTENDANCE_V73E_RESTORE #}
+
+<script>
+/* WCCR V7.3H.3C - approve current editor values */
+(function () {
+  "use strict";
+
+  const button = document.getElementById("v73-approve-shift");
+  const status = document.getElementById("v73-save-status");
+  const saved = {{ saved_review|tojson }};
+  const csrf = {{ csrf_token|tojson }};
+  const source = {{ review_source|tojson }};
+  const reviewState = window.wccrAttendanceReviewState;
+
+  if (!button || (saved && saved.status === "approved")) return;
+
+  function requiredTime(element, label) {
+    if (!element || !element.value) {
+      throw new Error(label + " is required.");
+    }
+    const value = element.value.slice(0, 16);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
+      throw new Error("Invalid " + label + ".");
+    }
+    return value;
+  }
+
+  function currentPayload() {
+    const reasonElement = document.getElementById("change-reason");
+    const reason = reasonElement ? reasonElement.value.trim() : "";
+
+    if (reason.length < 4 || reason.length > 1000) {
+      throw new Error("Reason must contain 4-1000 characters.");
+    }
+
+    const periods = [];
+    const list = document.getElementById("period-list");
+    if (!list) throw new Error("Break/Lunch editor is missing.");
+
+    for (const row of list.querySelectorAll(".correction-period")) {
+      const kind = row.dataset.kind;
+      if (kind !== "Break" && kind !== "Lunch") {
+        throw new Error("Invalid Break/Lunch type.");
+      }
+
+      const rawIds = (row.dataset.eventIds || "")
+        .split(",").map(v => v.trim()).filter(Boolean);
+      const ids = rawIds.map(Number);
+
+      if (ids.length > 2 || ids.some(
+        n => !Number.isSafeInteger(n) || n <= 0
+      )) {
+        throw new Error("Invalid event references.");
+      }
+
+      periods.push({
+        kind: kind,
+        start: requiredTime(
+          row.querySelector(".period-start"), kind + " start"
+        ),
+        end: requiredTime(
+          row.querySelector(".period-end"), kind + " end"
+        ),
+        source_event_ids: ids
+      });
+    }
+
+    return {
+      expected_revision: reviewState.revision,
+      expected_source: source,
+      started_at: requiredTime(
+        document.getElementById("clock-in"), "Clock In"
+      ),
+      ended_at: requiredTime(
+        document.getElementById("clock-out"), "Clock Out"
+      ),
+      periods: periods,
+      reason: reason
+    };
+  }
+
+  if (saved && saved.status === "pending" &&
+      reviewState.savedRevisionId) {
+    try {
+      reviewState.savedPayload =
+        JSON.stringify(currentPayload());
+    } catch (_) {
+      reviewState.savedPayload = null;
+    }
+  }
+
+  button.addEventListener("click", async function () {
+    if (button.disabled || reviewState.busy) return;
+
+    const active = document.activeElement;
+    if (active && typeof active.blur === "function") active.blur();
+
+    let payload;
+    try {
+      payload = currentPayload();
+    } catch (error) {
+      if (status) {
+        status.textContent = " " + error.message;
+        status.style.color = "#b42318";
+      }
+      return;
+    }
+
+    if (!window.confirm(
+      "Save current changes and approve this shift?\n\n" +
+      "This is Attendance approval, not Payroll approval."
+    )) return;
+
+    button.disabled = true;
+    button.textContent = "Approving...";
+
+    try {
+      reviewState.busy = true;
+      const form = new FormData();
+      form.append("csrf_token", csrf);
+
+      const snapshot = JSON.stringify(payload);
+      const approveExisting = (
+        Number.isSafeInteger(reviewState.savedRevisionId) &&
+        reviewState.savedRevisionId > 0 &&
+        reviewState.savedPayload === snapshot
+      );
+
+      if (approveExisting) {
+        form.append("action_type", "approve_review_revision");
+        form.append(
+          "revision_id", String(reviewState.savedRevisionId)
+        );
+        form.append("expected_source", source);
+      } else {
+        form.append("action_type", "save_and_approve_review");
+        form.append("payload", snapshot);
+      }
+
+      const response = await fetch(window.location.pathname, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {"Accept": "application/json"},
+        body: form
+      });
+
+      const type = response.headers.get("content-type") || "";
+      if (!type.includes("application/json")) {
+        throw new Error("Server returned HTTP " + response.status);
+      }
+
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Approval failed.");
+      }
+
+      window.location.reload();
+    } catch (error) {
+      reviewState.busy = false;
+      button.disabled = false;
+      button.textContent = "Approve Shift";
+      if (status) {
+        status.textContent = " " + error.message;
+        status.style.color = "#b42318";
+      }
+    }
+  });
 })();
 </script>
 

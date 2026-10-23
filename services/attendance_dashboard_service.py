@@ -11,6 +11,14 @@ from services.employee_time_calculations import (
     make_time_calculator
 )
 
+# WCCR_ATTENDANCE_V73G_APPROVED_EFFECTIVE
+from services.attendance_review_v73 import (
+    AttendanceReviewRevision,
+    AttendanceReviewPeriod,
+    aware_utc,
+    validate_revision,
+)
+
 
 def get_attendance_dashboard_data(
     db, *, paid_break_minutes, can_review=False,
@@ -100,6 +108,139 @@ def get_attendance_dashboard_data(
         for event in events:
             events_by_shift[event.shift_id].append(event)
 
+
+    # V7.3G: load saved revisions in bulk.
+    # Never mutate original EmployeeShift / EmployeeTimeEvent.
+    approved_effective = {}
+
+    if ids:
+        _review_revisions = db.session.execute(
+            select(AttendanceReviewRevision)
+            .where(
+                AttendanceReviewRevision.shift_id.in_(ids)
+            )
+            .order_by(
+                AttendanceReviewRevision.shift_id,
+                AttendanceReviewRevision.revision.desc(),
+                AttendanceReviewRevision.id.desc()
+            )
+        ).scalars().all()
+
+        _latest_by_shift = {}
+
+        for _revision in _review_revisions:
+            _latest_by_shift.setdefault(
+                _revision.shift_id, _revision
+            )
+
+        _approved_candidates = {
+            shift_id: revision
+            for shift_id, revision in _latest_by_shift.items()
+            if revision.status == "approved"
+        }
+
+        if _approved_candidates:
+            _period_rows = db.session.execute(
+                select(AttendanceReviewPeriod)
+                .where(
+                    AttendanceReviewPeriod.revision_id.in_(
+                        [
+                            revision.id
+                            for revision
+                            in _approved_candidates.values()
+                        ]
+                    )
+                )
+                .order_by(
+                    AttendanceReviewPeriod.revision_id,
+                    AttendanceReviewPeriod.started_at_utc,
+                    AttendanceReviewPeriod.id
+                )
+            ).scalars().all()
+
+            _periods_by_revision = defaultdict(list)
+
+            for _period in _period_rows:
+                _periods_by_revision[
+                    _period.revision_id
+                ].append(_period)
+
+            for _shift in shifts:
+                _revision = _approved_candidates.get(_shift.id)
+
+                if _revision is None:
+                    continue
+
+                if _shift.ended_at is None:
+                    continue
+
+                # Special event sequences may represent
+                # recovery gaps or disabled tracking.
+                # Do not discard those accounting rules.
+                _source_kinds = {
+                    event.event_type
+                    for event in events_by_shift[_shift.id]
+                }
+
+                # WCCR_V73H5_APPROVED_END_SHIFT
+                # END_SHIFT is a normal explicit shift-closing event.
+                # For an approved revision, validation below determines
+                # whether its corrected times can be applied.
+                # Keep tracking/recovery/idle/logout exclusions.
+                _unsafe_kinds = {
+                    "TRACKING_DISABLED",
+                    "RESUME_SHIFT",
+                    "IDLE",
+                    "LOGOUT",
+                }
+
+                if _source_kinds & _unsafe_kinds:
+                    continue
+
+                if not _source_kinds.issubset({
+                    "LOGIN",
+                    "END_SHIFT",
+                    "AUTO_CLOSE_MIDNIGHT",
+                    "LUNCH_START",
+                    "LUNCH_END",
+                    "BREAK_START",
+                    "BREAK_END",
+                }):
+                    continue
+
+                _saved_intervals = []
+
+                for _item in _periods_by_revision.get(
+                    _revision.id, []
+                ):
+                    _saved_intervals.append({
+                        "kind": _item.kind,
+                        "start": aware_utc(
+                            _item.started_at_utc
+                        ),
+                        "end": aware_utc(
+                            _item.ended_at_utc
+                        ),
+                    })
+
+                try:
+                    _validated = validate_revision(
+                        _revision.started_at_utc,
+                        _revision.ended_at_utc,
+                        _saved_intervals,
+                        _revision.reason,
+                        now=max(
+                            now,
+                            aware_utc(
+                                _revision.ended_at_utc
+                            )
+                        ),
+                    )
+                except (ValueError, TypeError):
+                    continue
+
+                approved_effective[_shift.id] = _validated
+
     # WCCR_ATTENDANCE_V62
     # Repeated LOGIN without LOGOUT is ambiguous.
     # Do not silently reinterpret historical attendance events.
@@ -146,12 +287,46 @@ def get_attendance_dashboard_data(
             shift, events_by_shift[shift.id], now
         )
 
+        # V7.3G: approved correction replaces the effective
+        # calculation, not the original recorded events.
+        _effective = approved_effective.get(shift.id)
+
+        if _effective is not None:
+            info = {
+                "start": _effective["start"],
+                "end": _effective["end"],
+                "intervals": {
+                    "LUNCH": [
+                        (p["start"], p["end"])
+                        for p in _effective["periods"]
+                        if p["kind"] == "Lunch"
+                    ],
+                    "BREAK": [
+                        (p["start"], p["end"])
+                        for p in _effective["periods"]
+                        if p["kind"] == "Break"
+                    ],
+                },
+                "recovery_gaps": [],
+                "logout_gaps": [],
+                "active_pause": None,
+                "anomalies": False,
+                "has_idle": False,
+            }
+
         open_shift = shift.ended_at is None
         requires_review = bool(
             shift.requires_review
             or info["anomalies"]
             or shift.id in unverified_shift_ids
         )
+
+        if _effective is not None:
+            # Explicit Attendance approval resolves the
+            # original auto-close review requirement.
+            requires_review = False
+            unverified_shift_ids.discard(shift.id)
+
 
         elapsed = (
             max(
@@ -170,12 +345,16 @@ def get_attendance_dashboard_data(
                 usernames.get(shift.user_id)
                 or f"User #{shift.user_id}"
             ),
-            "started": la_time(shift.started_at),
+            "started": la_time(info["start"]),
             "ended": (
-                la_time(shift.ended_at)
-                if shift.ended_at else None
+                la_time(info["end"])
+                if not open_shift else None
             ),
-            "status": shift.status,
+            "status": (
+                "approved"
+                if _effective is not None
+                else shift.status
+            ),
             "open": open_shift,
             "active_pause": info["active_pause"],
             "requires_review": requires_review if can_review else False,
@@ -301,13 +480,14 @@ def get_attendance_dashboard_data(
         reverse=True
     )
 
-    # V6.3: Today's Worked Hours = review-free daily rows.
-    # These are preliminary display totals, NOT payroll approval.
+    # WCCR_TODAYS_WORKED_PRELIMINARY_V64
+    # Include calculated hours even when review is pending.
+    # Exclude unresolved/invalid daily totals.
+    # This is display-only, not payroll approval.
     today_totals = defaultdict(int)
     for _day_row in daily_timesheets:
         if (
             _day_row["date"] == actual_today.isoformat()
-            and not _day_row["needs_review"]
             and _day_row["worked"] is not None
         ):
             today_totals[_day_row["user_id"]] += (

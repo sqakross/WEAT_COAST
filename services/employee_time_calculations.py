@@ -219,6 +219,42 @@ def make_time_calculator(paid_break_limit, tz):
             total - unpaid_union - extra_unpaid_break
         )
 
+
+        # WCCR_MY_TIME_ACTUAL_WORK_V663
+        excluded_intervals = (
+            info["intervals"]["LUNCH"]
+            + info["intervals"]["BREAK"]
+            + info["recovery_gaps"]
+            + info.get("logout_gaps", [])
+        )
+
+        actual_intervals = []
+        for a, b in excluded_intervals:
+            a = max(a, left, info["start"])
+            b = min(b, right, info["end"])
+            if b > a:
+                actual_intervals.append((a, b))
+
+        actual_intervals.sort(key=lambda item: item[0])
+        actual_merged = []
+
+        for a, b in actual_intervals:
+            if actual_merged and a <= actual_merged[-1][1]:
+                actual_merged[-1] = (
+                    actual_merged[-1][0],
+                    max(actual_merged[-1][1], b)
+                )
+            else:
+                actual_merged.append((a, b))
+
+        actual_work = max(
+            0,
+            total - sum(
+                seconds_between(a, b)
+                for a, b in actual_merged
+            )
+        )
+
         return {
             "total": int(total),
             "lunch": int(lunch),
@@ -226,6 +262,8 @@ def make_time_calculator(paid_break_limit, tz):
             "paid_break": int(paid_break),
             "unpaid_break": int(unpaid_break),
             "worked": int(worked),
+            "actual_work": int(actual_work),
+            "paid_time": int(worked),
         }
 
     def utc_midnight(day):

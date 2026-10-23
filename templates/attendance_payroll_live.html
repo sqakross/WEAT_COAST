@@ -1,3 +1,19 @@
+
+{% macro wccr_local_time(value) %}
+  {%- if value is none -%}
+    ?
+  {%- else -%}
+    {%- set raw = value|string -%}
+    {%- set hour = raw[11:13]|int -%}
+    {%- set minute = raw[14:16] -%}
+    {%- set display_hour = hour % 12 -%}
+    {%- if display_hour == 0 -%}
+      {%- set display_hour = 12 -%}
+    {%- endif -%}
+    {{- display_hour ~ ':' ~ minute ~
+        (' AM' if hour < 12 else ' PM') -}}
+  {%- endif -%}
+{% endmacro %}
 {% if attendance_data and access.attendance_view %}
 <section id="wccr-attendance-live" class="mt-4">
 
@@ -16,9 +32,14 @@
     <div class="col-md-3">
       <div class="card card-body">
         <small>Today's Worked Hours</small>
-        <h3>{{ '%.2f'|format(
-          (attendance_data.today_totals.values()|sum) / 3600
-        ) }}</h3>
+        <h3>
+          {% set total_seconds =
+             attendance_data.today_totals.values()|sum|int %}
+          {{ '%02d:%02d'|format(
+             total_seconds // 3600,
+             (total_seconds % 3600) // 60
+          ) }}
+        </h3>
       </div>
     </div>
     <div class="col-md-3">
@@ -241,19 +262,37 @@
                   <thead>
                     <tr>
                       <th>Shift</th>
-                      <th>Start</th>
-                      <th>End</th>
+                      <th>Clock In</th>
+                      <th>Clock Out</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {% for part in row.parts %}
+                    {# WCCR_ACTIVE_SHIFT_REAL_STATUS_V571 #}
+{% for part in row.parts %}
+{# WCCR_ACTIVE_SHIFT_UI_V56 #}
+
                     <tr>
                       <td>#{{ part.shift_id }}</td>
-                      <td>{{ part.daily_start }}</td>
-                      <td>{{ part.daily_end }}</td>
+                      {# WCCR_TIMESHEET_COMPACT_V532 #}
                       <td>
-                        {% if access.attendance_edit %}
+                        <span class="wccr-pacific-time" data-utc="{{ part.daily_start|e }}">?</span>
+                      </td>
+                      
+<td>
+  {% if not part.open %}
+    <span class="wccr-pacific-time"
+          data-utc="{{ part.daily_end|e }}">?</span>
+  {% else %}
+    <span class="badge bg-success">Working</span>
+  {% endif %}
+</td>
+                      <td>
+                        {% if part.open %}
+                          <span class="text-success small fw-semibold">
+                            Active shift
+                          </span>
+                        {% elif access.attendance_edit %}
                         <a class="btn btn-sm btn-outline-primary"
                            href="{{ url_for(
                              'inventory.attendance_shift_edit',
@@ -268,6 +307,67 @@
                     {% endfor %}
                   </tbody>
                 </table>
+
+{# WCCR_TIMESHEET_PACIFIC_V533 #}
+<script>
+(function () {
+  "use strict";
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+
+  function convertTime(raw) {
+    if (!raw || raw === "None" || raw === "?") {
+      return "?";
+    }
+
+    let value = raw.trim();
+
+    // Python datetime string -> ISO 8601.
+    value = value.replace(
+      /^(\d{4}-\d{2}-\d{2})\s+/,
+      "$1T"
+    );
+
+    // Naive timestamps in this table are UTC.
+    if (!/(Z|[+-]\d{2}:\d{2})$/i.test(value)) {
+      value += "Z";
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return "?";
+    }
+
+    return formatter.format(date);
+  }
+
+  function updateTimes() {
+    document
+      .querySelectorAll(".wccr-pacific-time[data-utc]")
+      .forEach(function (element) {
+        element.textContent = convertTime(
+          element.getAttribute("data-utc")
+        );
+      });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      updateTimes
+    );
+  } else {
+    updateTimes();
+  }
+})();
+</script>
+
                 <div class="text-muted small">
                   Select Edit to correct an individual shift.
                   Changes require a reason and remain subject
@@ -292,3 +392,118 @@
 </section>
 {% endif %}
 {# WCCR_EDIT_SHIFT_V40 #}
+
+
+{# WCCR_ATTENDANCE_LIVE_REFRESH_V65 #}
+<script>
+(function () {
+  "use strict";
+
+  const INTERVAL_MS = 60000;
+  let refreshing = false;
+
+  async function refreshAttendance() {
+    if (refreshing || document.hidden) return;
+
+    refreshing = true;
+
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("_attendance_refresh", Date.now());
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: {
+          "X-Requested-With": "WCCR-Attendance-Refresh"
+        }
+      });
+
+      if (!response.ok || response.redirected) return;
+
+      const html = await response.text();
+      const parsed = new DOMParser().parseFromString(
+        html, "text/html"
+      );
+
+      const currentSections =
+        document.querySelectorAll("section");
+      const freshSections =
+        parsed.querySelectorAll("section");
+
+      if (
+        currentSections.length === 0 ||
+        currentSections.length !== freshSections.length
+      ) {
+        return;
+      }
+
+      // Preserve expanded View / Fix panels.
+      const openPanels = new Set(
+        Array.from(
+          document.querySelectorAll(".collapse.show[id]")
+        ).map(el => el.id)
+      );
+
+      const scrollX = window.scrollX;
+      const scrollY = window.scrollY;
+
+      currentSections.forEach((section, index) => {
+        const fresh = freshSections[index];
+
+        if (!fresh) return;
+
+        section.innerHTML = fresh.innerHTML;
+      });
+
+      openPanels.forEach(id => {
+        const panel = document.getElementById(id);
+        if (panel) {
+          panel.classList.add("show");
+        }
+      });
+
+      // Re-run the existing Pacific Time formatter.
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Los_Angeles",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true
+      });
+
+      document.querySelectorAll(
+        ".wccr-pacific-time[data-utc]"
+      ).forEach(el => {
+        let raw = (el.getAttribute("data-utc") || "").trim();
+        if (!raw) return;
+
+        raw = raw.replace(
+          /^(\d{4}-\d{2}-\d{2})\s+/,
+          "$1T"
+        );
+
+        if (!/(Z|[+-]\d{2}:\d{2})$/i.test(raw)) {
+          raw += "Z";
+        }
+
+        const date = new Date(raw);
+
+        if (!Number.isNaN(date.getTime())) {
+          el.textContent = formatter.format(date);
+        }
+      });
+
+      window.scrollTo(scrollX, scrollY);
+
+    } catch (error) {
+      // Keep the existing page visible on network errors.
+      console.warn("WCCR attendance refresh skipped", error);
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  setInterval(refreshAttendance, INTERVAL_MS);
+})();
+</script>
