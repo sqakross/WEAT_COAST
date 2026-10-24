@@ -1,136 +1,378 @@
 
+{# WCCR_CORRECTION_QUEUE_V33 #}
 {% extends "base.html" %}
 {% block content %}
-<div class="container-fluid py-4" style="max-width:1450px">
-  <div class="d-flex flex-wrap justify-content-between
-              align-items-center gap-2 mb-3">
+
+<style>
+.cq33 {
+    max-width:1450px;
+    margin:auto;
+    color:#263347;
+}
+.cq33 .cq-card {
+    background:#fff;
+    border:1px solid #e5eaf0;
+    border-radius:12px;
+    padding:20px;
+}
+.cq33 .cq-stat {
+    border:1px solid #e5eaf0;
+    border-radius:11px;
+    padding:16px 19px;
+    background:#fff;
+    height:100%;
+}
+.cq33 .cq-number {
+    font-size:1.65rem;
+    font-weight:750;
+    line-height:1.2;
+}
+.cq33 .cq-label {
+    color:#718096;
+    font-size:.84rem;
+}
+.cq33 .cq-stat[data-filter] {
+    cursor:pointer;
+}
+.cq33 .cq-stat[data-filter]:focus-visible {
+    outline:3px solid #80b4ff;
+    outline-offset:2px;
+}
+.cq33 .cq-stat.active {
+    border-color:#3980d7;
+    box-shadow:0 0 0 1px #3980d7;
+}
+.cq33 .cq-table {
+    margin-bottom:0;
+    min-width:1000px;
+}
+.cq33 .cq-table th {
+    font-size:.78rem;
+    color:#637083;
+    font-weight:700;
+    background:#f8fafc;
+    white-space:nowrap;
+    padding:13px 12px;
+}
+.cq33 .cq-table td {
+    padding:14px 12px;
+    vertical-align:middle;
+    font-size:.88rem;
+}
+.cq33 .cq-dates {
+    font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+}
+.cq33 .cq-end {
+    color:#788496;
+    margin-top:4px;
+}
+.cq33 .cq-reason {
+    max-width:290px;
+    min-width:160px;
+    overflow-wrap:anywhere;
+}
+.cq33 .cq-note {
+    color:#718096;
+    font-size:.76rem;
+    margin-top:5px;
+    overflow-wrap:anywhere;
+}
+.cq33 .cq-action {
+    min-width:82px;
+}
+.cq33 .cq-toolbar {
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+}
+.cq33 .cq-search {
+    width:260px;
+    max-width:100%;
+}
+@media(max-width:600px) {
+    .cq33 .cq-card {padding:12px}
+    .cq33 .cq-search {width:100%}
+}
+</style>
+
+<div class="container-fluid py-4 cq33">
+
+  <div class="d-flex justify-content-between
+              align-items-start flex-wrap gap-3 mb-4">
     <div>
-      <h3 class="mb-1">Correction Requests</h3>
-      <p class="text-muted mb-0">
-        Employee correction queue ? Pacific Time
-      </p>
+      <h3 class="mb-1 fw-bold">Correction Requests</h3>
+      <div class="text-muted small">
+        Employee time corrections ? Pacific Time
+      </div>
     </div>
+
     <a class="btn btn-outline-secondary btn-sm"
        href="{{ url_for('inventory.attendance_payroll_dashboard') }}">
-      Attendance &amp; Payroll
+      Back to Attendance &amp; Payroll
     </a>
   </div>
 
-  <div class="card shadow-sm">
-    <div class="card-body">
-      <div class="table-responsive">
-        <table class="table table-sm table-striped align-middle">
-          <thead>
-            <tr>
-              <th>Request</th>
-              <th>Employee</th>
-              <th>Shift</th>
-              <th>Original (PT)</th>
-              <th>Requested (PT)</th>
-              <th>Reason</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in records %}
-            <tr>
-              <td>#{{ r.id }}</td>
-              <td>
-                {{ r.employee_name }}
-                <div class="text-muted small">
-                  User #{{ r.user_id }}
-                </div>
-              </td>
-              <td>#{{ r.shift_id }}</td>
-              <td class="small">
-                {{ r.original_start_pt }}
-                <div>{{ r.original_end_pt }}</div>
-              </td>
-              <td class="small">
-                {{ r.requested_start_pt }}
-                <div>{{ r.requested_end_pt }}</div>
-              </td>
-              <td style="min-width:130px">
-                {{ r.reason }}
-              </td>
-              <td>
-                {% if r.status == 'pending' %}
+  {% set ns = namespace(pending=0, approved=0, rejected=0) %}
+  {% for r in records %}
+    {% if r.status == 'pending' %}
+      {% set ns.pending = ns.pending + 1 %}
+    {% elif r.status == 'approved' %}
+      {% set ns.approved = ns.approved + 1 %}
+    {% elif r.status == 'rejected' %}
+      {% set ns.rejected = ns.rejected + 1 %}
+    {% endif %}
+  {% endfor %}
+
+  <div class="row g-3 mb-4">
+    <div class="col-4">
+      <div class="cq-stat active" data-filter="pending"
+           role="button" tabindex="0"
+           aria-label="Show pending requests"
+           aria-pressed="true">
+        <div class="cq-label">Pending</div>
+        <div class="cq-number" id="cq-count-pending">
+          {{ ns.pending }}
+        </div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="cq-stat" data-filter="approved"
+           role="button" tabindex="0"
+           aria-label="Show approved requests"
+           aria-pressed="false">
+        <div class="cq-label">Approved</div>
+        <div class="cq-number" id="cq-count-approved">
+          {{ ns.approved }}
+        </div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="cq-stat" data-filter="rejected"
+           role="button" tabindex="0"
+           aria-label="Show rejected requests"
+           aria-pressed="false">
+        <div class="cq-label">Rejected</div>
+        <div class="cq-number" id="cq-count-rejected">
+          {{ ns.rejected }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cq-card">
+
+    <div class="cq-toolbar mb-3">
+      <div>
+        <label for="cq-filter" class="form-label small mb-1">
+          Status
+        </label>
+        <select class="form-select form-select-sm"
+                id="cq-filter">
+          <option value="pending" selected>Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+          <option value="all">All requests</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="cq-search" class="form-label small mb-1">
+          Search
+        </label>
+        <input class="form-control form-control-sm cq-search"
+               id="cq-search" type="search"
+               placeholder="Request, employee, shift, reason">
+      </div>
+
+      <div class="ms-auto small text-muted align-self-end pb-1"
+           id="cq-visible-count" role="status"
+           aria-live="polite"></div>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-hover cq-table">
+        <thead>
+          <tr>
+            <th>Request</th>
+            <th>Employee</th>
+            <th>Shift</th>
+            <th>Original (PT)</th>
+            <th>Requested (PT)</th>
+            <th>Reason</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="cq-rows">
+          {% for r in records %}
+          <tr class="cq-record"
+              data-status="{{ r.status }}"
+              data-search="{{ (
+                (r.id|string) ~ ' ' ~
+                (r.shift_id|string) ~ ' ' ~
+                (r.user_id|string) ~ ' ' ~
+                r.employee_name ~ ' ' ~
+                (r.reason or '') ~ ' ' ~
+                (r.review_note or '')
+              )|lower|e }}">
+            <td class="fw-semibold">#{{ r.id }}</td>
+
+            <td>
+              <div class="fw-semibold">{{ r.employee_name }}</div>
+              <div class="text-muted small">
+                User #{{ r.user_id }}
+              </div>
+            </td>
+
+            <td>#{{ r.shift_id }}</td>
+
+            <td class="cq-dates">
+              <div>{{ r.original_start_pt }}</div>
+              <div class="cq-end">{{ r.original_end_pt }}</div>
+            </td>
+
+            <td class="cq-dates">
+              <div>{{ r.requested_start_pt }}</div>
+              <div class="cq-end">{{ r.requested_end_pt }}</div>
+            </td>
+
+            <td class="cq-reason">
+              {{ r.reason }}
+            </td>
+
+            <td>
+              {% if r.status == 'pending' %}
                 <span class="badge bg-warning text-dark">
                   Pending
                 </span>
-                {% elif r.status == 'rejected' %}
-                <span class="badge bg-secondary">
-                  Rejected
-                </span>
-                {% else %}
-                <span class="badge bg-info text-dark">
+              {% elif r.status == 'approved' %}
+                <span class="badge bg-success">Approved</span>
+              {% elif r.status == 'rejected' %}
+                <span class="badge bg-secondary">Rejected</span>
+              {% else %}
+                <span class="badge bg-light text-dark">
                   {{ r.status }}
                 </span>
-                {% endif %}
-                {% if r.review_note %}
-                <div class="small mt-1">
-                  {{ r.review_note }}
-                </div>
-                {% endif %}
-              </td>
-              <td style="min-width:210px">
-                <a class="btn btn-outline-secondary btn-sm mb-1"
+              {% endif %}
+
+              {% if r.review_note %}
+                <div class="cq-note">{{ r.review_note }}</div>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if r.status == 'pending' and can_edit %}
+                <a class="btn btn-primary btn-sm cq-action"
                    href="{{ url_for(
-                     'auth.attendance_correction_detail',
-                     request_id=r.id) }}">
+                     'auth.attendance_targeted_correction',
+                     shift_id=r.shift_id,
+                     correction_request_id=r.id) }}">
                   Review
                 </a>
-                {% if can_edit %}
-                <a class="btn btn-outline-primary btn-sm mb-1"
+              {% elif r.status != 'pending' %}
+                <a class="btn btn-outline-secondary btn-sm cq-action"
                    href="{{ url_for(
-                     'inventory.attendance_shift_edit',
-                     shift_id=r.shift_id) }}">
-                  Edit Shift
+                     'auth.attendance_targeted_correction',
+                     shift_id=r.shift_id,
+                     correction_request_id=r.id) }}">
+                  View
                 </a>
-                {% endif %}
-
-                {% if r.status == 'pending' and can_approve %}
-                <form method="post"
-                      action="{{ url_for(
-                        'auth.attendance_correction_reject',
-                        request_id=r.id) }}"
-                      onsubmit="return confirm(
-                        'Reject this correction request?');">
-                  <input type="hidden" name="csrf_token"
-                         value="{{ r.review_csrf }}">
-                  <input class="form-control form-control-sm mb-1"
-                         name="review_note" minlength="4"
-                         maxlength="1000" required
-                         placeholder="Reason for rejection">
-                  <button class="btn btn-outline-danger btn-sm"
-                          type="submit">
-                    Reject Request
-                  </button>
-                </form>
-                {% elif r.status == 'pending' %}
+              {% else %}
                 <span class="text-muted small">
-                  Awaiting authorized reviewer
+                  Awaiting reviewer
                 </span>
-                {% endif %}
-              </td>
-            </tr>
-            {% else %}
-            <tr>
-              <td colspan="8" class="text-muted">
-                No correction requests.
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <p class="text-muted small mb-0">
-        Editing a shift does not automatically approve a
-        correction request. Approval and payroll locking
-        will be implemented separately.
-      </p>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+
+          <tr id="cq-empty" hidden>
+            <td colspan="8" class="text-center text-muted py-4">
+              No matching correction requests.
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
+
+    <div class="text-muted small mt-3">
+      Review opens the time editor for pending requests.
+      View opens completed request details.
+      Payroll approval remains separate.
+    </div>
+
   </div>
 </div>
+
+<script>
+/* WCCR_CORRECTION_QUEUE_V33 */
+(function () {
+  "use strict";
+
+  const filter = document.getElementById("cq-filter");
+  const search = document.getElementById("cq-search");
+  const rows = Array.from(
+    document.querySelectorAll("#cq-rows .cq-record")
+  );
+  const empty = document.getElementById("cq-empty");
+  const count = document.getElementById("cq-visible-count");
+  const cards = Array.from(
+    document.querySelectorAll(".cq-stat[data-filter]")
+  );
+
+  function update() {
+    const status = filter.value;
+    const term = search.value.trim().toLowerCase();
+    let visible = 0;
+
+    rows.forEach(function (row) {
+      const statusOk =
+        status === "all" || row.dataset.status === status;
+      const searchOk =
+        !term || (row.dataset.search || "").includes(term);
+
+      const show = statusOk && searchOk;
+      row.hidden = !show;
+      row.style.display = show ? "" : "none";
+
+      if (show) visible++;
+    });
+
+    empty.hidden = visible !== 0;
+    empty.style.display = visible ? "none" : "";
+
+    count.textContent = visible + " of " +
+      rows.length + " requests";
+
+    cards.forEach(function (card) {
+      const active = card.dataset.filter === status;
+      card.classList.toggle("active", active);
+      card.setAttribute("aria-pressed", String(active));
+    });
+  }
+
+  filter.addEventListener("change", update);
+  search.addEventListener("input", update);
+
+  cards.forEach(function (card) {
+    function choose() {
+      filter.value = card.dataset.filter;
+      update();
+    }
+
+    card.addEventListener("click", choose);
+    card.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        choose();
+      }
+    });
+  });
+
+  update();
+})();
+</script>
+
 {% endblock %}

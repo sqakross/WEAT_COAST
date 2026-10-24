@@ -4,12 +4,101 @@
 {# WCCR_CLOCK_V66C_V2 #}
 {% extends "base.html" %}
 {% block content %}
-<div class="container py-4" style="max-width:960px">
+{# WCCR_MY_TIME_UI_V13 #}
+
+{# WCCR_MY_TIME_PRO_UI_V12 #}
+<style>
+.wccr-mytime-v12 {
+    --mt-ink: #192c46;
+    --mt-muted: #68788d;
+    --mt-border: #e2e9f2;
+    --mt-soft: #f5f8fc;
+    color: var(--mt-ink);
+}
+.wccr-mytime-v12 h3 {
+    font-size: 1.65rem;
+    font-weight: 750;
+    letter-spacing: -.03em;
+}
+.wccr-mytime-v12 h5 {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+.wccr-mytime-v12 .card {
+    border: 1px solid var(--mt-border) !important;
+    border-radius: 15px !important;
+    box-shadow: 0 4px 18px rgba(24,45,70,.045) !important;
+}
+.wccr-mytime-v12 .card-body {
+    padding: 1.4rem !important;
+}
+.wccr-mytime-v12 .bg-light {
+    background: var(--mt-soft) !important;
+}
+.wccr-mytime-v12 .table-responsive {
+    border: 1px solid var(--mt-border);
+    border-radius: 11px;
+    overflow-x: auto;
+}
+.wccr-mytime-v12 .table {
+    font-size: .85rem;
+    margin-bottom: 0;
+}
+.wccr-mytime-v12 .table thead th {
+    background: #f2f6fb;
+    color: #52647c;
+    font-size: .73rem;
+    font-weight: 700;
+    letter-spacing: .025em;
+    padding: .8rem .7rem;
+    white-space: nowrap;
+}
+.wccr-mytime-v12 .table tbody td {
+    padding: .8rem .7rem;
+    vertical-align: middle;
+}
+.wccr-mytime-v12 .table tbody tr:hover {
+    background: #f8faff;
+}
+.wccr-mytime-v12 .btn {
+    border-radius: 8px;
+}
+.wccr-mytime-v12 [data-report-key],
+.wccr-mytime-v12 [data-today-row],
+.wccr-mytime-v12 #wccr-today-hours {
+    font-variant-numeric: tabular-nums;
+}
+.wccr-mytime-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: #187247;
+    font-weight: 650;
+    white-space: nowrap;
+}
+.wccr-mytime-dot {
+    width: 7px;
+    height: 7px;
+    background: #16a36a;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+@media (max-width: 767px) {
+    .wccr-mytime-v12 .card-body {
+        padding: 1rem !important;
+    }
+    .wccr-mytime-v12 .table {
+        font-size: .8rem;
+    }
+}
+</style>
+
+<div class="container py-4 wccr-mytime-v12" style="max-width:1120px">
 
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
       <h3 class="mb-1">My Time</h3>
-      <div class="text-muted small">Employee Time Tracking ? Los Angeles Time</div>
+      <div class="text-muted small">Employee Time Tracking &middot; Pacific Time</div>
     </div>
     <div class="d-flex gap-2">
       {# WCCR_TIME_TRACKING_ERP_3D #}
@@ -60,7 +149,7 @@
             00:00:00
           </div>
           <div class="small text-muted">
-            Includes eligible paid breaks ? Excludes unpaid lunch
+            Includes eligible paid breaks &middot; Excludes unpaid lunch
           </div>
         </div>
 
@@ -138,7 +227,7 @@
             00:00:00
           </div>
           <div class="small text-muted">
-            Includes eligible paid breaks ? Excludes unpaid lunch
+            Includes eligible paid breaks &middot; Excludes unpaid lunch
           </div>
         </div>
         <span class="badge bg-secondary mb-3">
@@ -166,7 +255,7 @@
       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
           <h5 class="mb-1">Time Report</h5>
-          <div class="text-muted small">{{ report_label }} ? Pacific Time</div>
+          <div class="text-muted small">{{ report_label }} &middot; Pacific Time</div>
         </div>
         
         {# WCCR_MY_TIME_FILTERS_V68 #}
@@ -326,8 +415,27 @@
             {% for item in recent %}
               <tr>
                 <td>{{ la_time(item.started_at) }}</td>
-                <td>{{ la_time(item.ended_at) }}</td>
-                <td>{% if attendance_review_statuses.get(item.id) == 'approved' %}Approved{% elif item.requires_review %}Pending review{% else %}{{ item.status }}{% endif %}</td>
+                <td>
+              {% if item.ended_at %}
+                {{ la_time(item.ended_at) }}
+              {% else %}
+                <span class="wccr-mytime-progress">
+                  <span class="wccr-mytime-dot"></span>
+                  In progress
+                </span>
+              {% endif %}
+            </td>
+                <td>
+                  {% if attendance_review_statuses.get(item.id) == 'approved' %}
+                    <span class="badge bg-success">Approved</span>
+                  {% elif item.requires_review %}
+                    <span class="badge bg-warning text-dark">Pending Review</span>
+                  {% elif not item.ended_at %}
+                    <span class="badge bg-success">Working</span>
+                  {% else %}
+                    <span class="badge bg-secondary">{{ item.status|title }}</span>
+                  {% endif %}
+                </td>
                 <td>
                 {% if item.ended_at and correction_can_edit %}
                   <a class="btn btn-sm btn-outline-secondary"
@@ -339,7 +447,7 @@
                 {% endif %}
                 {% if correction_statuses.get(item.id) == 'pending' %}
                   <span class="badge bg-warning text-dark">
-                    Pending Review
+                    Correction Pending
                   </span>
                 {% elif item.ended_at %}
                   <a class="btn btn-sm btn-outline-primary"
@@ -365,6 +473,8 @@
 </div>
 
   {# WCCR_ATTENDANCE_V50_CORE #}
+  <div class="container wccr-mytime-v12"
+       style="max-width:1120px">
   <div class="card shadow-sm border-0 rounded-4 mt-4">
     <div class="card-body p-4">
       <div class="d-flex justify-content-between align-items-center">
@@ -390,14 +500,21 @@
             <tr>
               <td>#{{ r.id }}</td>
               <td>#{{ r.shift_id }}</td>
-              <td>{{ r.created_at_utc }}</td>
+              <td>
+                  <span class="wccr-correction-date"
+                        data-utc="{{ r.created_at_utc|e }}">
+                    {{ r.created_at_utc }}
+                  </span>
+                </td>
               <td>
                 {% if r.status == 'pending' %}
-                <span class="badge bg-warning text-dark">
-                  Pending Review
-                </span>
+                <span class="badge bg-warning text-dark">Pending</span>
+                {% elif r.status == 'approved' %}
+                <span class="badge bg-success">Approved</span>
+                {% elif r.status == 'rejected' %}
+                <span class="badge bg-danger">Rejected</span>
                 {% else %}
-                {{ r.status }}
+                <span class="badge bg-secondary">{{ r.status|title }}</span>
                 {% endif %}
               </td>
               <td>{{ r.review_note or '' }}</td>
@@ -413,6 +530,7 @@
         </table>
       </div>
     </div>
+  </div>
   </div>
 
 <script>
@@ -455,6 +573,11 @@
   const reportIncludesToday =
     {{ report_includes_today|tojson }};
 
+  // WCCR_MY_TIME_TIMER_SYNC_V14
+  // Capture the original shift elapsed time.
+  const initialTotal = counters.total
+    ? counters.total.value : 0;
+
   const initialToday = todayValue;
   const initialBreak = counters.break
     ? counters.break.value : 0;
@@ -476,7 +599,11 @@
     const deltaLunch = counters.lunch
       ? counters.lunch.value - initialLunch : 0;
 
+    const deltaTotal = counters.total
+      ? counters.total.value - initialTotal : 0;
+
     const deltas = {
+      total: deltaTotal,
       worked: deltaWorked,
       break: deltaBreak,
       lunch: deltaLunch
@@ -556,6 +683,39 @@
   }, 1000);
 })();
 </script>
+
+{# WCCR_CORRECTION_QUEUE_UI_V3 #}
+<script>
+(() => {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+
+  document.querySelectorAll(".wccr-correction-date").forEach(el => {
+    let value = (el.dataset.utc || "").trim();
+    if (!value) return;
+
+    value = value.replace(" ", "T");
+
+    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
+      value += "Z";
+    }
+
+    const parsed = new Date(value);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      el.textContent = formatter.format(parsed) + " PT";
+    }
+  });
+})();
+</script>
+
 {% endblock %}
 
 {# WCCR_MY_TIME_CORRECTION_V41 #}

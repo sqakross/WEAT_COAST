@@ -24538,8 +24538,24 @@ def attendance_payroll_dashboard(section="overview"):
                 end_date=selected_end
             )
 
+    # WCCR_CORRECTION_QUEUE_UI_V3
+    correction_pending_count = None
+
+    if access["attendance_review"]:
+        from sqlalchemy import text as correction_sql_text
+
+        correction_pending_count = db.session.execute(
+            correction_sql_text(
+                "SELECT COUNT(*) "
+                "FROM employee_time_correction_requests "
+                "WHERE status = :status"
+            ),
+            {"status": "pending"}
+        ).scalar_one()
+
     return render_template(
         "attendance_payroll_dashboard.html",
+        correction_pending_count=correction_pending_count,
         section=section,
         access=access,
         permission_codes=permissions,

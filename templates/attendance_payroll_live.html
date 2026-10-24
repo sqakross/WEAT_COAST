@@ -58,6 +58,26 @@
     {% endif %}
   </div>
 
+  {# WCCR_CORRECTION_QUEUE_UI_V3 #}
+  {% if correction_pending_count is not none %}
+  <div class="mb-3">
+    <a class="text-decoration-none"
+       href="{{ url_for('auth.attendance_correction_requests') }}">
+      <span class="badge bg-warning text-dark">
+        Correction Requests Pending:
+        {{ correction_pending_count }}
+      </span>
+      <span class="small ms-1">
+        Open Management Queue &#8594;
+      </span>
+    </a>
+    <div class="small text-muted mt-1">
+      Employee correction requests are separate from
+      shift reviews.
+    </div>
+  </div>
+  {% endif %}
+
   {% if section in ["overview", "attendance"] %}
   <h5>Currently Working</h5>
   <div class="table-responsive mb-4">
@@ -196,7 +216,7 @@
           <td>{{ row.date }}</td>
           <td>{{ row.employee_name }}</td>
           <td>
-            {{ row.started }} ? {{ row.ended }}
+            {{ row.started }} &ndash; {{ row.ended }}
             {% if row.parts|length > 1 %}
             <div class="small text-muted">
               {{ row.parts|length }} segments
@@ -243,7 +263,7 @@
             <div class="collapse" id="review-{{ loop.index }}">
               <div class="card card-body m-2">
                 <strong>
-                  {{ row.employee_name }} ? {{ row.date }}
+                  {{ row.employee_name }} &ndash; {{ row.date }}
                 </strong>
                 {% if row.unverified %}
                 <div class="alert alert-warning mt-2">

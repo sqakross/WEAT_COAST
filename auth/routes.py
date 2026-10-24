@@ -1102,6 +1102,173 @@ def attendance_correction_reject(request_id):
     return redirect(url_for("auth.attendance_correction_requests"))
 
 
+
+# WCCR_CORRECTION_APPROVAL_V1
+@auth_bp.route(
+    "/attendance/correction-requests/<int:request_id>/approve",
+    methods=["POST"]
+)
+@login_required
+def attendance_correction_approve(request_id):
+    from flask import abort, current_app
+    from sqlalchemy import text, select
+    from datetime import datetime, timezone
+    from itsdangerous import (
+        URLSafeTimedSerializer, BadSignature, SignatureExpired
+    )
+    from services.attendance_review_permissions import can_review_action
+    from services.attendance_review_v73 import AttendanceReviewRevision
+    from services.employee_time_tracking_models import EmployeeShift
+
+    if not can_review_action(current_user, "approve"):
+        abort(403)
+
+    if set(request.form.keys()) != {"csrf_token", "review_note"}:
+        abort(400)
+
+    serializer = URLSafeTimedSerializer(
+        current_app.secret_key,
+        salt="wccr-correction-review-v51"
+    )
+
+    try:
+        payload = serializer.loads(
+            request.form["csrf_token"], max_age=1800
+        )
+    except (BadSignature, SignatureExpired):
+        abort(400)
+
+    if (
+        not isinstance(payload, dict)
+        or payload.get("uid") != current_user.id
+        or payload.get("rid") != request_id
+        or payload.get("sid") != session.get("_id", "")
+    ):
+        abort(400)
+
+    note = request.form["review_note"].strip()
+
+    if len(note) > 1000:
+        flash("Review note is too long.", "warning")
+        return redirect(url_for(
+            "auth.attendance_correction_detail",
+            request_id=request_id
+        ))
+
+    def as_utc(value):
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value)
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    try:
+        record = db.session.execute(text("""
+            SELECT id, shift_id, user_id, status,
+                   requested_start_utc, requested_end_utc
+            FROM employee_time_correction_requests
+            WHERE id=:rid
+        """), {"rid": request_id}).mappings().first()
+
+        if record is None:
+            abort(404)
+
+        if record["status"] != "pending":
+            flash("Request already processed.", "warning")
+            return redirect(url_for(
+                "auth.attendance_correction_detail",
+                request_id=request_id
+            ))
+
+        shift = db.session.get(EmployeeShift, record["shift_id"])
+
+        if (
+            shift is None
+            or shift.user_id != record["user_id"]
+            or shift.ended_at is None
+        ):
+            flash("Shift and request do not match.", "danger")
+            return redirect(url_for(
+                "auth.attendance_correction_detail",
+                request_id=request_id
+            ))
+
+        latest = db.session.execute(
+            select(AttendanceReviewRevision)
+            .where(AttendanceReviewRevision.shift_id == shift.id)
+            .order_by(
+                AttendanceReviewRevision.revision.desc(),
+                AttendanceReviewRevision.id.desc()
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+
+        if latest is None or latest.status != "approved":
+            flash(
+                "Approve the matching shift revision first.",
+                "warning"
+            )
+            return redirect(url_for(
+                "auth.attendance_correction_detail",
+                request_id=request_id
+            ))
+
+        expected_start = as_utc(record["requested_start_utc"])
+        expected_end = as_utc(record["requested_end_utc"])
+        approved_start = as_utc(latest.started_at_utc)
+        approved_end = as_utc(latest.ended_at_utc)
+
+        if (
+            approved_start != expected_start
+            or approved_end != expected_end
+        ):
+            flash(
+                "Approved shift times do not match this request. "
+                "Review the requested times before approval.",
+                "warning"
+            )
+            return redirect(url_for(
+                "auth.attendance_correction_detail",
+                request_id=request_id
+            ))
+
+        result = db.session.execute(text("""
+            UPDATE employee_time_correction_requests
+            SET status='approved',
+                reviewed_by_user_id=:uid,
+                reviewed_at_utc=:now,
+                review_note=:note
+            WHERE id=:rid AND status='pending'
+        """), {
+            "uid": current_user.id,
+            "now": datetime.now(timezone.utc).isoformat(),
+            "note": note or (
+                "Approved against attendance revision "
+                + str(latest.id)
+            ),
+            "rid": request_id
+        })
+
+        if result.rowcount != 1:
+            db.session.rollback()
+            flash("Request was already processed.", "warning")
+        else:
+            db.session.commit()
+            flash("Correction request approved.", "success")
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Correction approval failed: request=%s", request_id
+        )
+        flash("Unable to approve correction request.", "danger")
+
+    return redirect(url_for(
+        "auth.attendance_correction_detail",
+        request_id=request_id
+    ))
+
+
 # WCCR_ATTENDANCE_V52_REVIEW
 @auth_bp.route(
     "/attendance/correction-requests/<int:request_id>",
@@ -1175,7 +1342,18 @@ def attendance_correction_detail(request_id):
         events=event_rows,
         pt=pt,
         can_edit=can_edit,
-        can_approve=can_approve
+        can_approve=can_approve,
+        approval_csrf=__import__(
+            "itsdangerous",
+            fromlist=["URLSafeTimedSerializer"]
+        ).URLSafeTimedSerializer(
+            __import__("flask").current_app.secret_key,
+            salt="wccr-correction-review-v51"
+        ).dumps({
+            "uid": current_user.id,
+            "rid": request_id,
+            "sid": session.get("_id", "")
+        })
     )
 
 
@@ -1404,6 +1582,41 @@ def attendance_targeted_correction(shift_id):
     if shift.ended_at is None:
         abort(409)
 
+    # WCCR_CORRECTION_V34_GUARD
+    # Protect completed requests opened through their own URL.
+    # Ordinary Timesheets editing without correction_request_id
+    # retains its existing independent permission checks.
+    _v34_request_id = request.args.get("correction_request_id")
+
+    if _v34_request_id is not None:
+        if not _v34_request_id.isdecimal():
+            abort(400)
+
+        _v34_row = db.session.execute(text("""
+            SELECT id, shift_id, user_id, status
+            FROM employee_time_correction_requests
+            WHERE id=:rid AND shift_id=:shift
+        """), {
+            "rid": int(_v34_request_id),
+            "shift": shift_id
+        }).mappings().first()
+
+        if (
+            _v34_row is None
+            or _v34_row["user_id"] != shift.user_id
+        ):
+            abort(404)
+
+        if request.method == "POST":
+            if _v34_row["status"] != "pending":
+                abort(
+                    409,
+                    description=(
+                        "Correction request is already processed. "
+                        "This request is read-only."
+                    )
+                )
+
     pacific = ZoneInfo("America/Los_Angeles")
 
     def utc(value):
@@ -1459,6 +1672,177 @@ def attendance_targeted_correction(shift_id):
             EmployeeTimeEvent.id
         )
     ).scalars().all()
+
+
+    # WCCR_CORRECTION_V31
+    if (
+        request.method == "POST"
+        and request.form.get("action_type")
+        == "approve_employee_correction_v31"
+    ):
+        import json as _v31_json
+        from flask import jsonify
+        from sqlalchemy import text as _v31_text
+        from services.attendance_review_v73 import (
+            AttendanceReviewError, parse_pacific
+        )
+        from services.attendance_review_save_v73 import save_revision
+        from services.attendance_review_approve_v73 import approve_revision
+
+        if not (
+            can_review_action(current_user, "edit")
+            and can_review_action(current_user, "approve")
+        ):
+            abort(403)
+
+        if set(request.form.keys()) != {
+            "csrf_token", "action_type", "payload",
+            "correction_request_id"
+        }:
+            abort(400)
+
+        try:
+            token_data = serializer.loads(
+                request.form["csrf_token"], max_age=1800
+            )
+        except (BadSignature, SignatureExpired):
+            abort(400)
+
+        if (
+            not isinstance(token_data, dict)
+            or token_data.get("uid") != current_user.id
+            or token_data.get("shift") != shift_id
+            or token_data.get("sid") != session.get("_id", "")
+        ):
+            abort(400)
+
+        try:
+            rid = int(request.form["correction_request_id"])
+            if rid <= 0:
+                raise ValueError("Invalid request ID.")
+
+            raw = request.form["payload"]
+            if len(raw) > 30000:
+                raise AttendanceReviewError("Payload too large.")
+
+            data = _v31_json.loads(raw)
+            if not isinstance(data, dict) or set(data) != {
+                "expected_revision", "expected_source",
+                "started_at", "ended_at", "periods", "reason"
+            }:
+                raise AttendanceReviewError(
+                    "Invalid correction payload."
+                )
+
+            correction = db.session.execute(_v31_text("""
+                SELECT id, shift_id, user_id, status,
+                       requested_start_utc, requested_end_utc
+                FROM employee_time_correction_requests
+                WHERE id=:rid
+            """), {"rid": rid}).mappings().first()
+
+            if (
+                correction is None
+                or correction["shift_id"] != shift_id
+                or correction["user_id"] != shift.user_id
+                or correction["status"] != "pending"
+            ):
+                raise AttendanceReviewError(
+                    "Request already processed. Reload the page."
+                )
+
+            def normalized_utc(value):
+                if isinstance(value, str):
+                    value = datetime.fromisoformat(value)
+                if value.tzinfo is None:
+                    value = value.replace(tzinfo=timezone.utc)
+                return value.astimezone(timezone.utc)
+
+            start = parse_pacific(data["started_at"])
+            end = parse_pacific(data["ended_at"])
+
+            if (
+                start != normalized_utc(
+                    correction["requested_start_utc"]
+                )
+                or end != normalized_utc(
+                    correction["requested_end_utc"]
+                )
+            ):
+                raise AttendanceReviewError(
+                    "Editor times differ from the employee request. "
+                    "Review the requested Clock In/Out before approval."
+                )
+
+            revision_id, revision_number = save_revision(
+                shift_id=shift_id,
+                actor_id=current_user.id,
+                expected_revision=data["expected_revision"],
+                expected_source=data["expected_source"],
+                started_at=data["started_at"],
+                ended_at=data["ended_at"],
+                periods=data["periods"],
+                reason=data["reason"],
+                commit=False,
+            )
+
+            result = approve_revision(
+                shift_id=shift_id,
+                actor_id=current_user.id,
+                revision_id=revision_id,
+                expected_source=data["expected_source"],
+                correction_request_id=rid,
+                commit=False,
+            )
+
+            changed = db.session.execute(_v31_text("""
+                UPDATE employee_time_correction_requests
+                SET status='approved',
+                    reviewed_by_user_id=:uid,
+                    reviewed_at_utc=:now,
+                    review_note=:note
+                WHERE id=:rid AND shift_id=:shift
+                  AND status='pending'
+            """), {
+                "uid": current_user.id,
+                "now": datetime.now(timezone.utc).isoformat(),
+                "note": (
+                    "Approved with Attendance revision #"
+                    + str(revision_number)
+                ),
+                "rid": rid,
+                "shift": shift_id
+            })
+
+            if changed.rowcount != 1:
+                raise AttendanceReviewError(
+                    "Request changed during approval."
+                )
+
+            db.session.commit()
+            return jsonify({
+                "ok": True,
+                "request_status": "approved",
+                **result
+            })
+
+        except (
+            AttendanceReviewError, ValueError,
+            TypeError, KeyError
+        ) as exc:
+            db.session.rollback()
+            return jsonify({
+                "ok": False, "error": str(exc)
+            }), 409
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Correction V3.1 failed: shift=%s", shift_id
+            )
+            return jsonify({
+                "ok": False,
+                "error": "Unable to approve correction."
+            }), 500
 
     # WCCR_V73H3C_ONE_CLICK
     if (
@@ -1934,6 +2318,54 @@ def attendance_targeted_correction(shift_id):
             "reason": _latest_review.reason,
         }
 
+
+    # WCCR_UNIFIED_CORRECTION_V22
+    correction_request = None
+    correction_id = request.args.get(
+        "correction_request_id", type=int
+    )
+
+    if correction_id is not None:
+        if not (
+            can_review_action(current_user, "review")
+            or can_review_action(current_user, "approve")
+        ):
+            abort(403)
+
+        row = db.session.execute(text("""
+            SELECT id, shift_id, user_id, status, reason,
+                   original_start_utc, original_end_utc,
+                   requested_start_utc, requested_end_utc
+            FROM employee_time_correction_requests
+            WHERE id=:rid AND shift_id=:shift
+        """), {
+            "rid": correction_id,
+            "shift": shift_id
+        }).mappings().first()
+
+        if row is None or row["user_id"] != shift.user_id:
+            abort(404)
+
+        correction_request = dict(row)
+
+        from itsdangerous import URLSafeTimedSerializer as _V31Serializer
+        correction_request["review_csrf"] = _V31Serializer(
+            current_app.secret_key,
+            salt="wccr-correction-review-v51"
+        ).dumps({
+            "uid": current_user.id,
+            "rid": correction_id,
+            "sid": session.get("_id", "")
+        })
+
+        for field in (
+            "original_start_utc", "original_end_utc",
+            "requested_start_utc", "requested_end_utc"
+        ):
+            correction_request[field + "_pt"] = display(
+                correction_request[field]
+            )
+
     return render_template(
         "attendance_targeted_correction.html",
         shift=shift,
@@ -1947,5 +2379,6 @@ def attendance_targeted_correction(shift_id):
         review_revision=review_revision,
         display_shift=display_shift,
         display_timeline=display_timeline,
-        saved_review=saved_review
+        saved_review=saved_review,
+        correction_request=correction_request
     )

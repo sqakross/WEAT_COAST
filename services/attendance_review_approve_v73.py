@@ -36,6 +36,7 @@ def approve_revision(
     revision_id,
     expected_source,
     commit=True,
+    correction_request_id=None,
 ):
     if type(revision_id) is not int or revision_id <= 0:
         raise AttendanceReviewError("Invalid revision ID.")
@@ -49,10 +50,42 @@ def approve_revision(
         if shift is None or shift.ended_at is None:
             raise AttendanceReviewError("Closed shift not found.")
 
+        # WCCR_CORRECTION_V31
+        correction_mode = correction_request_id is not None
+
+        if correction_mode:
+            from sqlalchemy import text
+            if (
+                type(correction_request_id) is not int
+                or correction_request_id <= 0
+            ):
+                raise AttendanceReviewError(
+                    "Invalid correction request."
+                )
+
+            correction = db.session.execute(text("""
+                SELECT id, shift_id, user_id, status
+                FROM employee_time_correction_requests
+                WHERE id=:rid
+            """), {"rid": correction_request_id}).mappings().first()
+
+            if (
+                correction is None
+                or correction["shift_id"] != shift_id
+                or correction["user_id"] != shift.user_id
+                or correction["status"] != "pending"
+            ):
+                raise AttendanceReviewError(
+                    "Correction request is no longer pending."
+                )
+
         if shift.status != "pending_review":
-            raise AttendanceReviewError(
-                "Shift is not pending review."
-            )
+            if not (
+                correction_mode and shift.status == "closed"
+            ):
+                raise AttendanceReviewError(
+                    "Shift is not pending review."
+                )
 
         events = db.session.execute(
             select(EmployeeTimeEvent)

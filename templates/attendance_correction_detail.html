@@ -92,12 +92,35 @@
       </a>
       {% endif %}
 
+      {# WCCR_CORRECTION_APPROVAL_V1 #}
       {% if record.status == 'pending' %}
-      <p class="text-muted small mt-3 mb-0">
-        Request remains Pending until an authorized decision.
-        Editing a shift does not automatically approve it.
-        Approval is disabled until event-safe processing is ready.
-      </p>
+        {% if can_approve %}
+        <form method="post" class="mt-3"
+              action="{{ url_for(
+                'auth.attendance_correction_approve',
+                request_id=record.id
+              ) }}"
+              onsubmit="return confirm(
+                'Approve this correction request? The latest approved shift revision must match the requested times.'
+              );">
+          <input type="hidden" name="csrf_token"
+                 value="{{ approval_csrf }}">
+          <label class="form-label small">
+            Review note (optional)
+          </label>
+          <input class="form-control form-control-sm mb-2"
+                 name="review_note" maxlength="1000"
+                 placeholder="Approval note">
+          <button type="submit" class="btn btn-success">
+            Approve Correction Request
+          </button>
+        </form>
+        {% endif %}
+        <p class="text-muted small mt-3 mb-0">
+          The request can be approved only when the latest
+          approved Attendance revision matches the requested
+          start and end times. Payroll approval is separate.
+        </p>
       {% else %}
       <p class="text-muted mt-3 mb-0">
         This request has already been processed.

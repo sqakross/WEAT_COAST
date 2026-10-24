@@ -49,6 +49,11 @@
     <a class="btn btn-sm btn-outline-secondary ms-auto"
        href="{{ url_for('auth.attendance_correction_requests') }}">
       Correction Requests
+      {% if correction_pending_count is not none %}
+      <span class="badge bg-warning text-dark ms-1">
+        {{ correction_pending_count }}
+      </span>
+      {% endif %}
     </a>
     {% endif %}
   </div>

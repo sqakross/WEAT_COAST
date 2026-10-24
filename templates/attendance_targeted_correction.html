@@ -256,7 +256,71 @@
     {% endif %}
   </div>
 
-  <section class="panel">
+  
+  {# WCCR_UNIFIED_CORRECTION_V22 #}
+  {% if correction_request %}
+  <section class="panel" style="border-left:4px solid #e5a600">
+    <div class="d-flex justify-content-between
+                align-items-center flex-wrap gap-2 mb-3">
+      <div>
+        <div class="section-title mb-1">
+          Employee Correction Request #{{ correction_request.id }}
+        </div>
+        {% if correction_request.status == 'approved' %}
+        <span class="badge bg-success">Approved</span>
+        {% elif correction_request.status == 'rejected' %}
+        <span class="badge bg-danger">Rejected</span>
+        {% else %}
+        <span class="badge bg-warning text-dark">
+          Pending Review
+        </span>
+        {% endif %}
+      </div>
+      <a class="btn btn-outline-secondary btn-sm"
+         href="{{ url_for('auth.attendance_correction_requests') }}">
+        Back to Requests
+      </a>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
+        <div class="clock-card">
+          <label>Original Time (PT)</label>
+          <div>{{ correction_request.original_start_utc_pt }}</div>
+          <div>{{ correction_request.original_end_utc_pt }}</div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="clock-card">
+          <label>Requested Time (PT)</label>
+          <div>{{ correction_request.requested_start_utc_pt }}</div>
+          <div>{{ correction_request.requested_end_utc_pt }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mb-2">
+      <strong>Employee's Request:</strong>
+      {{ correction_request.reason }}
+    </div>
+
+    {% if correction_request.status == 'pending' %}
+<div class="subtle">
+      Review the times below. Save a draft or approve
+      the correction to complete this request.
+    </div>
+{% endif %}
+  </section>
+  {% endif %}
+
+<section class="panel">
+    {# WCCR_CORRECTION_V34_UI #}
+    <style>
+      /* The clock editor renders its own accessible labels. */
+      .clock-card > label {
+          display: none !important;
+      }
+    </style>
     <div class="section-title">Work Hours</div>
     <div class="row g-3">
       <div class="col-md-6">
@@ -435,17 +499,69 @@
         {% if saved_review and saved_review.status == 'approved' %}
           Approved
         {% else %}
-          Approve Shift
+          {% if correction_request %}
+            Approve Correction
+          {% else %}
+            Approve Shift
+          {% endif %}
         {% endif %}
       </button>
+      {% if correction_request and correction_request.status == 'pending' %}
+      <button type="button"
+              class="btn btn-outline-danger"
+              id="v31-reject-toggle">
+        Reject Request
+      </button>
+      {% endif %}
     </div>
-    <div class="subtle mt-3">
+
+    {% if correction_request and correction_request.status == 'pending' %}
+    <form id="v31-reject-form" method="post"
+          action="{{ url_for('auth.attendance_correction_reject',
+                            request_id=correction_request.id) }}"
+          class="mt-3" hidden>
+      <input type="hidden" name="csrf_token"
+             value="{{ correction_request.review_csrf }}">
+      <label for="v31-reject-reason" class="form-label">
+        Reason for rejection
+      </label>
+      <textarea id="v31-reject-reason" name="review_note"
+                class="form-control" rows="2"
+                minlength="4" maxlength="1000" required
+                placeholder="Explain why this request is rejected"></textarea>
+      <div class="mt-2 d-flex gap-2">
+        <button type="submit" class="btn btn-danger">
+          Reject Request
+        </button>
+        <button type="button" id="v31-reject-cancel"
+                class="btn btn-outline-secondary">
+          Cancel
+        </button>
+      </div>
+    </form>
+    {% endif %}
+
+    {% if not correction_request or correction_request.status == 'pending' %}
+<div class="subtle mt-3">
       Save Changes saves a draft.
-      Approve Shift saves current changes and approves Attendance.
-      Payroll approval is separate.
+      {# WCCR_CORRECTION_V32_UI #}
+      {% if correction_request %}
+        {% if correction_request.status == 'pending' %}
+          Save Changes keeps a draft.
+          Approve Correction completes this request.
+          Reject Request requires a reason.
+        {% else %}
+          This correction request has been processed.
+        {% endif %}
+      {% else %}
+        Save Changes keeps a draft.
+        Approve Shift approves Attendance.
+      {% endif %}
+      Payroll approval remains separate.
       <span id="v73-save-status" role="status"
             aria-live="polite"></span>
     </div>
+{% endif %}
   </section>
 
   <details class="panel">
@@ -1785,6 +1901,9 @@ window.wccrAttendanceReviewState = {
     };
   }
 
+  // WCCR_CORRECTION_V31
+  window.wccrCorrectionV31Payload = currentPayload;
+
   if (saved && saved.status === "pending" &&
       reviewState.savedRevisionId) {
     try {
@@ -1873,5 +1992,501 @@ window.wccrAttendanceReviewState = {
   });
 })();
 </script>
+
+
+{% if correction_request and correction_request.status == 'pending' %}
+<script>
+/* WCCR_CORRECTION_V31 */
+(function () {
+  "use strict";
+
+  const requestId = {{ correction_request.id|tojson }};
+  const csrf = {{ csrf_token|tojson }};
+  const button = document.getElementById("v73-approve-shift");
+  const status = document.getElementById("v73-save-status");
+  const toggle = document.getElementById("v31-reject-toggle");
+  const rejectForm = document.getElementById("v31-reject-form");
+  const cancel = document.getElementById("v31-reject-cancel");
+
+  if (toggle && rejectForm) {
+    toggle.addEventListener("click", function () {
+      rejectForm.hidden = !rejectForm.hidden;
+      if (!rejectForm.hidden) {
+        document.getElementById("v31-reject-reason").focus();
+      }
+    });
+  }
+
+  if (cancel && rejectForm) {
+    cancel.addEventListener("click", function () {
+      rejectForm.hidden = true;
+    });
+  }
+
+  if (!button) return;
+
+  button.addEventListener("click", async function (event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (button.dataset.v31Busy === "1") return;
+
+    const active = document.activeElement;
+    if (active && typeof active.blur === "function") active.blur();
+
+    try {
+      if (typeof window.wccrCorrectionV31Payload !== "function") {
+        throw new Error("Editor is not ready. Reload the page.");
+      }
+
+      const payload = window.wccrCorrectionV31Payload();
+      const form = new FormData();
+
+      form.append("csrf_token", csrf);
+      form.append("action_type", "approve_employee_correction_v31");
+      form.append("correction_request_id", String(requestId));
+      form.append("payload", JSON.stringify(payload));
+
+      button.dataset.v31Busy = "1";
+      button.disabled = true;
+      button.textContent = "Approving...";
+
+      const response = await fetch(window.location.pathname, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {"Accept": "application/json"},
+        body: form
+      });
+
+      const type = response.headers.get("content-type") || "";
+      if (!type.includes("application/json")) {
+        throw new Error("Server returned HTTP " + response.status);
+      }
+
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Approval failed.");
+      }
+
+      window.location.href =
+        {{ url_for('auth.attendance_correction_requests')|tojson }};
+    } catch (error) {
+      button.disabled = false;
+      button.dataset.v31Busy = "0";
+      button.textContent = "Approve Correction";
+      if (status) {
+        status.textContent = " " + error.message;
+        status.style.color = "#b42318";
+      }
+    }
+  }, true);
+})();
+</script>
+{% endif %}
+
+
+{# WCCR_CORRECTION_V33_READONLY #}
+{% if correction_request and correction_request.status in ('approved', 'rejected') %}
+<style>
+.wtime-pro.wccr-v33-completed
+  input:disabled,
+.wtime-pro.wccr-v33-completed
+  textarea:disabled,
+.wtime-pro.wccr-v33-completed
+  select:disabled {
+    background-color: #f7f9fc;
+    opacity: 1;
+    color: #455468;
+}
+.wccr-v33-completed-notice {
+    padding: 12px 15px;
+    margin-bottom: 15px;
+    background: #f2f6fa;
+    border: 1px solid #dce5ef;
+    border-radius: 10px;
+    font-size: .88rem;
+}
+</style>
+<script>
+(function () {
+    "use strict";
+
+    function lockCompletedRequest() {
+        const root = document.querySelector(".wtime-pro");
+        if (!root) return;
+
+        root.classList.add("wccr-v33-completed");
+
+        const status = {{ correction_request.status|tojson }};
+        const requestId = {{ correction_request.id|tojson }};
+
+        const notice = document.createElement("div");
+        notice.className = "wccr-v33-completed-notice";
+        notice.setAttribute("role", "status");
+        notice.textContent =
+            "Correction Request #" + requestId +
+            " is " + status.toUpperCase() +
+            ". This request is completed and shown for review only.";
+
+        const panels = root.querySelectorAll(".panel");
+        if (panels.length) {
+            panels[0].insertAdjacentElement("afterend", notice);
+        }
+
+        root.querySelectorAll(
+            "input, textarea, select, button"
+        ).forEach(function (control) {
+            control.disabled = true;
+        });
+
+        const actionBar = root.querySelector(".action-bar");
+        if (actionBar) {
+            actionBar.hidden = true;
+        }
+
+        const rejection = document.getElementById("v31-reject-form");
+        if (rejection) {
+            rejection.hidden = true;
+        }
+
+        const guidance = root.querySelector(
+            "#v73-save-status"
+        );
+        if (guidance) {
+            guidance.textContent = "";
+        }
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener(
+            "DOMContentLoaded",
+            lockCompletedRequest,
+            {once: true}
+        );
+    } else {
+        lockCompletedRequest();
+    }
+})();
+</script>
+{% endif %}
+
+
+{# WCCR_CORRECTION_V331_UI_CLEANUP #}
+{% if correction_request and correction_request.status in ('approved', 'rejected') %}
+
+<style>
+/* Completed correction requests are history, not an editor. */
+.wccr-v331-hidden {
+    display: none !important;
+}
+</style>
+
+<script>
+(function () {
+    "use strict";
+
+    function cleanupCompletedCorrection() {
+        const requestPanel = document.querySelector(
+            ".wtime-pro"
+        );
+
+        if (!requestPanel) return;
+
+        const status = {{ correction_request.status|tojson }};
+
+        // Remove guidance that refers to saving or approving
+        // a request which has already been completed.
+        const walker = document.createTreeWalker(
+            requestPanel,
+            NodeFilter.SHOW_TEXT
+        );
+
+        const staleTexts = [];
+
+        while (walker.nextNode()) {
+            const node = walker.currentNode;
+            const text = (node.nodeValue || "").trim();
+
+            if (
+                text.includes(
+                    "Save a draft or approve the correction"
+                ) ||
+                text.includes(
+                    "Saving or approving a shift does not"
+                )
+            ) {
+                staleTexts.push(node);
+            }
+        }
+
+        staleTexts.forEach(function (node) {
+            const parent = node.parentElement;
+
+            if (parent &&
+                parent.children.length === 0) {
+                parent.classList.add(
+                    "wccr-v331-hidden"
+                );
+            } else {
+                node.nodeValue = "";
+            }
+        });
+
+        // Hide all visible edit actions in the completed
+        // request screen, including break/lunch controls.
+        const editWords = [
+            "add break",
+            "add lunch",
+            "undo",
+            "reset",
+            "save changes",
+            "approve correction",
+            "approve shift",
+            "reject request",
+            "delete break",
+            "remove break",
+            "delete lunch",
+            "remove lunch"
+        ];
+
+        requestPanel.querySelectorAll(
+            "button, input[type='button'], input[type='submit']"
+        ).forEach(function (button) {
+            const label = (
+                button.textContent ||
+                button.value ||
+                button.getAttribute("aria-label") ||
+                ""
+            ).trim().toLowerCase();
+
+            if (editWords.some(function (word) {
+                return label.includes(word);
+            })) {
+                button.disabled = true;
+                button.classList.add(
+                    "wccr-v331-hidden"
+                );
+            }
+        });
+
+        // Preserve navigation to the correction queue.
+        requestPanel.querySelectorAll("a").forEach(
+            function (link) {
+                const label = (
+                    link.textContent || ""
+                ).trim().toLowerCase();
+
+                if (label.includes("back to requests")) {
+                    link.classList.remove(
+                        "wccr-v331-hidden"
+                    );
+                }
+            }
+        );
+
+        // Hide the redundant Timesheets navigation only
+        // when the correction queue link is available.
+        const queueLink = Array.from(
+            requestPanel.querySelectorAll("a")
+        ).find(function (link) {
+            return (link.textContent || "")
+                .toLowerCase()
+                .includes("back to requests");
+        });
+
+        if (queueLink) {
+            requestPanel.querySelectorAll("a").forEach(
+                function (link) {
+                    if (
+                        (link.textContent || "")
+                        .toLowerCase()
+                        .includes("back to timesheets")
+                    ) {
+                        link.classList.add(
+                            "wccr-v331-hidden"
+                        );
+                    }
+                }
+            );
+        }
+
+        requestPanel.setAttribute(
+            "data-correction-view",
+            "completed-" + status
+        );
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener(
+            "DOMContentLoaded",
+            cleanupCompletedCorrection,
+            {once: true}
+        );
+    } else {
+        cleanupCompletedCorrection();
+    }
+})();
+</script>
+
+{% endif %}
+
+
+{# WCCR_CORRECTION_V332_COMPLETED_VIEW #}
+{% if correction_request and correction_request.status in ('approved', 'rejected') %}
+
+<style>
+.wccr-v332-hidden {
+    display: none !important;
+}
+.wccr-v332-completed input:disabled,
+.wccr-v332-completed textarea:disabled,
+.wccr-v332-completed select:disabled {
+    opacity: 1;
+    background-color: #f7f9fc;
+    color: #475569;
+}
+</style>
+
+<script>
+(function () {
+    "use strict";
+
+    function cleanupCompletedView() {
+        const root = document.querySelector(".wtime-pro");
+        if (!root) return;
+
+        root.classList.add("wccr-v332-completed");
+
+        const stalePhrases = [
+            "save a draft or approve the correction",
+            "save changes saves a draft",
+            "saving or approving a shift does not",
+            "review the times below. save a draft",
+            "this correction request has been processed"
+        ];
+
+        // Hide only text elements that contain obsolete
+        // instructions, without removing surrounding cards.
+        root.querySelectorAll(
+            "p, small, .text-muted, .form-text, .help-text"
+        ).forEach(function (element) {
+            const text = (
+                element.textContent || ""
+            ).trim().toLowerCase();
+
+            if (
+                stalePhrases.some(function (phrase) {
+                    return text.includes(phrase);
+                }) &&
+                !element.querySelector(
+                    "input, textarea, select, button, a"
+                )
+            ) {
+                element.classList.add(
+                    "wccr-v332-hidden"
+                );
+            }
+        });
+
+        // Some guidance is rendered in plain div/span nodes.
+        root.querySelectorAll("div, span").forEach(
+            function (element) {
+                if (element.children.length !== 0) return;
+
+                const text = (
+                    element.textContent || ""
+                ).trim().toLowerCase();
+
+                if (
+                    stalePhrases.some(function (phrase) {
+                        return text.includes(phrase);
+                    })
+                ) {
+                    element.classList.add(
+                        "wccr-v332-hidden"
+                    );
+                }
+            }
+        );
+
+        // Use history-oriented terminology.
+        root.querySelectorAll("label, h4, h5, h6")
+            .forEach(function (element) {
+                if (
+                    (element.textContent || "")
+                    .trim().toLowerCase() ===
+                    "reason for correction"
+                ) {
+                    element.textContent = "Correction Note";
+                }
+            });
+
+        // Remove edit actions on completed requests.
+        const editLabels = [
+            "save changes",
+            "approve correction",
+            "approve shift",
+            "reject request",
+            "add break",
+            "add lunch",
+            "undo",
+            "reset"
+        ];
+
+        root.querySelectorAll(
+            "button, input[type='button'], input[type='submit']"
+        ).forEach(function (button) {
+            const label = (
+                button.textContent ||
+                button.value ||
+                button.getAttribute("aria-label") ||
+                ""
+            ).trim().toLowerCase();
+
+            if (
+                editLabels.some(function (phrase) {
+                    return label.includes(phrase);
+                })
+            ) {
+                button.disabled = true;
+                button.classList.add(
+                    "wccr-v332-hidden"
+                );
+            }
+        });
+
+        // Preserve queue navigation.
+        root.querySelectorAll("a").forEach(function (link) {
+            const label = (
+                link.textContent || ""
+            ).trim().toLowerCase();
+
+            if (label.includes("back to requests")) {
+                link.classList.remove(
+                    "wccr-v332-hidden"
+                );
+            }
+        });
+
+        root.setAttribute(
+            "data-correction-view-mode",
+            "history"
+        );
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener(
+            "DOMContentLoaded",
+            cleanupCompletedView,
+            {once: true}
+        );
+    } else {
+        cleanupCompletedView();
+    }
+})();
+</script>
+
+{% endif %}
 
 {% endblock %}
