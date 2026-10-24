@@ -639,8 +639,18 @@
             <a class="wccr-btn-ghost text-decoration-none" href="{{ url_for('inventory.change_password', user_id=current_user.id) }}">🔑 CHANGE PASSWORD</a>
             
 {# WCCR_ATTENDANCE_PAYROLL_NAV_V29B_BEGIN #}
+{# WCCR_FLEX_ACCESS_V14B: individual permissions only #}
 {% if current_user.is_authenticated
-      and (current_user.role or '')|lower in ['superadmin', 'admin'] %}
+      and (
+      erp_access_allowed(current_user, 'erp.attendance.view_all')
+      or erp_access_allowed(current_user, 'erp.attendance.review_shifts')
+      or erp_access_allowed(current_user, 'erp.attendance.edit_shifts')
+      or erp_access_allowed(current_user, 'erp.attendance.approve_shifts')
+      or erp_access_allowed(current_user, 'erp.attendance.manage_users')
+      or erp_access_allowed(current_user, 'erp.payroll.view')
+      or erp_access_allowed(current_user, 'erp.payroll.manage_rates')
+      or erp_access_allowed(current_user, 'erp.payroll.approve')
+      ) %}
 <a class="nav-link"
    href="{{ url_for('inventory.attendance_payroll_dashboard') }}">
   Attendance &amp; Payroll

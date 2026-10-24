@@ -41,51 +41,12 @@
           Superadmin has global access
         </div>
         <div style="font-size:.85rem;">
-          Warehouse, Appliance and ERP access restrictions do not apply to this account.
+          Full Access - Always Allowed. Superadmin has unrestricted access to all WCCR modules, including Employee Time, Attendance and Payroll. Saved DENY settings do not restrict this account.
         </div>
       </div>
     {% endif %}
 
     
-      <!-- WCCR_ATTENDANCE_SECURITY_V35 -->
-      {% if is_target_superadmin %}
-      <form method="post"
-            action="{{ url_for('inventory.user_access', user_id=user.id) }}"
-            class="card border-primary mb-4">
-        <input type="hidden" name="attendance_review_csrf"
-               value="{{ attendance_review_csrf }}">
-        <div class="card-header fw-semibold">
-          Attendance Review Permissions (Explicit ALLOW)
-        </div>
-        <div class="card-body">
-          <p class="small text-muted">
-            These four rights are independent of Superadmin bypass.
-          </p>
-          {% for code in attendance_review_rights|sort %}
-          {% set current_effect = erp_override_map.get(code, 'DEFAULT') %}
-          <div class="row align-items-center mb-2">
-            <div class="col-md-6"><code>{{ code }}</code></div>
-            <div class="col-md-6">
-              <select class="form-select form-select-sm"
-                      name="erp_override__{{ code }}">
-                {% for effect in ['DEFAULT', 'ALLOW', 'DENY'] %}
-                <option value="{{ effect }}"
-                  {% if current_effect == effect %}selected{% endif %}>
-                  {{ effect }}
-                </option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-        <div class="card-footer text-end">
-          <button type="submit" class="btn btn-primary">
-            Save Attendance Review Permissions
-          </button>
-        </div>
-      </form>
-      {% endif %}
 
 <form method="post"
           action="{{ url_for('inventory.user_access', user_id=user.id) }}"
@@ -429,8 +390,7 @@
 
             <div class="text-muted mt-1"
                  style="font-size:.72rem;">
-              Per-user exceptions to the existing ERP role
-              permissions. DEFAULT keeps the current role behavior.
+              Individual ERP permissions. For Employee Time and Payroll, only explicit ALLOW grants access; DEFAULT and DENY block access.
             </div>
 
           </div>

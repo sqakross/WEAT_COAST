@@ -19312,55 +19312,15 @@ def user_access(user_id):
     # =========================================================
     if request.method == "POST":
         # WCCR_ATTENDANCE_SECURITY_V32: dedicated Superadmin permission update
+        # WCCR_ACCESS_UI_V15
+        # Superadmin permissions are unconditional.
         if is_target_superadmin:
-            from flask import abort
-            from services.attendance_review_permissions import REVIEW_PERMISSIONS
-            from services.attendance_review_csrf import (
-                verify_csrf_token, rotate_csrf_nonce,
+            flash(
+                "Superadmin already has full access.",
+                "info",
             )
-            rights = frozenset(REVIEW_PERMISSIONS.values())
-            prefix = 'erp_override__'
-            expected_fields = {
-                prefix + code for code in rights
-            } | {'attendance_review_csrf'}
-            if set(request.form.keys()) != expected_fields:
-                abort(400)
-            token_values = request.form.getlist(
-                'attendance_review_csrf'
-            )
-            if len(token_values) != 1 or not verify_csrf_token(
-                token_values[0], current_user.id, user.id
-            ):
-                abort(400)
-            submitted = {
-                key[len(prefix):] for key in request.form.keys()
-                if key.startswith(prefix)
-            }
-            if submitted != rights:
-                abort(400)
-            changes = {}
-            for code in rights:
-                values = request.form.getlist(prefix + code)
-                if len(values) != 1 or values[0] not in (
-                    'DEFAULT', 'ALLOW', 'DENY'
-                ):
-                    abort(400)
-                changes[code] = values[0]
-            try:
-                for code, effect in changes.items():
-                    ErpAccessService.set_override(
-                        user=user, permission_code=code,
-                        effect=effect, actor=current_user,
-                        commit=False,
-                    )
-                db.session.commit()
-            except Exception:
-                db.session.rollback()
-                raise
-            rotate_csrf_nonce()
-            flash('Attendance Review permissions updated.', 'success')
             return redirect(url_for(
-                'inventory.user_access', user_id=user.id
+                "inventory.user_access", user_id=user.id
             ))
 
 
@@ -24429,9 +24389,9 @@ def attendance_payroll_dashboard(section="overview"):
     from services.erp_access_service import ErpAccessService
     from services.attendance_review_permissions import can_review_action
 
+    # WCCR_FLEX_ACCESS_V11
+    # Access is based on individual permissions, not base roles.
     role = (getattr(current_user, "role", "") or "").strip().lower()
-    if role not in ("superadmin", "admin"):
-        abort(403)
 
     permissions = {
         "attendance_view": "erp.attendance.view_all",
@@ -24442,9 +24402,10 @@ def attendance_payroll_dashboard(section="overview"):
         "payroll_approve": "erp.payroll.approve",
     }
 
+    # WCCR_FLEX_ACCESS_V13
+    # Every operational permission requires individual ALLOW.
+    # No role-based bypass, including Superadmin.
     def allowed(code):
-        if role == "superadmin":
-            return True
         return bool(ErpAccessService.is_allowed(
             current_user, code, default_allowed=False
         ))
@@ -24472,6 +24433,10 @@ def attendance_payroll_dashboard(section="overview"):
 
     if section not in sections:
         abort(404)
+
+    # WCCR_FLEX_ACCESS_V11: no module rights means no entry.
+    if not any(access.values()):
+        abort(403)
 
     required = sections[section]
     if required is not None and not access[required]:

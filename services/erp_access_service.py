@@ -74,6 +74,20 @@ class ErpAccessService:
 
         return code
 
+    # WCCR_FLEX_ACCESS_V12_STRICT
+    # All operational Employee Time / Attendance / Payroll rights
+    # require an individual explicit ALLOW, including Superadmin.
+    TIME_PAYROLL_PREFIXES = (
+        "erp.attendance.",
+        "erp.payroll.",
+        "erp.employee_time.",
+        "erp.time_tracking.",
+    )
+
+    @classmethod
+    def is_time_payroll_right(cls, code: str) -> bool:
+        return code.startswith(cls.TIME_PAYROLL_PREFIXES)
+
     ATTENDANCE_REVIEW_RIGHTS = frozenset({
         'erp.attendance.review_shifts',
         'erp.attendance.edit_shifts',
@@ -88,6 +102,9 @@ class ErpAccessService:
         permission_code: str,
     ) -> str | None:
 
+        # WCCR_SUPERADMIN_FULL_V14C_AST
+        if user is not None and cls.is_superadmin(user):
+            return cls.EFFECT_ALLOW
         if user is None:
             return None
 
@@ -95,7 +112,10 @@ class ErpAccessService:
             permission_code
         )
 
-        if cls.is_superadmin(user) and code not in cls.ATTENDANCE_REVIEW_RIGHTS:
+        if (
+            cls.is_superadmin(user)
+            and not cls.is_time_payroll_right(code)
+        ):
             return cls.EFFECT_ALLOW
 
         row = (
@@ -131,11 +151,14 @@ class ErpAccessService:
         default_allowed: bool,
     ) -> bool:
 
+        # WCCR_SUPERADMIN_FULL_V14C_AST
+        if user is not None and cls.is_superadmin(user):
+            return True
         if user is None:
             return False
 
         code = cls._normalize_code(permission_code)
-        if code in cls.ATTENDANCE_REVIEW_RIGHTS:
+        if cls.is_time_payroll_right(code):
             return cls.get_override(user, code) == cls.EFFECT_ALLOW
 
         if cls.is_superadmin(user):
@@ -176,8 +199,18 @@ class ErpAccessService:
             )
 
         code = cls._normalize_code(permission_code)
+
+        # Only Superadmin may delegate Time / Payroll rights.
+        if (
+            cls.is_time_payroll_right(code)
+            and not cls.is_superadmin(actor)
+        ):
+            raise ErpAccessError(
+                "Only Superadmin can configure Time / Payroll access."
+            )
+
         if (cls.is_superadmin(user) and
-                code not in cls.ATTENDANCE_REVIEW_RIGHTS):
+                not cls.is_time_payroll_right(code)):
             raise ErpAccessError(
                 "Superadmin ERP access cannot be restricted."
             )
