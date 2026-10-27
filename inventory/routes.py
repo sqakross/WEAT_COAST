@@ -20030,6 +20030,13 @@ def edit_user(user_id):
     from decimal import Decimal, InvalidOperation
     from sqlalchemy import func
     from models import EmployeePayRate, EmployeePayrollStatus
+    # WCCR_CA_RULES_V1B3
+    from models import EmployeeCaliforniaPayrollRule
+    # WCCR_CA_RULES_V1B3_1
+    from services.california_payroll_rules_v1a import (
+        validate_rules,
+        CaliforniaRulesError,
+    )
 
     user = User.query.get_or_404(user_id)
     me_role = (current_user.role or "").lower()
@@ -20114,6 +20121,25 @@ def edit_user(user_id):
         .all()
     ) if pay_allowed else []
 
+    # WCCR_CA_RULES_V1B3: employee-specific history
+    ca_history = (
+        EmployeeCaliforniaPayrollRule.query
+        .filter_by(user_id=user.id)
+        .order_by(
+            EmployeeCaliforniaPayrollRule.effective_date.desc(),
+            EmployeeCaliforniaPayrollRule.id.desc(),
+        )
+        .all()
+    ) if pay_allowed else []
+
+    active_ca_history = [
+        item for item in ca_history
+        if item.cancelled_at is None
+    ]
+    latest_ca = (
+        active_ca_history[0] if active_ca_history else None
+    )
+
     # WCCR_PAYROLL_CORRECT_V10C8C3
     active_pay_history = [
         item for item in pay_history
@@ -20134,10 +20160,179 @@ def edit_user(user_id):
         bool(latest_status.enabled) if latest_status else False
     )
 
+
+    # WCCR_PAYROLL_EDIT_CSRF_V2
+    import secrets as _pay_csrf_secrets
+    from flask import session as _pay_csrf_session
+
+    _pay_csrf_key = "wccr_payroll_edit_user_csrf"
+    _pay_csrf_token = _pay_csrf_session.get(_pay_csrf_key)
+
+    if not _pay_csrf_token:
+        _pay_csrf_token = _pay_csrf_secrets.token_urlsafe(32)
+        _pay_csrf_session[_pay_csrf_key] = _pay_csrf_token
+
     if request.method == "POST":
+
+        _submitted_csrf = request.form.get(
+            "wccr_payroll_csrf", ""
+        )
+        if (
+            not _submitted_csrf
+            or not _pay_csrf_secrets.compare_digest(
+                _pay_csrf_token,
+                _submitted_csrf
+            )
+        ):
+            abort(400)
+
 
         # WCCR_PAYROLL_CORRECT_V10C8C3
         action = request.form.get("form_action")
+        # WCCR_CA_CORRECTIONS_V1B5
+        if action == "ca_rules_correct":
+            if not pay_allowed:
+                abort(403)
+
+            from datetime import datetime
+            from sqlalchemy.exc import IntegrityError
+
+            try:
+                record_id = int(
+                    request.form.get("ca_record_id") or "0"
+                )
+                reason = (
+                    request.form.get("ca_correction_reason") or ""
+                ).strip()
+
+                if not 5 <= len(reason) <= 1000:
+                    raise ValueError(
+                        "Correction reason must contain "
+                        "5 to 1000 characters"
+                    )
+
+                record = (
+                    EmployeeCaliforniaPayrollRule.query
+                    .filter_by(id=record_id, user_id=user.id)
+                    .first()
+                )
+
+                if record is None:
+                    raise ValueError("California Rules record not found")
+
+                if record.cancelled_at is not None:
+                    raise ValueError(
+                        "This record was already corrected or cancelled"
+                    )
+
+                wage = (
+                    request.form.get("ca_corrected_wage_order") or ""
+                ).strip()
+                first = (
+                    request.form.get("ca_corrected_first") or ""
+                ).strip()
+                second = (
+                    request.form.get("ca_corrected_second") or ""
+                ).strip()
+                notes = (
+                    request.form.get("ca_corrected_notes") or ""
+                ).strip()
+
+                values = validate_rules({
+                    "effective_date": record.effective_date.isoformat(),
+                    "wage_order": wage,
+                    "first_meal_waiver": first,
+                    "second_meal_waiver": second,
+                    "notes": notes,
+                })
+
+                if not isinstance(values, dict):
+                    raise ValueError(
+                        "California Rules validation failed"
+                    )
+
+                if (
+                    record.wage_order == wage
+                    and record.first_meal_waiver == first
+                    and record.second_meal_waiver == second
+                    and (record.notes or "") == notes
+                ):
+                    raise ValueError(
+                        "No California Rules changes to correct"
+                    )
+
+                conflict = (
+                    EmployeeCaliforniaPayrollRule.query
+                    .filter(
+                        EmployeeCaliforniaPayrollRule.user_id
+                        == user.id,
+                        EmployeeCaliforniaPayrollRule.effective_date
+                        == record.effective_date,
+                        EmployeeCaliforniaPayrollRule.id
+                        != record.id,
+                        EmployeeCaliforniaPayrollRule.cancelled_at
+                        .is_(None),
+                    )
+                    .first()
+                )
+                if conflict is not None:
+                    raise ValueError(
+                        "Another active California Rules record "
+                        "already exists on this date"
+                    )
+
+                record.cancelled_at = datetime.utcnow()
+                record.cancelled_by_id = current_user.id
+                record.cancellation_reason = (
+                    "Superseded by correction: " + reason
+                )
+
+                # Release active-date uniqueness before replacement.
+                db.session.flush()
+
+                db.session.add(
+                    EmployeeCaliforniaPayrollRule(
+                        user_id=user.id,
+                        effective_date=record.effective_date,
+                        wage_order=wage,
+                        first_meal_waiver=first,
+                        second_meal_waiver=second,
+                        notes=notes,
+                        created_by_id=current_user.id,
+                    )
+                )
+
+                db.session.commit()
+                flash(
+                    "California Rules correction saved. "
+                    "Review affected approved Payroll periods "
+                    "separately.",
+                    "success",
+                )
+
+            except (
+                ValueError,
+                InvalidOperation,
+                CaliforniaRulesError,
+                IntegrityError,
+            ) as exc:
+                db.session.rollback()
+                flash(str(exc), "danger")
+            except Exception:
+                db.session.rollback()
+                current_app.logger.exception(
+                    "California Rules correction failed: user_id=%s",
+                    user.id,
+                )
+                flash(
+                    "Unable to save California Rules correction.",
+                    "danger",
+                )
+
+            return redirect(url_for(
+                "inventory.edit_user", user_id=user.id
+            ))
+
         if action in {"payroll_correct", "payroll_cancel"}:
             if not pay_allowed:
                 abort(403)
@@ -20600,13 +20795,162 @@ def edit_user(user_id):
                     ))
                     changed = True
 
+            # WCCR_CA_RULES_V1B3: same transaction as Payroll
+            if pay_allowed:
+                # WCCR_CA_RULES_V1B3_1:
+                # Do not interpret missing CA form fields as changes.
+                ca_fields = (
+                    "ca_wage_order",
+                    "ca_first_meal_waiver",
+                    "ca_second_meal_waiver",
+                    "ca_notes",
+                )
+                present = [
+                    key in request.form for key in ca_fields
+                ]
+                if any(present) and not all(present):
+                    raise ValueError(
+                        "California Rules form is incomplete. "
+                        "Reload the page and try again."
+                    )
+
+                if not any(present):
+                    ca_wage = ""
+                    ca_first = "none"
+                    ca_second = "none"
+                    ca_notes = ""
+                else:
+                    ca_wage = (
+                        request.form.get("ca_wage_order") or ""
+                    ).strip()
+                    ca_first = (
+                        request.form.get("ca_first_meal_waiver") or ""
+                    ).strip()
+                    ca_second = (
+                        request.form.get("ca_second_meal_waiver") or ""
+                    ).strip()
+                    ca_notes = (
+                        request.form.get("ca_notes") or ""
+                    ).strip()
+
+                allowed_waivers = {
+                    "none",
+                    "documented_pending_review",
+                    "verified_by_authorized_reviewer",
+                }
+
+                if ca_wage and ca_wage not in {
+                    str(n) for n in range(1, 18)
+                }:
+                    raise ValueError("Invalid California Wage Order")
+
+                if (
+                    ca_first not in allowed_waivers
+                    or ca_second not in allowed_waivers
+                ):
+                    raise ValueError("Invalid meal waiver status")
+
+                if len(ca_notes) > 1000:
+                    raise ValueError(
+                        "California Rules notes exceed 1000 characters"
+                    )
+
+                if not ca_wage and (
+                    ca_first != "none"
+                    or ca_second != "none"
+                    or ca_notes
+                ):
+                    raise ValueError(
+                        "Select a Wage Order before configuring "
+                        "California meal waiver records"
+                    )
+
+                # WCCR_CA_RULES_V1B4_SAFE_CLEAR
+                # Never silently ignore clearing an existing rule.
+                if (
+                    all(present)
+                    and not ca_wage
+                    and latest_ca is not None
+                ):
+                    raise ValueError(
+                        "California Wage Order is already saved. "
+                        "To remove or correct it, use an authorized "
+                        "history correction. Existing history is "
+                        "preserved."
+                    )
+
+                if all(present) and ca_wage:
+                    ca_values = {
+                        "effective_date": effective.isoformat(),
+                        "wage_order": ca_wage,
+                        "first_meal_waiver": ca_first,
+                        "second_meal_waiver": ca_second,
+                        "notes": ca_notes,
+                    }
+                    # Existing V1A validator: fail closed on error.
+                    ca_validation = validate_rules(ca_values)
+                    if ca_validation is False:
+                        raise ValueError(
+                            "California Rules validation failed"
+                        )
+
+                    ca_changed = (
+                        latest_ca is None
+                        or latest_ca.wage_order != ca_wage
+                        or latest_ca.first_meal_waiver != ca_first
+                        or latest_ca.second_meal_waiver != ca_second
+                        or (latest_ca.notes or "") != ca_notes
+                    )
+
+                    if ca_changed:
+                        if (
+                            latest_ca is not None
+                            and effective <= latest_ca.effective_date
+                        ):
+                            raise ValueError(
+                                "California Rules Effective Date "
+                                "must be later than the latest rule"
+                            )
+
+                        conflict = (
+                            EmployeeCaliforniaPayrollRule.query
+                            .filter_by(
+                                user_id=user.id,
+                                effective_date=effective,
+                                cancelled_at=None,
+                            )
+                            .first()
+                        )
+                        if conflict:
+                            raise ValueError(
+                                "California Rules already exist "
+                                "for this Effective Date"
+                            )
+
+                        db.session.add(
+                            EmployeeCaliforniaPayrollRule(
+                                user_id=user.id,
+                                effective_date=effective,
+                                wage_order=ca_wage,
+                                first_meal_waiver=ca_first,
+                                second_meal_waiver=ca_second,
+                                notes=ca_notes,
+                                created_by_id=current_user.id,
+                            )
+                        )
+                        changed = True
+
             if changed:
                 db.session.commit()
                 flash("Employee Settings saved.", "success")
             else:
                 flash("No changes to save.", "info")
 
-        except (ValueError, InvalidOperation) as exc:
+        except (
+            ValueError,
+            InvalidOperation,
+            CaliforniaRulesError,
+        ) as exc:
             db.session.rollback()
             flash(str(exc), "danger")
         except Exception:
@@ -20636,7 +20980,7 @@ def edit_user(user_id):
 
     author_ids = {
         uid
-        for item in pay_history + status_history
+        for item in pay_history + status_history + ca_history
         for uid in (item.created_by_id, item.cancelled_by_id)
         if uid is not None
     }
@@ -20665,6 +21009,7 @@ def edit_user(user_id):
 
     return render_template(
         "edit_user.html",
+        wccr_payroll_csrf=_pay_csrf_token,
         user=user,
         role_options=role_options,
         change_role_allowed=change_role_allowed,
@@ -20679,6 +21024,8 @@ def edit_user(user_id):
         payroll_today_date=date.today(),
         payroll_effective_date=suggested_date.isoformat(),
         payroll_authors=authors,
+        ca_history=ca_history,
+        latest_ca=latest_ca,
     )
 
 @inventory_bp.route('/users/change_password/<int:user_id>', methods=['GET', 'POST'])

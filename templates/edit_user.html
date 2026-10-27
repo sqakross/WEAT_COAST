@@ -1,8 +1,222 @@
-﻿
+
 {% extends "base.html" %}
 {% block content %}
 {# WCCR_PAYROLL_EMPLOYEE_SETTINGS_V10C2 #}
 <div class="container-sm py-3" style="max-width:760px">
+
+
+<!-- WCCR_PAYROLL_UX_V11_1_CLEANUP -->
+<style>
+/* Compact employee payroll settings */
+.wccr-pro-heading {
+  margin-bottom:12px !important;
+  padding-bottom:10px !important;
+}
+.wccr-status-panel {
+  padding:9px 12px !important;
+  margin-bottom:9px !important;
+}
+.wccr-choice-row {
+  margin-top:6px !important;
+  gap:6px !important;
+}
+.wccr-choice-btn {
+  min-height:34px !important;
+  padding:5px 10px !important;
+}
+.wccr-setting-help {
+  margin-top:5px !important;
+  font-size:.8rem !important;
+  line-height:1.35 !important;
+}
+.wccr-field-hint {
+  font-size:.78rem !important;
+  line-height:1.35 !important;
+  margin-top:4px !important;
+}
+.wccr-status-panel .alert {
+  font-size:.8rem;
+  margin-top:7px !important;
+  padding:7px 9px !important;
+}
+.wccr-pro-rules > summary,
+.wccr-pro-history > summary {
+  padding:11px 14px !important;
+}
+.wccr-pro-rules > summary > .text-muted,
+.wccr-pro-history > summary > .text-muted {
+  margin-left:auto;
+  margin-right:8px;
+}
+.wccr-pro-rules > summary::after,
+.wccr-pro-history > summary::after {
+  content:"" !important;
+  display:block !important;
+  flex:0 0 8px !important;
+  width:8px !important;
+  height:8px !important;
+  border-right:2px solid #64748b !important;
+  border-bottom:2px solid #64748b !important;
+  transform:rotate(45deg) !important;
+  transition:transform .15s ease;
+}
+.wccr-pro-rules[open] > summary::after,
+.wccr-pro-history[open] > summary::after {
+  transform:rotate(225deg) !important;
+}
+.wccr-current-status {
+  padding:8px 11px !important;
+  margin-bottom:10px !important;
+}
+.wccr-pro-history-content {
+  padding:10px !important;
+}
+</style>
+
+<!-- WCCR_PAYROLL_PRO_UX_V11 -->
+<style>
+.wccr-pro-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding-bottom:14px;
+  margin-bottom:16px;
+  border-bottom:1px solid #e2e8f0;
+}
+.container-sm:has(.wccr-pro-heading) {
+  max-width:860px !important;
+}
+.wccr-pro-heading h5 {
+  font-weight:700;
+  letter-spacing:-.02em;
+}
+.wccr-pro-heading ~ .wccr-status-panel {
+  margin-bottom:12px;
+}
+.wccr-status-panel {
+  padding:12px 14px !important;
+  border:1px solid #dbe2ea !important;
+  border-radius:10px !important;
+  background:transparent !important;
+}
+.wccr-status-panel.pay-on,
+.wccr-status-panel.pay-off,
+.wccr-status-panel.class-exempt,
+.wccr-status-panel.class-nonexempt {
+  background:transparent !important;
+  border-color:#dbe2ea !important;
+}
+.wccr-choice-row {
+  display:flex !important;
+  gap:6px !important;
+  margin-top:9px !important;
+}
+.wccr-choice-btn {
+  flex:1;
+  min-height:38px !important;
+  font-size:.82rem !important;
+  border-radius:7px !important;
+  font-weight:600 !important;
+}
+.wccr-setting-help {
+  font-size:.76rem !important;
+  margin-top:7px !important;
+  line-height:1.4 !important;
+}
+.wccr-pro-rules,
+.wccr-pro-history {
+  border:1px solid #dbe2ea;
+  border-radius:10px;
+  background:transparent;
+  overflow:hidden;
+}
+.wccr-pro-rules > summary,
+.wccr-pro-history > summary {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  cursor:pointer;
+  padding:14px 16px;
+  list-style:none;
+}
+.wccr-pro-rules > summary::-webkit-details-marker,
+.wccr-pro-history > summary::-webkit-details-marker {
+  display:none;
+}
+.wccr-pro-rules > summary::after,
+.wccr-pro-history > summary::after {
+  content:"";
+  display:block;
+  flex:0 0 8px;
+  width:8px;
+  height:8px;
+  border-right:2px solid #64748b;
+  border-bottom:2px solid #64748b;
+  transform:rotate(45deg);
+  transition:transform .15s ease;
+
+}
+.wccr-pro-rules[open] > summary::after,
+.wccr-pro-history[open] > summary::after {
+  transform:rotate(225deg);
+}
+.wccr-pro-rules-body {
+  padding:4px 16px 16px;
+  border-top:1px solid #e2e8f0;
+}
+.wccr-pro-rule {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:9px 0;
+  border-bottom:1px solid #edf0f4;
+  font-size:.85rem;
+}
+.wccr-pro-rule strong {
+  text-align:right;
+  font-weight:600;
+}
+.wccr-pro-history-content {
+  padding:12px;
+  border-top:1px solid #e2e8f0;
+}
+.wccr-pro-history-content > .card {
+  box-shadow:none !important;
+  border:0 !important;
+  margin-bottom:8px !important;
+}
+.wccr-pro-history-content > .card > .card-body {
+  padding:8px !important;
+}
+.wccr-pro-history-content h5 {
+  font-size:1rem;
+  font-weight:650;
+}
+.wccr-pro-history-content table {
+  font-size:.82rem;
+}
+.wccr-pro-history-content details {
+  background:transparent;
+}
+.wccr-current-status {
+  border-radius:9px !important;
+  background:transparent !important;
+}
+.wccr-field-hint {
+  font-size:.76rem;
+}
+@media(max-width:575px) {
+  .wccr-pro-rule {
+    align-items:flex-start;
+  }
+  .wccr-pro-heading {
+    padding-bottom:10px;
+  }
+}
+</style>
+
   <h3 class="mb-3">
     Employee Settings
     <span class="text-uppercase text-muted">
@@ -12,6 +226,8 @@
 
   <form method="POST"
         action="{{ url_for('inventory.edit_user', user_id=user.id) }}">
+    <!-- WCCR_PAYROLL_EDIT_CSRF_V2 -->
+    <input type="hidden" name="wccr_payroll_csrf" value="{{ wccr_payroll_csrf }}">
     <input type="hidden" name="form_action"
            value="employee_settings">
 
@@ -51,7 +267,7 @@
     {% if pay_allowed %}
     <div class="card shadow-sm mb-3">
       <div class="card-body">
-        <h5 class="mb-3">Compensation</h5>
+        <div class="wccr-pro-heading"><div><h5 class="mb-1">Payroll Settings</h5><div class="text-muted small">Compensation and payroll rules</div></div></div>
 
 
 
@@ -157,7 +373,7 @@
           <div class="fw-semibold">
             Payroll
             <span class="small fw-normal text-muted">
-              ? selected setting
+              
             </span>
           </div>
           <input type="hidden" name="payroll_enabled"
@@ -218,7 +434,7 @@
               <option value="salary"
                 {% if latest_pay and latest_pay.pay_type == 'salary' %}
                 selected{% endif %}>Salary</option>
-            </select><div class="form-text wccr-field-hint">Choose Hourly for payment per hour, or Salary for a fixed amount per selected period.</div>
+            </select><div class="form-text wccr-field-hint">Hourly or fixed salary</div>
           </div>
 
           <div class="col-md-6">
@@ -228,7 +444,7 @@
             <input class="form-control" type="number"
                    name="pay_amount" min="0.01"
                    max="9999999999.99" step="0.01"
-                   value="{{ latest_pay.amount if latest_pay else '' }}"><div class="form-text wccr-field-hint">Enter the hourly rate or salary amount. Payroll OFF does not erase worked hours or pay owed.</div>
+                   value="{{ latest_pay.amount if latest_pay else '' }}"><div class="form-text wccr-field-hint">Rate or salary amount</div>
           </div>
 
           <div class="col-md-6" id="wccr-pay-frequency-wrap">
@@ -245,7 +461,7 @@
                 {% if latest_pay and latest_pay.salary_frequency == value %}
                 selected{% endif %}>{{ caption }}</option>
               {% endfor %}
-            </select><div class="form-text wccr-field-hint">The period covered by the salary amount. This may differ from the paycheck schedule.</div>
+            </select><div class="form-text wccr-field-hint">Salary amount period</div>
           </div>
 
           <div class="col-md-6">
@@ -253,11 +469,301 @@
             <input class="form-control" type="date"
                    name="effective_date"
                    value="{{ payroll_effective_date }}"
-                   min="{{ payroll_effective_date }}"
-                   required><div class="form-text wccr-field-hint">The date when the change takes effect. Earlier rates and statuses remain in history.</div>
+                   min="{{ payroll_today_date.isoformat() }}"
+                   required><div class="form-text wccr-field-hint">Previous rates remain in history</div>
           </div>
         </div>
 
+
+        <!-- WCCR_PAYROLL_PRO_UX_V11: California rules -->
+        <details class="wccr-pro-rules mt-3">
+          <summary>
+            <span class="fw-semibold">
+              Overtime &amp; California Rules
+            </span>
+            <span class="text-muted small">
+              Configure rules
+            </span>
+          </summary>
+          <div class="wccr-pro-rules-body">
+            <div class="wccr-pro-rule">
+              <span>Daily overtime</span>
+              <strong>Over 8 hours</strong>
+            </div>
+            <div class="wccr-pro-rule">
+              <span>Daily double time</span>
+              <strong>Over 12 hours</strong>
+            </div>
+            <div class="wccr-pro-rule">
+              <span>Weekly overtime</span>
+              <strong>Over 40 hours</strong>
+            </div>
+            <div class="wccr-pro-rule">
+              <span>Seventh consecutive day</span>
+              <strong>Special rules apply</strong>
+            </div>
+            <div class="wccr-pro-rule">
+              <span>Meal / Rest Breaks</span>
+              <strong>California requirements</strong>
+            </div>
+            <p class="small text-muted mb-0 mt-3">
+              General California non-exempt rules.
+              Actual eligibility, Wage Order, exceptions,
+              meal waivers and premium payments require
+              individual configuration and legal review.
+              Saving these settings does not establish legal
+              waiver eligibility or approve payroll.
+            </p>
+
+            <!-- WCCR_CA_RULES_V1B3 -->
+            <div class="row g-2 mt-2">
+              <div class="col-md-4">
+                <label class="form-label small fw-semibold"
+                       for="wccr-ca-wage">
+                  California Wage Order
+                </label>
+                <select class="form-select form-select-sm"
+                        id="wccr-ca-wage"
+                        name="ca_wage_order">
+                  <option value="">Not configured - select after review</option>
+                  <!-- WCCR_CA_RULES_UX_V1B3_2 -->
+                  <option value="1"
+                    {% if latest_ca and latest_ca.wage_order == '1' %}
+                    selected{% endif %}>
+                    1 - Manufacturing
+                  </option>
+                  <option value="2"
+                    {% if latest_ca and latest_ca.wage_order == '2' %}
+                    selected{% endif %}>
+                    2 - Personal Services
+                  </option>
+                  <option value="3"
+                    {% if latest_ca and latest_ca.wage_order == '3' %}
+                    selected{% endif %}>
+                    3 - Food Canning / Freezing / Preserving
+                  </option>
+                  <option value="4"
+                    {% if latest_ca and latest_ca.wage_order == '4' %}
+                    selected{% endif %}>
+                    4 - Professional / Technical / Office / Mechanical
+                  </option>
+                  <option value="5"
+                    {% if latest_ca and latest_ca.wage_order == '5' %}
+                    selected{% endif %}>
+                    5 - Public Housekeeping
+                  </option>
+                  <option value="6"
+                    {% if latest_ca and latest_ca.wage_order == '6' %}
+                    selected{% endif %}>
+                    6 - Laundry / Dry Cleaning
+                  </option>
+                  <option value="7"
+                    {% if latest_ca and latest_ca.wage_order == '7' %}
+                    selected{% endif %}>
+                    7 - Retail / Mercantile
+                  </option>
+                  <option value="8"
+                    {% if latest_ca and latest_ca.wage_order == '8' %}
+                    selected{% endif %}>
+                    8 - Agricultural Products After Harvest
+                  </option>
+                  <option value="9"
+                    {% if latest_ca and latest_ca.wage_order == '9' %}
+                    selected{% endif %}>
+                    9 - Transportation
+                  </option>
+                  <option value="10"
+                    {% if latest_ca and latest_ca.wage_order == '10' %}
+                    selected{% endif %}>
+                    10 - Amusement / Recreation
+                  </option>
+                  <option value="11"
+                    {% if latest_ca and latest_ca.wage_order == '11' %}
+                    selected{% endif %}>
+                    11 - Broadcasting
+                  </option>
+                  <option value="12"
+                    {% if latest_ca and latest_ca.wage_order == '12' %}
+                    selected{% endif %}>
+                    12 - Motion Picture
+                  </option>
+                  <option value="13"
+                    {% if latest_ca and latest_ca.wage_order == '13' %}
+                    selected{% endif %}>
+                    13 - Agricultural Products Preparation
+                  </option>
+                  <option value="14"
+                    {% if latest_ca and latest_ca.wage_order == '14' %}
+                    selected{% endif %}>
+                    14 - Agricultural Occupations
+                  </option>
+                  <option value="15"
+                    {% if latest_ca and latest_ca.wage_order == '15' %}
+                    selected{% endif %}>
+                    15 - Household Occupations
+                  </option>
+                  <option value="16"
+                    {% if latest_ca and latest_ca.wage_order == '16' %}
+                    selected{% endif %}>
+                    16 - On-Site Construction / Drilling / Mining
+                  </option>
+                  <option value="17"
+                    {% if latest_ca and latest_ca.wage_order == '17' %}
+                    selected{% endif %}>
+                    17 - Miscellaneous Employees
+                  </option>
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label small fw-semibold">
+                  First Meal Agreement
+                </label>
+                <select class="form-select form-select-sm"
+                        name="ca_first_meal_waiver">
+                  {% for value, caption in [
+                    ('none', 'None'),
+                    ('documented_pending_review', 'Document received - pending review'),
+                    ('verified_by_authorized_reviewer',
+                     'Reviewed by authorized person')
+                  ] %}
+                  <option value="{{ value }}"
+                    {% if latest_ca and
+                          latest_ca.first_meal_waiver == value %}
+                    selected{% endif %}>
+                    {{ caption }}
+                  </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label small fw-semibold">
+                  Second Meal Agreement
+                </label>
+                <select class="form-select form-select-sm"
+                        name="ca_second_meal_waiver">
+                  {% for value, caption in [
+                    ('none', 'None'),
+                    ('documented_pending_review', 'Document received - pending review'),
+                    ('verified_by_authorized_reviewer',
+                     'Reviewed by authorized person')
+                  ] %}
+                  <option value="{{ value }}"
+                    {% if latest_ca and
+                          latest_ca.second_meal_waiver == value %}
+                    selected{% endif %}>
+                    {{ caption }}
+                  </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label small fw-semibold">
+                  California Rules Notes
+                </label>
+                <textarea class="form-control form-control-sm"
+                          name="ca_notes" rows="2"
+                          maxlength="1000">{{ latest_ca.notes if latest_ca else '' }}</textarea>
+              </div>
+            </div>
+
+            <div class="form-text mt-2">
+              Changes use the Effective Date above.
+              Choose meal agreements only when supporting
+              documentation exists. Review status does not
+              establish legal eligibility or remove meal
+              premium obligations.
+            </div>
+
+            <details class="mt-3">
+              <summary class="small fw-semibold">
+                California Rules History
+                ({{ ca_history|length }})
+              </summary>
+              <div class="table-responsive mt-2">
+                <table class="table table-sm small">
+                  <thead>
+                    <tr>
+                      <th>Effective</th>
+                      <th>Wage Order</th>
+                      <th>First Meal</th>
+                      <th>Second Meal</th>
+                      <th>Created by</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for rule in ca_history %}
+                    <tr>
+                      <td>
+                        {{ rule.effective_date }}
+                        {# WCCR_CA_AUDIT_HISTORY_V1B5_1 #}
+                        {% if rule.cancelled_at %}
+                          {% if rule.cancellation_reason
+                            and rule.cancellation_reason.startswith(
+                              'Superseded by correction:'
+                            ) %}
+                            <span class="badge bg-secondary">
+                              SUPERSEDED
+                            </span>
+                          {% else %}
+                            <span class="badge bg-secondary">
+                              CANCELLED
+                            </span>
+                          {% endif %}
+                        {% elif rule.effective_date > payroll_today_date %}
+                          <span class="badge bg-info text-dark">
+                            SCHEDULED
+                          </span>
+                        {% else %}
+                          <span class="badge bg-success">
+                            ACTIVE
+                          </span>
+                        {% endif %}
+                      </td>
+                      <td>{{ rule.wage_order }}</td>
+                      <td>{{ rule.first_meal_waiver|replace('_', ' ') }}</td>
+                      <td>{{ rule.second_meal_waiver|replace('_', ' ') }}</td>
+                      <td>
+                        {{ payroll_authors.get(
+                          rule.created_by_id, 'Unknown'
+                        ) }}
+
+                        {% if rule.cancelled_at %}
+                        <div class="text-muted mt-1">
+                          Corrected / cancelled by:
+                          <strong>
+                            {{ payroll_authors.get(
+                              rule.cancelled_by_id, 'Unknown'
+                            ) }}
+                          </strong>
+                        </div>
+                        <div class="text-muted">
+                          {{ rule.cancelled_at }}
+                        </div>
+                        {% if rule.cancellation_reason %}
+                        <div class="small mt-1">
+                          <strong>Reason:</strong>
+                          {{ rule.cancellation_reason }}
+                        </div>
+                        {% endif %}
+                        {% endif %}
+                      </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                      <td colspan="5" class="text-muted">
+                        No California Rules history yet.
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        </details>
       </div>
     </div>
     {% endif %}
@@ -345,6 +851,130 @@
   </form>
 
   {% if pay_allowed %}
+  <!-- WCCR_PAYROLL_PRO_UX_V11: history disclosure -->
+  <details class="wccr-pro-history mb-3">
+    <summary>
+      <span class="fw-semibold">
+        Payroll History &amp; Corrections
+      </span>
+      <span class="text-muted small">
+        View history
+      </span>
+    </summary>
+  <div class="wccr-pro-history-content">
+  {# WCCR_CA_CORRECTIONS_V1B5 #}
+  <details class="border rounded p-2 mb-3">
+    <summary class="small fw-semibold">
+      Correct California Rules History
+    </summary>
+    <div class="small text-muted mt-2 mb-2">
+      Correct an existing record without deleting its history.
+      Effective Date stays unchanged. Previously approved
+      Payroll is not automatically recalculated.
+    </div>
+
+    {% for rule in ca_history if not rule.cancelled_at %}
+    <details class="border rounded p-2 mb-2">
+      <summary class="small">
+        {{ rule.effective_date }} ? Wage Order {{ rule.wage_order }}
+      </summary>
+      <form method="POST" class="mt-2">
+        <input type="hidden" name="wccr_payroll_csrf"
+               value="{{ wccr_payroll_csrf }}">
+        <input type="hidden" name="form_action"
+               value="ca_rules_correct">
+        <input type="hidden" name="ca_record_id"
+               value="{{ rule.id }}">
+
+        <div class="row g-2">
+          <div class="col-sm-6">
+            <label class="form-label small">Wage Order</label>
+            <select name="ca_corrected_wage_order"
+                    class="form-select form-select-sm" required>
+              {% for number in range(1, 18) %}
+              <option value="{{ number }}"
+                {% if rule.wage_order|string == number|string %}
+                selected{% endif %}>
+                {{ number }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-sm-6">
+            <label class="form-label small">
+              First Meal Agreement
+            </label>
+            <select name="ca_corrected_first"
+                    class="form-select form-select-sm">
+              {% for value, label in [
+                ('none', 'None'),
+                ('documented_pending_review',
+                 'Documented ? pending review'),
+                ('verified_by_authorized_reviewer',
+                 'Verified by authorized reviewer')
+              ] %}
+              <option value="{{ value }}"
+                {% if rule.first_meal_waiver == value %}
+                selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-sm-6">
+            <label class="form-label small">
+              Second Meal Agreement
+            </label>
+            <select name="ca_corrected_second"
+                    class="form-select form-select-sm">
+              {% for value, label in [
+                ('none', 'None'),
+                ('documented_pending_review',
+                 'Documented ? pending review'),
+                ('verified_by_authorized_reviewer',
+                 'Verified by authorized reviewer')
+              ] %}
+              <option value="{{ value }}"
+                {% if rule.second_meal_waiver == value %}
+                selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label small">Notes</label>
+            <textarea name="ca_corrected_notes"
+                      class="form-control form-control-sm"
+                      maxlength="1000" rows="2">{{ rule.notes or '' }}</textarea>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label small">
+              Reason for correction
+            </label>
+            <textarea name="ca_correction_reason"
+                      class="form-control form-control-sm"
+                      minlength="5" maxlength="1000"
+                      rows="2" required
+                      placeholder="Explain why this record is incorrect"></textarea>
+          </div>
+
+          <div class="col-12">
+            <button type="submit"
+                    class="btn btn-outline-primary btn-sm">
+              Save Correction
+            </button>
+          </div>
+        </div>
+      </form>
+    </details>
+    {% else %}
+    <div class="small text-muted">
+      No active California Rules records to correct.
+    </div>
+    {% endfor %}
+  </details>
+
   <div class="card shadow-sm mb-3">
     <div class="card-body">
       {# WCCR_PAYROLL_UI_V10C8C5_FIX3 #}
@@ -526,11 +1156,13 @@
                ) }}
             {% endif %}
             {% if rate.cancelled_at %}
-            ? {{ rate.cancelled_at }}
+            {{ rate.cancelled_at }}
             {% endif %}
           </div>
         {% else %}
         <form method="POST" class="mt-3">
+    <!-- WCCR_PAYROLL_EDIT_CSRF_V2 -->
+    <input type="hidden" name="wccr_payroll_csrf" value="{{ wccr_payroll_csrf }}">
           <input type="hidden" name="form_action"
                  value="payroll_correct">
           <input type="hidden" name="record_type"
@@ -613,6 +1245,8 @@
 
         {% if rate.effective_date > payroll_today_date %}
         <form method="POST" class="mt-2">
+    <!-- WCCR_PAYROLL_EDIT_CSRF_V2 -->
+    <input type="hidden" name="wccr_payroll_csrf" value="{{ wccr_payroll_csrf }}">
           <input type="hidden" name="form_action"
                  value="payroll_cancel">
           <input type="hidden" name="record_type"
@@ -656,10 +1290,12 @@
                'User #' ~ entry.cancelled_by_id
              ) }}
           {% endif %}
-          ? {{ entry.cancelled_at }}
+          {{ entry.cancelled_at }}
         </div>
         {% else %}
         <form method="POST" class="mt-3">
+    <!-- WCCR_PAYROLL_EDIT_CSRF_V2 -->
+    <input type="hidden" name="wccr_payroll_csrf" value="{{ wccr_payroll_csrf }}">
           <input type="hidden" name="form_action"
                  value="payroll_correct">
           <input type="hidden" name="record_type"
@@ -706,6 +1342,8 @@
 
         {% if entry.effective_date > payroll_today_date %}
         <form method="POST" class="mt-2">
+    <!-- WCCR_PAYROLL_EDIT_CSRF_V2 -->
+    <input type="hidden" name="wccr_payroll_csrf" value="{{ wccr_payroll_csrf }}">
           <input type="hidden" name="form_action"
                  value="payroll_cancel">
           <input type="hidden" name="record_type"
@@ -730,6 +1368,8 @@
       {% endfor %}
     </div>
   </div>
+  </div>
+  </details>
   {% endif %}
 
 

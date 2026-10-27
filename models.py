@@ -1,4 +1,4 @@
-﻿# models.py (Ð³Ð¾Ñ‚Ð¾Ð²Ñ‹Ð¹ Ñ„Ð°Ð¹Ð»)
+# models.py (Ð³Ð¾Ñ‚Ð¾Ð²Ñ‹Ð¹ Ñ„Ð°Ð¹Ð»)
 from __future__ import annotations
 
 from datetime import datetime, date, timezone
@@ -5477,5 +5477,92 @@ class EmployeePayrollStatus(db.Model):
         db.Text,
         nullable=True,
     )
+
+
+
+# WCCR_CALIFORNIA_RULES_V1B_MODEL
+# Effective-dated employee California payroll configuration.
+# Configuration does NOT establish legal eligibility for waivers.
+class EmployeeCaliforniaPayrollRule(db.Model):
+    __tablename__ = "employee_california_payroll_rule"
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "wage_order IN (" +
+            ", ".join("'" + str(n) + "'" for n in range(1, 18)) +
+            ")",
+            name="ck_employee_ca_rule_wage_order",
+        ),
+        db.CheckConstraint(
+            "first_meal_waiver IN "
+            "('none', 'documented_pending_review', "
+            "'verified_by_authorized_reviewer')",
+            name="ck_employee_ca_rule_first_waiver",
+        ),
+        db.CheckConstraint(
+            "second_meal_waiver IN "
+            "('none', 'documented_pending_review', "
+            "'verified_by_authorized_reviewer')",
+            name="ck_employee_ca_rule_second_waiver",
+        ),
+        db.Index(
+            "uq_employee_ca_rule_active_date",
+            "user_id",
+            "effective_date",
+            unique=True,
+            sqlite_where=db.text("cancelled_at IS NULL"),
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    effective_date = db.Column(
+        db.Date, nullable=False, index=True,
+    )
+    wage_order = db.Column(db.String(2), nullable=False)
+
+    first_meal_waiver = db.Column(
+        db.String(40), nullable=False, default="none",
+    )
+    second_meal_waiver = db.Column(
+        db.String(40), nullable=False, default="none",
+    )
+    notes = db.Column(db.Text, nullable=False, default="")
+
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow,
+    )
+    created_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    cancelled_at = db.Column(db.DateTime, nullable=True)
+    cancelled_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    cancellation_reason = db.Column(db.Text, nullable=True)
+
+    corrects_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "employee_california_payroll_rule.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    correction_reason = db.Column(db.Text, nullable=True)
+
+    __mapper_args__ = {"confirm_deleted_rows": True}
+
 
 
