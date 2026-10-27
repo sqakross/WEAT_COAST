@@ -6491,6 +6491,108 @@ _RECEIVING_USER_MAP_CACHE = {
 }
 
 
+
+def _wccr_alert_unique_wo_count():
+    from datetime import date, timedelta
+    from sqlalchemy import or_, func, case
+    from models import WorkOrder, WorkOrderPart, IssuedBatch, IssuedPartRecord
+
+    today = date.today()
+
+    base = (
+        db.session.query(WorkOrderPart.work_order_id.label("wo_id"))
+        .join(WorkOrder, WorkOrder.id == WorkOrderPart.work_order_id)
+        .filter(
+            WorkOrder.status.notin_(["done", "cancel_job"]),
+            WorkOrderPart.ordered_date.isnot(None),
+            WorkOrderPart.quantity > 0,
+            WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+            or_(
+                WorkOrderPart.invoice_number.is_(None),
+                WorkOrderPart.invoice_number == "",
+            ),
+        )
+    )
+
+    overdue = base.filter(
+        WorkOrderPart.backorder_flag.is_(False),
+        WorkOrderPart.ordered_date <= today - timedelta(days=3),
+    )
+
+    backorders = base.filter(
+        WorkOrderPart.backorder_flag.is_(True),
+        WorkOrderPart.ordered_date <= today - timedelta(days=14),
+    )
+
+    eta = (
+        db.session.query(WorkOrderPart.work_order_id.label("wo_id"))
+        .join(WorkOrder, WorkOrder.id == WorkOrderPart.work_order_id)
+        .filter(
+            WorkOrder.status == "ordered",
+            WorkOrderPart.ordered_date.isnot(None),
+            WorkOrderPart.eta_date.isnot(None),
+            WorkOrderPart.eta_date < today,
+            WorkOrderPart.invoice_number.is_(None),
+            WorkOrderPart.quantity > 0,
+            WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+        )
+    )
+
+    ready = (
+        db.session.query(WorkOrder.id.label("wo_id"))
+        .join(WorkOrderPart, WorkOrderPart.work_order_id == WorkOrder.id)
+        .filter(
+            WorkOrder.status == "ordered",
+            WorkOrderPart.quantity > 0,
+            WorkOrderPart.issued_qty < WorkOrderPart.quantity,
+        )
+        .group_by(WorkOrder.id)
+        .having(
+            func.sum(
+                case(
+                    (
+                        or_(
+                            WorkOrderPart.invoice_number.is_(None),
+                            WorkOrderPart.invoice_number == "",
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ) == 0
+        )
+    )
+
+    pending = (
+        db.session.query(IssuedBatch.work_order_id.label("wo_id"))
+        .join(WorkOrder, WorkOrder.id == IssuedBatch.work_order_id)
+        .join(IssuedPartRecord, IssuedPartRecord.batch_id == IssuedBatch.id)
+        .filter(
+            WorkOrder.status != "cancel_job",
+            IssuedBatch.issue_date <= today - timedelta(days=3),
+        )
+        .group_by(IssuedBatch.id, IssuedBatch.work_order_id)
+        .having(
+            func.sum(
+                case(
+                    (IssuedPartRecord.confirmed_by_tech == False, 1),
+                    else_=0,
+                )
+            ) > 0
+        )
+    )
+
+    combined = overdue.union(
+        backorders, eta, ready, pending
+    ).subquery()
+
+    return int(
+        db.session.query(
+            func.count(func.distinct(combined.c.wo_id))
+        ).scalar() or 0
+    )
+
+
 @inventory_bp.app_context_processor
 def inject_alerts_count():
     # ERP ACCESS ALERTS STEP 1 - BADGE
@@ -6525,25 +6627,7 @@ def inject_alerts_count():
             "alerts_count": _ALERTS_COUNT_CACHE["value"]
         }
 
-    today = date.today()
-    overdue_cutoff = today - timedelta(days=3)
-
-    count = (
-        db.session.query(func.count(WorkOrderPart.id))
-        .join(
-            WorkOrder,
-            WorkOrder.id == WorkOrderPart.work_order_id,
-        )
-        .filter(
-            WorkOrder.status.notin_(["done", "cancel_job"]),
-            WorkOrderPart.ordered_date.isnot(None),
-            WorkOrderPart.issued_qty < WorkOrderPart.quantity,
-            WorkOrderPart.backorder_flag.is_(False),
-            WorkOrderPart.ordered_date <= overdue_cutoff,
-        )
-        .scalar()
-        or 0
-    )
+    count = _wccr_alert_unique_wo_count()
 
     _ALERTS_COUNT_CACHE["value"] = int(count)
     _ALERTS_COUNT_CACHE["expires_at"] = now + 30.0
@@ -6732,9 +6816,18 @@ def wo_alerts():
         if row[1].id not in received_ready_wo_ids_set
     ]
 
-    overdue_rows = sort_alert_rows(overdue_rows)
+
+    # WCCR ALERTS V2.1 - MERGED ORDER DELAYS
+    delay_by_part = {}
+
+    for row in overdue_rows + eta_passed_rows:
+        part, wo, unit = row
+        if wo.id not in received_ready_wo_ids_set:
+            delay_by_part[part.id] = row
+
+    overdue_rows = sort_alert_rows(list(delay_by_part.values()))
     backorder_rows = sort_alert_rows(backorder_rows)
-    eta_passed_rows = sort_alert_rows(eta_passed_rows)
+    eta_passed_rows = []
 
 
     received_not_issued_rows = (
@@ -6786,8 +6879,26 @@ def wo_alerts():
         .all()
     )
 
+
+    alert_counts = {
+        "delays": len({wo.id for p, wo, unit in overdue_rows}),
+        "backorders": len({wo.id for p, wo, unit in backorder_rows}),
+        "received": len({wo.id for p, wo, unit in received_not_issued_rows}),
+        "pending": len({wo.id for batch, wo, total, confirmed in pending_confirm_rows}),
+    }
+
+    alert_wo_ids = (
+        {wo.id for p, wo, unit in overdue_rows}
+        | {wo.id for p, wo, unit in backorder_rows}
+        | {wo.id for p, wo, unit in received_not_issued_rows}
+        | {wo.id for batch, wo, total, confirmed in pending_confirm_rows}
+    )
+    unique_alerts_count = len(alert_wo_ids)
+
     return render_template(
         "wo_alerts.html",
+        alert_counts=alert_counts,
+        unique_alerts_count=unique_alerts_count,
         overdue_rows=overdue_rows,
         backorder_rows=backorder_rows,
         pending_days=pending_days,
@@ -19914,159 +20025,660 @@ def add_user():
 @inventory_bp.route('/users/edit/<int:user_id>', methods=['GET', 'POST'])
 @login_required
 def edit_user(user_id):
+    # WCCR_PAYROLL_EMPLOYEE_SETTINGS_V10C2
+    from datetime import date, timedelta
+    from decimal import Decimal, InvalidOperation
     from sqlalchemy import func
+    from models import EmployeePayRate, EmployeePayrollStatus
+
     user = User.query.get_or_404(user_id)
+    me_role = (current_user.role or "").lower()
+    target_role = (user.role or "").lower()
 
-    me_role = (current_user.role or '').lower()
-    target_role = (user.role or '').lower()
-
-    if me_role not in {ROLE_ADMIN, ROLE_SUPERADMIN}:
-        flash("Access denied", "danger")
-        return redirect(url_for("inventory.dashboard"))
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.users.access",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Manage Users access is disabled.",
-            "danger",
-        )
-        return redirect(url_for("inventory.dashboard"))
-
-    if not ErpAccessService.is_allowed(
-        current_user,
-        "erp.users.edit",
-        default_allowed=True,
-    ):
-        flash(
-            "Access denied: Edit Users is disabled.",
-            "danger",
-        )
-        return redirect(url_for("inventory.users"))
-
-    change_role_allowed = ErpAccessService.is_allowed(
-        current_user,
-        "erp.users.change_role",
-        default_allowed=True,
+    pay_allowed = ErpAccessService.is_allowed(
+        current_user, "erp.payroll.manage_rates",
+        default_allowed=False,
     )
 
-    # ÐŸÑ€Ð°Ð²Ð°: superadmin â€” Ð²ÑÐµÑ…; admin â€” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ user/viewer/technician Ð¸ ÑÐµÐ±Ñ
-    if me_role == 'admin':
-        if not (user.id == current_user.id or target_role in {'user', 'viewer', 'technician'}):
-            flash("Admins can only edit users with role 'user/viewer/technician' or themselves.", "danger")
-            return redirect(url_for('inventory.dashboard'))
-    elif me_role != 'superadmin':
-        flash("Access denied", "danger")
-        return redirect(url_for('inventory.dashboard'))
+    can_edit_user_settings = (
+        me_role in {ROLE_ADMIN, ROLE_SUPERADMIN}
+        and ErpAccessService.is_allowed(
+            current_user, "erp.users.access",
+            default_allowed=True,
+        )
+        and ErpAccessService.is_allowed(
+            current_user, "erp.users.edit",
+            default_allowed=True,
+        )
+        and (
+            me_role == ROLE_SUPERADMIN
+            or user.id == current_user.id
+            or target_role in {"user", "viewer", "technician"}
+        )
+    )
 
-    # Ð¡Ð¿Ð¸ÑÐ¾Ðº Ñ€Ð¾Ð»ÐµÐ¹ Ð´Ð»Ñ ÑÐµÐ»ÐµÐºÑ‚Ð°:
-    # - ÑÑƒÐ¿ÐµÑ€-Ð°Ð´Ð¼Ð¸Ð½ Ð²Ð¸Ð´Ð¸Ñ‚ Ð²ÑÐµ Ñ€Ð¾Ð»Ð¸
-    # - Ð°Ð´Ð¼Ð¸Ð½ Ð¼Ð¾Ð¶ÐµÑ‚ Ð½Ð°Ð·Ð½Ð°Ñ‡Ð°Ñ‚ÑŒ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ user/viewer/technician; ÑÐµÐ±Ðµ â€” Ð¾ÑÑ‚Ð°Ð²Ð»ÑÑ‚ÑŒ admin
+    if not can_edit_user_settings and not pay_allowed:
+        abort(403)
+
+    change_role_allowed = (
+        can_edit_user_settings
+        and ErpAccessService.is_allowed(
+            current_user, "erp.users.change_role",
+            default_allowed=True,
+        )
+    )
 
     role_options = []
+    if can_edit_user_settings:
+        if me_role == ROLE_SUPERADMIN:
+            role_options = [
+                (ROLE_TECHNICIAN, "Technician"),
+                (ROLE_USER, "User"),
+                (ROLE_VIEWER, "Viewer"),
+                (ROLE_ACCOUNTING, "Accounting"),
+                ("manager", "Manager"),
+                (ROLE_ADMIN, "Admin"),
+                (ROLE_SUPERADMIN, "Superadmin"),
+            ]
+        else:
+            role_options = [
+                (ROLE_TECHNICIAN, "Technician"),
+                (ROLE_USER, "User"),
+                (ROLE_VIEWER, "Viewer"),
+                (ROLE_ACCOUNTING, "Accounting"),
+                ("manager", "Manager"),
+            ]
+            override = ErpAccessService.get_override(
+                current_user, "erp.users.change_role"
+            )
+            if override == "ALLOW" or user.id == current_user.id:
+                role_options.append((ROLE_ADMIN, "Admin"))
 
-    if me_role == ROLE_SUPERADMIN:
-        role_options = [
-            (ROLE_TECHNICIAN, "Technician"),
-            (ROLE_USER, "User"),
-            (ROLE_VIEWER, "Viewer"),
-            (ROLE_ACCOUNTING, "Accounting"),
-            ("manager", "Manager"),
-            (ROLE_ADMIN, "Admin"),
-            (ROLE_SUPERADMIN, "Superadmin"),
-        ]
-
-    else:  # admin
-        change_role_override = ErpAccessService.get_override(
-            current_user,
-            "erp.users.change_role",
+    pay_history = (
+        EmployeePayRate.query
+        .filter_by(user_id=user.id)
+        .order_by(
+            EmployeePayRate.effective_date.desc(),
+            EmployeePayRate.id.desc(),
         )
+        .all()
+    ) if pay_allowed else []
 
-        role_options = [
-            (ROLE_TECHNICIAN, "Technician"),
-            (ROLE_USER, "User"),
-            (ROLE_VIEWER, "Viewer"),
-            (ROLE_ACCOUNTING, "Accounting"),
-            ("manager", "Manager"),
-        ]
+    status_history = (
+        EmployeePayrollStatus.query
+        .filter_by(user_id=user.id)
+        .order_by(
+            EmployeePayrollStatus.effective_date.desc(),
+            EmployeePayrollStatus.id.desc(),
+        )
+        .all()
+    ) if pay_allowed else []
 
-        if change_role_override == "ALLOW":
-            role_options.append(
-                (ROLE_ADMIN, "Admin")
-            )
-        elif user.id == current_user.id:
-            # Keep current ADMIN visible when editing yourself.
-            # This does not grant promotion rights.
-            role_options.append(
-                (ROLE_ADMIN, "Admin")
-            )
+    # WCCR_PAYROLL_CORRECT_V10C8C3
+    active_pay_history = [
+        item for item in pay_history
+        if item.cancelled_at is None
+    ]
+    active_status_history = [
+        item for item in status_history
+        if item.cancelled_at is None
+    ]
+    latest_pay = (
+        active_pay_history[0] if active_pay_history else None
+    )
+    latest_status = (
+        active_status_history[0]
+        if active_status_history else None
+    )
+    payroll_enabled = (
+        bool(latest_status.enabled) if latest_status else False
+    )
 
-    if request.method == 'POST':
-        new_username = (request.form.get('username') or '').strip()
-        new_role_raw = (request.form.get('role') or '').strip().lower()
+    if request.method == "POST":
 
-        # username Ð¼Ð¾Ð¶Ð½Ð¾ Ð¼ÐµÐ½ÑÑ‚ÑŒ Ð¾Ð±Ð¾Ð¸Ð¼ (ÐºÐ°Ðº Ð±Ñ‹Ð»Ð¾), Ð±ÐµÐ· ÑƒÑÐ»Ð¾Ð¶Ð½ÐµÐ½Ð¸Ñ Ð»Ð¾Ð³Ð¸ÐºÐ¸
-        if new_username:
-            # Ð·Ð°Ñ‰Ð¸Ñ‚Ð° Ð¾Ñ‚ Ð´ÑƒÐ±Ð»ÐµÐ¹ Ð¿Ð¾ Ð½Ð¸Ð¶Ð½ÐµÐ¼Ñƒ Ñ€ÐµÐ³Ð¸ÑÑ‚Ñ€Ñƒ
-            exists = (
-                db.session.query(User.id)
-                .filter(func.lower(User.username) == new_username.lower(), User.id != user.id)
-                .first()
-            )
-            if exists:
-                flash("Username already exists.", "danger")
-                return redirect(url_for('inventory.edit_user', user_id=user.id))
-            user.username = new_username
+        # WCCR_PAYROLL_CORRECT_V10C8C3
+        action = request.form.get("form_action")
+        if action in {"payroll_correct", "payroll_cancel"}:
+            if not pay_allowed:
+                abort(403)
 
-        # Ñ€Ð¾Ð»ÑŒ â€” Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð² Ð¿Ñ€ÐµÐ´ÐµÐ»Ð°Ñ… Ñ€Ð°Ð·Ñ€ÐµÑˆÑ‘Ð½Ð½Ñ‹Ñ… Ð¾Ð¿Ñ†Ð¸Ð¹
-        allowed_values = {value for value, _caption in role_options}
+            from datetime import datetime
+            from sqlalchemy.exc import IntegrityError
 
-        if (
-            new_role_raw != target_role
-            and not change_role_allowed
-        ):
-            flash(
-                "Access denied: Change User Roles is disabled.",
-                "danger",
-            )
-            return redirect(
-                url_for("inventory.edit_user", user_id=user.id)
-            )
+            try:
+                kind = request.form.get("record_type")
+                if kind not in {"rate", "status"}:
+                    raise ValueError("Invalid record type")
 
-        if new_role_raw not in allowed_values:
-            flash(
-                f"Invalid role received: {new_role_raw!r}",
-                "danger",
-            )
-            return redirect(
-                url_for("inventory.edit_user", user_id=user.id)
-            )
+                model = (
+                    EmployeePayRate if kind == "rate"
+                    else EmployeePayrollStatus
+                )
+                record_id = int(
+                    request.form.get("record_id") or "0"
+                )
+                reason = (
+                    request.form.get("reason") or ""
+                ).strip()
 
-        user.role = new_role_raw
+                if not 5 <= len(reason) <= 1000:
+                    raise ValueError(
+                        "Correction reason must contain "
+                        "5 to 1000 characters"
+                    )
 
+                # Serialize corrections for this employee on SQLite.
+                # The row is re-read before the write.
+                record = model.query.filter_by(
+                    id=record_id,
+                    user_id=user.id,
+                ).first()
+
+                if record is None:
+                    raise ValueError("Record not found")
+                if record.cancelled_at is not None:
+                    raise ValueError(
+                        "Record was already corrected or cancelled"
+                    )
+
+                # WCCR_PAYROLL_SAFETY_V10C8C4
+                # Optimistic check; database active-date index
+                # remains the final uniqueness guarantee.
+                if model.query.filter(
+                    model.id == record.id,
+                    model.user_id == user.id,
+                    model.cancelled_at.is_(None),
+                ).first() is None:
+                    raise ValueError("Record is no longer active")
+
+                today = date.today()
+                now = datetime.utcnow()
+
+                if action == "payroll_cancel":
+                    if record.effective_date <= today:
+                        raise ValueError(
+                            "Only future records can be cancelled"
+                        )
+
+                    # Do not cancel a rate needed by a scheduled
+                    # Payroll ON entry without a replacement.
+                    if kind == "rate":
+                        other_rates = [
+                            r for r in pay_history
+                            if r.cancelled_at is None
+                            and r.id != record.id
+                        ]
+                        future_on = [
+                            s for s in status_history
+                            if s.cancelled_at is None
+                            and s.enabled
+                            and s.effective_date >= today
+                        ]
+                        for status in future_on:
+                            if (
+                                status.effective_date
+                                >= record.effective_date
+                                and not any(
+                                    r.effective_date
+                                    <= status.effective_date
+                                    for r in other_rates
+                                )
+                            ):
+                                raise ValueError(
+                                    "This rate is needed by a "
+                                    "scheduled Payroll ON status. "
+                                    "Correct the rate instead."
+                                )
+
+                    record.cancelled_at = now
+                    record.cancelled_by_id = current_user.id
+                    record.cancellation_reason = reason
+                    message = "Scheduled change cancelled."
+
+                else:
+                    effective = date.fromisoformat(
+                        request.form.get("corrected_date") or ""
+                    )
+
+                    # One active value per effective date.
+                    conflict = model.query.filter(
+                        model.user_id == user.id,
+                        model.effective_date == effective,
+                        model.id != record.id,
+                        model.cancelled_at.is_(None),
+                    ).first()
+                    if conflict:
+                        raise ValueError(
+                            "Another active entry already uses "
+                            "this Effective Date"
+                        )
+
+                    if kind == "status":
+                        raw = request.form.get(
+                            "corrected_enabled"
+                        )
+                        if raw not in {"0", "1"}:
+                            raise ValueError(
+                                "Choose Payroll ON or OFF"
+                            )
+                        enabled_value = raw == "1"
+
+                        if enabled_value:
+                            rates = [
+                                r for r in pay_history
+                                if r.cancelled_at is None
+                                and r.effective_date <= effective
+                            ]
+                            if not rates:
+                                raise ValueError(
+                                    "Cannot enable Payroll without "
+                                    "an effective pay rate"
+                                )
+
+                        new_record = EmployeePayrollStatus(
+                            user_id=user.id,
+                            enabled=enabled_value,
+                            effective_date=effective,
+                            created_by_id=current_user.id,
+                            corrects_id=record.id,
+                            correction_reason=reason,
+                        )
+                    else:
+                        from decimal import Decimal
+                        pay_type = request.form.get(
+                            "corrected_pay_type"
+                        )
+                        classification = request.form.get(
+                            "corrected_classification"
+                        )
+                        frequency = request.form.get(
+                            "corrected_frequency"
+                        ) or None
+                        amount = Decimal(
+                            request.form.get(
+                                "corrected_amount"
+                            ) or ""
+                        )
+
+                        if pay_type not in {"hourly", "salary"}:
+                            raise ValueError("Invalid Pay Type")
+                        if classification not in {
+                            "exempt", "non_exempt"
+                        }:
+                            raise ValueError(
+                                "Invalid classification"
+                            )
+                        if pay_type == "hourly":
+                            frequency = None
+                        elif frequency not in {
+                            "weekly", "biweekly",
+                            "semimonthly", "monthly", "annual"
+                        }:
+                            raise ValueError(
+                                "Invalid Salary Frequency"
+                            )
+
+                        if (
+                            not amount.is_finite()
+                            or amount <= 0
+                            or amount > Decimal("9999999999.99")
+                            or amount != amount.quantize(
+                                Decimal("0.01")
+                            )
+                        ):
+                            raise ValueError(
+                                "Invalid pay amount"
+                            )
+
+                        new_record = EmployeePayRate(
+                            user_id=user.id,
+                            pay_type=pay_type,
+                            classification=classification,
+                            amount=amount,
+                            salary_frequency=frequency,
+                            effective_date=effective,
+                            created_by_id=current_user.id,
+                            corrects_id=record.id,
+                            correction_reason=reason,
+                        )
+
+                    record.cancelled_at = now
+                    record.cancelled_by_id = current_user.id
+                    record.cancellation_reason = (
+                        "Superseded by correction: " + reason
+                    )
+                    # WCCR_PAYROLL_SAFETY_V10C8C4
+                    # Release the active-date unique slot first.
+                    db.session.flush()
+                    db.session.add(new_record)
+                    message = (
+                        "Correction saved. Review any affected "
+                        "previously approved payroll periods."
+                    )
+
+                db.session.commit()
+                flash(message, "success")
+
+            except (
+                ValueError, ArithmeticError,
+                InvalidOperation, IntegrityError
+            ) as exc:
+                db.session.rollback()
+                flash(str(exc), "danger")
+            except Exception:
+                db.session.rollback()
+                current_app.logger.exception(
+                    "Payroll correction failed: user_id=%s",
+                    user.id,
+                )
+                flash(
+                    "Unable to save Payroll correction.",
+                    "danger",
+                )
+
+            return redirect(url_for(
+                "inventory.edit_user", user_id=user.id
+            ))
+
+        if request.form.get("form_action") != "employee_settings":
+            abort(400)
+
+        # Every editable field is independently permission-checked.
+        # Payroll-only delegation cannot modify username or role.
         try:
-            db.session.commit()
-            db.session.refresh(user)
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Failed to update user: {e}", "danger")
-            return redirect(
-                url_for("inventory.edit_user", user_id=user.id)
-            )
+            changed = False
 
-        flash(
-            f"User updated successfully. Saved role: {user.role}",
-            "success",
+            if can_edit_user_settings:
+                new_username = (
+                    request.form.get("username") or ""
+                ).strip()
+                new_role = (
+                    request.form.get("role") or ""
+                ).strip().lower()
+
+                if not new_username:
+                    raise ValueError("Username is required")
+
+                duplicate = (
+                    db.session.query(User.id)
+                    .filter(
+                        func.lower(User.username)
+                        == new_username.lower(),
+                        User.id != user.id,
+                    )
+                    .first()
+                )
+                if duplicate:
+                    raise ValueError("Username already exists")
+
+                allowed_roles = {
+                    value for value, caption in role_options
+                }
+                if new_role not in allowed_roles:
+                    raise ValueError("Invalid role")
+
+                if new_role != target_role and not change_role_allowed:
+                    raise ValueError(
+                        "Change User Roles permission is required"
+                    )
+
+                if user.username != new_username:
+                    user.username = new_username
+                    changed = True
+
+                if new_role != target_role:
+                    user.role = new_role
+                    changed = True
+
+            if pay_allowed:
+                enabled = (
+                    request.form.get("payroll_enabled") == "1"
+                )
+                classification = (
+                    "exempt"
+                    if request.form.get("classification") == "exempt"
+                    else "non_exempt"
+                )
+
+                raw_class = request.form.get("classification")
+                if raw_class not in {"exempt", "non_exempt"}:
+                    raise ValueError("Invalid classification")
+
+                effective_text = (
+                    request.form.get("effective_date") or ""
+                ).strip()
+                effective = date.fromisoformat(effective_text)
+
+                if effective < date.today():
+                    raise ValueError(
+                        "Effective Date cannot be in the past"
+                    )
+
+                pay_type = (
+                    request.form.get("pay_type") or ""
+                ).strip()
+                amount_text = (
+                    request.form.get("pay_amount") or ""
+                ).strip()
+                frequency = (
+                    request.form.get("salary_frequency") or ""
+                ).strip()
+
+                if pay_type not in {"hourly", "salary"}:
+                    raise ValueError("Invalid Pay Type")
+
+                if pay_type == "hourly":
+                    frequency = None
+                elif frequency not in {
+                    "weekly", "biweekly", "semimonthly",
+                    "monthly", "annual"
+                }:
+                    raise ValueError("Invalid Salary Frequency")
+
+                amount = None
+                if amount_text:
+                    amount = Decimal(amount_text)
+                    if (
+                        not amount.is_finite()
+                        or amount <= 0
+                        or amount > Decimal("9999999999.99")
+                        or amount != amount.quantize(
+                            Decimal("0.01")
+                        )
+                    ):
+                        raise ValueError(
+                            "Pay amount must be positive "
+                            "with at most two decimals"
+                        )
+
+                # WCCR_PAYROLL_RULES_V10C6
+                # Payroll status is independent of pay-rate history.
+                # A disabled employee may have no rate.
+                rate_changed = False
+
+                if latest_pay:
+                    if amount is None:
+                        if enabled:
+                            raise ValueError(
+                                "Pay amount is required while "
+                                "enabling Payroll"
+                            )
+                        # No amount submitted while disabled:
+                        # preserve the existing rate unchanged.
+                        rate_changed = False
+                    else:
+                        rate_changed = any((
+                            latest_pay.pay_type != pay_type,
+                            latest_pay.classification != classification,
+                            Decimal(latest_pay.amount) != amount,
+                            latest_pay.salary_frequency != frequency,
+                        ))
+                elif amount is not None:
+                    rate_changed = True
+
+                status_changed = (
+                    latest_status is None and enabled
+                ) or (
+                    latest_status is not None
+                    and bool(latest_status.enabled) != enabled
+                )
+
+                if enabled and not latest_pay and not rate_changed:
+                    raise ValueError(
+                        "Set a pay rate before enabling Payroll"
+                    )
+
+                if rate_changed:
+                    if (
+                        latest_pay
+                        and effective <= latest_pay.effective_date
+                    ):
+                        raise ValueError(
+                            "Rate Effective Date must be later "
+                            "than the latest saved rate"
+                        )
+                    db.session.add(EmployeePayRate(
+                        user_id=user.id,
+                        pay_type=pay_type,
+                        classification=classification,
+                        amount=amount,
+                        salary_frequency=frequency,
+                        effective_date=effective,
+                        created_by_id=current_user.id,
+                    ))
+                    changed = True
+
+                if status_changed:
+                    # WCCR_PAYROLL_V10C7B
+                    # A future scheduled status cannot be silently
+                    # contradicted by another status entry.
+                    if (
+                        latest_status is not None
+                        and latest_status.effective_date > date.today()
+                        and bool(latest_status.enabled) != enabled
+                        and request.form.get(
+                            "confirm_future_status"
+                        ) != "1"
+                    ):
+                        raise ValueError(
+                            "A future Payroll status is already "
+                            "scheduled. Confirm the new status "
+                            "change before saving."
+                        )
+
+                    if (
+                        latest_status
+                        and effective <= latest_status.effective_date
+                    ):
+                        raise ValueError(
+                            "Payroll Status Effective Date must "
+                            "be later than the latest status change"
+                        )
+
+                    # A future enable date requires a rate effective
+                    # on or before that date.
+                    if enabled:
+                        valid_rate = (
+                            rate_changed
+                            or (
+                                latest_pay is not None
+                                and latest_pay.effective_date
+                                <= effective
+                            )
+                        )
+                        if not valid_rate:
+                            raise ValueError(
+                                "No pay rate is effective "
+                                "on the Payroll enable date"
+                            )
+
+                    db.session.add(EmployeePayrollStatus(
+                        user_id=user.id,
+                        enabled=enabled,
+                        effective_date=effective,
+                        created_by_id=current_user.id,
+                    ))
+                    changed = True
+
+            if changed:
+                db.session.commit()
+                flash("Employee Settings saved.", "success")
+            else:
+                flash("No changes to save.", "info")
+
+        except (ValueError, InvalidOperation) as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Employee Settings save failed: user_id=%s",
+                user.id,
+            )
+            flash("Unable to save Employee Settings.", "danger")
+
+        return redirect(url_for(
+            "inventory.edit_user", user_id=user.id
+        ))
+
+    suggested_date = date.today()
+    if latest_pay and latest_pay.effective_date >= suggested_date:
+        suggested_date = (
+            latest_pay.effective_date + timedelta(days=1)
         )
-        return redirect(url_for("inventory.users"))
+    if (
+        latest_status
+        and latest_status.effective_date >= suggested_date
+    ):
+        suggested_date = (
+            latest_status.effective_date + timedelta(days=1)
+        )
+
+    author_ids = {
+        uid
+        for item in pay_history + status_history
+        for uid in (item.created_by_id, item.cancelled_by_id)
+        if uid is not None
+    }
+    authors = {}
+    if author_ids:
+        authors = {
+            item.id: item.username
+            for item in User.query.filter(
+                User.id.in_(author_ids)
+            ).all()
+        }
+
+
+    # WCCR_PAYROLL_UX_V10C5
+    current_status = next(
+        (
+            entry for entry in active_status_history
+            if entry.effective_date <= date.today()
+        ),
+        None,
+    )
+    current_payroll_enabled = (
+        bool(current_status.enabled)
+        if current_status else False
+    )
 
     return render_template(
         "edit_user.html",
         user=user,
         role_options=role_options,
         change_role_allowed=change_role_allowed,
+        can_edit_user_settings=can_edit_user_settings,
+        pay_allowed=pay_allowed,
+        pay_history=pay_history,
+        status_history=status_history,
+        latest_pay=latest_pay,
+        latest_status=latest_status,
+        payroll_enabled=payroll_enabled,
+        current_payroll_enabled=current_payroll_enabled,
+        payroll_today_date=date.today(),
+        payroll_effective_date=suggested_date.isoformat(),
+        payroll_authors=authors,
     )
 
 @inventory_bp.route('/users/change_password/<int:user_id>', methods=['GET', 'POST'])
@@ -24386,6 +24998,7 @@ def add_part_batch():
 def attendance_payroll_dashboard(section="overview"):
     from flask import abort, render_template
     from flask_login import current_user
+    from flask import session as _void_session
     from services.erp_access_service import ErpAccessService
     from services.attendance_review_permissions import can_review_action
 
@@ -24448,8 +25061,24 @@ def attendance_payroll_dashboard(section="overview"):
     selected_start = None
     selected_end = None
 
+    # WCCR_SHIFT_VOID_RESTORE_V11
+    import secrets as _void_secrets_v11
+    from flask import session as _void_session_v11
+    if section in ("overview", "timesheets"):
+        if not _void_session_v11.get("wccr_void_v1_csrf"):
+            _void_session_v11["wccr_void_v1_csrf"] = (
+                _void_secrets_v11.token_urlsafe(32)
+            )
+
     # WCCR_ACCOUNTING_TIMESHEET_V61
     if section == "timesheets":
+        # WCCR_SHIFT_VOID_RESTORE_V1
+        import secrets as _void_secrets
+        from flask import session as _void_session
+        if not _void_session.get("wccr_void_v1_csrf"):
+            _void_session["wccr_void_v1_csrf"] = (
+                _void_secrets.token_urlsafe(32)
+            )
         from flask import request, abort
         from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
@@ -24486,7 +25115,7 @@ def attendance_payroll_dashboard(section="overview"):
 
     if section in ("overview", "attendance", "timesheets"):
         if access["attendance_view"]:
-            from extensions import db
+            # WCCR_PAYROLL_DB_SCOPE_FIX: use global extensions.db
             from services.employee_time_policy import (
                 load_policy
             )
@@ -24518,6 +25147,442 @@ def attendance_payroll_dashboard(section="overview"):
             {"status": "pending"}
         ).scalar_one()
 
+    # WCCR_PAYROLL_SCHEDULE_V1
+    # Read-only biweekly period selector; no payroll persistence.
+    payroll_schedule = None
+    if section == "payroll-preview":
+        from datetime import date as _pay_date, timedelta as _pay_delta
+        from flask import request as _pay_request
+
+        from datetime import datetime as _PayDateTime
+        from zoneinfo import ZoneInfo as _PayZoneInfo
+
+        _today = _PayDateTime.now(
+            _PayZoneInfo("America/Los_Angeles")
+        ).date()
+
+        _default_start = (
+            _today - _pay_delta(days=_today.weekday() + 14)
+        )
+        # WCCR_PAYROLL_PERIOD_V24
+        _current_start = (
+            _today - _pay_delta(days=_today.weekday())
+        )
+        _previous_start = _current_start - _pay_delta(days=14)
+        _selected_period = _pay_request.args.get("period", "")
+        if _selected_period == "current":
+            _start_raw = _current_start.isoformat()
+        elif _selected_period == "previous":
+            _start_raw = _previous_start.isoformat()
+        elif _selected_period:
+            abort(400)
+        else:
+            _start_raw = _pay_request.args.get(
+                "period_start", _previous_start.isoformat()
+            )
+        _date_raw = _pay_request.args.get("pay_date", "")
+
+        try:
+            _start = _pay_date.fromisoformat(_start_raw)
+            if _start.weekday() != 0:
+                raise ValueError("Period must begin Monday")
+            if not (
+                _pay_date(2000, 1, 1) <= _start
+                <= _today + _pay_delta(days=366)
+            ):
+                raise ValueError("Period outside allowed range")
+
+            _end = _start + _pay_delta(days=13)
+            _suggested_pay_date = _end + _pay_delta(days=5)
+            _payday = (
+                _pay_date.fromisoformat(_date_raw)
+                if _date_raw else _suggested_pay_date
+            )
+            if not (
+                _end <= _payday
+                <= _end + _pay_delta(days=30)
+            ):
+                raise ValueError("Pay Date outside allowed range")
+        except (TypeError, ValueError, OverflowError):
+            abort(400)
+
+        payroll_schedule = {
+            "start": _start.isoformat(),
+            "end": _end.isoformat(),
+            "current_start": _current_start.isoformat(),
+            "previous_start": _previous_start.isoformat(),
+            "is_current": _start == _current_start,
+            "is_previous": _start == _previous_start,
+            "in_progress": _end > _today,
+            "pay_date": _payday.isoformat(),
+            "previous": (
+                _start - _pay_delta(days=14)
+            ).isoformat(),
+            "next": (
+                _start + _pay_delta(days=14)
+            ).isoformat(),
+            "default_pay_date": _suggested_pay_date.isoformat(),
+        }
+
+
+
+    # WCCR_PAYROLL_PREVIEW_V2
+    payroll_preview_rows = []
+    payroll_preview_totals = None
+
+    if section == "payroll-preview":
+        from decimal import Decimal as _PayDecimal
+        from models import User as _PayUser
+        from services.employee_time_policy import (
+            load_policy as _pay_load_policy
+        )
+        from services.payroll_gross_preview_v1e import (
+            preview_from_database as _pay_preview
+        )
+
+        from datetime import date as _PayPeriodDate
+        _pay_period_start_date = _PayPeriodDate.fromisoformat(
+            payroll_schedule["start"]
+        )
+
+        _pay_policy = _pay_load_policy()
+        _pay_break = _pay_policy["paid_break_minutes"]
+
+        # WCCR_PAYROLL_MYTIME_HELP_V21
+        # Current My Time roster only; historical payroll
+        # obligations require separate period-aware review.
+        # WCCR_PAYROLL_ROSTER_LIGHT_V4
+        # Fetch only fields required for Payroll Preview.
+        # Preserve My Time ON filtering and employee ordering.
+        _pay_employees = (
+            db.session.query(
+                _PayUser.id,
+                _PayUser.username
+            )
+            .filter(
+                _PayUser.employee_time_tracking_enabled.is_(True)
+            )
+            .order_by(_PayUser.username.asc())
+            .all()
+        )
+
+        # WCCR_PAYROLL_TIME_TOTALS_V23
+        from decimal import ROUND_HALF_UP as _PayRound
+
+        def _pay_hhmm(value):
+            if value is None:
+                return None
+            minutes = int(
+                (_PayDecimal(str(value)) * 60).quantize(
+                    _PayDecimal("1"),
+                    rounding=_PayRound
+                )
+            )
+            return f"{minutes // 60}:{minutes % 60:02d}"
+
+        _pay_attendance_total = _PayDecimal("0")
+
+        _pay_totals = {
+            "hours": _PayDecimal("0"),
+            "regular": _PayDecimal("0"),
+            "overtime": _PayDecimal("0"),
+            "doubletime": _PayDecimal("0"),
+            "gross": _PayDecimal("0"),
+        }
+
+        # WCCR_PAYROLL_SHARED_DASHBOARD_V1
+        # One Attendance calculation for the entire payroll roster.
+        # Do not bypass the reader's date and safety validation.
+        _pay_shared_dashboard = None
+        _pay_shared_dashboard_error = None
+
+        if _pay_employees:
+            from services.attendance_dashboard_service import (
+                get_attendance_dashboard_data as _pay_dashboard
+            )
+            from datetime import datetime as _PayNow, timezone as _PayUTC
+
+            _pay_now = _PayNow.now(_PayUTC.utc)
+            _pay_period_end_date = (
+                _pay_period_start_date
+                + _pay_delta(days=13)
+            )
+
+            # Future periods are blocked by the existing reader.
+            # Avoid requesting future dates from Attendance.
+            # WCCR_PAYROLL_LIVE_V25
+            if _pay_period_start_date <= _today:
+                try:
+                    _pay_shared_dashboard = _pay_dashboard(
+                        db,
+                        paid_break_minutes=_pay_break,
+                        can_review=True,
+                        now=_pay_now,
+                        start_date=_pay_period_start_date,
+                        end_date=min(
+                            _pay_period_end_date, _today
+                        ),
+                    )
+                except Exception as _pay_dashboard_exc:
+                    _pay_shared_dashboard_error = (
+                        _pay_dashboard_exc
+                    )
+                    current_app.logger.exception(
+                        "Payroll shared Attendance load failed"
+                    )
+
+        for _employee in _pay_employees:
+            _row = {
+                "employee_id": _employee.id,
+                "employee_name": (
+                    getattr(_employee, "username", None)
+                    or getattr(_employee, "name", None)
+                    or ("Employee #" + str(_employee.id))
+                ),
+                "status": "BLOCKED",
+                "reason": "",
+                "hours": None,
+                "regular": None,
+                "overtime": None,
+                "doubletime": None,
+                "gross": None,
+                "completed_hours_display": None,
+                "open_shift_count": 0,
+                "review_day_count": 0,
+            }
+
+            # WCCR_PAYROLL_PERIOD_V24: incomplete period
+            # is informational, never a payroll estimate.
+            if payroll_schedule["in_progress"]:
+                # WCCR_PAYROLL_LIVE_V25
+                # Display only: never call Payroll Reader here.
+                _row["status"] = "IN_PROGRESS"
+
+                if _pay_shared_dashboard_error is not None:
+                    _row["status"] = "BLOCKED"
+                    _row["reason"] = (
+                        "Attendance temporarily unavailable."
+                    )
+                elif _pay_shared_dashboard is None:
+                    _row["reason"] = (
+                        "This period has not started."
+                    )
+                else:
+                    _live_seconds = 0
+                    _live_open_ids = set()
+                    _live_review_days = set()
+
+                    for _day in _pay_shared_dashboard.get(
+                        "daily_timesheets", []
+                    ):
+                        if _day.get("user_id") != _employee.id:
+                            continue
+
+                        _day_date = _day.get("date")
+                        if not (
+                            payroll_schedule["start"]
+                            <= str(_day_date)
+                            <= min(
+                                payroll_schedule["end"],
+                                _today.isoformat()
+                            )
+                        ):
+                            continue
+
+                        _parts = _day.get("parts", [])
+
+                        for _part in _parts:
+                            if (
+                                _part.get("open") is True
+                                and _part.get("status") != "voided"
+                            ):
+                                _live_open_ids.add(
+                                    _part.get("shift_id")
+                                )
+
+                        # WCCR_PAYROLL_CLEAN_V26
+                        # Open is a normal shift state, not by
+                        # itself an Attendance review problem.
+                        _needs_review = (
+                            _day.get("needs_review") is True
+                            or _day.get("overlap") is True
+                            or _day.get("unverified") is True
+                        )
+                        _is_open = _day.get("open") is True
+
+                        if _needs_review:
+                            _live_review_days.add(_day_date)
+
+                        # Never count open or unresolved days
+                        # as completed payroll hours.
+                        if _is_open or _needs_review:
+                            continue
+
+                        _seconds = _day.get("worked")
+                        if (
+                            type(_seconds) is int
+                            and _seconds >= 0
+                        ):
+                            _live_seconds += _seconds
+                        else:
+                            _live_review_days.add(_day_date)
+
+                    _live_hours = (
+                        _PayDecimal(_live_seconds)
+                        / _PayDecimal("3600")
+                    )
+
+                    _row["hours"] = _live_hours
+                    _row["hours_display"] = _pay_hhmm(
+                        _live_hours
+                    )
+                    _row["completed_hours_display"] = (
+                        _row["hours_display"]
+                    )
+                    _row["open_shift_count"] = len(
+                        _live_open_ids
+                    )
+                    _row["review_day_count"] = len(
+                        _live_review_days
+                    )
+
+                    _row["reason"] = (
+                        "Completed Attendance only. "
+                        "Open or unresolved days excluded. "
+                        "Payroll calculation is blocked."
+                    )
+
+                payroll_preview_rows.append(_row)
+                continue
+
+            try:
+                # WCCR_PAYROLL_HOURS_HELP_V22
+                # Attendance hours do not require a pay rate.
+                from services.payroll_data_reader_v1c import (
+                    load_payroll_sources as _pay_load_sources
+                )
+                from services.payroll_gross_preview_v1e import (
+                    preview_from_prepared as _pay_from_prepared
+                )
+
+                if _pay_shared_dashboard_error is not None:
+                    raise _pay_shared_dashboard_error
+
+                _prepared = _pay_load_sources(
+                    db,
+                    employee_id=_employee.id,
+                    period_start=_pay_period_start_date,
+                    paid_break_minutes=_pay_break,
+                    now=_pay_now if _pay_shared_dashboard is not None else None,
+                    dashboard=_pay_shared_dashboard,
+                )
+
+                _attendance_hours = sum(
+                    (
+                        _PayDecimal(str(_entry["hours"]))
+                        for _entry in _prepared["entries"]
+                    ),
+                    _PayDecimal("0"),
+                )
+
+                _row["hours"] = _attendance_hours
+                _row["hours_display"] = _pay_hhmm(
+                    _attendance_hours
+                )
+                _pay_attendance_total += _attendance_hours
+
+                # Rates/statuses are required for gross,
+                # but not for displaying attendance hours.
+                _result = _pay_from_prepared(_prepared)
+
+                _regular = _PayDecimal(
+                    str(_result["regular_hours"])
+                )
+                _overtime = _PayDecimal(
+                    str(_result["overtime_hours"])
+                )
+                _doubletime = _PayDecimal(
+                    str(_result["doubletime_hours"])
+                )
+                _gross = _PayDecimal(
+                    str(_result["gross_pay"])
+                )
+                _hours = (
+                    _regular + _overtime + _doubletime
+                )
+
+                _row.update({
+                    "status": "ESTIMATE",
+                    "hours": _hours,
+                    "hours_display": _pay_hhmm(_hours),
+                    "regular": _regular,
+                    "regular_display": _pay_hhmm(_regular),
+                    "overtime": _overtime,
+                    "overtime_display": _pay_hhmm(_overtime),
+                    "doubletime": _doubletime,
+                    "doubletime_display": _pay_hhmm(_doubletime),
+                    "gross": _gross,
+                })
+
+                _pay_totals["hours"] += _hours
+                _pay_totals["regular"] += _regular
+                _pay_totals["overtime"] += _overtime
+                _pay_totals["doubletime"] += _doubletime
+                _pay_totals["gross"] += _gross
+
+            except Exception as _pay_error:
+                from services.payroll_calculation_engine_v1a import (
+                    PayrollBlocked as _PayrollBlocked
+                )
+
+                if isinstance(_pay_error, _PayrollBlocked):
+                    _message = str(_pay_error)
+                    _help_messages = {
+                        "Missing effective rate":
+                            "No pay rate for this period. "
+                            "Set the effective rate in Edit User.",
+                        "Missing pay rate history":
+                            "Pay rate not configured. "
+                            "Add it in Edit User.",
+                        "Missing payroll status history":
+                            "Payroll status not configured. "
+                            "Check Payroll Settings in Edit User.",
+                        "Future payroll period is incomplete":
+                            "This pay period has not ended.",
+                    }
+                    _row["reason"] = _help_messages.get(
+                        _message, _message
+                    )
+                else:
+                    current_app.logger.exception(
+                        "Payroll preview failed for employee %s",
+                        _employee.id,
+                    )
+                    _row["reason"] = (
+                        "Calculation unavailable. "
+                        "Check application logs."
+                    )
+
+            payroll_preview_rows.append(_row)
+
+        _pay_totals["attendance_hours"] = (
+            _pay_attendance_total
+        )
+        _pay_totals["attendance_display"] = _pay_hhmm(
+            _pay_attendance_total
+        )
+        _pay_totals["regular_display"] = _pay_hhmm(
+            _pay_totals["regular"]
+        )
+        _pay_totals["overtime_display"] = _pay_hhmm(
+            _pay_totals["overtime"]
+        )
+        _pay_totals["doubletime_display"] = _pay_hhmm(
+            _pay_totals["doubletime"]
+        )
+
+        payroll_preview_totals = _pay_totals
+
     return render_template(
         "attendance_payroll_dashboard.html",
         correction_pending_count=correction_pending_count,
@@ -24525,11 +25590,180 @@ def attendance_payroll_dashboard(section="overview"):
         access=access,
         permission_codes=permissions,
         payroll_read_only=True,
+        payroll_schedule=payroll_schedule,
+        payroll_preview_rows=payroll_preview_rows,
+        payroll_preview_totals=payroll_preview_totals,
         attendance_data=attendance_data,
         timesheet_from=timesheet_from,
         timesheet_to=timesheet_to,
+        void_csrf_token=(
+            _void_session.get("wccr_void_v1_csrf", "")
+            if section in ("overview", "timesheets") else ""
+        ),
     )
 # WCCR_ATTENDANCE_PAYROLL_V29B_END
+
+
+# WCCR_SHIFT_VOID_RESTORE_V1
+@inventory_bp.route(
+    "/attendance-payroll/shift/<int:shift_id>/void-restore",
+    methods=["POST"],
+)
+@login_required
+def attendance_shift_void_restore(shift_id):
+    import secrets
+    from datetime import datetime, timezone, timedelta
+    from flask import request, session, abort, flash, redirect, url_for
+    from flask_login import current_user
+    from sqlalchemy import select, update
+    from models import ErpAccessOverride
+    from services.employee_time_tracking_models import (
+        EmployeeShift, EmployeeTimeAudit
+    )
+
+    # Explicit per-user permission; never grant by role.
+    permission = db.session.query(ErpAccessOverride).filter_by(
+        user_id=current_user.id,
+        permission_code="erp.attendance.edit_shifts",
+    ).first()
+
+    if (
+        permission is None
+        or (permission.effect or "").strip().upper() != "ALLOW"
+    ):
+        abort(403)
+
+    expected_token = session.get("wccr_void_v1_csrf", "")
+    submitted_token = request.form.get("csrf_token", "")
+
+    if (
+        not expected_token
+        or not secrets.compare_digest(
+            expected_token, submitted_token
+        )
+    ):
+        abort(400)
+
+    if set(request.form) != {
+        "csrf_token", "action", "reason", "expected_status"
+    }:
+        abort(400)
+
+    action = request.form["action"]
+    reason = request.form["reason"].strip()
+    expected_status = request.form["expected_status"]
+
+    if action not in ("void", "restore"):
+        abort(400)
+
+    if not 10 <= len(reason) <= 1000:
+        flash(
+            "Reason must contain 10 to 1000 characters.",
+            "danger",
+        )
+        return redirect(url_for(
+            "inventory.attendance_payroll_dashboard",
+            section="timesheets",
+        ))
+
+    shift = db.session.get(EmployeeShift, shift_id)
+    if shift is None:
+        abort(404)
+
+    if shift.ended_at is None:
+        abort(409)
+
+    if shift.status != expected_status:
+        abort(409)
+
+    if action == "void":
+        if shift.status not in ("closed", "pending_review"):
+            abort(409)
+        target_status = "voided"
+    else:
+        if shift.status != "voided":
+            abort(409)
+
+        # Recover the original status from the most recent
+        # Void audit, not from user-supplied form data.
+        latest_void = db.session.execute(
+            select(EmployeeTimeAudit)
+            .where(
+                EmployeeTimeAudit.shift_id == shift_id,
+                EmployeeTimeAudit.field_name == "shift_void",
+            )
+            .order_by(EmployeeTimeAudit.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+        if (
+            latest_void is None
+            or latest_void.old_value not in (
+                "closed", "pending_review"
+            )
+        ):
+            abort(409)
+
+        target_status = latest_void.old_value
+
+    def aware_utc(value):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    # Conservative V1 boundary until payroll-period locks
+    # are integrated with the real Payroll Engine.
+    if aware_utc(shift.started_at) < (
+        datetime.now(timezone.utc) - timedelta(days=31)
+    ):
+        abort(409)
+
+    try:
+        result = db.session.execute(
+            update(EmployeeShift)
+            .where(
+                EmployeeShift.id == shift_id,
+                EmployeeShift.status == expected_status,
+                EmployeeShift.ended_at.is_not(None),
+            )
+            .values(status=target_status)
+            .execution_options(synchronize_session=False)
+        )
+
+        if result.rowcount != 1:
+            db.session.rollback()
+            abort(409)
+
+        db.session.add(EmployeeTimeAudit(
+            shift_id=shift_id,
+            changed_by_user_id=current_user.id,
+            field_name=(
+                "shift_void"
+                if action == "void"
+                else "shift_restore"
+            ),
+            old_value=expected_status,
+            new_value=target_status,
+            reason=reason,
+        ))
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        raise
+
+    flash(
+        "Shift voided." if action == "void"
+        else "Shift restored.",
+        "success",
+    )
+
+    return redirect(url_for(
+        "inventory.attendance_payroll_dashboard",
+        section="timesheets",
+    ))
+
 
 # WCCR_EDIT_SHIFT_V40
 @inventory_bp.route(

@@ -378,7 +378,7 @@
                  href="{{ url_for('inventory.wo_alerts') }}">
                 ALERTS
                 {% if alerts_count is defined and alerts_count > 0 %}
-                  <span class="badge bg-danger ms-1">{{ alerts_count }}</span>
+                  <span class="badge rounded-pill bg-danger text-white ms-2" style="font-size:12px;min-width:26px;padding:5px 7px;font-weight:700;vertical-align:middle" title="{{ alerts_count }} unique Work Orders">{{ alerts_count if alerts_count < 100 else '99+' }}</span>
                 {% endif %}
               </a>
             </li>

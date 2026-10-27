@@ -127,8 +127,302 @@
 
   {% elif section == 'payroll-preview' %}
     <h5>Payroll Preview</h5>
-    <div class="alert alert-warning">
-      Payroll calculations are not yet enabled.
+    <!-- WCCR_PAYROLL_SCHEDULE_V1 -->
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between
+                    align-items-center gap-2 mb-2">
+          <h6 class="mb-0">Payroll Schedule</h6>
+          <span class="badge bg-secondary">
+            Preview only - not saved
+          </span>
+        </div>
+
+        <!-- WCCR_PAYROLL_PERIOD_V24 -->
+        <div class="d-flex flex-wrap gap-2 mb-3"
+             role="group" aria-label="Payroll period">
+          <a class="btn btn-sm {{ 'btn-primary' if payroll_schedule.is_current else 'btn-outline-secondary' }}"
+             href="{{ url_for(
+               'inventory.attendance_payroll_dashboard',
+               section='payroll-preview',
+               period='current'
+             ) }}">
+            Current Period
+          </a>
+          <a class="btn btn-sm {{ 'btn-primary' if payroll_schedule.is_previous else 'btn-outline-secondary' }}"
+             href="{{ url_for(
+               'inventory.attendance_payroll_dashboard',
+               section='payroll-preview',
+               period='previous'
+             ) }}">
+            Previous Period
+          </a>
+          {% if payroll_schedule.in_progress %}
+          <span class="badge bg-warning text-dark align-self-center"
+                title="The pay period is not complete. Payroll calculation remains blocked.">
+            In Progress &#9432;
+          </span>
+          {% endif %}
+        </div>
+
+        <form method="get"
+              action="{{ url_for(
+                'inventory.attendance_payroll_dashboard',
+                section='payroll-preview'
+              ) }}"
+              class="row g-2 align-items-end">
+
+          <div class="col-md-4">
+            <label class="form-label small">
+              Pay Period Start (Monday)
+            </label>
+            <input type="date"
+                   class="form-control form-control-sm"
+                   name="period_start"
+                   required
+                   value="{{ payroll_schedule.start }}">
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label small">Pay Date</label>
+            <input type="date"
+                   class="form-control form-control-sm"
+                   name="pay_date"
+                   required
+                   value="{{ payroll_schedule.pay_date }}">
+          </div>
+
+          <div class="col-md-4">
+            <button type="submit"
+                    class="btn btn-primary btn-sm">
+              Update Preview
+            </button>
+          </div>
+        </form>
+
+        <div class="small mt-3">
+          <strong>Pay Period:</strong>
+          {{ payroll_schedule.start }}
+          &ndash;
+          {{ payroll_schedule.end }}
+          <span class="mx-2">|</span>
+          <strong>Pay Date:</strong>
+          {{ payroll_schedule.pay_date }}
+        </div>
+
+        <!-- WCCR_PAYROLL_CLEAN_V26 -->
+        <div class="form-text mt-2">
+          Calendar selection only. Dates are not saved.
+          The Pay Date is a suggested date, not a verified
+          California payment deadline.
+        </div>
+      </div>
+    </div>
+
+
+    {# WCCR_PAYROLL_PREVIEW_V2 #}
+{# WCCR_PAYROLL_HOURS_HELP_V22 #}
+
+{# WCCR_PAYROLL_MYTIME_HELP_V21 #}
+<style>
+.wccr-pay-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 3px;
+  border-radius: 50%;
+  border: 1px solid #93a4b8;
+  color: #52657b;
+  background: #f4f7fb;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: help;
+  vertical-align: middle;
+}
+.wccr-pay-help:hover,
+.wccr-pay-help:focus {
+  background: #e4eefb;
+  color: #174a82;
+  outline: 2px solid #a8c9f0;
+  outline-offset: 1px;
+}
+</style>
+<div class="small text-muted mb-2">
+  Showing employees with My Time enabled.
+  Hover over &#9432; for explanations.
+  Estimates are not approved payroll.
+</div>
+    <div class="card mt-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between
+                    align-items-center mb-2">
+          <h6 class="mb-0">Employee Payroll Estimates</h6>
+          <span class="badge bg-secondary">
+            Illustrative only
+          </span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm table-hover
+                        align-middle">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th class="text-end">Hours <span class="wccr-pay-help" tabindex="0" role="note" aria-label="Total recorded paid working hours for this pay period. Preliminary until attendance review." title="Total recorded paid working hours for this pay period. Preliminary until attendance review.">&#9432;</span></th>
+                <th class="text-end">Regular <span class="wccr-pay-help" tabindex="0" role="note" aria-label="Hours paid at the regular rate, after applicable overtime classification." title="Hours paid at the regular rate, after applicable overtime classification.">&#9432;</span></th>
+                <th class="text-end">OT <span class="wccr-pay-help" tabindex="0" role="note" aria-label="Overtime hours, generally paid at 1.5 times the applicable regular rate." title="Overtime hours, generally paid at 1.5 times the applicable regular rate.">&#9432;</span></th>
+                <th class="text-end">DT <span class="wccr-pay-help" tabindex="0" role="note" aria-label="Double-time hours, generally paid at 2 times the applicable regular rate." title="Double-time hours, generally paid at 2 times the applicable regular rate.">&#9432;</span></th>
+                <th class="text-end">Gross <span class="wccr-pay-help" tabindex="0" role="note" aria-label="Estimated pay before taxes and deductions. Not an approved payroll amount." title="Estimated pay before taxes and deductions. Not an approved payroll amount.">&#9432;</span></th>
+                <th>Status <span class="wccr-pay-help" tabindex="0" role="note" aria-label="Estimate means a preliminary calculation is available. Needs review means something prevents a reliable estimate." title="Estimate means a preliminary calculation is available. Needs review means something prevents a reliable estimate.">&#9432;</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in payroll_preview_rows %}
+              <tr>
+                <td>
+                  {{ row.employee_name }}
+                  <span class="text-muted small">
+                    #{{ row.employee_id }}
+                  </span>
+                </td>
+
+                {% if row.status == 'ESTIMATE' %}
+                <td class="text-end">{{ row.hours_display }}</td>
+                <td class="text-end">{{ row.regular_display }}</td>
+                <td class="text-end">{{ row.overtime_display }}</td>
+                <td class="text-end">{{ row.doubletime_display }}</td>
+                <td class="text-end">
+                  ${{ row.gross }}
+                </td>
+                <td>
+                  <span class="badge bg-info text-dark">
+                    Estimate
+                  </span>
+                </td>
+                {% else %}
+                <td class="text-end">
+                  {% if row.hours is not none %}
+                    {{ row.hours_display }}
+                  {% else %}
+                    &mdash;
+                  {% endif %}
+                </td>
+                <td class="text-end">&mdash;</td>
+                <td class="text-end">&mdash;</td>
+                <td class="text-end">&mdash;</td>
+                <td class="text-end">&mdash;</td>
+                <td>
+                  <span class="badge bg-warning text-dark"
+                        title="{{ row.reason }}"
+                        tabindex="0">
+                    {% if row.status == 'IN_PROGRESS' %}
+                      In Progress &#9432;
+                    {% else %}
+                      Needs review &#9432;
+                    {% endif %}
+                  </span>
+                  <!-- WCCR_PAYROLL_LIVE_V25 -->
+                  {% if row.status == 'IN_PROGRESS' %}
+                    <div class="small mt-1">
+                      {% if row.open_shift_count %}
+                        <span class="text-primary">
+                          {{ row.open_shift_count }}
+                          open shift{{ 's' if row.open_shift_count != 1 else '' }}
+                        </span>
+                      {% else %}
+                        <span class="text-muted">
+                          No open shifts
+                        </span>
+                      {% endif %}
+                      {% if row.review_day_count %}
+                        <span class="text-warning-emphasis ms-1">
+                          ? {{ row.review_day_count }}
+                          day{{ 's' if row.review_day_count != 1 else '' }}
+                          need review
+                        </span>
+                      {% endif %}
+                    </div>
+                  {% endif %}
+                  {% if row.status != 'IN_PROGRESS' %}
+                  <div class="small text-muted mt-1">
+                    {{ row.reason }}
+                  </div>
+                  {% endif %}
+                </td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+
+            {% if payroll_schedule.in_progress %}
+            <tfoot class="table-light">
+              <tr>
+                <td colspan="7" class="small text-muted">
+                  Current period in progress.
+                  Completed hours are shown per employee;
+                  payroll totals are not finalized.
+                </td>
+              </tr>
+            </tfoot>
+            {% elif payroll_preview_totals %}
+            {% set blocked_count =
+                payroll_preview_rows
+                | rejectattr('status', 'equalto', 'ESTIMATE')
+                | list | length %}
+            <tfoot class="table-light fw-semibold">
+              <tr>
+                <td>
+                  {% if blocked_count %}
+                    Partial totals
+                    <span class="badge bg-warning text-dark"
+                          title="Some employees could not be calculated. This is not the full payroll total.">
+                      Incomplete &#9432;
+                    </span>
+                  {% else %}
+                    Estimated totals
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  {{ payroll_preview_totals.attendance_display }}
+                </td>
+                <td class="text-end">
+                  {% if blocked_count %}&mdash;{% else %}{{ payroll_preview_totals.regular_display }}{% endif %}
+                </td>
+                <td class="text-end">
+                  {% if blocked_count %}&mdash;{% else %}{{ payroll_preview_totals.overtime_display }}{% endif %}
+                </td>
+                <td class="text-end">
+                  {% if blocked_count %}&mdash;{% else %}{{ payroll_preview_totals.doubletime_display }}{% endif %}
+                </td>
+                <td class="text-end">
+                  {% if blocked_count %}
+                    &mdash;
+                  {% else %}
+                    ${{ payroll_preview_totals.gross }}
+                  {% endif %}
+                </td>
+                <td></td>
+              </tr>
+            </tfoot>
+            {% endif %}
+          </table>
+        </div>
+
+        <p class="small text-muted mb-0">
+          {% if payroll_schedule.in_progress %}
+          Current period: completed, non-flagged hours only.
+          Open shifts are excluded. Payroll is not approved.
+          Regular, OT, DT and Gross are unavailable.
+          {% else %}
+          Estimates use preliminary attendance data.
+          Missing days are assumed zero for preview only.
+          {% endif %}
+          Incomplete employee estimates are excluded from totals.
+          Payroll approval and payment are disabled.
+        </p>
+      </div>
     </div>
 
   {% elif section == 'payroll-approval' %}

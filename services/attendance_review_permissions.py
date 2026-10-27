@@ -25,8 +25,6 @@ def can_review_action(actor, action, *, session=None):
     no default access and no automatic inheritance.
     """
     # WCCR_SUPERADMIN_FULL_V14C_AST
-    if actor is not None and (getattr(actor, 'role', '') or '').strip().lower() == 'superadmin':
-        return True
     if actor is None:
         return False
 
@@ -43,6 +41,10 @@ def can_review_action(actor, action, *, session=None):
 
     if getattr(actor, "is_active", True) is False:
         return False
+
+    # WCCR_ATTENDANCE_V16A: validated Superadmin bypass
+    if actor is not None and (getattr(actor, 'role', '') or '').strip().lower() == 'superadmin':
+        return True
 
     # WCCR_ATTENDANCE_V67A_STRICT
     # Every actor, including Superadmin, requires explicit ALLOW.

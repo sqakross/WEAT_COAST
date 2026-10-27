@@ -1,71 +1,870 @@
+﻿
 {% extends "base.html" %}
 {% block content %}
+{# WCCR_PAYROLL_EMPLOYEE_SETTINGS_V10C2 #}
+<div class="container-sm py-3" style="max-width:760px">
+  <h3 class="mb-3">
+    Employee Settings
+    <span class="text-uppercase text-muted">
+      {{ user.username }}
+    </span>
+  </h3>
 
-{# ERP ACCESS USERS STEP 1 FINAL FIX02 - EDIT UI #}
-<div class="container-sm" style="max-width: 680px;">
-  <div class="d-flex align-items-center justify-content-between mb-3">
-    <h3 class="mb-0">
-      Edit User
-      <span class="text-uppercase">{{ user.username }}</span>
-    </h3>
-  </div>
+  <form method="POST"
+        action="{{ url_for('inventory.edit_user', user_id=user.id) }}">
+    <input type="hidden" name="form_action"
+           value="employee_settings">
 
-  <div class="card shadow-sm border-0">
-    <div class="card-body p-4">
-      <form method="POST" novalidate>
-
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Username</label>
-          <input type="text"
-                 name="username"
-                 value="{{ user.username }}"
-                 class="form-control"
-                 placeholder="e.g. tech.john"
-                 required>
-        </div>
-
-        <div class="mb-4">
-          <label class="form-label fw-semibold">Role</label>
-          {% if change_role_allowed %}
-          <select name="role" class="form-select" required>
-            {% for value, caption in role_options %}
+    {% if can_edit_user_settings %}
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <h5>General Information</h5>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Username</label>
+            <input class="form-control" name="username"
+                   value="{{ user.username }}" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Role</label>
+            {% if change_role_allowed %}
+            <select class="form-select" name="role">
+              {% for value, caption in role_options %}
               <option value="{{ value }}"
-                {% if (user.role or '')|lower == value %}selected{% endif %}>
+                {% if user.role|lower == value %}selected{% endif %}>
                 {{ caption }}
               </option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <input class="form-control"
+                   value="{{ user.role|title }}" disabled>
+            <input type="hidden" name="role"
+                   value="{{ user.role|lower }}">
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if pay_allowed %}
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <h5 class="mb-3">Compensation</h5>
+
+
+
+        <!-- WCCR_PAYROLL_UX_V10C5 -->
+        <!-- WCCR_PAYROLL_HELP_CLEANUP_V10C51 -->
+        <style>
+          .wccr-status-panel {
+            border:1px solid #cbd5e1;
+            border-radius:10px;
+            padding:14px;
+            margin-bottom:12px;
+          }
+          .wccr-status-panel.pay-on {
+            background:#e2f6e8;
+            border-color:#86c99b;
+          }
+          .wccr-status-panel.pay-off {
+            background:#fde9e9;
+            border-color:#e9a3a3;
+          }
+          .wccr-status-panel.class-exempt {
+            background:#fff3d6;
+            border-color:#e5b95c;
+          }
+          .wccr-status-panel.class-nonexempt {
+            background:#e8f1ff;
+            border-color:#94bdf5;
+          }
+          .wccr-choice-row {
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:8px;
+            margin-top:10px;
+          }
+          .wccr-choice-btn {
+            min-height:42px;
+            padding:8px;
+            background:#fff;
+            color:#334155;
+            border:1px solid #cbd5e1;
+            border-radius:8px;
+            font-weight:700;
+            font-size:.83rem;
+            cursor:pointer;
+          }
+          .wccr-choice-btn:focus-visible {
+            outline:3px solid #2563eb;
+            outline-offset:2px;
+          }
+          .wccr-choice-btn.off[aria-pressed="true"] {
+            background:#b91c1c;
+            border-color:#b91c1c;
+            color:white;
+          }
+          .wccr-choice-btn.on[aria-pressed="true"] {
+            background:#15803d;
+            border-color:#15803d;
+            color:white;
+          }
+          .wccr-choice-btn.nonexempt[aria-pressed="true"] {
+            background:#1d4ed8;
+            border-color:#1d4ed8;
+            color:white;
+          }
+          .wccr-choice-btn.exempt[aria-pressed="true"] {
+            background:#b45309;
+            border-color:#b45309;
+            color:white;
+          }
+          .wccr-setting-help {
+            font-size:.79rem;
+            color:#475569;
+            margin-top:9px;
+            line-height:1.5;
+          }
+          .wccr-help-icon {
+            border:0;
+            background:transparent;
+            color:#475569;
+            cursor:help;
+            padding:0 5px;
+          }
+          .wccr-unsaved {
+            background:#fef9c3;
+            color:#854d0e;
+            border:1px solid #eab308;
+            border-radius:8px;
+            padding:10px;
+            margin-bottom:12px;
+          }
+          .wccr-current-status {
+            background:#f8fafc;
+            border:1px solid #cbd5e1;
+            border-radius:8px;
+            padding:10px;
+            margin-bottom:12px;
+            font-size:.84rem;
+          }
+        </style>
+
+        <div id="wccr-pay-panel"
+             class="wccr-status-panel">
+          <div class="fw-semibold">
+            Payroll
+            <span class="small fw-normal text-muted">
+              ? selected setting
+            </span>
+          </div>
+          <input type="hidden" name="payroll_enabled"
+                 id="wccr-pay-enabled-value"
+                 value="{{ '1' if payroll_enabled else '0' }}">
+          <div class="wccr-choice-row" role="group"
+               aria-label="Payroll status">
+            <button type="button" id="wccr-pay-off"
+              class="wccr-choice-btn off"
+              aria-pressed="false">OFF</button>
+            <button type="button" id="wccr-pay-on"
+              class="wccr-choice-btn on"
+              aria-pressed="false">ON</button>
+          </div>
+          <div id="wccr-pay-description"
+               class="wccr-setting-help"></div>
+        </div>
+
+        <div id="wccr-class-panel"
+             class="wccr-status-panel">
+          <div class="fw-semibold">
+            Overtime Classification
+            
+          </div>
+          <input type="hidden" name="classification"
+                 id="wccr-pay-classification"
+                 value="{{ latest_pay.classification if latest_pay else 'non_exempt' }}">
+          <div class="wccr-choice-row" role="group"
+               aria-label="Overtime classification">
+            <button type="button" id="wccr-pay-nonexempt"
+              class="wccr-choice-btn nonexempt"
+              aria-pressed="false">NON-EXEMPT</button>
+            <button type="button" id="wccr-pay-exempt-choice"
+              class="wccr-choice-btn exempt"
+              aria-pressed="false">EXEMPT</button>
+          </div>
+          <div id="wccr-class-description"
+               class="wccr-setting-help"></div>
+
+          <div id="wccr-exempt-warning"
+               class="alert alert-warning mt-2 mb-0 py-2"
+               role="note" hidden>
+            <strong>Exempt classification:</strong>
+            Verify that the employee meets applicable
+            California salary and job-duty requirements.
+            Selecting EXEMPT alone does not establish
+            legal overtime exemption.
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Pay Type </label>
+            <select class="form-select" name="pay_type"
+                    id="wccr-pay-type">
+              <option value="hourly"
+                {% if not latest_pay or latest_pay.pay_type == 'hourly' %}
+                selected{% endif %}>Hourly</option>
+              <option value="salary"
+                {% if latest_pay and latest_pay.pay_type == 'salary' %}
+                selected{% endif %}>Salary</option>
+            </select><div class="form-text wccr-field-hint">Choose Hourly for payment per hour, or Salary for a fixed amount per selected period.</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label" id="wccr-pay-amount-label" title="Positive hourly rate or salary amount. Use Payroll OFF instead of setting the rate to zero.">
+              Pay Amount ($)
+            </label>
+            <input class="form-control" type="number"
+                   name="pay_amount" min="0.01"
+                   max="9999999999.99" step="0.01"
+                   value="{{ latest_pay.amount if latest_pay else '' }}"><div class="form-text wccr-field-hint">Enter the hourly rate or salary amount. Payroll OFF does not erase worked hours or pay owed.</div>
+          </div>
+
+          <div class="col-md-6" id="wccr-pay-frequency-wrap">
+            <label class="form-label">Salary Frequency </label>
+            <select class="form-select" name="salary_frequency">
+              {% for value, caption in [
+                ('weekly','Weekly'),
+                ('biweekly','Biweekly'),
+                ('semimonthly','Twice monthly'),
+                ('monthly','Monthly'),
+                ('annual','Annual')
+              ] %}
+              <option value="{{ value }}"
+                {% if latest_pay and latest_pay.salary_frequency == value %}
+                selected{% endif %}>{{ caption }}</option>
+              {% endfor %}
+            </select><div class="form-text wccr-field-hint">The period covered by the salary amount. This may differ from the paycheck schedule.</div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Effective Date </label>
+            <input class="form-control" type="date"
+                   name="effective_date"
+                   value="{{ payroll_effective_date }}"
+                   min="{{ payroll_effective_date }}"
+                   required><div class="form-text wccr-field-hint">The date when the change takes effect. Earlier rates and statuses remain in history.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    {% endif %}
+
+
+    {% if pay_allowed %}
+    <div id="wccr-unsaved-warning"
+         class="wccr-unsaved" role="status" hidden>
+      Unsaved changes - click Save Changes to apply.
+    </div>
+
+    <!-- WCCR_PAYROLL_V10C7B -->
+    <div class="wccr-current-status">
+      <div>
+        <strong>Current Payroll:</strong>
+        <span class="fw-semibold">
+          {{ 'ON' if current_payroll_enabled else 'OFF' }}
+        </span>
+        <span class="text-muted">(effective today)</span>
+      </div>
+
+      {% if latest_status and
+            latest_status.effective_date > payroll_today_date %}
+      <div class="mt-2">
+        <strong>Scheduled Payroll:</strong>
+        <span class="fw-semibold">
+          {{ 'ON' if latest_status.enabled else 'OFF' }}
+        </span>
+        from {{ latest_status.effective_date }}
+      </div>
+      <div class="text-muted mt-1">
+        The buttons above show the latest scheduled setting,
+        not necessarily today's effective status.
+      </div>
+      {% endif %}
+
+      {% if not status_history %}
+      <div class="text-muted mt-1">
+        No status history. Payroll defaults to OFF.
+      </div>
+      {% endif %}
+    </div>
+
+    {% if latest_status and
+          latest_status.effective_date > payroll_today_date %}
+    <div id="wccr-future-conflict"
+         class="alert alert-warning py-2"
+         hidden>
+      <strong>Existing future Payroll change:</strong>
+      {{ 'ON' if latest_status.enabled else 'OFF' }}
+      from {{ latest_status.effective_date }}.
+
+      <div class="mt-1">
+        Choosing the opposite setting will create a
+        <strong>new later status change</strong>.
+        It will not cancel or delete the existing entry.
+      </div>
+
+      <label class="d-flex align-items-start gap-2 mt-2">
+        <input type="checkbox"
+               class="form-check-input mt-1"
+               id="wccr-confirm-future-status"
+               name="confirm_future_status"
+               value="1">
+        <span>
+          I understand and want to schedule this
+          additional Payroll status change.
+        </span>
+      </label>
+    </div>
+    {% endif %}
+    {% endif %}
+    <div class="d-flex gap-2 mb-3">
+      <button class="btn btn-primary px-4" type="submit">
+        <i class="bi bi-check2-circle me-1"></i>
+        Save Changes
+      </button>
+      {% if can_edit_user_settings %}
+      <a class="btn btn-outline-secondary"
+         href="{{ url_for('inventory.users') }}">
+        Back
+      </a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if pay_allowed %}
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      {# WCCR_PAYROLL_UI_V10C8C5_FIX3 #}
+{# WCCR_PAYROLL_SMART_HISTORY_V10C8C7 #}
+
+{% set current_rate = namespace(id=none, date=none) %}
+{% for r in pay_history %}
+  {% if not r.cancelled_at
+    and r.effective_date <= payroll_today_date
+    and (current_rate.date is none
+         or r.effective_date > current_rate.date) %}
+    {% set current_rate.id = r.id %}
+    {% set current_rate.date = r.effective_date %}
+  {% endif %}
+{% endfor %}
+{% set current_rate_id = current_rate.id %}
+<h5>Pay Rate History</h5>
+      {% if pay_history %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Effective</th>
+              <th>Type</th>
+              <th>Amount</th>
+              <th>Class</th>
+              <th>Status</th>
+              <th>By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rate in pay_history %}
+            <tr>
+              <td>{{ rate.effective_date }}</td>
+              <td>{{ rate.pay_type|title }}</td>
+              <td>
+                ${{ "%.2f"|format(rate.amount) }}
+                {% if rate.salary_frequency %}
+                / {{ rate.salary_frequency }}
+                {% else %}/ hr{% endif %}
+              </td>
+              <td>
+                {{ rate.classification|replace('_',' ')|title }}
+              </td>
+              <td>
+                {% if rate.cancelled_at %}
+                  {% if rate.cancellation_reason
+                    and rate.cancellation_reason.startswith(
+                      'Superseded by correction:'
+                    ) %}
+                    <span class="badge bg-secondary">SUPERSEDED</span>
+                  {% else %}
+                    <span class="badge bg-secondary">CANCELLED</span>
+                  {% endif %}
+                {% else %}
+                  
+{% if rate.effective_date > payroll_today_date %}
+  <span class="badge bg-info text-dark">SCHEDULED</span>
+{% elif rate.id == current_rate_id %}
+  <span class="badge bg-success">CURRENT</span>
+{% else %}
+  <span class="badge bg-secondary">HISTORICAL</span>
+{% endif %}
+
+                {% endif %}
+              </td>
+              <td>
+                {{ payroll_authors.get(rate.created_by_id, 'User #' ~ rate.created_by_id) }}
+              </td>
+            </tr>
             {% endfor %}
-          </select>
-          {% else %}
-          <input type="text"
-                 class="form-control"
-                 value="{{ (user.role or '')|upper }}"
-                 disabled>
-          <input type="hidden"
-                 name="role"
-                 value="{{ (user.role or '')|lower }}">
-          <div class="form-text">
-            Role changes are disabled for your account.
-          </div>
-          {% endif %}
-          <div class="form-text">
-            Default shop role: <code>Technician</code>.
-          </div>
-        </div>
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">
+        No pay rate history.
+      </p>
+      {% endif %}
 
-        <div class="d-flex gap-2">
-          <button type="submit" class="btn btn-primary px-4">
-            <i class="bi bi-check2-circle me-1"></i> Save
-          </button>
+      <hr>
+      
+{% set current_status = namespace(id=none, date=none) %}
+{% for s in status_history %}
+  {% if not s.cancelled_at
+    and s.effective_date <= payroll_today_date
+    and (current_status.date is none
+         or s.effective_date > current_status.date) %}
+    {% set current_status.id = s.id %}
+    {% set current_status.date = s.effective_date %}
+  {% endif %}
+{% endfor %}
+{% set current_status_id = current_status.id %}
+<h5>Payroll Status History</h5>
+      {% if status_history %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Effective</th>
+              <th>Status</th>
+              <th>Status Record</th>
+              <th>By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in status_history %}
+            <tr>
+              <td>{{ entry.effective_date }}</td>
+              <td>
+                {{ 'Enabled' if entry.enabled else 'Disabled' }}
+              </td>
+              <td>
+                {% if entry.cancelled_at %}
+                  {% if entry.cancellation_reason
+                    and entry.cancellation_reason.startswith(
+                      'Superseded by correction:'
+                    ) %}
+                    <span class="badge bg-secondary">SUPERSEDED</span>
+                  {% else %}
+                    <span class="badge bg-secondary">CANCELLED</span>
+                  {% endif %}
+                {% else %}
+                  
+{% if entry.effective_date > payroll_today_date %}
+  <span class="badge bg-info text-dark">SCHEDULED</span>
+{% elif entry.id == current_status_id %}
+  <span class="badge bg-success">CURRENT</span>
+{% else %}
+  <span class="badge bg-secondary">HISTORICAL</span>
+{% endif %}
 
-          <a href="{{ url_for('inventory.users') }}"
-             class="btn btn-outline-secondary px-4">
-            Back
-          </a>
-        </div>
-
-      </form>
+                {% endif %}
+              </td>
+              <td>
+                {{ payroll_authors.get(entry.created_by_id, 'User #' ~ entry.created_by_id) }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">
+        No status history. Payroll is disabled by default.
+      </p>
+      {% endif %}
     </div>
   </div>
+  {% endif %}
+  {# WCCR_PAYROLL_CORRECT_V10C8C3 #}
+  {% if pay_allowed %}
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <h5 class="mb-2">Correct Payroll History</h5>
+      <p class="small text-muted">
+        Select an existing record below. Corrections preserve
+        the original record and require a reason.
+        Previously approved payroll is not automatically changed.
+      </p>
+
+      {% for rate in pay_history %}
+      <details class="border rounded p-2 mb-2">
+        <summary>
+          Rate {{ rate.effective_date }} - ${{ "%.2f"|format(rate.amount) }}
+          {% if rate.cancelled_at %}
+          - CANCELLED / SUPERSEDED
+          {% endif %}
+        </summary>
+
+        {% if rate.cancelled_at %}
+          <div class="small text-muted mt-2">
+            {{ rate.cancellation_reason or 'Cancelled' }}
+            {% if rate.cancelled_by_id %}
+            - by
+            {{ payroll_authors.get(
+                 rate.cancelled_by_id,
+                 'User #' ~ rate.cancelled_by_id
+               ) }}
+            {% endif %}
+            {% if rate.cancelled_at %}
+            ? {{ rate.cancelled_at }}
+            {% endif %}
+          </div>
+        {% else %}
+        <form method="POST" class="mt-3">
+          <input type="hidden" name="form_action"
+                 value="payroll_correct">
+          <input type="hidden" name="record_type"
+                 value="rate">
+          <input type="hidden" name="record_id"
+                 value="{{ rate.id }}">
+          <div class="row g-2">
+            <div class="col-sm-6">
+              <label class="form-label">Effective Date</label>
+              <input class="form-control" type="date"
+                     name="corrected_date"
+                     value="{{ rate.effective_date }}"
+                     required>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Amount ($)</label>
+              <input class="form-control" type="number"
+                     name="corrected_amount"
+                     step="0.01" min="0.01"
+                     value="{{ rate.amount }}" required>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Pay Type</label>
+              <select class="form-select"
+                      name="corrected_pay_type">
+                <option value="hourly"
+                  {% if rate.pay_type == 'hourly' %}selected{% endif %}>
+                  Hourly
+                </option>
+                <option value="salary"
+                  {% if rate.pay_type == 'salary' %}selected{% endif %}>
+                  Salary
+                </option>
+              </select>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Classification</label>
+              <select class="form-select"
+                      name="corrected_classification">
+                <option value="non_exempt"
+                  {% if rate.classification == 'non_exempt' %}
+                  selected{% endif %}>Non-exempt</option>
+                <option value="exempt"
+                  {% if rate.classification == 'exempt' %}
+                  selected{% endif %}>Exempt</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Salary Frequency</label>
+              <select class="form-select"
+                      name="corrected_frequency">
+                {% for value, caption in [
+                  ('weekly','Weekly'),
+                  ('biweekly','Biweekly'),
+                  ('semimonthly','Twice monthly'),
+                  ('monthly','Monthly'),
+                  ('annual','Annual')
+                ] %}
+                <option value="{{ value }}"
+                  {% if rate.salary_frequency == value %}
+                  selected{% endif %}>{{ caption }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">
+                Reason for correction
+              </label>
+              <textarea class="form-control"
+                        name="reason"
+                        minlength="5" maxlength="1000"
+                        rows="2" required></textarea>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm mt-2"
+                  type="submit">
+            Save Correction
+          </button>
+        </form>
+
+        {% if rate.effective_date > payroll_today_date %}
+        <form method="POST" class="mt-2">
+          <input type="hidden" name="form_action"
+                 value="payroll_cancel">
+          <input type="hidden" name="record_type"
+                 value="rate">
+          <input type="hidden" name="record_id"
+                 value="{{ rate.id }}">
+          <label class="form-label small">
+            Reason to cancel scheduled rate
+          </label>
+          <textarea class="form-control"
+                    name="reason" minlength="5"
+                    maxlength="1000" rows="2"
+                    required></textarea>
+          <button class="btn btn-outline-danger btn-sm mt-2"
+                  type="submit">
+            Cancel Scheduled Rate
+          </button>
+        </form>
+        {% endif %}
+        {% endif %}
+      </details>
+      {% endfor %}
+
+      <h5 class="mt-4">Correct Payroll Status</h5>
+      {% for entry in status_history %}
+      <details class="border rounded p-2 mb-2">
+        <summary>
+          {{ entry.effective_date }} - {{ 'ON' if entry.enabled else 'OFF' }}
+          {% if entry.cancelled_at %}
+          - CANCELLED / SUPERSEDED
+          {% endif %}
+        </summary>
+
+        {% if entry.cancelled_at %}
+        <div class="small text-muted mt-2">
+          {{ entry.cancellation_reason or 'Cancelled' }}
+          {% if entry.cancelled_by_id %}
+          - by
+          {{ payroll_authors.get(
+               entry.cancelled_by_id,
+               'User #' ~ entry.cancelled_by_id
+             ) }}
+          {% endif %}
+          ? {{ entry.cancelled_at }}
+        </div>
+        {% else %}
+        <form method="POST" class="mt-3">
+          <input type="hidden" name="form_action"
+                 value="payroll_correct">
+          <input type="hidden" name="record_type"
+                 value="status">
+          <input type="hidden" name="record_id"
+                 value="{{ entry.id }}">
+          <div class="row g-2">
+            <div class="col-sm-6">
+              <label class="form-label">Effective Date</label>
+              <input class="form-control" type="date"
+                     name="corrected_date"
+                     value="{{ entry.effective_date }}"
+                     required>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Payroll</label>
+              <select class="form-select"
+                      name="corrected_enabled">
+                <option value="1"
+                  {% if entry.enabled %}selected{% endif %}>
+                  ON
+                </option>
+                <option value="0"
+                  {% if not entry.enabled %}selected{% endif %}>
+                  OFF
+                </option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">
+                Reason for correction
+              </label>
+              <textarea class="form-control"
+                        name="reason"
+                        minlength="5" maxlength="1000"
+                        rows="2" required></textarea>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm mt-2"
+                  type="submit">
+            Save Correction
+          </button>
+        </form>
+
+        {% if entry.effective_date > payroll_today_date %}
+        <form method="POST" class="mt-2">
+          <input type="hidden" name="form_action"
+                 value="payroll_cancel">
+          <input type="hidden" name="record_type"
+                 value="status">
+          <input type="hidden" name="record_id"
+                 value="{{ entry.id }}">
+          <label class="form-label small">
+            Reason to cancel scheduled status
+          </label>
+          <textarea class="form-control"
+                    name="reason" minlength="5"
+                    maxlength="1000" rows="2"
+                    required></textarea>
+          <button class="btn btn-outline-danger btn-sm mt-2"
+                  type="submit">
+            Cancel Scheduled Status
+          </button>
+        </form>
+        {% endif %}
+        {% endif %}
+      </details>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+
 </div>
+
+<script>
+(function () {
+  "use strict";
+
+  const get = id => document.getElementById(id);
+  const enabled = get("wccr-pay-enabled-value");
+  const classification = get("wccr-pay-classification");
+  const type = get("wccr-pay-type");
+  const frequency = get("wccr-pay-frequency-wrap");
+  const amountLabel = get("wccr-pay-amount-label");
+  const form = enabled ? enabled.closest("form") : null;
+
+  // WCCR_PAYROLL_V10C7B
+  const originalPayrollValue = enabled ? enabled.value : null;
+
+  const initial = form
+    ? Object.fromEntries(new FormData(form).entries())
+    : {};
+
+  function refresh() {
+    const on = enabled && enabled.value === "1";
+    const exempt = classification &&
+      classification.value === "exempt";
+
+    const payPanel = get("wccr-pay-panel");
+    const classPanel = get("wccr-class-panel");
+
+    if (payPanel) {
+      payPanel.classList.toggle("pay-on", on);
+      payPanel.classList.toggle("pay-off", !on);
+    }
+    if (classPanel) {
+      classPanel.classList.toggle("class-exempt", exempt);
+      classPanel.classList.toggle("class-nonexempt", !exempt);
+    }
+
+    const exemptWarning = get("wccr-exempt-warning");
+    if (exemptWarning) {
+      exemptWarning.hidden = !exempt;
+    }
+
+    [
+      ["wccr-pay-off", !on],
+      ["wccr-pay-on", on],
+      ["wccr-pay-nonexempt", !exempt],
+      ["wccr-pay-exempt-choice", exempt]
+    ].forEach(([id, active]) => {
+      const button = get(id);
+      if (button) {
+        button.setAttribute("aria-pressed", String(active));
+      }
+    });
+
+    const payHelp = get("wccr-pay-description");
+    if (payHelp) {
+      payHelp.textContent = on
+        ? "ON: Employee is included in Payroll from the effective date."
+        : "OFF: Regular Payroll enrollment is disabled. Worked hours and pay owed remain recorded.";
+    }
+
+    const classHelp = get("wccr-class-description");
+    if (classHelp) {
+      classHelp.textContent = exempt
+        ? "EXEMPT: Requires legal eligibility. A salary alone is not sufficient."
+        : "NON-EXEMPT: Applicable overtime and timekeeping rules apply.";
+    }
+
+    if (type && frequency && amountLabel) {
+      const salary = type.value === "salary";
+      frequency.hidden = !salary;
+      amountLabel.textContent = salary
+        ? "Salary Amount ($)"
+        : "Hourly Rate ($)";
+    }
+
+    const futureWarning = get("wccr-future-conflict");
+    const futureConfirmation =
+      get("wccr-confirm-future-status");
+
+    if (futureWarning && enabled) {
+      const conflict =
+        enabled.value !== originalPayrollValue;
+
+      futureWarning.hidden = !conflict;
+
+      if (!conflict && futureConfirmation) {
+        futureConfirmation.checked = false;
+      }
+    }
+
+    const warning = get("wccr-unsaved-warning");
+    if (warning && form) {
+      const current = Object.fromEntries(
+        new FormData(form).entries()
+      );
+      const keys = new Set([
+        ...Object.keys(initial),
+        ...Object.keys(current)
+      ]);
+      const changed = [...keys].some(
+        key => (initial[key] || "") !== (current[key] || "")
+      );
+      warning.hidden = !changed;
+    }
+  }
+
+  function bind(id, field, value) {
+    const button = get(id);
+    if (button && field) {
+      button.addEventListener("click", function () {
+        field.value = value;
+        refresh();
+      });
+    }
+  }
+
+  bind("wccr-pay-off", enabled, "0");
+  bind("wccr-pay-on", enabled, "1");
+  bind("wccr-pay-nonexempt", classification, "non_exempt");
+  bind("wccr-pay-exempt-choice", classification, "exempt");
+
+  if (form) {
+    form.addEventListener("input", refresh);
+    form.addEventListener("change", refresh);
+  }
+
+  refresh();
+})();
+</script>
+
+
 
 {% endblock %}

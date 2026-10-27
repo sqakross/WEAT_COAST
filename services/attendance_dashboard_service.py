@@ -283,6 +283,40 @@ def get_attendance_dashboard_data(
     today_totals = defaultdict(int)
 
     for shift in shifts:
+        # WCCR_SHIFT_VOID_RESTORE_V1
+        # Keep voided shifts visible, but never count their hours.
+        if shift.status == "voided":
+            _void_day = aware(shift.started_at).astimezone(tz).date()
+            if first_day <= _void_day <= today:
+                _void_start = aware(shift.started_at)
+                _void_end = aware(shift.ended_at)
+                _void_record = {
+                    "shift_id": shift.id,
+                    "user_id": shift.user_id,
+                    "employee_name": (
+                        usernames.get(shift.user_id)
+                        or f"User #{shift.user_id}"
+                    ),
+                    "started": la_time(_void_start),
+                    "ended": la_time(_void_end),
+                    "status": "voided",
+                    "open": False,
+                    "active_pause": None,
+                    "requires_review": False,
+                    "has_idle": False,
+                    "elapsed_hours": 0,
+                    "date": _void_day.isoformat(),
+                    "unverified": False,
+                    "daily_start": _void_start,
+                    "daily_end": _void_end,
+                    "worked": 0,
+                    "lunch": 0,
+                    "break": 0,
+                    "total": 0,
+                }
+                timesheets.append(_void_record)
+            continue
+
         info = summary(
             shift, events_by_shift[shift.id], now
         )
@@ -429,13 +463,36 @@ def get_attendance_dashboard_data(
         unverified = any(
             p.get("unverified", False) for p in parts
         )
+        # WCCR_SHIFT_VOID_RESTORE_V1
+        # Voided records must not create artificial overlaps.
+        _active_parts = [
+            p for p in parts if p.get("status") != "voided"
+        ]
+        overlapping = False
+        _last_end = None
+        for _part in _active_parts:
+            if (
+                _last_end is not None
+                and _part["daily_start"] < _last_end
+            ):
+                overlapping = True
+            if (
+                _last_end is None
+                or _part["daily_end"] > _last_end
+            ):
+                _last_end = _part["daily_end"]
+
         review_required = (
             overlapping
             or unverified
-            or any(p["requires_review"] for p in parts)
+            or any(p["requires_review"] for p in _active_parts)
         )
         is_open = any(p["open"] for p in parts)
-        first = parts[0]
+        first = _active_parts[0] if _active_parts else parts[0]
+        _display_end = (
+            _last_end if _last_end is not None
+            else max(p["daily_end"] for p in parts)
+        )
 
         daily_timesheets.append({
             "date": work_date,
@@ -446,7 +503,7 @@ def get_attendance_dashboard_data(
             ).strftime("%I:%M %p"),
             "ended": (
                 "Still open" if is_open else
-                max_end.astimezone(tz).strftime("%I:%M %p")
+                _display_end.astimezone(tz).strftime("%I:%M %p")
             ),
             "unverified": unverified,
             "worked": (

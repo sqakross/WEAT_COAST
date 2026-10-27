@@ -1,4 +1,4 @@
-# models.py (Ð³Ð¾Ñ‚Ð¾Ð²Ñ‹Ð¹ Ñ„Ð°Ð¹Ð»)
+﻿# models.py (Ð³Ð¾Ñ‚Ð¾Ð²Ñ‹Ð¹ Ñ„Ð°Ð¹Ð»)
 from __future__ import annotations
 
 from datetime import datetime, date, timezone
@@ -5341,5 +5341,141 @@ class ApplianceMovement(db.Model):
         )
 
 
+# WCCR_PAYROLL_SETTINGS_V10A
+# Effective-dated employee compensation history.
+# Payroll calculations must select the rate by work date.
+class EmployeePayRate(db.Model):
+    __tablename__ = "employee_pay_rate"
+
+    __table_args__ = (
+        # WCCR_PAYROLL_SAFETY_V10C8C4
+        db.CheckConstraint(
+            "pay_type IN ('hourly', 'salary')",
+            name="ck_employee_pay_rate_type",
+        ),
+        db.CheckConstraint(
+            "classification IN ('non_exempt', 'exempt')",
+            name="ck_employee_pay_rate_classification",
+        ),
+        db.CheckConstraint(
+            "amount > 0",
+            name="ck_employee_pay_rate_positive",
+        ),
+        db.CheckConstraint(
+            "(pay_type = 'hourly' AND salary_frequency IS NULL) OR "
+            "(pay_type = 'salary' AND salary_frequency IS NOT NULL)",
+            name="ck_employee_pay_rate_frequency",
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    pay_type = db.Column(db.String(12), nullable=False)
+    classification = db.Column(db.String(16), nullable=False)
+    amount = db.Column(db.Numeric(12, 2), nullable=False)
+    salary_frequency = db.Column(db.String(20), nullable=True)
+    effective_date = db.Column(db.Date, nullable=False, index=True)
+
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    created_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+    __mapper_args__ = {"confirm_deleted_rows": True}
+
+
+    # WCCR_PAYROLL_CANCEL_V10C8A
+    cancelled_at = db.Column(db.DateTime, nullable=True)
+    cancelled_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    cancellation_reason = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+
+    # WCCR_PAYROLL_CORRECTIONS_V10C8C1
+    corrects_id = db.Column(
+        db.Integer,
+        db.ForeignKey("employee_pay_rate.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    correction_reason = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+
+
+
+# WCCR_PAYROLL_STATUS_V10C1
+class EmployeePayrollStatus(db.Model):
+    __tablename__ = "employee_payroll_status"
+
+    __table_args__ = (
+        # WCCR_PAYROLL_SAFETY_V10C8C4
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    enabled = db.Column(db.Boolean, nullable=False)
+    effective_date = db.Column(
+        db.Date, nullable=False, index=True,
+    )
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow,
+    )
+    created_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+
+    # WCCR_PAYROLL_CANCEL_V10C8A
+    cancelled_at = db.Column(db.DateTime, nullable=True)
+    cancelled_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    cancellation_reason = db.Column(
+        db.Text,
+        nullable=True,
+    )
+
+
+    # WCCR_PAYROLL_CORRECTIONS_V10C8C1
+    corrects_id = db.Column(
+        db.Integer,
+        db.ForeignKey("employee_payroll_status.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    correction_reason = db.Column(
+        db.Text,
+        nullable=True,
+    )
 
 

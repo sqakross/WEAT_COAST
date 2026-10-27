@@ -308,19 +308,58 @@
   {% endif %}
 </td>
                       <td>
+                        {# WCCR_SHIFT_VOID_RESTORE_V11 #}
                         {% if part.open %}
                           <span class="text-success small fw-semibold">
                             Active shift
                           </span>
                         {% elif access.attendance_edit %}
-                        <a class="btn btn-sm btn-outline-primary"
-                           href="{{ url_for(
-                             'inventory.attendance_shift_edit',
-                             shift_id=part.shift_id) }}">
-                          Edit
-                        </a>
+                          {% if part.status == "voided" %}
+                            <span class="badge bg-secondary me-1">VOIDED</span>
+                          {% else %}
+                            <a class="btn btn-sm btn-outline-primary"
+                               href="{{ url_for(
+                                 'inventory.attendance_shift_edit',
+                                 shift_id=part.shift_id) }}">
+                              Edit
+                            </a>
+                          {% endif %}
+                          {% if section in ["overview", "timesheets"] %}
+                        <form method="post"
+                              class="d-inline wccr-void-form"
+                              action="{{ url_for(
+                                'inventory.attendance_shift_void_restore',
+                                shift_id=part.shift_id
+                              ) }}">
+                          <input type="hidden"
+                                 name="csrf_token"
+                                 value="{{ void_csrf_token }}">
+                          <input type="hidden"
+                                 name="expected_status"
+                                 value="{{ part.status }}">
+                          <input type="hidden"
+                                 name="reason" value="">
+                          {% if part.status == "voided" %}
+                          <input type="hidden"
+                                 name="action" value="restore">
+                          <button type="submit"
+                                  class="btn btn-sm btn-outline-success">
+                            Restore
+                          </button>
+                          {% else %}
+                          <input type="hidden"
+                                 name="action" value="void">
+                          <button type="submit"
+                                  class="btn btn-sm btn-outline-danger">
+                            Void
+                          </button>
+                          {% endif %}
+                        </form>
+                          {% endif %}
+                        {% elif part.status == "voided" %}
+                          <span class="badge bg-secondary">VOIDED</span>
                         {% else %}
-                        <span class="text-muted small">View only</span>
+                          <span class="text-muted small">View only</span>
                         {% endif %}
                       </td>
                     </tr>
@@ -526,4 +565,39 @@
 
   setInterval(refreshAttendance, INTERVAL_MS);
 })();
+</script>
+
+{# WCCR_SHIFT_VOID_RESTORE_V1 #}
+<script>
+document.addEventListener("submit", function (event) {
+  const form = event.target;
+  if (!form.classList.contains("wccr-void-form")) return;
+
+  const action = form.querySelector(
+    'input[name="action"]'
+  ).value;
+
+  const message = action === "void"
+    ? "Reason for voiding this shift (10-1000 characters):"
+    : "Reason for restoring this shift (10-1000 characters):";
+
+  const reason = window.prompt(message);
+
+  if (reason === null) {
+    event.preventDefault();
+    return;
+  }
+
+  const cleaned = reason.trim();
+
+  if (cleaned.length < 10 || cleaned.length > 1000) {
+    event.preventDefault();
+    window.alert("Reason must be 10-1000 characters.");
+    return;
+  }
+
+  form.querySelector(
+    'input[name="reason"]'
+  ).value = cleaned;
+});
 </script>
