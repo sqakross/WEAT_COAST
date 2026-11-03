@@ -398,6 +398,91 @@ def post_receiving_batch(
 
 # ---------- core: UNPOST (rollback stock using applied_qty) ----------
 
+
+# WCCR_RECEIVING_SAFETY_V1
+def _wccr_receiving_has_issued_parts(batch):
+    """
+    WCCR RECEIVING DUPLICATE SAFETY V2.
+
+    Protect actual issued receipt lots.
+    Preserve conservative protection for historical unlinked issues.
+    """
+
+    from models import IssuedPartRecord, Part, GoodsReceiptLine
+
+    receipt_lines = (
+        GoodsReceiptLine.query
+        .filter_by(goods_receipt_id=batch.id)
+        .all()
+    )
+
+    receipt_line_ids = {
+        row.id for row in receipt_lines
+        if row.id is not None
+    }
+
+    if not receipt_line_ids:
+        return False
+
+    linked_issue = (
+        IssuedPartRecord.query
+        .filter(
+            IssuedPartRecord.quantity > 0,
+            IssuedPartRecord.source_receipt_line_id.in_(
+                receipt_line_ids
+            ),
+        )
+        .first()
+    )
+
+    if linked_issue is not None:
+        return True
+
+    invoice = str(
+        getattr(batch, "invoice_number", "") or ""
+    ).strip().upper()
+
+    if not invoice:
+        return False
+
+    def norm(value):
+        value = str(value or "").strip().upper()
+        return value.lstrip("0") or "0"
+
+    target_invoice = norm(invoice)
+
+    part_numbers = {
+        str(row.part_number or "").strip().upper()
+        for row in receipt_lines
+    }
+
+    historical_issues = (
+        db.session.query(IssuedPartRecord, Part)
+        .join(Part, IssuedPartRecord.part_id == Part.id)
+        .filter(
+            IssuedPartRecord.quantity > 0,
+            IssuedPartRecord.source_receipt_line_id.is_(None),
+        )
+        .all()
+    )
+
+    for record, part in historical_issues:
+        pn = str(
+            getattr(part, "part_number", "") or ""
+        ).strip().upper()
+
+        ref = getattr(record, "inv_ref", None)
+
+        if (
+            pn in part_numbers
+            and ref
+            and norm(ref) == target_invoice
+        ):
+            return True
+
+    return False
+
+
 def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     """
     UNPOST (откат прихода):
@@ -406,82 +491,160 @@ def unpost_receiving_batch(batch_id: int, current_user_id: int | None = None):
     - статус batch -> draft
     """
 
-    _authorize_mutation("inventory.receiving.unpost")
-    from flask import current_app
+    # WCCR_RECEIVING_SAFETY_V1_3
+    try:
 
-    batch = ReceivingBatch.query.get(batch_id)
-    if not batch:
-        raise ValueError(f"Receiving batch {batch_id} not found")
+        _authorize_mutation("inventory.receiving.unpost")
+        from flask import current_app
 
-    curr_status = (getattr(batch, "status", "") or "").strip().lower()
-    if curr_status != "posted":
+        batch = ReceivingBatch.query.get(batch_id)
+        if not batch:
+            raise ValueError(f"Receiving batch {batch_id} not found")
+
+        # WCCR_RECEIVING_SAFETY_V1: preserve issued supplier lots.
+        if _wccr_receiving_has_issued_parts(batch):
+            raise ValueError(
+                "Receiving cannot be unposted: parts from this supplier "
+                "invoice have already been issued. Use an audited correction."
+            )
+
+        curr_status = (getattr(batch, "status", "") or "").strip().lower()
+        if curr_status != "posted":
+            current_app.logger.info(
+                "[RECEIVING_UNPOST] Batch %s not in 'posted' (status='%s'), skipping.",
+                batch.id, getattr(batch, "status", None),
+            )
+            return batch
+
+        # WCCR_RECEIVING_SAFETY_V1_2
+        # Validate the complete batch BEFORE changing any inventory.
+        required_by_part = {}
+        existing_parts = {}
+
+        items = list(batch.items or [])
+
+        if not items:
+            raise ValueError(
+                "Cannot unpost receiving: batch contains no lines."
+            )
+
+        for item in items:
+            pn = str(getattr(item, "part_number", "") or "").strip().upper()
+
+            try:
+                quantity = int(getattr(item, "quantity", 0) or 0)
+                applied = int(getattr(item, "applied_qty", 0) or 0)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Cannot unpost receiving: invalid quantity data."
+                )
+
+            if not pn or quantity <= 0:
+                raise ValueError(
+                    "Cannot unpost receiving: invalid receiving line."
+                )
+
+            if applied != quantity:
+                raise ValueError(
+                    f"Cannot unpost receiving #{batch.id}: "
+                    f"{pn} has inconsistent applied_qty "
+                    f"({applied}) versus quantity ({quantity}). "
+                    "Manual reconciliation required."
+                )
+
+            required_by_part[pn] = (
+                required_by_part.get(pn, 0) + applied
+            )
+
+        for pn, required in required_by_part.items():
+            matches = Part.query.filter(
+                func.upper(Part.part_number) == pn
+            ).all()
+
+            if len(matches) != 1:
+                raise ValueError(
+                    f"Cannot unpost receiving: expected exactly "
+                    f"one inventory part for {pn}, found {len(matches)}."
+                )
+
+            part = matches[0]
+            available = _get_part_on_hand(part)
+
+            if available < required:
+                raise ValueError(
+                    f"Cannot unpost receiving: insufficient stock "
+                    f"for {pn}. Need {required}, have {available}."
+                )
+
+            existing_parts[pn] = part
+
         current_app.logger.info(
-            "[RECEIVING_UNPOST] Batch %s not in 'posted' (status='%s'), skipping.",
-            batch.id, getattr(batch, "status", None),
+            "[RECEIVING_UNPOST] Reverting batch %s from posted -> draft ...",
+            batch.id,
         )
+
+        for it in (batch.items or []):
+            pn = (getattr(it, "part_number", "") or "").strip().upper()
+            if not pn:
+                continue
+
+            qty_applied = int(getattr(it, "applied_qty", 0) or 0)
+
+            if qty_applied <= 0:
+                continue
+
+            part = existing_parts[pn]
+
+            before_qty = _get_part_on_hand(part)
+            # WCCR_RECEIVING_SAFETY_V1: never silently partially unpost.
+            if before_qty < qty_applied:
+                raise ValueError(
+                    f"Cannot unpost receiving: insufficient stock for {pn}. "
+                    f"Need {qty_applied}, available {before_qty}."
+                )
+            rollback_qty = qty_applied
+            after_qty = before_qty - rollback_qty
+
+            _set_part_on_hand(part, after_qty)
+
+            if hasattr(part, "location"):
+                incoming_loc = (getattr(it, "location", "") or "").strip().upper()
+                if after_qty == 0:
+                    part.location = ""
+                else:
+                    if incoming_loc:
+                        part.location = _remove_locations(getattr(part, "location", ""), incoming_loc)[:64]
+
+            current_app.logger.info(
+                "[RECEIVING_UNPOST] part %s: before=%s, rollback=%s, after=%s (qty_applied=%s)",
+                pn, before_qty, rollback_qty, after_qty, qty_applied
+            )
+
+            if hasattr(it, "applied_qty"):
+                it.applied_qty = 0
+
+            db.session.add(part)
+            db.session.add(it)
+
+        batch.status = "draft"
+        batch.posted_at = None
+
+        if hasattr(batch, "unposted_by"):
+            batch.unposted_by = current_user_id
+        if hasattr(batch, "unposted_at"):
+            batch.unposted_at = datetime.utcnow()
+
+        db.session.add(batch)
+        db.session.commit()
+
+        current_app.logger.info(
+            "[RECEIVING_UNPOST] Batch %s reverted to draft, stock rolled back safely.",
+            batch.id,
+        )
+
         return batch
 
-    current_app.logger.info(
-        "[RECEIVING_UNPOST] Reverting batch %s from posted -> draft ...",
-        batch.id,
-    )
-
-    for it in (batch.items or []):
-        pn = (getattr(it, "part_number", "") or "").strip().upper()
-        if not pn:
-            continue
-
-        qty_applied = int(getattr(it, "applied_qty", 0) or 0)
-        if qty_applied <= 0:
-            qty_applied = int(getattr(it, "quantity", 0) or 0)
-
-        if qty_applied <= 0:
-            continue
-
-        part = Part.query.filter(func.upper(Part.part_number) == pn).first()
-        if not part:
-            continue
-
-        before_qty = _get_part_on_hand(part)
-        rollback_qty = qty_applied if qty_applied <= before_qty else before_qty
-        after_qty = before_qty - rollback_qty
-
-        _set_part_on_hand(part, after_qty)
-
-        if hasattr(part, "location"):
-            incoming_loc = (getattr(it, "location", "") or "").strip().upper()
-            if after_qty == 0:
-                part.location = ""
-            else:
-                if incoming_loc:
-                    part.location = _remove_locations(getattr(part, "location", ""), incoming_loc)[:64]
-
-        current_app.logger.info(
-            "[RECEIVING_UNPOST] part %s: before=%s, rollback=%s, after=%s (qty_applied=%s)",
-            pn, before_qty, rollback_qty, after_qty, qty_applied
-        )
-
-        if hasattr(it, "applied_qty"):
-            it.applied_qty = 0
-
-        db.session.add(part)
-        db.session.add(it)
-
-    batch.status = "draft"
-    batch.posted_at = None
-
-    if hasattr(batch, "unposted_by"):
-        batch.unposted_by = current_user_id
-    if hasattr(batch, "unposted_at"):
-        batch.unposted_at = datetime.utcnow()
-
-    db.session.add(batch)
-    db.session.commit()
-
-    current_app.logger.info(
-        "[RECEIVING_UNPOST] Batch %s reverted to draft, stock rolled back safely.",
-        batch.id,
-    )
-
-    return batch
+    except Exception:
+        db.session.rollback()
+        raise
 

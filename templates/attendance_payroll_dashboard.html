@@ -1,3 +1,4 @@
+{# WCCR_PAYROLL_UI_CLEANUP_V1_1 #}
 {% extends "base.html" %}
 {% block content %}
 <div class="container-fluid py-3">
@@ -30,8 +31,7 @@
         {% for key, label in [
           ('overview', 'Overview'),
           ('pay-settings', 'Employee Pay Settings'),
-          ('payroll-preview', 'Payroll Preview'),
-          ('payroll-approval', 'Payroll Approval'),
+          ('payroll-preview', 'Payroll Review'),
           ('my-access', 'My Access')
         ] %}
         <li>
@@ -72,7 +72,7 @@
           <h5>Payroll</h5>
           <p>Pay profiles, overtime and payroll approval.</p>
           <span class="badge bg-secondary">
-            Payroll engine pending
+            Payroll preview available
           </span>
         </div></div>
       </div>
@@ -121,12 +121,14 @@
       <li>Automatic Overtime Policy</li>
     </ul>
     <div class="alert alert-warning">
-      Settings are not editable yet. No payroll data is being
-      written or calculated.
+      Employee pay settings are managed in Manage Users &gt; Edit User. Payroll Preview is read-only; it does not approve or post payroll.
     </div>
 
+    {# WCCR_PAYROLL_REVIEW_V12 #}
   {% elif section == 'payroll-preview' %}
-    <h5>Payroll Preview</h5>
+    <h5>Payroll Review</h5>
+    {# WCCR_UNIFIED_PAYROLL_REVIEW_V1_1 #}
+    <p class="small text-muted">Review attendance hours and estimated gross pay. Payroll approval is not yet enabled.</p>
     <!-- WCCR_PAYROLL_SCHEDULE_V1 -->
     <div class="card mb-3">
       <div class="card-body">
@@ -276,6 +278,7 @@
                 <th class="text-end">DT <span class="wccr-pay-help" tabindex="0" role="note" aria-label="Double-time hours, generally paid at 2 times the applicable regular rate." title="Double-time hours, generally paid at 2 times the applicable regular rate.">&#9432;</span></th>
                 <th class="text-end">Gross <span class="wccr-pay-help" tabindex="0" role="note" aria-label="Estimated pay before taxes and deductions. Not an approved payroll amount." title="Estimated pay before taxes and deductions. Not an approved payroll amount.">&#9432;</span></th>
                 <th>Status <span class="wccr-pay-help" tabindex="0" role="note" aria-label="Estimate means a preliminary calculation is available. Needs review means something prevents a reliable estimate." title="Estimate means a preliminary calculation is available. Needs review means something prevents a reliable estimate.">&#9432;</span></th>
+                <th>Approval</th>
               </tr>
             </thead>
             <tbody>
@@ -298,7 +301,13 @@
                 </td>
                 <td>
                   <span class="badge bg-info text-dark">
-                    Estimate
+                    Estimate available
+                  </span>
+                </td>
+                <td>
+                  <span class="badge bg-secondary"
+                        title="Payroll approval is not implemented.">
+                    Not enabled
                   </span>
                 </td>
                 {% else %}
@@ -320,7 +329,7 @@
                     {% if row.status == 'IN_PROGRESS' %}
                       In Progress &#9432;
                     {% else %}
-                      Needs review &#9432;
+                      Needs setup / review &#9432;
                     {% endif %}
                   </span>
                   <!-- WCCR_PAYROLL_LIVE_V25 -->
@@ -351,6 +360,12 @@
                   </div>
                   {% endif %}
                 </td>
+                <td>
+                  <span class="badge bg-secondary"
+                        title="Payroll approval is not implemented.">
+                    Not enabled
+                  </span>
+                </td>
                 {% endif %}
               </tr>
               {% endfor %}
@@ -359,7 +374,7 @@
             {% if payroll_schedule.in_progress %}
             <tfoot class="table-light">
               <tr>
-                <td colspan="7" class="small text-muted">
+                <td colspan="8" class="small text-muted">
                   Current period in progress.
                   Completed hours are shown per employee;
                   payroll totals are not finalized.
@@ -404,6 +419,7 @@
                   {% endif %}
                 </td>
                 <td></td>
+                <td></td>
               </tr>
             </tfoot>
             {% endif %}
@@ -426,11 +442,22 @@
     </div>
 
   {% elif section == 'payroll-approval' %}
-    <h5>Payroll Approval</h5>
-    <div class="alert alert-warning">
-      Approval actions are not yet enabled.
+    <h5>Payroll Review</h5>
+    <div class="alert alert-info">
+      Payroll Preview and Review now share one screen.
+      Approval remains disabled.
     </div>
-  {% endif %}
+    {% if access.payroll_view %}
+    <a class="btn btn-sm btn-outline-primary"
+       href="{{ url_for(
+         'inventory.attendance_payroll_dashboard',
+         section='payroll-preview'
+       ) }}">
+      Open Payroll Review
+    </a>
+    {% endif %}
+
+{% endif %}
 </div>
 
 {# WCCR_ATTENDANCE_DASHBOARD_V294 #}

@@ -191,13 +191,32 @@
         Show Period
       </button>
     </div>
-  </form>
+  
+    
+    {# WCCR_PRINT_REPORT_V2 #}
+    <div class="col-md-3">
+      <label class="form-label" for="wccr-report-employee">
+        Report for
+      </label>
+      <select id="wccr-report-employee"
+              class="form-select">
+        <option value="">All Employees</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <button type="button"
+              class="btn btn-outline-primary w-100"
+              onclick="wccrPrintAttendanceReport()">
+        Print Report
+      </button>
+    </div>
+</form>
   {% endif %}
 
 
 
   <div class="table-responsive">
-    <table class="table table-sm table-hover align-middle">
+    <table id="wccr-attendance-print-source" class="table table-sm table-hover align-middle">
       <thead class="table-light">
         <tr>
           <th>Work Date</th>
@@ -601,3 +620,620 @@ document.addEventListener("submit", function (event) {
   ).value = cleaned;
 });
 </script>
+
+
+
+{# WCCR_PRINT_REPORT_V2_SCRIPT #}
+
+<style>
+@media print {
+  #wccr-print-report .wccr-grand-total {
+    background: #dce8f3 !important;
+    font-weight: 700;
+    border-top: 2px solid #193653;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  #wccr-print-report .summary-section {
+    break-before: auto !important;
+    page-break-before: auto !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #wccr-print-report .wccr-total-row {
+    font-weight: 700;
+  }
+}
+</style>
+
+
+<style>
+@media print {
+  #wccr-print-report .wccr-total-row {
+    font-weight: 700;
+    background: #e6edf4 !important;
+    border-top: 2px solid #193653;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+</style>
+
+{% if section == "timesheets" %}
+<style>
+#wccr-print-report {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 12mm;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #wccr-print-report,
+  #wccr-print-report * {
+    visibility: visible !important;
+  }
+
+  #wccr-print-report {
+    display: block !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    color: #172333;
+    background: white;
+    font-family: Arial, sans-serif;
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  #wccr-print-report .report-header {
+    border-bottom: 3px solid #193653;
+    padding-bottom: 12px;
+    margin-bottom: 18px;
+  }
+
+  #wccr-print-report .company {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: .5px;
+  }
+
+  #wccr-print-report .report-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-top: 9px;
+  }
+
+  #wccr-print-report .report-meta {
+    margin-top: 7px;
+    color: #475569;
+  }
+
+  #wccr-print-report h3 {
+    font-size: 12px;
+    margin: 18px 0 8px;
+  }
+
+  #wccr-print-report table {
+    border-collapse: collapse;
+    width: 100%;
+    table-layout: auto;
+  }
+
+  #wccr-print-report th {
+    background: #eaf0f5 !important;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    border-bottom: 2px solid #60758b;
+    padding: 7px 6px;
+    text-align: left;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  #wccr-print-report td {
+    border-bottom: 1px solid #dbe2e9;
+    padding: 6px;
+    vertical-align: top;
+  }
+
+  #wccr-print-report tbody tr:nth-child(even) {
+    background: #f7f9fb !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  #wccr-print-report thead {
+    display: table-header-group;
+  }
+
+  #wccr-print-report tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #wccr-print-report .summary-section {
+    break-before: auto;
+    break-before: auto;
+  
+    break-inside: avoid;
+}
+
+  #wccr-print-report .summary-section.first-only {
+    break-before: auto;
+    page-break-before: auto;
+  }
+
+  #wccr-print-report .note {
+    font-size: 9px;
+    color: #526274;
+    margin-top: 12px;
+  }
+
+  #wccr-print-report .empty {
+    padding: 14px;
+    border: 1px solid #dbe2e9;
+  }
+}
+</style>
+
+<div id="wccr-print-report"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  const sourceId = "wccr-attendance-print-source";
+  const selectId = "wccr-report-employee";
+  const reportId = "wccr-print-report";
+
+  function escapeHTML(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function sourceRows() {
+    const table = document.getElementById(sourceId);
+    if (!table) return [];
+
+    return Array.from(
+      table.querySelectorAll("tbody > tr")
+    ).filter(tr => tr.children.length === 8)
+     .map(tr => {
+       const cells = Array.from(tr.children);
+       const values = cells.map(cell => cell.innerText.trim());
+       return {
+         date: values[0],
+         employee: values[1],
+         shift: values[2].replace(/\s+/g, " "),
+         worked: values[3],
+         lunch: values[4],
+         breakTime: values[5],
+         status: values[6],
+       };
+     });
+  }
+
+  function populateEmployees() {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    const current = select.value;
+    const names = [...new Set(
+      sourceRows().map(row => row.employee)
+    )].filter(Boolean).sort((a, b) => a.localeCompare(b));
+
+    select.replaceChildren();
+
+    const all = new Option("All Employees", "");
+    select.add(all);
+
+    for (const name of names) {
+      select.add(new Option(name, name));
+    }
+
+    if (names.includes(current)) select.value = current;
+    filterTimesheet();
+  }
+
+  function seconds(value) {
+    const match = String(value).trim().match(/^(\d+):([0-5]\d)$/);
+    return match
+      ? Number(match[1]) * 3600 + Number(match[2]) * 60
+      : null;
+  }
+
+  function duration(value) {
+    const minutes = Math.floor(value / 60);
+    return String(Math.floor(minutes / 60)).padStart(2, "0")
+      + ":" + String(minutes % 60).padStart(2, "0");
+  }
+
+  function table(headers, rows) {
+    const head = "<thead><tr>" + headers.map(
+      h => "<th>" + escapeHTML(h) + "</th>"
+    ).join("") + "</tr></thead>";
+
+    const body = "<tbody>" + rows.map(row =>
+      "<tr>" + row.map(
+        cell => "<td>" + escapeHTML(cell) + "</td>"
+      ).join("") + "</tr>"
+    ).join("") + "</tbody>";
+
+    return "<table>" + head + body + "</table>";
+  }
+
+  function buildSummary(rows) {
+    const totals = new Map();
+
+    for (const row of rows) {
+      if (!totals.has(row.employee)) {
+        totals.set(row.employee, {
+          days: 0,
+          validDays: 0,
+          worked: 0,
+          lunch: 0,
+          breaks: 0,
+          incomplete: false,
+        });
+      }
+
+      const item = totals.get(row.employee);
+      item.days++;
+
+      const w = seconds(row.worked);
+      const l = seconds(row.lunch);
+      const b = seconds(row.breakTime);
+
+      const valid = (
+        w !== null && l !== null && b !== null &&
+        !/review|progress|open/i.test(row.status)
+      );
+
+      if (!valid) {
+        item.incomplete = true;
+        continue;
+      }
+
+      item.validDays++;
+      item.worked += w;
+      item.lunch += l;
+      item.breaks += b;
+    }
+
+    return [...totals.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, item]) => [
+        name,
+        item.validDays + " / " + item.days,
+        duration(item.worked + item.lunch + item.breaks),
+        duration(item.lunch),
+        duration(item.breaks),
+        duration(item.worked),
+        "Pending",
+        "Pending",
+        "Pending",
+        item.incomplete ? "Partial / Review" : "Calculated"
+      ]);
+  }
+
+  
+  // WCCR_REPORT_LIVE_FILTER_V22
+  function filterTimesheet() {
+    const selected = document.getElementById(selectId)?.value || "";
+    const table = document.getElementById(sourceId);
+    if (!table) return;
+
+    const rows = Array.from(
+      table.querySelectorAll("tbody > tr")
+    );
+
+    for (let i = 0; i < rows.length; i++) {
+      const tr = rows[i];
+
+      if (tr.children.length !== 8) continue;
+
+      const employee = tr.children[1].innerText.trim();
+      const visible = !selected || employee === selected;
+
+      tr.style.display = visible ? "" : "none";
+
+      const detail = rows[i + 1];
+      if (
+        detail &&
+        detail.children.length === 1 &&
+        detail.children[0].colSpan === 8
+      ) {
+        detail.style.display = visible ? "" : "none";
+      }
+    }
+  }
+
+  document.getElementById(selectId)?.addEventListener(
+    "change", filterTimesheet
+  );
+
+window.wccrPrintAttendanceReport = function () {
+    populateEmployees();
+
+    const selected = document.getElementById(selectId)?.value || "";
+    const target = document.getElementById(reportId);
+
+    if (!target) return;
+
+    const rows = sourceRows().filter(
+      row => !selected || row.employee === selected
+    );
+
+    if (!rows.length) {
+      alert("No attendance records for this selection.");
+      return;
+    }
+
+    const from = document.querySelector(
+      'input[name="from"]'
+    )?.value || "";
+    const to = document.querySelector(
+      'input[name="to"]'
+    )?.value || "";
+
+    const title = selected
+      ? "Individual Employee Attendance Report"
+      : "Employee Attendance Report";
+
+    const generated = new Date().toLocaleString(
+      "en-US", { timeZone: "America/Los_Angeles" }
+    );
+
+    const header =
+      '<div class="report-header">' +
+      '<div class="company">WEST COAST CHIEF REPAIR</div>' +
+      '<div class="report-title">' + escapeHTML(title) + '</div>' +
+      '<div class="report-meta">' +
+      'Employee: ' + escapeHTML(selected || "All Employees") +
+      ' &nbsp; | &nbsp; Period: ' +
+      escapeHTML(from) + ' to ' + escapeHTML(to) +
+      ' &nbsp; | &nbsp; Pacific Time' +
+      '<div>Generated: ' + escapeHTML(generated) + '</div>' +
+      '</div></div>';
+
+    const daily = table(
+      ["Date", "Employee", "Shift Start / End",
+       "Worked", "Lunch", "Break", "Status"],
+      rows.map(row => [
+        row.date, row.employee, row.shift,
+        row.worked, row.lunch, row.breakTime, row.status
+      ])
+    );
+
+    const summary = table(
+      ["Employee", "Days Valid / Total", "Shift",
+       "Lunch", "Break", "Worked",
+       "Regular", "OT 1.5x", "DT 2x", "Status"],
+      buildSummary(rows)
+    );
+
+    target.innerHTML =
+      header +
+      "<h3>Daily Attendance</h3>" + daily +
+      '<section class="summary-section">' +
+      "<h3>Employee Totals</h3>" + summary +
+      '<p class="note">' +
+      "Totals exclude open and review days. " +
+      "Shift is calculated as Worked + Lunch + Break. " +
+      "Regular, overtime and double time are pending " +
+      "validated payroll calculations. " +
+      "This report is not payroll approval." +
+      "</p></section>";
+
+
+    // WCCR_PRINT_REPORT_V24
+    // Add a TOTAL row for individual employee reports.
+    if (selected) {
+      const tables = target.querySelectorAll("table");
+      const dailyTable = tables[0];
+      const summaryTable = tables[1];
+
+      if (dailyTable && summaryTable) {
+        const summaryRow = summaryTable.querySelector("tbody tr");
+        const body = dailyTable.querySelector("tbody");
+
+        if (summaryRow && body) {
+          const cells = Array.from(summaryRow.cells)
+            .map(cell => cell.textContent.trim());
+
+          if (cells.length >= 10) {
+            const total = document.createElement("tr");
+            total.className = "wccr-total-row";
+
+            const values = [
+              "TOTAL",
+              cells[0],
+              "Valid: " + cells[1],
+              cells[5],
+              cells[3],
+              cells[4],
+              cells[9]
+            ];
+
+            for (const value of values) {
+              const cell = document.createElement("td");
+              cell.textContent = value;
+              total.appendChild(cell);
+            }
+
+            body.appendChild(total);
+          }
+        }
+      }
+    }
+
+
+    // WCCR_PRINT_REPORT_V25
+    // Presentation only; use existing validated-day totals.
+    (function finalizeAttendanceReport() {
+      const reportTables = Array.from(
+        target.querySelectorAll("table")
+      );
+
+      if (reportTables.length !== 2) {
+        throw new Error("Report table structure mismatch");
+      }
+
+      const dailyTable = reportTables[0];
+      const summaryTable = reportTables[1];
+
+      const setHeader = (table, index, label) => {
+        const th = table.querySelectorAll("thead th")[index];
+        if (th) th.textContent = label;
+      };
+
+      setHeader(dailyTable, 3, "Actual Worked");
+      setHeader(summaryTable, 2, "Shift Hours");
+      setHeader(summaryTable, 5, "Actual Worked");
+
+      const summaryRows = Array.from(
+        summaryTable.querySelectorAll("tbody tr")
+      );
+
+      const readTime = value => {
+        const match = String(value).trim()
+          .match(/^(\d+):([0-5]\d)$/);
+        if (!match) return null;
+        return Number(match[1]) * 3600 +
+          Number(match[2]) * 60;
+      };
+
+      const timeString = value => {
+        const totalMinutes = Math.floor(value / 60);
+        return String(Math.floor(totalMinutes / 60))
+          .padStart(2, "0") + ":" +
+          String(totalMinutes % 60).padStart(2, "0");
+      };
+
+      // Individual: the V2.4 TOTAL is already under
+      // daily rows. Remove the duplicated summary table.
+      if (selected) {
+        const summarySection =
+          summaryTable.closest(".summary-section");
+
+        if (summarySection) {
+          summarySection.remove();
+        } else {
+          summaryTable.remove();
+        }
+
+        return;
+      }
+
+      // All Employees: sum only the existing employee
+      // summary rows, which exclude open/review days.
+      let validDays = 0;
+      let totalDays = 0;
+      let shift = 0;
+      let lunch = 0;
+      let breaks = 0;
+      let worked = 0;
+      let partial = false;
+
+      for (const row of summaryRows) {
+        const cells = Array.from(row.cells)
+          .map(c => c.textContent.trim());
+
+        if (cells.length !== 10) {
+          throw new Error("Employee summary mismatch");
+        }
+
+        const days = cells[1].match(/^(\d+)\s*\/\s*(\d+)$/);
+        if (!days) {
+          throw new Error("Invalid employee day totals");
+        }
+
+        const values = [
+          cells[2], cells[3], cells[4], cells[5]
+        ].map(readTime);
+
+        if (values.some(v => v === null)) {
+          throw new Error("Invalid employee time totals");
+        }
+
+        validDays += Number(days[1]);
+        totalDays += Number(days[2]);
+        shift += values[0];
+        lunch += values[1];
+        breaks += values[2];
+        worked += values[3];
+
+        if (cells[9].includes("Review") ||
+            Number(days[1]) !== Number(days[2])) {
+          partial = true;
+        }
+      }
+
+      if (!summaryRows.length) {
+        throw new Error("No employee totals available");
+      }
+
+      // Shift = Worked + Lunch + Break.
+      // Allow up to one minute per employee for display
+      // rounding, but never silently alter the values.
+      const tolerance = summaryRows.length * 60;
+      if (Math.abs(
+        shift - (worked + lunch + breaks)
+      ) > tolerance) {
+        throw new Error("Attendance totals do not reconcile");
+      }
+
+      const totalRow = document.createElement("tr");
+      totalRow.className = "wccr-grand-total";
+
+      const values = [
+        "TOTAL ALL EMPLOYEES",
+        validDays + " / " + totalDays,
+        timeString(shift),
+        timeString(lunch),
+        timeString(breaks),
+        timeString(worked),
+        "Pending",
+        "Pending",
+        "Pending",
+        partial ? "Partial / Review" : "Calculated"
+      ];
+
+      for (const value of values) {
+        const td = document.createElement("td");
+        td.textContent = value;
+        totalRow.appendChild(td);
+      }
+
+      const tbody = summaryTable.querySelector("tbody");
+      if (!tbody) {
+        throw new Error("Summary body missing");
+      }
+      tbody.appendChild(totalRow);
+    })();
+
+    window.print();
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded", populateEmployees, { once: true }
+    );
+  } else {
+    populateEmployees();
+  }
+})();
+</script>
+{% endif %}

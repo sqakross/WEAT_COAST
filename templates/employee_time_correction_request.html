@@ -1,42 +1,416 @@
-
 {% extends "base.html" %}
 {% block content %}
-<div class="container py-4" style="max-width:720px">
-<h3>Request Shift Correction #{{ shift.id }}</h3>
-<p class="text-muted">
-Pacific Time. This request will not change recorded hours.
+<!-- WCCR_TIME_CORRECTION_UI_V2 -->
+<style>
+.wccr-time-card {
+    max-width: 460px;
+    margin: 0 auto;
+    border-radius: 18px;
+}
+.wccr-time-choice {
+    border: 1px solid #dce2e8;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+.wccr-time-choice:has(input:checked) {
+    border-color: #2563eb;
+    background: #eff6ff;
+}
+.wccr-time-select {
+    min-height: 52px;
+    font-size: 18px;
+    font-weight: 600;
+    text-align: center;
+}
+.wccr-time-label {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 7px;
+}
+.wccr-time-section {
+    padding: 14px;
+    background: #f8fafc;
+    border-radius: 12px;
+    margin-bottom: 15px;
+}
+.wccr-time-submit {
+    min-height: 52px;
+    font-weight: 600;
+    border-radius: 12px;
+}
+@media (max-width: 576px) {
+    .wccr-time-card {
+        border: none;
+        box-shadow: none !important;
+    }
+    .wccr-time-card .card-body {
+        padding: 12px !important;
+    }
+}
+</style>
+
+<div class="container py-3">
+<div class="card shadow-sm wccr-time-card">
+<div class="card-body p-4">
+
+<h4 class="mb-1">Correct My Time</h4>
+<p class="text-muted small mb-3">
+    Shift #{{ shift.id }} ? Pacific Time
 </p>
-<form method="post">
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+<div class="wccr-time-section">
+    <div class="small text-muted mb-2">Recorded shift</div>
+    <div class="row">
+        <div class="col-6">
+            <div class="small">Clock In</div>
+            <strong id="recordedStart"></strong>
+        </div>
+        <div class="col-6">
+            <div class="small">Clock Out</div>
+            <strong id="recordedEnd"></strong>
+        </div>
+    </div>
+</div>
+
+<form method="post" id="correctionForm">
+
+<input type="hidden" name="csrf_token"
+       value="{{ csrf_token }}">
 <input type="hidden" name="expected_start"
        value="{{ expected_start }}">
 <input type="hidden" name="expected_end"
        value="{{ expected_end }}">
 
+<input type="hidden" name="started_at"
+       id="serverStart" value="{{ started_at }}">
+<input type="hidden" name="ended_at"
+       id="serverEnd" value="{{ ended_at }}">
+<input type="hidden" name="reason" id="serverReason">
+
 <div class="mb-3">
-<label class="form-label">Requested Start</label>
-<input type="datetime-local" class="form-control"
-       name="started_at" value="{{ started_at }}" required>
+<div class="fw-semibold mb-2">What needs correction?</div>
+
+<label class="wccr-time-choice d-block">
+<input type="radio" name="ui_correction_type"
+       value="forgot_out" checked>
+&nbsp; I forgot to Clock Out
+</label>
+
+<label class="wccr-time-choice d-block">
+<input type="radio" name="ui_correction_type"
+       value="forgot_in">
+&nbsp; I forgot to Clock In
+</label>
+
+<label class="wccr-time-choice d-block">
+<input type="radio" name="ui_correction_type"
+       value="wrong_time">
+&nbsp; My recorded time is incorrect
+</label>
+
+<label class="wccr-time-choice d-block">
+<input type="radio" name="ui_correction_type"
+       value="other">
+&nbsp; Other time correction
+</label>
+</div>
+
+<div id="startSection" class="wccr-time-section" hidden>
+<div class="fw-semibold mb-2">Correct Clock In</div>
+<div class="row g-2">
+<div class="col-4">
+<label class="wccr-time-label">Hour</label>
+<select id="startHour"
+        class="form-select wccr-time-select"></select>
+</div>
+<div class="col-4">
+<label class="wccr-time-label">Minute</label>
+<select id="startMinute"
+        class="form-select wccr-time-select"></select>
+</div>
+<div class="col-4">
+<label class="wccr-time-label">AM / PM</label>
+<select id="startPeriod"
+        class="form-select wccr-time-select">
+<option>AM</option><option>PM</option>
+</select>
+</div>
+</div>
+<div class="form-check mt-3">
+<input class="form-check-input" type="checkbox"
+       id="startNextDay">
+<label class="form-check-label" for="startNextDay">
+    Next calendar day
+</label>
+</div>
+</div>
+
+<div id="endSection" class="wccr-time-section">
+<div class="fw-semibold mb-2">Correct Clock Out</div>
+<div class="row g-2">
+<div class="col-4">
+<label class="wccr-time-label">Hour</label>
+<select id="endHour"
+        class="form-select wccr-time-select"></select>
+</div>
+<div class="col-4">
+<label class="wccr-time-label">Minute</label>
+<select id="endMinute"
+        class="form-select wccr-time-select"></select>
+</div>
+<div class="col-4">
+<label class="wccr-time-label">AM / PM</label>
+<select id="endPeriod"
+        class="form-select wccr-time-select">
+<option>AM</option><option>PM</option>
+</select>
+</div>
+</div>
+<div class="form-check mt-3">
+<input class="form-check-input" type="checkbox"
+       id="endNextDay">
+<label class="form-check-label" for="endNextDay">
+    Next calendar day
+</label>
+</div>
 </div>
 
 <div class="mb-3">
-<label class="form-label">Requested End</label>
-<input type="datetime-local" class="form-control"
-       name="ended_at" value="{{ ended_at }}" required>
+<label class="form-label fw-semibold" for="details">
+    Additional details (optional)
+</label>
+<textarea id="details" class="form-control"
+          rows="2" maxlength="850"
+          placeholder="Briefly explain what happened"></textarea>
 </div>
 
-<div class="mb-3">
-<label class="form-label">Reason for Correction</label>
-<textarea class="form-control" name="reason"
-          minlength="4" maxlength="1000"
-          rows="3" required></textarea>
-</div>
+<div class="alert alert-danger d-none"
+     id="formError" role="alert"></div>
 
-<button class="btn btn-primary" type="submit">
-Submit Request
+<p class="small text-muted">
+Your request will be reviewed before recorded hours change.
+</p>
+
+<button type="submit"
+        class="btn btn-primary w-100 wccr-time-submit">
+    Submit for Approval
 </button>
-<a class="btn btn-outline-secondary"
-   href="{{ url_for('auth.my_time') }}">Cancel</a>
+
+<a href="{{ url_for('auth.my_time') }}"
+   class="btn btn-outline-secondary w-100 mt-2">
+    Cancel
+</a>
+
 </form>
 </div>
+</div>
+</div>
+
+<script>
+(function () {
+"use strict";
+
+const form = document.getElementById("correctionForm");
+const serverStart = document.getElementById("serverStart");
+const serverEnd = document.getElementById("serverEnd");
+const serverReason = document.getElementById("serverReason");
+const originalStart = serverStart.value;
+const originalEnd = serverEnd.value;
+const error = document.getElementById("formError");
+
+function pad(n) {
+    return String(n).padStart(2, "0");
+}
+
+function parseLocal(value) {
+    const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/.exec(value);
+    if (!m) return null;
+    return {
+        date: m[1],
+        hour: Number(m[2]),
+        minute: Number(m[3])
+    };
+}
+
+function addCalendarDay(dateText) {
+    const parts = dateText.split("-").map(Number);
+    const d = new Date(Date.UTC(parts[0], parts[1]-1, parts[2]+1));
+    return d.getUTCFullYear() + "-" +
+           pad(d.getUTCMonth()+1) + "-" + pad(d.getUTCDate());
+}
+
+function populate(prefix, value, baseDate) {
+    const parsed = parseLocal(value);
+    if (!parsed) return;
+
+    const hour = document.getElementById(prefix+"Hour");
+    const minute = document.getElementById(prefix+"Minute");
+    const period = document.getElementById(prefix+"Period");
+    const next = document.getElementById(prefix+"NextDay");
+
+    for (let i=1; i<=12; i++) {
+        hour.add(new Option(String(i), String(i)));
+    }
+    for (let i=0; i<60; i++) {
+        minute.add(new Option(pad(i), pad(i)));
+    }
+
+    hour.value = String(parsed.hour % 12 || 12);
+    minute.value = pad(parsed.minute);
+    period.value = parsed.hour >= 12 ? "PM" : "AM";
+    next.checked = parsed.date !== baseDate;
+}
+
+const initialStart = parseLocal(originalStart);
+const initialEnd = parseLocal(originalEnd);
+
+if (!initialStart || !initialEnd) {
+    error.textContent = "Unable to load shift time.";
+    error.classList.remove("d-none");
+    form.querySelector('button[type="submit"]').disabled = true;
+    return;
+}
+
+const baseDate = initialStart.date;
+
+populate("start", originalStart, baseDate);
+populate("end", originalEnd, baseDate);
+
+function display(value) {
+    const p = parseLocal(value);
+    if (!p) return value;
+    const hour = p.hour % 12 || 12;
+    return p.date + " " + hour + ":" +
+           pad(p.minute) + (p.hour >= 12 ? " PM" : " AM");
+}
+
+document.getElementById("recordedStart").textContent =
+    display(originalStart);
+document.getElementById("recordedEnd").textContent =
+    display(originalEnd);
+
+function selectedMode() {
+    return document.querySelector(
+        'input[name="ui_correction_type"]:checked'
+    ).value;
+}
+
+function updateSections() {
+    const mode = selectedMode();
+    document.getElementById("startSection").hidden =
+        mode === "forgot_out";
+    document.getElementById("endSection").hidden =
+        mode === "forgot_in";
+    error.classList.add("d-none");
+}
+
+document.querySelectorAll(
+    'input[name="ui_correction_type"]'
+).forEach(el => {
+    el.addEventListener("change", updateSections);
+});
+
+function makeValue(prefix) {
+    const hour12 = Number(
+        document.getElementById(prefix+"Hour").value
+    );
+    const minute = Number(
+        document.getElementById(prefix+"Minute").value
+    );
+    const period = document.getElementById(
+        prefix+"Period"
+    ).value;
+
+    let hour24 = hour12 % 12;
+    if (period === "PM") hour24 += 12;
+
+    const next = document.getElementById(
+        prefix+"NextDay"
+    ).checked;
+
+    const date = next ? addCalendarDay(baseDate) : baseDate;
+    return date + "T" + pad(hour24) + ":" + pad(minute);
+}
+
+function showError(message) {
+    error.textContent = message;
+    error.classList.remove("d-none");
+    error.scrollIntoView({block:"nearest"});
+}
+
+const labels = {
+    forgot_out: "Employee forgot to Clock Out",
+    forgot_in: "Employee forgot to Clock In",
+    wrong_time: "Employee reports incorrect recorded time",
+    other: "Employee requests another time correction"
+};
+
+form.addEventListener("submit", function (event) {
+    event.preventDefault();
+
+    const mode = selectedMode();
+
+    const startValue = mode === "forgot_out"
+        ? originalStart : makeValue("start");
+
+    const endValue = mode === "forgot_in"
+        ? originalEnd : makeValue("end");
+
+    const start = new Date(startValue);
+    const end = new Date(endValue);
+
+    if (!Number.isFinite(start.getTime()) ||
+        !Number.isFinite(end.getTime())) {
+        showError("Please select valid times.");
+        return;
+    }
+
+    const duration = end.getTime() - start.getTime();
+
+    if (duration <= 0 || duration > 86400000) {
+        showError(
+            "Clock Out must be after Clock In and within 24 hours."
+        );
+        return;
+    }
+
+    if (end.getTime() > Date.now()) {
+        showError("Clock Out cannot be in the future.");
+        return;
+    }
+
+    if (startValue === originalStart &&
+        endValue === originalEnd) {
+        showError("Please change the incorrect time.");
+        return;
+    }
+
+    const details = document.getElementById("details").value.trim();
+    const reason = labels[mode] +
+        (details ? ": " + details : "");
+
+    if (reason.length > 1000) {
+        showError("Please shorten the explanation.");
+        return;
+    }
+
+    serverStart.value = startValue;
+    serverEnd.value = endValue;
+    serverReason.value = reason;
+
+    // Remove UI-only radio fields from POST.
+    document.querySelectorAll(
+        'input[name="ui_correction_type"]'
+    ).forEach(el => {
+        el.disabled = true;
+    });
+
+    HTMLFormElement.prototype.submit.call(form);
+});
+
+updateSections();
+})();
+</script>
 {% endblock %}

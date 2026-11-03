@@ -127,7 +127,8 @@
     erp_recv_edit_posted if is_posted else erp_recv_create
   %}
 
-  <div class="text-end">
+  
+<div class="text-end">
     <a class="btn btn-outline-secondary me-2" href="{{ url_for('inventory.receiving_list') }}">‹ Back</a>
 
     {% if is_posted %}
@@ -175,6 +176,175 @@
     {% endif %}
   </div>
 </div>
+
+
+{# WCCR ORIGINAL PDF V1.1 UI #}
+{% if erp_recv_access %}
+<div class="card mb-3" id="wccr-original-pdf-card">
+  <div class="card-body py-2 px-3">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+      <div class="d-flex align-items-center gap-2">
+        <!-- WCCR ORIGINAL PDF V1.2 LOCAL PREVIEW -->
+        <a id="wccr-pdf-preview-link"
+           href="{{ url_for('inventory.wccr_receiving_original_pdf', batch_id=batch.id) }}"
+           target="_blank" rel="noopener"
+           title="Open original invoice"
+           style="display:none;text-decoration:none">
+          <div style="width:90px;height:112px;overflow:hidden;
+                      border:1px solid #d6dce5;border-radius:5px;
+                      background:#fff;position:relative">
+            <iframe id="wccr-pdf-preview-frame"
+                    title="Original invoice preview"
+                    loading="lazy"
+                    tabindex="-1"
+                    style="width:450px;height:560px;border:0;
+                           transform:scale(.2);
+                           transform-origin:top left;
+                           pointer-events:none">
+            </iframe>
+          </div>
+        </a>
+        <span id="wccr-pdf-fallback"
+              class="badge bg-secondary"
+              style="font-size:11px">PDF</span>
+        <div>
+          <div class="fw-semibold small">Original Invoice PDF</div>
+          <div class="text-muted small" id="wccr-pdf-info">
+            Checking document...
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex flex-wrap align-items-center gap-1"
+           id="wccr-pdf-controls" style="display:none!important">
+        <a id="wccr-pdf-view"
+           class="btn btn-sm btn-outline-primary"
+           target="_blank" rel="noopener"
+           href="{{ url_for('inventory.wccr_receiving_original_pdf', batch_id=batch.id) }}">
+          Open PDF
+        </a>
+
+        <a id="wccr-pdf-download"
+           class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('inventory.wccr_receiving_original_pdf', batch_id=batch.id, download=1) }}">
+          Download
+        </a>
+
+        <form id="wccr-pdf-upload-form"
+              class="d-inline"
+              method="post"
+              enctype="multipart/form-data"
+              action="{{ url_for('inventory.wccr_receiving_original_pdf_upload', batch_id=batch.id) }}">
+          <input type="hidden" name="wccr_pdf_token">
+          <label class="btn btn-sm btn-outline-secondary mb-0"
+                 style="cursor:pointer">
+            <span id="wccr-pdf-upload-label">Attach PDF</span>
+            <input type="file" name="original_pdf"
+                   accept=".pdf,application/pdf"
+                   hidden required id="wccr-pdf-file">
+          </label>
+        </form>
+
+        <form id="wccr-pdf-delete-form"
+              class="d-inline"
+              method="post"
+              action="{{ url_for('inventory.wccr_receiving_original_pdf_delete', batch_id=batch.id) }}">
+          <input type="hidden" name="wccr_pdf_token">
+          <button type="submit"
+                  class="btn btn-sm btn-outline-danger">
+            Delete
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const card = document.getElementById("wccr-original-pdf-card");
+  const info = document.getElementById("wccr-pdf-info");
+  const controls = document.getElementById("wccr-pdf-controls");
+  const upload = document.getElementById("wccr-pdf-upload-form");
+  const remove = document.getElementById("wccr-pdf-delete-form");
+  const file = document.getElementById("wccr-pdf-file");
+  const label = document.getElementById("wccr-pdf-upload-label");
+  const view = document.getElementById("wccr-pdf-view");
+  const download = document.getElementById("wccr-pdf-download");
+
+  fetch(
+    "{{ url_for('inventory.wccr_receiving_original_pdf_status', batch_id=batch.id) }}",
+    {credentials:"same-origin", cache:"no-store"}
+  )
+  .then(r => {
+    if (!r.ok) throw Error("PDF status unavailable");
+    return r.json();
+  })
+  .then(d => {
+    info.textContent = d.exists
+      ? d.filename + " ? " +
+        (d.size / 1024).toFixed(1) + " KB ? Stored in SQLite"
+      : "No PDF attached";
+
+    for (const field of card.querySelectorAll(
+      'input[name="wccr_pdf_token"]'
+    )) {
+      field.value = d.token || "";
+    }
+
+    const previewLink = document.getElementById("wccr-pdf-preview-link");
+    const previewFrame = document.getElementById("wccr-pdf-preview-frame");
+    const fallback = document.getElementById("wccr-pdf-fallback");
+
+    if (d.exists) {
+      previewLink.style.display = "block";
+      fallback.style.display = "none";
+      previewFrame.src = view.href + "#page=1&toolbar=0&navpanes=0";
+    } else {
+      previewLink.style.display = "none";
+      fallback.style.display = "inline-block";
+    }
+
+    view.hidden = !d.exists;
+    download.hidden = !d.exists;
+    remove.hidden = !d.exists || !d.can_modify;
+    upload.hidden = !d.can_modify;
+    label.textContent = d.exists ? "Replace" : "Attach PDF";
+
+    controls.style.setProperty("display", "flex", "important");
+  })
+  .catch(() => {
+    info.textContent = "Document status unavailable";
+  });
+
+  file.addEventListener("change", function () {
+    if (!file.files.length) return;
+
+    if (file.files[0].size > 10 * 1024 * 1024) {
+      alert("Maximum PDF size is 10 MB.");
+      file.value = "";
+      return;
+    }
+
+    if (label.textContent === "Replace" &&
+        !confirm("Replace the existing PDF? The previous copy will be archived.")) {
+      file.value = "";
+      return;
+    }
+
+    upload.submit();
+  });
+
+  remove.addEventListener("submit", function (event) {
+    if (!confirm(
+      "Remove this PDF from Receiving? An archived copy will be retained."
+    )) {
+      event.preventDefault();
+    }
+  });
+})();
+</script>
+{% endif %}
 
 {% if consumed %}
   <div class="alert alert-warning small" style="line-height:1.3;">

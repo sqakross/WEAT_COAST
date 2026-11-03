@@ -24,6 +24,14 @@ class EmployeeShift(db.Model):
     status = db.Column(db.String(30), nullable=False, default="open")
     requires_review = db.Column(db.Boolean, nullable=False, default=False)
 
+    # WCCR_AUTO_LUNCH_SHIFT_SNAPSHOT_V1
+    auto_lunch_enabled = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.text('0'),
+    )
+
     created_at = db.Column(
         db.DateTime(timezone=True), nullable=False, default=utc_now
     )

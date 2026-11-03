@@ -1258,14 +1258,23 @@ function wccrToast(msg) {
      * потому что новые строки ещё не имеют database ID.
      */
     if (!IS_EDIT) {
+      // WCCR WO SAVE V3D: lock before asynchronous validation.
+      saveInProgress = true;
+
       const okToSubmit =
         await handleDuplicateCheckBeforeSubmit();
 
       if (!okToSubmit) {
+        saveInProgress = false;
         return;
       }
 
       syncOrderedFlagsBeforeSubmit();
+
+      window.WCCR_WO_SAVE_STARTED = true;
+      if (typeof window.WCCR_CANCEL_PENDING_JOB_RESERVE === 'function') {
+        window.WCCR_CANCEL_PENDING_JOB_RESERVE();
+      }
 
       isSubmitting = true;
       isDirty = false;
@@ -2972,7 +2981,13 @@ return;
   }
 
 
+  window.WCCR_CANCEL_PENDING_JOB_RESERVE = function(){
+    cancelPendingReserve();
+    reserveRequestSeq++;
+  };
+
   async function reserveNow(options = {}){
+    if (window.WCCR_WO_SAVE_STARTED) return false;
     const force = !!options.force;
 
     const raw = (jobInput.value || "").trim();
@@ -3227,7 +3242,7 @@ return;
    */
 
   function handleJobInput(){
-  if (IS_RO) return;
+  if (IS_RO || window.WCCR_WO_SAVE_STARTED) return;
 
   /*
    * Во время набора НЕ обращаемся к серверу.
@@ -3282,6 +3297,8 @@ jobInput.addEventListener(
    */
   jobInput.addEventListener('blur', () => {
 
+  if (saveInProgress || window.WCCR_WO_SAVE_STARTED) return;
+
   if (suppressBlurReserve) {
     suppressBlurReserve = false;
     return;
@@ -3335,6 +3352,8 @@ jobInput.addEventListener(
    */
 
   function releaseLock(){
+    if (window.WCCR_WO_SAVE_STARTED) return;
+
     const raw =
       (jobInput.value || "").trim();
 
@@ -3401,50 +3420,10 @@ jobInput.addEventListener(
   );
 
 
-  /*
-   * ------------------------------------------------------------
-   * FINAL CHECK BEFORE SAVE
-   * ------------------------------------------------------------
-   */
 
-  form.addEventListener(
-    'submit',
-    async (e) => {
+  // V3D: Primary submit handler exclusively owns Save.
+  // Server-side duplicate and reservation checks remain active.
 
-      /*
-       * Уже точно знаем, что job занят/duplicate.
-       */
-      if (
-        lastStatus === "locked" ||
-        lastStatus === "exists"
-      ){
-        e.preventDefault();
-        return;
-      }
-
-      /*
-       * Отменяем отложенный debounce.
-       * Save сам делает final reserve check.
-       */
-      if (reserveTimer) {
-        clearTimeout(reserveTimer);
-        reserveTimer = null;
-      }
-
-      try{
-        await reserveNow();
-
-        if (
-          lastStatus === "locked" ||
-          lastStatus === "exists"
-        ){
-          e.preventDefault();
-          return;
-        }
-
-      }catch(err){}
-    }
-  );
 
 })();
 </script>

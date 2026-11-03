@@ -2040,12 +2040,32 @@ window.wccrAttendanceReviewState = {
       }
 
       const payload = window.wccrCorrectionV31Payload();
+
+      // WCCR_CORRECTION_APPROVAL_V32
+      const requestedStart = {{ correction_request.requested_start_utc_pt|tojson }};
+      const requestedEnd = {{ correction_request.requested_end_utc_pt|tojson }};
+
+      const confirmed = window.confirm(
+        "Approve this correction?\\n\\n" +
+        "Employee requested:\\n" +
+        "Clock In: " + requestedStart + "\\n" +
+        "Clock Out: " + requestedEnd + "\\n\\n" +
+        "Editor values:\\n" +
+        "Clock In: " + payload.started_at + "\\n" +
+        "Clock Out: " + payload.ended_at + "\\n\\n" +
+        "Confirm that you reviewed these times. " +
+        "Any difference will be recorded in the approval history."
+      );
+
+      if (!confirmed) return;
+
       const form = new FormData();
 
       form.append("csrf_token", csrf);
       form.append("action_type", "approve_employee_correction_v31");
       form.append("correction_request_id", String(requestId));
       form.append("payload", JSON.stringify(payload));
+      form.append("time_difference_ack", "1");
 
       button.dataset.v31Busy = "1";
       button.disabled = true;

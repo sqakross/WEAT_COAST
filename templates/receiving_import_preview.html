@@ -3,12 +3,12 @@
 <h3>Preview & Edit Import</h3>
 
 <form method="post" action="{{ url_for('inventory.receiving_import_apply') }}" id="importForm">
-  <input type="hidden" name="attachment_path" value="{{ meta.attachment_path }}">
+  <input type="hidden" name="wccr_import_token" value="{{ pdf_import_token }}">
 
   <div class="row g-2 mb-3">
     <div class="col-md-3">
       <label class="form-label">Supplier</label>
-      <input class="form-control" name="supplier" value="{{ meta.supplier or '' }}">
+      <input class="form-control" name="supplier_name" value="{{ meta.supplier or '' }}">
     </div>
 
     <div class="col-md-3">
@@ -72,7 +72,7 @@
           </td>
 
           <td>
-            <input name="rows[{{ i }}][unit_cost]"
+            <input name="rows[{{ i }}][unit_cost_base]"
                    type="number"
                    step="0.01"
                    min="0"
@@ -143,7 +143,7 @@
       <td>${inputHtml(`rows[${index}][part_number]`, 'form-control js-part-number', 'required')}</td>
       <td>${inputHtml(`rows[${index}][part_name]`, 'form-control js-trim')}</td>
       <td>${inputHtml(`rows[${index}][quantity]`, 'form-control text-end', 'type="number" min="0" value="1" required')}</td>
-      <td>${inputHtml(`rows[${index}][unit_cost]`, 'form-control text-end', 'type="number" step="0.01" min="0" value="0"')}</td>
+      <td>${inputHtml(`rows[${index}][unit_cost_base]`, 'form-control text-end', 'type="number" step="0.01" min="0" value="0"')}</td>
       <td>${inputHtml(`rows[${index}][location]`, 'form-control js-trim')}</td>
       <td class="text-end">
         <button type="button" class="btn btn-outline-danger btn-sm js-remove-row">×</button>

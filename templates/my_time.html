@@ -1,721 +1,728 @@
-{# WCCR_MY_TIME_FILTERS_V68 #}
-{# WCCR_MY_TIME_SIMPLE_V671 #}
-{# WCCR_MY_TIME_ACTUAL_WORK_V663 #}
-{# WCCR_CLOCK_V66C_V2 #}
-{% extends "base.html" %}
-{% block content %}
-{# WCCR_MY_TIME_UI_V13 #}
-
-{# WCCR_MY_TIME_PRO_UI_V12 #}
-<style>
-.wccr-mytime-v12 {
-    --mt-ink: #192c46;
-    --mt-muted: #68788d;
-    --mt-border: #e2e9f2;
-    --mt-soft: #f5f8fc;
-    color: var(--mt-ink);
-}
-.wccr-mytime-v12 h3 {
-    font-size: 1.65rem;
-    font-weight: 750;
-    letter-spacing: -.03em;
-}
-.wccr-mytime-v12 h5 {
-    font-size: 1.1rem;
-    font-weight: 700;
-}
-.wccr-mytime-v12 .card {
-    border: 1px solid var(--mt-border) !important;
-    border-radius: 15px !important;
-    box-shadow: 0 4px 18px rgba(24,45,70,.045) !important;
-}
-.wccr-mytime-v12 .card-body {
-    padding: 1.4rem !important;
-}
-.wccr-mytime-v12 .bg-light {
-    background: var(--mt-soft) !important;
-}
-.wccr-mytime-v12 .table-responsive {
-    border: 1px solid var(--mt-border);
-    border-radius: 11px;
-    overflow-x: auto;
-}
-.wccr-mytime-v12 .table {
-    font-size: .85rem;
-    margin-bottom: 0;
-}
-.wccr-mytime-v12 .table thead th {
-    background: #f2f6fb;
-    color: #52647c;
-    font-size: .73rem;
-    font-weight: 700;
-    letter-spacing: .025em;
-    padding: .8rem .7rem;
-    white-space: nowrap;
-}
-.wccr-mytime-v12 .table tbody td {
-    padding: .8rem .7rem;
-    vertical-align: middle;
-}
-.wccr-mytime-v12 .table tbody tr:hover {
-    background: #f8faff;
-}
-.wccr-mytime-v12 .btn {
-    border-radius: 8px;
-}
-.wccr-mytime-v12 [data-report-key],
-.wccr-mytime-v12 [data-today-row],
-.wccr-mytime-v12 #wccr-today-hours {
-    font-variant-numeric: tabular-nums;
-}
-.wccr-mytime-progress {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    color: #187247;
-    font-weight: 650;
-    white-space: nowrap;
-}
-.wccr-mytime-dot {
-    width: 7px;
-    height: 7px;
-    background: #16a36a;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-@media (max-width: 767px) {
-    .wccr-mytime-v12 .card-body {
-        padding: 1rem !important;
-    }
-    .wccr-mytime-v12 .table {
-        font-size: .8rem;
-    }
-}
-</style>
-
-<div class="container py-4 wccr-mytime-v12" style="max-width:1120px">
-
-  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-    <div>
-      <h3 class="mb-1">My Time</h3>
-      <div class="text-muted small">Employee Time Tracking &middot; Pacific Time</div>
-    </div>
-    <div class="d-flex gap-2">
-      {# WCCR_TIME_TRACKING_ERP_3D #}
-      {% if erp_access_allowed(
-          current_user,
-          'erp.time_tracking.manage_settings',
-          false
-      ) or erp_access_allowed(
-          current_user,
-          'erp.time_tracking.view_settings',
-          false
-      ) %}
-      <a class="btn btn-outline-primary btn-sm"
-         href="{{ url_for('auth.time_tracking_settings') }}">Time Tracking Settings</a>
-      {% endif %}
-      <a class="btn btn-outline-secondary btn-sm"
-         href="{{ url_for('auth.my_time') }}">Refresh</a>
-    </div>
-  </div>
-
-  <div class="card shadow-sm border-0 rounded-4 mb-4">
-    <div class="card-body p-4">
-
-      {% if shift %}
-        <div class="d-flex flex-wrap justify-content-between gap-3 mb-3">
-          <div>
-            <div class="text-muted small">Clocked in</div>
-            <strong>{{ started }}</strong>
-          </div>
-          <div>
-            {% if shift.requires_review %}
-              <span class="badge bg-warning text-dark">Pending Review</span>
-            {% elif active_pause %}
-              <span class="badge bg-info text-dark">{{ active_pause|title }}</span>
-            {% else %}
-              <span class="badge bg-success">Working</span>
-            {% endif %}
-          </div>
-        </div>
-
-
-        {# WCCR_MY_TIME_SIMPLE_V671 #}
-        <div class="border rounded-4 bg-light p-4 mb-3 text-center">
-          <div class="fw-semibold">Hours Worked Today</div>
-          <div class="display-5 fw-bold"
-               id="wccr-today-hours"
-               data-seconds="{{ today_worked }}">
-            00:00:00
-          </div>
-          <div class="small text-muted">
-            Includes eligible paid breaks &middot; Excludes unpaid lunch
-          </div>
-        </div>
-
-        <div class="row g-2 mb-3">
-          {% for key, label in [
-            ('total', 'Current Shift'),
-            ('break', 'Break'),
-            ('lunch', 'Lunch')
-          ] %}
-          <div class="col-4">
-            <div class="border rounded-3 p-2 h-100">
-              <div class="text-muted small">{{ label }}</div>
-              <div class="fs-5 fw-semibold wccr-live-time"
-                   data-key="{{ key }}"
-                   data-seconds="{{ current[key] }}">
-                00:00:00
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-
-        <div class="d-none">
-          <span id="wccr-paid-break-used"
-                data-seconds="{{ current['paid_break'] }}"></span>
-        </div>
-
-        <p class="text-muted small mb-4">
-          Preliminary hours, subject to administrative review.
-        </p>
-
-        <div class="d-flex flex-wrap gap-2">
-          {% if active_pause %}
-            <form method="post" action="{{ url_for('auth.my_time_action') }}">
-              <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
-              <input type="hidden" name="action"
-                     value="{{ 'lunch_end' if active_pause == 'LUNCH' else 'break_end' }}">
-              <button class="btn btn-primary" type="submit">
-                End {{ active_pause|title }}
-              </button>
-            </form>
-          {% else %}
-            <form method="post" action="{{ url_for('auth.my_time_action') }}">
-              <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
-              <input type="hidden" name="action" value="lunch_start">
-              <button class="btn btn-outline-primary" type="submit">Start Lunch</button>
-            </form>
-
-            <form method="post" action="{{ url_for('auth.my_time_action') }}">
-              <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
-              <input type="hidden" name="action" value="break_start">
-              <button class="btn btn-outline-primary" type="submit">Start Break</button>
-            </form>
-          {% endif %}
-
-          {# WCCR_CLOCK_V66B #}
-          <form method="post"
-                action="{{ url_for('auth.my_time_action') }}">
-            <input type="hidden" name="employee_time_csrf"
-                   value="{{ csrf_token }}">
-            <input type="hidden" name="action" value="clock_out">
-            <button class="btn btn-danger" type="submit">
-              Clock Out
-            </button>
-          </form>
-        </div>
-
-      {% else %}
-
-        <div class="border rounded-4 bg-light p-4 mb-3 text-center">
-          <div class="fw-semibold">Hours Worked Today</div>
-          <div class="display-5 fw-bold"
-               id="wccr-today-hours"
-               data-seconds="{{ today_worked }}">
-            00:00:00
-          </div>
-          <div class="small text-muted">
-            Includes eligible paid breaks &middot; Excludes unpaid lunch
-          </div>
-        </div>
-        <span class="badge bg-secondary mb-3">
-          Clocked Out
-        </span>
-        <p class="text-muted">
-          Clock In starts a new work interval.
-        </p>
-        <form method="post"
-              action="{{ url_for('auth.my_time_action') }}">
-          <input type="hidden" name="employee_time_csrf"
-                 value="{{ csrf_token }}">
-          <input type="hidden" name="action" value="clock_in">
-          <button class="btn btn-success" type="submit">
-            Clock In
-          </button>
-        </form>
-      {% endif %}
-</div>
-  </div>
-
-
-  <div class="card shadow-sm border-0 rounded-4 mb-4">
-    <div class="card-body p-4">
-      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-        <div>
-          <h5 class="mb-1">Time Report</h5>
-          <div class="text-muted small">{{ report_label }} &middot; Pacific Time</div>
-        </div>
-        
-        {# WCCR_MY_TIME_FILTERS_V68 #}
-        <form method="get"
-              action="{{ url_for('auth.my_time') }}"
-              class="d-flex flex-wrap align-items-end gap-2"
-              id="wccr-time-filter">
-
-          <div>
-            <label for="wccr-period"
-                   class="form-label small mb-1">
-              Period
-            </label>
-            <select class="form-select form-select-sm"
-                    name="period"
-                    id="wccr-period">
-              {% for value, label in [
-                ('today', 'Today'),
-                ('yesterday', 'Yesterday'),
-                ('week', 'This Week'),
-                ('two_weeks', 'Last 14 Days'),
-                ('month', 'This Month'),
-                ('year', 'This Year'),
-                ('custom', 'Custom Range')
-              ] %}
-              <option value="{{ value }}"
-                {{ 'selected' if period == value else '' }}>
-                {{ label }}
-              </option>
-              {% endfor %}
-            </select>
-          </div>
-
-          <div id="wccr-custom-dates"
-               class="d-flex flex-wrap gap-2"
-               style="{{ '' if period == 'custom' else 'display:none!important' }}">
-            <div>
-              <label for="wccr-from"
-                     class="form-label small mb-1">From</label>
-              <input type="date"
-                     class="form-control form-control-sm"
-                     id="wccr-from"
-                     name="from"
-                     value="{{ filter_from }}">
-            </div>
-            <div>
-              <label for="wccr-to"
-                     class="form-label small mb-1">To</label>
-              <input type="date"
-                     class="form-control form-control-sm"
-                     id="wccr-to"
-                     name="to"
-                     value="{{ filter_to }}">
-            </div>
-          </div>
-
-          <button type="submit"
-                  class="btn btn-primary btn-sm">
-            Apply
-          </button>
-        </form>
-
-      </div>
-
-
-      <div class="row g-2 mb-3">
-        {% for key, label in [
-          ('worked', 'Hours Worked'),
-          ('break', 'Break'),
-          ('lunch', 'Lunch')
-        ] %}
-        <div class="col-4">
-          <div class="border rounded-3 p-2">
-            <div class="text-muted small">{{ label }}</div>
-            <strong class="wccr-report-time"
-                    data-seconds="{{ report_total[key] }}"
-                    data-report-key="{{ key }}">
-              00:00:00
-            </strong>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-
-      <div class="table-responsive">
-        <table class="table table-sm align-middle">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Shift</th>
-              <th>Hours Worked</th>
-              <th>Lunch</th>
-              <th>Total Break</th>
-              <th>Paid Break</th>
-              <th>Unpaid Break</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in report_rows %}
-            <tr>
-              <td>{{ row.date }}</td>
-              {% for key in ['total', 'worked', 'lunch', 'break', 'paid_break', 'unpaid_break'] %}
-              <td>
-                <span class="wccr-report-time"
-                      data-seconds="{{ row[key] }}"
-                       data-row-key="{{ key }}"
-                       data-today-row="{{ '1' if row.date == today_date_label else '0' }}">?</span>
-              </td>
-              {% endfor %}
-              <td>
-                {% if row.review %}
-                  <span class="badge bg-warning text-dark">Review</span>
-                {% elif row.open %}
-                  <span class="badge bg-info text-dark">Open</span>
-                {% else %}
-                  <span class="badge bg-secondary">Recorded</span>
-                {% endif %}
-                {% if row.idle %}
-                  <span class="badge bg-warning text-dark">Idle event</span>
-                {% endif %}
-              </td>
-            </tr>
-            {% else %}
-            {# WCCR_MY_TIME_REAL_DAYS_V1 #}
-            <tr>
-              <td colspan="8" class="text-center text-muted py-4">
-                No time records yet
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <p class="text-muted small mb-0">
-        Preliminary totals. Open shifts are included through the last
-        page refresh. Idle events are flagged but not automatically
-        deducted. Administrative review may change final totals.
-      </p>
-    </div>
-  </div>
-
-  <div class="card shadow-sm border-0 rounded-4">
-    <div class="card-body p-4">
-      <h5 class="mb-3">Recent Work Intervals</h5>
-      <div class="table-responsive">
-        <table class="table table-sm align-middle">
-          <thead>
-            <tr>
-              <th>Start (PT)</th>
-              <th>End (PT)</th>
-              <th>Status</th>
-              <th>Correction</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in recent %}
-              <tr>
-                <td>{{ la_time(item.started_at) }}</td>
-                <td>
-              {% if item.ended_at %}
-                {{ la_time(item.ended_at) }}
-              {% else %}
-                <span class="wccr-mytime-progress">
-                  <span class="wccr-mytime-dot"></span>
-                  In progress
-                </span>
-              {% endif %}
-            </td>
-                <td>
-                  {% if attendance_review_statuses.get(item.id) == 'approved' %}
-                    <span class="badge bg-success">Approved</span>
-                  {% elif item.requires_review %}
-                    <span class="badge bg-warning text-dark">Pending Review</span>
-                  {% elif not item.ended_at %}
-                    <span class="badge bg-success">Working</span>
-                  {% else %}
-                    <span class="badge bg-secondary">{{ item.status|title }}</span>
-                  {% endif %}
-                </td>
-                <td>
-                {% if item.ended_at and correction_can_edit %}
-                  <a class="btn btn-sm btn-outline-secondary"
-                     href="{{ url_for(
-                       'inventory.attendance_shift_edit',
-                       shift_id=item.id) }}">
-                    Edit Shift
-                  </a>
-                {% endif %}
-                {% if correction_statuses.get(item.id) == 'pending' %}
-                  <span class="badge bg-warning text-dark">
-                    Correction Pending
-                  </span>
-                {% elif item.ended_at %}
-                  <a class="btn btn-sm btn-outline-primary"
-                     href="{{ url_for(
-                       'auth.my_time_correction',
-                       shift_id=item.id) }}">
-                    Request Correction
-                  </a>
-                {% endif %}
-                </td>
-              </tr>
-            {% else %}
-              <tr>
-                <td colspan="4" class="text-muted">No shifts yet</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-</div>
-
-  {# WCCR_ATTENDANCE_V50_CORE #}
-  <div class="container wccr-mytime-v12"
-       style="max-width:1120px">
-  <div class="card shadow-sm border-0 rounded-4 mt-4">
-    <div class="card-body p-4">
-      <div class="d-flex justify-content-between align-items-center">
-        <h5>My Correction Requests</h5>
-        {% if correction_can_review %}
-        <a class="btn btn-sm btn-outline-primary"
-           href="{{ url_for('auth.attendance_correction_requests') }}">
-          Management Queue
-        </a>
-        {% endif %}
-      </div>
-      <div class="table-responsive">
-        <table class="table table-sm align-middle">
-          <thead>
-            <tr>
-              <th>Request</th><th>Shift</th>
-              <th>Submitted</th><th>Status</th>
-              <th>Review Note</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in correction_history %}
-            <tr>
-              <td>#{{ r.id }}</td>
-              <td>#{{ r.shift_id }}</td>
-              <td>
-                  <span class="wccr-correction-date"
-                        data-utc="{{ r.created_at_utc|e }}">
-                    {{ r.created_at_utc }}
-                  </span>
-                </td>
-              <td>
-                {% if r.status == 'pending' %}
-                <span class="badge bg-warning text-dark">Pending</span>
-                {% elif r.status == 'approved' %}
-                <span class="badge bg-success">Approved</span>
-                {% elif r.status == 'rejected' %}
-                <span class="badge bg-danger">Rejected</span>
-                {% else %}
-                <span class="badge bg-secondary">{{ r.status|title }}</span>
-                {% endif %}
-              </td>
-              <td>{{ r.review_note or '' }}</td>
-            </tr>
-            {% else %}
-            <tr>
-              <td colspan="5" class="text-muted">
-                No correction requests.
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  </div>
-
-<script>
-(function () {
-  "use strict";
-
-  // WCCR_MY_TIME_SIMPLE_V671
-  const paidLimit = {{ paid_break_limit_seconds|tojson }};
-  const pause = {{ (active_pause or '')|tojson }};
-  const shiftActive = {{ (true if shift else false)|tojson }};
-  const todayEl = document.getElementById("wccr-today-hours");
-  const paidUsedEl = document.getElementById("wccr-paid-break-used");
-
-  function fmt(value) {
-    const s = Math.max(0, Math.floor(value));
-    return [
-      Math.floor(s / 3600),
-      Math.floor(s / 60) % 60,
-      s % 60
-    ].map(x => String(x).padStart(2, "0")).join(":");
-  }
-
-  document.querySelectorAll(".wccr-report-time").forEach(el => {
-    el.textContent = fmt(Number(el.dataset.seconds || 0));
-  });
-
-  const counters = {};
-  document.querySelectorAll(".wccr-live-time").forEach(el => {
-    counters[el.dataset.key] = {
-      el: el,
-      value: Number(el.dataset.seconds || 0)
-    };
-  });
-
-  let todayValue = Number(todayEl.dataset.seconds || 0);
-  let paidUsed = paidUsedEl
-    ? Number(paidUsedEl.dataset.seconds || 0)
-    : 0;
-
-  const reportIncludesToday =
-    {{ report_includes_today|tojson }};
-
-  // WCCR_MY_TIME_TIMER_SYNC_V14
-  // Capture the original shift elapsed time.
-  const initialTotal = counters.total
-    ? counters.total.value : 0;
-
-  const initialToday = todayValue;
-  const initialBreak = counters.break
-    ? counters.break.value : 0;
-  const initialLunch = counters.lunch
-    ? counters.lunch.value : 0;
-
-  function render() {
-    todayEl.textContent = fmt(todayValue);
-
-    Object.values(counters).forEach(c => {
-      c.el.textContent = fmt(c.value);
-    });
-
-    if (!reportIncludesToday) return;
-
-    const deltaWorked = todayValue - initialToday;
-    const deltaBreak = counters.break
-      ? counters.break.value - initialBreak : 0;
-    const deltaLunch = counters.lunch
-      ? counters.lunch.value - initialLunch : 0;
-
-    const deltaTotal = counters.total
-      ? counters.total.value - initialTotal : 0;
-
-    const deltas = {
-      total: deltaTotal,
-      worked: deltaWorked,
-      break: deltaBreak,
-      lunch: deltaLunch
-    };
-
-    document.querySelectorAll("[data-report-key]").forEach(el => {
-      const key = el.dataset.reportKey;
-      const base = Number(el.dataset.seconds || 0);
-      el.textContent = fmt(base + (deltas[key] || 0));
-    });
-
-    document.querySelectorAll(
-      '[data-today-row="1"]'
-    ).forEach(el => {
-      const key = el.dataset.rowKey;
-      if (!(key in deltas)) return;
-      const base = Number(el.dataset.seconds || 0);
-      el.textContent = fmt(base + deltas[key]);
-    });
-  }
-
-  const filter = document.getElementById("wccr-period");
-  const custom = document.getElementById("wccr-custom-dates");
-
-  function updateCustom() {
-    if (!filter || !custom) return;
-    custom.style.setProperty(
-      "display",
-      filter.value === "custom" ? "flex" : "none",
-      "important"
-    );
-  }
-
-  if (filter) {
-    filter.addEventListener("change", updateCustom);
-    updateCustom();
-  }
-
-  render();
-
-  if (!shiftActive) return;
-
-  let lastTick = Date.now();
-
-  setInterval(() => {
-    const now = Date.now();
-    const elapsed = Math.max(
-      0,
-      Math.floor((now - lastTick) / 1000)
-    );
-
-    if (elapsed < 1) return;
-    lastTick += elapsed * 1000;
-
-    if (counters.total) {
-      counters.total.value += elapsed;
-    }
-
-    if (pause === "LUNCH") {
-      if (counters.lunch) {
-        counters.lunch.value += elapsed;
-      }
-    } else if (pause === "BREAK") {
-      if (counters.break) {
-        counters.break.value += elapsed;
-      }
-
-      const remaining = Math.max(0, paidLimit - paidUsed);
-      const eligible = Math.min(elapsed, remaining);
-      paidUsed += eligible;
-      todayValue += eligible;
-    } else {
-      todayValue += elapsed;
-    }
-
-    render();
-  }, 1000);
-})();
-</script>
-
-{# WCCR_CORRECTION_QUEUE_UI_V3 #}
-<script>
-(() => {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true
-  });
-
-  document.querySelectorAll(".wccr-correction-date").forEach(el => {
-    let value = (el.dataset.utc || "").trim();
-    if (!value) return;
-
-    value = value.replace(" ", "T");
-
-    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
-      value += "Z";
-    }
-
-    const parsed = new Date(value);
-
-    if (!Number.isNaN(parsed.getTime())) {
-      el.textContent = formatter.format(parsed) + " PT";
-    }
-  });
-})();
-</script>
-
-{% endblock %}
-
-{# WCCR_MY_TIME_CORRECTION_V41 #}
+{# WCCR_MY_TIME_FILTERS_V68 #}
+{# WCCR_MY_TIME_SIMPLE_V671 #}
+{# WCCR_MY_TIME_ACTUAL_WORK_V663 #}
+{# WCCR_CLOCK_V66C_V2 #}
+{% extends "base.html" %}
+{% block content %}
+{# WCCR_MY_TIME_UI_V13 #}
+
+{# WCCR_MY_TIME_PRO_UI_V12 #}
+<style>
+.wccr-mytime-v12 {
+    --mt-ink: #192c46;
+    --mt-muted: #68788d;
+    --mt-border: #e2e9f2;
+    --mt-soft: #f5f8fc;
+    color: var(--mt-ink);
+}
+.wccr-mytime-v12 h3 {
+    font-size: 1.65rem;
+    font-weight: 750;
+    letter-spacing: -.03em;
+}
+.wccr-mytime-v12 h5 {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+.wccr-mytime-v12 .card {
+    border: 1px solid var(--mt-border) !important;
+    border-radius: 15px !important;
+    box-shadow: 0 4px 18px rgba(24,45,70,.045) !important;
+}
+.wccr-mytime-v12 .card-body {
+    padding: 1.4rem !important;
+}
+.wccr-mytime-v12 .bg-light {
+    background: var(--mt-soft) !important;
+}
+.wccr-mytime-v12 .table-responsive {
+    border: 1px solid var(--mt-border);
+    border-radius: 11px;
+    overflow-x: auto;
+}
+.wccr-mytime-v12 .table {
+    font-size: .85rem;
+    margin-bottom: 0;
+}
+.wccr-mytime-v12 .table thead th {
+    background: #f2f6fb;
+    color: #52647c;
+    font-size: .73rem;
+    font-weight: 700;
+    letter-spacing: .025em;
+    padding: .8rem .7rem;
+    white-space: nowrap;
+}
+.wccr-mytime-v12 .table tbody td {
+    padding: .8rem .7rem;
+    vertical-align: middle;
+}
+.wccr-mytime-v12 .table tbody tr:hover {
+    background: #f8faff;
+}
+.wccr-mytime-v12 .btn {
+    border-radius: 8px;
+}
+.wccr-mytime-v12 [data-report-key],
+.wccr-mytime-v12 [data-today-row],
+.wccr-mytime-v12 #wccr-today-hours {
+    font-variant-numeric: tabular-nums;
+}
+.wccr-mytime-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: #187247;
+    font-weight: 650;
+    white-space: nowrap;
+}
+.wccr-mytime-dot {
+    width: 7px;
+    height: 7px;
+    background: #16a36a;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+@media (max-width: 767px) {
+    .wccr-mytime-v12 .card-body {
+        padding: 1rem !important;
+    }
+    .wccr-mytime-v12 .table {
+        font-size: .8rem;
+    }
+}
+</style>
+
+<div class="container py-4 wccr-mytime-v12" style="max-width:1120px">
+
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <h3 class="mb-1">My Time</h3>
+      <div class="text-muted small">Employee Time Tracking &middot; Pacific Time</div>
+    </div>
+    <div class="d-flex gap-2">
+      {# WCCR_TIME_TRACKING_ERP_3D #}
+      {% if erp_access_allowed(
+          current_user,
+          'erp.time_tracking.manage_settings',
+          false
+      ) or erp_access_allowed(
+          current_user,
+          'erp.time_tracking.view_settings',
+          false
+      ) %}
+      <a class="btn btn-outline-primary btn-sm"
+         href="{{ url_for('auth.time_tracking_settings') }}">Time Tracking Settings</a>
+      {% endif %}
+      <a class="btn btn-outline-secondary btn-sm"
+         href="{{ url_for('auth.my_time') }}">Refresh</a>
+    </div>
+  </div>
+
+  <div class="card shadow-sm border-0 rounded-4 mb-4">
+    <div class="card-body p-4">
+
+      {% if shift %}
+        <div class="d-flex flex-wrap justify-content-between gap-3 mb-3">
+          <div>
+            <div class="text-muted small">Clocked in</div>
+            <strong>{{ started }}</strong>
+          </div>
+          <div>
+            {% if shift.requires_review %}
+              <span class="badge bg-warning text-dark">Pending Review</span>
+            {% elif active_pause %}
+              <span class="badge bg-info text-dark">{{ active_pause|title }}</span>
+            {% else %}
+              <span class="badge bg-success">Working</span>
+            {% endif %}
+          </div>
+        </div>
+
+
+        {# WCCR_MY_TIME_SIMPLE_V671 #}
+        <div class="border rounded-4 bg-light p-4 mb-3 text-center">
+          <div class="fw-semibold">Hours Worked Today</div>
+          <div class="display-5 fw-bold"
+               id="wccr-today-hours"
+               data-seconds="{{ today_worked }}">
+            00:00:00
+          </div>
+          <div class="small text-muted">
+            Includes eligible paid breaks &middot; Excludes unpaid lunch
+          </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+          {% for key, label in [
+            ('total', 'Current Shift'),
+            ('break', 'Break'),
+            ('lunch', 'Lunch')
+          ] %}
+          <div class="col-4">
+            <div class="border rounded-3 p-2 h-100">
+              <div class="text-muted small">{{ label }}</div>
+              <div class="fs-5 fw-semibold wccr-live-time"
+                   data-key="{{ key }}"
+                   data-seconds="{{ current[key] }}">
+                00:00:00
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="d-none">
+          <span id="wccr-paid-break-used"
+                data-seconds="{{ current['paid_break'] }}"></span>
+        </div>
+
+        <p class="text-muted small mb-4">
+          Preliminary hours, subject to administrative review.
+        </p>
+
+        <div class="d-flex flex-wrap gap-2">
+          {% if active_pause %}
+            <form method="post" action="{{ url_for('auth.my_time_action') }}">
+              <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="action"
+                     value="{{ 'lunch_end' if active_pause == 'LUNCH' else 'break_end' }}">
+              <button class="btn btn-primary" type="submit">
+                End {{ active_pause|title }}
+              </button>
+            </form>
+          {% elif not current_user.employee_auto_lunch_enabled %}
+            {# WCCR_AUTO_LUNCH_MY_TIME_V1 #}
+            <form method="post" action="{{ url_for('auth.my_time_action') }}">
+              <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="lunch_start">
+              <button class="btn btn-outline-primary" type="submit">Start Lunch</button>
+            </form>
+
+            <form method="post" action="{{ url_for('auth.my_time_action') }}">
+              <input type="hidden" name="employee_time_csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="break_start">
+              <button class="btn btn-outline-primary" type="submit">Start Break</button>
+            </form>
+          {% endif %}
+
+          {# WCCR_CLOCK_V66B #}
+          <form method="post"
+                action="{{ url_for('auth.my_time_action') }}">
+            <input type="hidden" name="employee_time_csrf"
+                   value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="clock_out">
+            <button class="btn btn-danger" type="submit">
+              Clock Out
+            </button>
+          </form>
+        </div>
+
+      {% else %}
+
+        <div class="border rounded-4 bg-light p-4 mb-3 text-center">
+          <div class="fw-semibold">Hours Worked Today</div>
+          <div class="display-5 fw-bold"
+               id="wccr-today-hours"
+               data-seconds="{{ today_worked }}">
+            00:00:00
+          </div>
+          <div class="small text-muted">
+            Includes eligible paid breaks &middot; Excludes unpaid lunch
+          </div>
+        </div>
+        <span class="badge bg-secondary mb-3">
+          Clocked Out
+        </span>
+        <p class="text-muted">
+          Clock In starts a new work interval.
+        </p>
+        <form method="post"
+              action="{{ url_for('auth.my_time_action') }}">
+          <input type="hidden" name="employee_time_csrf"
+                 value="{{ csrf_token }}">
+          <input type="hidden" name="action" value="clock_in">
+          <button class="btn btn-success" type="submit">
+            Clock In
+          </button>
+        </form>
+      {% endif %}
+</div>
+  </div>
+
+
+  <div class="card shadow-sm border-0 rounded-4 mb-4">
+    <div class="card-body p-4">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+          <h5 class="mb-1">Time Report</h5>
+          <div class="text-muted small">{{ report_label }} &middot; Pacific Time</div>
+        </div>
+        
+        {# WCCR_MY_TIME_FILTERS_V68 #}
+        <form method="get"
+              action="{{ url_for('auth.my_time') }}"
+              class="d-flex flex-wrap align-items-end gap-2"
+              id="wccr-time-filter">
+
+          <div>
+            <label for="wccr-period"
+                   class="form-label small mb-1">
+              Period
+            </label>
+            <select class="form-select form-select-sm"
+                    name="period"
+                    id="wccr-period">
+              {% for value, label in [
+                ('today', 'Today'),
+                ('yesterday', 'Yesterday'),
+                ('week', 'This Week'),
+                ('two_weeks', 'Last 14 Days'),
+                ('month', 'This Month'),
+                ('year', 'This Year'),
+                ('custom', 'Custom Range')
+              ] %}
+              <option value="{{ value }}"
+                {{ 'selected' if period == value else '' }}>
+                {{ label }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div id="wccr-custom-dates"
+               class="d-flex flex-wrap gap-2"
+               style="{{ '' if period == 'custom' else 'display:none!important' }}">
+            <div>
+              <label for="wccr-from"
+                     class="form-label small mb-1">From</label>
+              <input type="date"
+                     class="form-control form-control-sm"
+                     id="wccr-from"
+                     name="from"
+                     value="{{ filter_from }}">
+            </div>
+            <div>
+              <label for="wccr-to"
+                     class="form-label small mb-1">To</label>
+              <input type="date"
+                     class="form-control form-control-sm"
+                     id="wccr-to"
+                     name="to"
+                     value="{{ filter_to }}">
+            </div>
+          </div>
+
+          <button type="submit"
+                  class="btn btn-primary btn-sm">
+            Apply
+          </button>
+        </form>
+
+      </div>
+
+
+      <div class="row g-2 mb-3">
+        {% for key, label in [
+          ('worked', 'Hours Worked'),
+          ('break', 'Break'),
+          ('lunch', 'Lunch')
+        ] %}
+        <div class="col-4">
+          <div class="border rounded-3 p-2">
+            <div class="text-muted small">{{ label }}</div>
+            <strong class="wccr-report-time"
+                    data-seconds="{{ report_total[key] }}"
+                    data-report-key="{{ key }}">
+              00:00:00
+            </strong>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Shift</th>
+              <th>Hours Worked</th>
+              <th>Lunch</th>
+              <th>Total Break</th>
+              <th>Paid Break</th>
+              <th>Unpaid Break</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in report_rows %}
+            <tr>
+              <td>{{ row.date }}</td>
+              {% for key in ['total', 'worked', 'lunch', 'break', 'paid_break', 'unpaid_break'] %}
+              <td>
+                <span class="wccr-report-time"
+                      data-seconds="{{ row[key] }}"
+                       data-row-key="{{ key }}"
+                       data-today-row="{{ '1' if row.date == today_date_label else '0' }}">?</span>
+                {# WCCR_V8C5B_UNIFIED_MY_TIME: one Lunch column #}
+
+              </td>
+              {% endfor %}
+              <td>
+                {% if row.review %}
+                  <span class="badge bg-warning text-dark">Review</span>
+                {% elif row.open %}
+                  <span class="badge bg-info text-dark">Open</span>
+                {% elif row.auto_lunch_status|default('') == 'FINAL' %}
+                  <span class="badge bg-secondary">Final</span>
+                {% else %}
+                  <span class="badge bg-secondary">Recorded</span>
+                {% endif %}
+                {% if row.idle %}
+                  <span class="badge bg-warning text-dark">Idle event</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            {# WCCR_MY_TIME_REAL_DAYS_V1 #}
+            <tr>
+              <td colspan="8" class="text-center text-muted py-4">
+                No time records yet
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="text-muted small mb-0">
+        Closed past days show calculated Lunch and Worked totals. These are not payroll-approved hours. Administrative review and corrections may change the final payable time.
+      </p>
+    </div>
+  </div>
+
+  <div class="card shadow-sm border-0 rounded-4">
+    <div class="card-body p-4">
+      <h5 class="mb-3">Work Intervals</h5>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Start (PT)</th>
+              <th>End (PT)</th>
+              <th>Status</th>
+              <th>Correction</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in recent %}
+              <tr>
+                <td>{{ la_time(recent_effective[item.id]["start"])
+       if item.id in recent_effective
+       else la_time(item.started_at) }}</td>
+                <td>
+              {% if item.ended_at %}
+                {{ la_time(recent_effective[item.id]["end"])
+       if item.id in recent_effective
+       else la_time(item.ended_at) }}
+              {% else %}
+                <span class="wccr-mytime-progress">
+                  <span class="wccr-mytime-dot"></span>
+                  In progress
+                </span>
+              {% endif %}
+            </td>
+                <td>
+                  {% if attendance_review_statuses.get(item.id) == 'approved' %}
+                    <span class="badge bg-success">Approved</span>
+                  {% elif item.requires_review %}
+                    <span class="badge bg-warning text-dark">Pending Review</span>
+                  {% elif not item.ended_at %}
+                    <span class="badge bg-success">Working</span>
+                  {% else %}
+                    <span class="badge bg-secondary">{{ item.status|title }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                {% if item.ended_at and correction_can_edit %}
+                  <a class="btn btn-sm btn-outline-secondary"
+                     href="{{ url_for(
+                       'inventory.attendance_shift_edit',
+                       shift_id=item.id) }}">
+                    Edit Shift
+                  </a>
+                {% endif %}
+                {% if correction_statuses.get(item.id) == 'pending' %}
+                  <span class="badge bg-warning text-dark">
+                    Correction Pending
+                  </span>
+                {% elif item.ended_at %}
+                  <a class="btn btn-sm btn-outline-primary"
+                     href="{{ url_for(
+                       'auth.my_time_correction',
+                       shift_id=item.id) }}">
+                    Request Correction
+                  </a>
+                {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="4" class="text-muted">No shifts yet</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+  {# WCCR_ATTENDANCE_V50_CORE #}
+  <div class="container wccr-mytime-v12"
+       style="max-width:1120px">
+  <div class="card shadow-sm border-0 rounded-4 mt-4">
+    <div class="card-body p-4">
+      <div class="d-flex justify-content-between align-items-center">
+        <h5>My Correction Requests</h5>
+        {% if correction_can_review %}
+        <a class="btn btn-sm btn-outline-primary"
+           href="{{ url_for('auth.attendance_correction_requests') }}">
+          Management Queue
+        </a>
+        {% endif %}
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Request</th><th>Shift</th>
+              <th>Submitted</th><th>Status</th>
+              <th>Review Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in correction_history %}
+            <tr>
+              <td>#{{ r.id }}</td>
+              <td>#{{ r.shift_id }}</td>
+              <td>
+                  <span class="wccr-correction-date"
+                        data-utc="{{ r.created_at_utc|e }}">
+                    {{ r.created_at_utc }}
+                  </span>
+                </td>
+              <td>
+                {% if r.status == 'pending' %}
+                <span class="badge bg-warning text-dark">Pending</span>
+                {% elif r.status == 'approved' %}
+                <span class="badge bg-success">Approved</span>
+                {% elif r.status == 'rejected' %}
+                <span class="badge bg-danger">Rejected</span>
+                {% else %}
+                <span class="badge bg-secondary">{{ r.status|title }}</span>
+                {% endif %}
+              </td>
+              <td>{{ r.review_note or '' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="5" class="text-muted">
+                No correction requests.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // WCCR_MY_TIME_SIMPLE_V671
+  const paidLimit = {{ paid_break_limit_seconds|tojson }};
+  const pause = {{ (active_pause or '')|tojson }};
+  const shiftActive = {{ (true if shift else false)|tojson }};
+  const todayEl = document.getElementById("wccr-today-hours");
+  const paidUsedEl = document.getElementById("wccr-paid-break-used");
+
+  function fmt(value) {
+    const s = Math.max(0, Math.floor(value));
+    return [
+      Math.floor(s / 3600),
+      Math.floor(s / 60) % 60,
+      s % 60
+    ].map(x => String(x).padStart(2, "0")).join(":");
+  }
+
+  document.querySelectorAll(".wccr-report-time").forEach(el => {
+    el.textContent = fmt(Number(el.dataset.seconds || 0));
+  });
+
+  const counters = {};
+  document.querySelectorAll(".wccr-live-time").forEach(el => {
+    counters[el.dataset.key] = {
+      el: el,
+      value: Number(el.dataset.seconds || 0)
+    };
+  });
+
+  let todayValue = Number(todayEl.dataset.seconds || 0);
+  let paidUsed = paidUsedEl
+    ? Number(paidUsedEl.dataset.seconds || 0)
+    : 0;
+
+  const reportIncludesToday =
+    {{ report_includes_today|tojson }};
+
+  // WCCR_MY_TIME_TIMER_SYNC_V14
+  // Capture the original shift elapsed time.
+  const initialTotal = counters.total
+    ? counters.total.value : 0;
+
+  const initialToday = todayValue;
+  const initialBreak = counters.break
+    ? counters.break.value : 0;
+  const initialLunch = counters.lunch
+    ? counters.lunch.value : 0;
+
+  function render() {
+    todayEl.textContent = fmt(todayValue);
+
+    Object.values(counters).forEach(c => {
+      c.el.textContent = fmt(c.value);
+    });
+
+    if (!reportIncludesToday) return;
+
+    const deltaWorked = todayValue - initialToday;
+    const deltaBreak = counters.break
+      ? counters.break.value - initialBreak : 0;
+    const deltaLunch = counters.lunch
+      ? counters.lunch.value - initialLunch : 0;
+
+    const deltaTotal = counters.total
+      ? counters.total.value - initialTotal : 0;
+
+    const deltas = {
+      total: deltaTotal,
+      worked: deltaWorked,
+      break: deltaBreak,
+      lunch: deltaLunch
+    };
+
+    document.querySelectorAll("[data-report-key]").forEach(el => {
+      const key = el.dataset.reportKey;
+      const base = Number(el.dataset.seconds || 0);
+      el.textContent = fmt(base + (deltas[key] || 0));
+    });
+
+    document.querySelectorAll(
+      '[data-today-row="1"]'
+    ).forEach(el => {
+      const key = el.dataset.rowKey;
+      if (!(key in deltas)) return;
+      const base = Number(el.dataset.seconds || 0);
+      el.textContent = fmt(base + deltas[key]);
+    });
+  }
+
+  const filter = document.getElementById("wccr-period");
+  const custom = document.getElementById("wccr-custom-dates");
+
+  function updateCustom() {
+    if (!filter || !custom) return;
+    custom.style.setProperty(
+      "display",
+      filter.value === "custom" ? "flex" : "none",
+      "important"
+    );
+  }
+
+  if (filter) {
+    filter.addEventListener("change", updateCustom);
+    updateCustom();
+  }
+
+  render();
+
+  if (!shiftActive) return;
+
+  let lastTick = Date.now();
+
+  setInterval(() => {
+    const now = Date.now();
+    const elapsed = Math.max(
+      0,
+      Math.floor((now - lastTick) / 1000)
+    );
+
+    if (elapsed < 1) return;
+    lastTick += elapsed * 1000;
+
+    if (counters.total) {
+      counters.total.value += elapsed;
+    }
+
+    if (pause === "LUNCH") {
+      if (counters.lunch) {
+        counters.lunch.value += elapsed;
+      }
+    } else if (pause === "BREAK") {
+      if (counters.break) {
+        counters.break.value += elapsed;
+      }
+
+      const remaining = Math.max(0, paidLimit - paidUsed);
+      const eligible = Math.min(elapsed, remaining);
+      paidUsed += eligible;
+      todayValue += eligible;
+    } else {
+      todayValue += elapsed;
+    }
+
+    render();
+  }, 1000);
+})();
+</script>
+
+{# WCCR_CORRECTION_QUEUE_UI_V3 #}
+<script>
+(() => {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  });
+
+  document.querySelectorAll(".wccr-correction-date").forEach(el => {
+    let value = (el.dataset.utc || "").trim();
+    if (!value) return;
+
+    value = value.replace(" ", "T");
+
+    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
+      value += "Z";
+    }
+
+    const parsed = new Date(value);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      el.textContent = formatter.format(parsed) + " PT";
+    }
+  });
+})();
+</script>
+
+{% endblock %}
+
+{# WCCR_MY_TIME_CORRECTION_V41 #}

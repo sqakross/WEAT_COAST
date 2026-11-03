@@ -311,6 +311,22 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
 }
 
+# WCCR SQLITE TRANSACTION SAFETY V1G4
+from sqlalchemy import event as _wccr_sqlite_event
+from sqlalchemy.engine import Engine as _WCCR_SQLAlchemyEngine
+
+@_wccr_sqlite_event.listens_for(_WCCR_SQLAlchemyEngine, "connect")
+def _wccr_sqlite_connect(dbapi_connection, connection_record):
+    if isinstance(dbapi_connection, __import__("sqlite3").Connection):
+        dbapi_connection.isolation_level = None
+
+@_wccr_sqlite_event.listens_for(_WCCR_SQLAlchemyEngine, "begin")
+def _wccr_sqlite_begin(connection):
+    if connection.dialect.name == "sqlite":
+        connection.exec_driver_sql("BEGIN")
+
+# END WCCR SQLITE TRANSACTION SAFETY V1G4
+
 db.init_app(app)          # <<< ЭТА СТРОКА ПРОПАЛА
 
 

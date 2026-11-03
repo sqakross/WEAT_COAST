@@ -129,7 +129,7 @@ def recalc_batch_totals(batch: SupplierReturnBatch) -> Dict[str, Any]:
 
     return {"ok": len(errors) == 0, "errors": errors}
 
-def post_batch(batch_id: int, actor: str | None = None) -> Dict[str, Any]:
+def post_batch(batch_id: int, actor: str | None = None, *, commit: bool = True) -> Dict[str, Any]:
     """
     Постинг возврата:
       - валидация и пересчёт;
@@ -178,7 +178,11 @@ def post_batch(batch_id: int, actor: str | None = None) -> Dict[str, Any]:
     b.posted_at = datetime.utcnow()
     b.posted_by = (actor or "")[:120] if actor else None
     db.session.add(b)
-    db.session.commit()
+    # WCCR RETURN SAFETY V1.4B FIX
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
 
     return {"ok": True}
 
@@ -197,6 +201,22 @@ def unpost_batch(batch_id: int, actor: str | None = None) -> Dict[str, Any]:
 
     if (b.status or "draft") != "posted":
         return {"ok": False, "errors": {"_": "Only posted batch can be unposted."}}
+
+    # WCCR RETURN SAFETY V1.3
+    # Invoice-linked vendor returns are accounting records.
+    # Their current quantity may differ from the original stock movement.
+    # Never reverse inventory using that edited quantity.
+    if (
+        str(getattr(b, "source_kind", "") or "").strip().lower()
+        == "reports_return"
+        or getattr(b, "source_return_record_id", None) is not None
+    ):
+        raise SupplierReturnError(
+            "Unpost blocked: this Supplier Return is linked to a "
+            "Return Invoice. Its quantity may have been corrected "
+            "after posting. Automatic inventory reversal is unsafe. "
+            "Use the controlled return correction workflow."
+        )
 
     per_row_errors: Dict[int, str] = {}
     for idx, it in enumerate(b.items or []):

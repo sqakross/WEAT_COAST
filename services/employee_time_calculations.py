@@ -101,6 +101,7 @@ def make_time_calculator(paid_break_limit, tz):
         if logout_start is not None:
             logout_gaps.append((logout_start, finish))
 
+
         return {
             "start": start,
             "end": finish,
@@ -271,3 +272,253 @@ def make_time_calculator(paid_break_limit, tz):
             day, time.min, tzinfo=tz
         ).astimezone(timezone.utc)
     return (aware, la_time, seconds_between, summary, overlap, totals, utc_midnight)
+
+
+# WCCR_AUTO_LUNCH_CALCULATION_BRIDGE_V1
+def calculate_auto_lunch_preview(
+    gross_seconds,
+    *,
+    enabled=False,
+    first_meal_waived=False,
+    second_meal_waived=False,
+    confirmed_lunch_seconds=0,
+    approved_correction=False,
+):
+    """Return a proposed deduction, never a verified meal event.
+
+    This function is deliberately not wired into paid-time totals.
+    A confirmed meal or approved correction takes precedence.
+    """
+    from services.auto_lunch_policy import calculate_auto_lunch
+
+    if (
+        type(gross_seconds) not in (int, float)
+        or gross_seconds < 0
+    ):
+        raise ValueError("Invalid gross seconds")
+
+    if (
+        type(confirmed_lunch_seconds) not in (int, float)
+        or confirmed_lunch_seconds < 0
+    ):
+        raise ValueError("Invalid confirmed lunch seconds")
+
+    if type(approved_correction) is not bool:
+        raise ValueError("Invalid approved correction flag")
+
+    if type(enabled) is not bool:
+        raise ValueError("Invalid Auto Lunch flag")
+
+    if approved_correction or confirmed_lunch_seconds > 0:
+        return {
+            "proposed_seconds": 0,
+            "source": "confirmed_or_approved",
+            "verified_meal": False,
+        }
+
+    if not enabled:
+        return {
+            "proposed_seconds": 0,
+            "source": "manual_mode",
+            "verified_meal": False,
+        }
+
+    result = calculate_auto_lunch(
+        int(gross_seconds // 60),
+        enabled=True,
+        first_meal_waived=first_meal_waived,
+        second_meal_waived=second_meal_waived,
+    )
+
+    # Policy V1 returns a structured calculation result.
+    # Extract its minutes without assuming a single field name.
+    # WCCR_AUTO_LUNCH_BRIDGE_FIX_V2
+    # Exact result field returned by AutoLunchResult.
+    candidate_names = (
+        "total_meal_minutes",
+        "total_minutes",
+        "lunch_minutes",
+        "auto_lunch_minutes",
+        "deduct_minutes",
+        "deduction_minutes",
+    )
+    minutes = None
+
+    if isinstance(result, dict):
+        for name in candidate_names:
+            if name in result:
+                minutes = result[name]
+                break
+    else:
+        for name in candidate_names:
+            if hasattr(result, name):
+                minutes = getattr(result, name)
+                break
+
+    if minutes is None:
+        raise ValueError(
+            "Auto Lunch policy result field not recognized"
+        )
+
+    if type(minutes) is not int or not 0 <= minutes <= 60:
+        raise ValueError("Invalid policy lunch minutes")
+
+    return {
+        "proposed_seconds": minutes * 60,
+        "source": "auto_lunch_proposal",
+        "verified_meal": False,
+    }
+
+
+# WCCR_AUTO_LUNCH_DEDUCTION_GUARD_V2
+# WCCR_AUTO_LUNCH_DIFFERENCE_V6
+def calculate_auto_lunch_deduction(
+    gross_seconds,
+    *,
+    enabled=False,
+    confirmed_lunch_seconds=0,
+    approved_correction=False,
+    first_meal_waived=False,
+    second_meal_waived=False,
+):
+    """
+    Calculate missing configured lunch minutes for one workday.
+
+    Existing lunch is counted before proposing additional minutes.
+    Approved corrections do not suppress the difference calculation.
+
+    Preview only. No database, payroll or event mutation.
+    """
+    from services.auto_lunch_policy import calculate_auto_lunch
+
+    gross = max(0, int(gross_seconds))
+    recorded = max(0, int(confirmed_lunch_seconds))
+
+    if not enabled:
+        return 0
+
+    policy_minutes = (gross + recorded) // 60
+
+    result = calculate_auto_lunch(
+        policy_minutes,
+        enabled=True,
+        first_meal_waived=first_meal_waived,
+        second_meal_waived=second_meal_waived,
+    )
+
+    required = result.total_meal_minutes * 60
+
+    return max(0, required - recorded)
+
+
+
+# WCCR_DAILY_AUTO_LUNCH_CORE_V1
+def calculate_daily_auto_lunch(
+    intervals_seconds,
+    *,
+    enabled=True,
+    approved_correction=False,
+    confirmed_meal_seconds=0,
+):
+    """Daily Auto Lunch estimate including recorded lunch."""
+
+    if type(enabled) is not bool:
+        raise ValueError("Invalid enabled flag")
+
+    if type(approved_correction) is not bool:
+        raise ValueError("Invalid correction flag")
+
+    if (
+        type(confirmed_meal_seconds) is not int
+        or confirmed_meal_seconds < 0
+    ):
+        raise ValueError("Invalid confirmed meal")
+
+    if not isinstance(intervals_seconds, (list, tuple)):
+        raise ValueError("Expected list of intervals")
+
+    if any(
+        type(seconds) is not int or seconds < 0
+        for seconds in intervals_seconds
+    ):
+        raise ValueError("Invalid interval duration")
+
+    gross = sum(intervals_seconds)
+
+    proposed = calculate_auto_lunch_deduction(
+        gross,
+        enabled=enabled,
+        confirmed_lunch_seconds=confirmed_meal_seconds,
+        approved_correction=approved_correction,
+    )
+
+    illustrative = max(0, gross - proposed)
+
+    return {
+        "gross_seconds": gross,
+        "confirmed_meal_seconds": confirmed_meal_seconds,
+        "auto_lunch_seconds": proposed,
+        "paid_seconds": illustrative,
+        "regular_seconds": min(illustrative, 8 * 3600),
+        "overtime_seconds": min(
+            max(0, illustrative - 8 * 3600),
+            4 * 3600,
+        ),
+        "doubletime_seconds": max(
+            0,
+            illustrative - 12 * 3600,
+        ),
+        "verified_meal": False,
+        "status": "PREVIEW_ONLY",
+    }
+
+
+
+# WCCR_DAILY_LUNCH_PREVIEW_V4
+def daily_auto_lunch_preview_for_parts(parts):
+    """One Auto Lunch difference calculation per employee workday."""
+
+    active = [
+        p for p in parts
+        if p.get("status") != "voided"
+        and p.get("worked") is not None
+    ]
+
+    if not active:
+        return 0
+
+    if any(p.get("open") for p in active):
+        return 0
+
+    if any(p.get("unverified") for p in active):
+        return 0
+
+    if any(p.get("requires_review") for p in active):
+        return 0
+
+    if any(
+        not p.get("auto_lunch_enabled")
+        for p in active
+    ):
+        return 0
+
+    recorded = sum(
+        max(0, int(p.get("lunch") or 0))
+        for p in active
+    )
+
+    worked = sum(
+        max(0, int(p.get("worked") or 0))
+        for p in active
+    )
+
+    return calculate_auto_lunch_deduction(
+        worked,
+        enabled=True,
+        confirmed_lunch_seconds=recorded,
+        approved_correction=any(
+            p.get("approved_effective")
+            for p in active
+        ),
+    )
+

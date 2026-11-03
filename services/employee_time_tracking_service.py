@@ -696,8 +696,10 @@ class EmployeeTimeTrackingService:
 
 
             requires_review=False,
-
-
+            # WCCR_AUTO_LUNCH_SHIFT_SNAPSHOT_V1
+            auto_lunch_enabled=bool(
+                getattr(user, 'employee_auto_lunch_enabled', False)
+            ),
         )
 
 
@@ -1143,6 +1145,13 @@ class EmployeeTimeTrackingService:
 
 
     def start_pause(cls, user, kind):
+        # WCCR_AUTO_LUNCH_MY_TIME_V1
+        # Do not create manual lunch/break events in Auto Lunch mode.
+        if bool(getattr(user, "employee_auto_lunch_enabled", False)):
+            raise TimeTrackingError(
+                "Manual Lunch/Break is disabled in Auto Lunch mode."
+            )
+
 
 
         if not cls.eligible(user):

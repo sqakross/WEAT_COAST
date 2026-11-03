@@ -76,6 +76,13 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(64), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
     role = db.Column(db.String(20), nullable=False, default=ROLE_TECHNICIAN)
+    # WCCR_AUTO_LUNCH_SETTING_V1
+    employee_auto_lunch_enabled = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.text('0'),
+    )
     employee_time_tracking_enabled = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('0'))
     # WCCR_CLOCK_V66C_V2
     employee_time_tracking_mode = db.Column(db.String(16), nullable=False, default='automatic', server_default=db.text("'automatic'"))

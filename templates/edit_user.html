@@ -267,7 +267,30 @@
     {% if pay_allowed %}
     <div class="card shadow-sm mb-3">
       <div class="card-body">
-        <div class="wccr-pro-heading"><div><h5 class="mb-1">Payroll Settings</h5><div class="text-muted small">Compensation and payroll rules</div></div></div>
+        <div class="wccr-pro-heading"><div><!-- WCCR_AUTO_LUNCH_SETTING_V1 -->
+        <div class="border rounded p-3 mb-3">
+          <div class="form-check form-switch">
+            <input type="hidden"
+                   name="employee_auto_lunch_enabled"
+                   value="0">
+            <input class="form-check-input"
+                   type="checkbox"
+                   role="switch"
+                   id="employee_auto_lunch_enabled"
+                   name="employee_auto_lunch_enabled"
+                   value="1"
+                   {% if user.employee_auto_lunch_enabled %}checked{% endif %}>
+            <label class="form-check-label fw-semibold"
+                   for="employee_auto_lunch_enabled">
+              Auto Lunch
+            </label>
+          </div>
+          <div class="small text-muted mt-1">
+            Automatic lunch mode for this employee.
+            Default OFF.
+          </div>
+        </div>
+        <h5 class="mb-1">Payroll Settings</h5><div class="text-muted small">Compensation and payroll rules</div></div></div>
 
 
 

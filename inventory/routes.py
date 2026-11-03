@@ -316,23 +316,9 @@ def _supplier_to_default_location(supplier_hint: str | None) -> str:
     return "MAIN"
 
 def _reserve_invoice_number():
-    """
-    Ð‘ÐµÑ€Ñ‘Ð¼ Ð¼Ð°ÐºÑÐ¸Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ð¹ invoice_number Ð¸ Ð² IssuedBatch, Ð¸ Ð² IssuedPartRecord
-    Ð¸ Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‰Ð°ÐµÐ¼ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¹ Ð½Ð¾Ð¼ÐµÑ€.
-    """
-    from models import IssuedBatch, IssuedPartRecord  # Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ðµ Ð»Ð¾Ð²Ð¸Ñ‚ÑŒ Ñ†Ð¸ÐºÐ»Ñ‹
-
-    mb = (
-        db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0))
-        .scalar()
-        or 0
-    )
-    ml = (
-        db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0))
-        .scalar()
-        or 0
-    )
-    return max(int(mb), int(ml)) + 1
+    # WCCR INVOICE SEQUENCE V1C
+    from services.wccr_invoice_sequence import reserve_invoice_number as _wccr_reserve
+    return _wccr_reserve(db.session)
 
 
 def _apply_default_location(obj, default_loc: str):
@@ -1230,6 +1216,20 @@ def receiving_delete(batch_id: int):
         except Exception:
             return []
 
+    # WCCR_RECEIVING_SAFETY_V1
+    from services.receiving import _wccr_receiving_has_issued_parts
+
+    if _wccr_receiving_has_issued_parts(batch):
+        flash(
+            "Cannot delete receiving: parts from this supplier "
+            "invoice have already been issued. "
+            "Use an audited correction.",
+            "danger",
+        )
+        return redirect(
+            url_for("inventory.receiving_detail", batch_id=batch_id)
+        )
+
     lines = _get_lines_for_batch(batch)
 
     pns = {
@@ -1889,39 +1889,14 @@ def _tech_norm(s: str) -> str:
     return (s or '').strip().upper()
 
 def _next_invoice_number() -> int:
-    """
-    Ð¡Ð»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¹ invoice_number:
-      max(IssuedBatch.invoice_number, IssuedPartRecord.invoice_number, INVOICE_START_AT-1) + 1
-      (ÑƒÑ‡Ð¸Ñ‚Ñ‹Ð²Ð°ÐµÑ‚ legacy-ÑÑ‚Ñ€Ð¾ÐºÐ¸ Ð¸ Ð³Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ€ÑƒÐµÑ‚ ÑÑ‚Ð°Ñ€Ñ‚ Ñ 140)
-    """
-    # max Ð¿Ð¾ Ð±Ð°Ñ‚Ñ‡Ð°Ð¼ (Ð½Ð¾Ð²Ð°Ñ ÑÑ…ÐµÐ¼Ð°)
-    max_batch = db.session.query(
-        func.coalesce(func.max(IssuedBatch.invoice_number), 0)
-    ).scalar()
-
-    # max Ð¿Ð¾ ÑÑ‚Ñ€Ð¾ÐºÐ°Ð¼ (legacy)
-    max_line = db.session.query(
-        func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)
-    ).scalar()
-
-    try:
-        mb = int(max_batch or 0)
-    except Exception:
-        mb = 0
-    try:
-        ml = int(max_line or 0)
-    except Exception:
-        ml = 0
-
-    # Ð±Ð°Ð·Ð¾Ð²Ñ‹Ð¹ Â«ÑÐµÐ¼ÐµÑ‡ÐºÐ¾Â», Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¿ÐµÑ€Ð²Ñ‹Ð¹ Ð½Ð¾Ð²Ñ‹Ð¹ = 140
-    seed = INVOICE_START_AT - 1
-    return max(mb, ml, seed) + 1
+    # WCCR INVOICE SEQUENCE V1C
+    from services.wccr_invoice_sequence import reserve_invoice_number as _wccr_reserve
+    return _wccr_reserve(db.session)
 
 def _next_invoice_number() -> int:
-    """ÐÐ¾Ð²Ñ‹Ð¹ ÑƒÐ½Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ invoice_number Ð½Ð° Ð¾ÑÐ½Ð¾Ð²Ðµ Ð¼Ð°ÐºÑÐ¸Ð¼ÑƒÐ¼Ð¾Ð² Ð¿Ð¾ Batch Ð¸ Record."""
-    mb = db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0)).scalar() or 0
-    ml = db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)).scalar() or 0
-    return max(int(mb), int(ml)) + 1
+    # WCCR INVOICE SEQUENCE V1C
+    from services.wccr_invoice_sequence import reserve_invoice_number as _wccr_reserve
+    return _wccr_reserve(db.session)
 
 def _create_batch_for_records(
     records: list,
@@ -6636,6 +6611,27 @@ def inject_alerts_count():
         "alerts_count": int(count)
     }
 
+
+# WCCR_ALERTS_LIVE_COUNTER_V1
+@inventory_bp.get("/work_orders/alerts/live-count")
+@login_required
+def wccr_alerts_live_count_v1():
+    from flask import jsonify
+
+    if not ErpAccessService.is_allowed(
+        current_user,
+        "erp.alerts.access",
+        default_allowed=True,
+    ):
+        return jsonify({"ok": False}), 403
+
+    result = inject_alerts_count()
+    return jsonify({
+        "ok": True,
+        "count": int(result.get("alerts_count", 0))
+    })
+
+
 @inventory_bp.get("/work_orders/alerts", endpoint="wo_alerts")
 @login_required
 def wo_alerts():
@@ -9631,7 +9627,9 @@ def wo_save():
         tokens = _job_tokens(wo.job_numbers)
 
         if tokens:
-            JobReservation.query.filter(JobReservation.expires_at < now).delete(synchronize_session=False)
+            # WCCR SQLITE LOCK SAFETY V1
+            # Expired reservations are reused below.
+            # Avoid unnecessary DELETE before WO save.
 
             locked = (
                 JobReservation.query
@@ -11225,17 +11223,9 @@ def wo_issue_instock(wo_id):
 
     # --- Ñ…ÐµÐ»Ð¿ÐµÑ€: ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¹ Ð½Ð¾Ð¼ÐµÑ€ Ð¸Ð½Ð²Ð¾Ð¹ÑÐ° ---
     def _reserve_invoice_number() -> int:
-        mb = (
-            db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0))
-            .scalar()
-            or 0
-        )
-        ml = (
-            db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0))
-            .scalar()
-            or 0
-        )
-        return max(int(mb), int(ml)) + 1
+        # WCCR INVOICE SEQUENCE V1C
+        from services.wccr_invoice_sequence import reserve_invoice_number as _wccr_reserve
+        return _wccr_reserve(db.session)
 
     # ===== INV from UI: inv_map (preferred) + fallback inv_<id> =====
     inv_by_id: dict[int, str] = {}
@@ -17400,17 +17390,9 @@ def view_invoice_pdf():
 
     # ---- Ð²ÑÐ¿Ð¾Ð¼Ð¾Ð³Ð°Ð»ÐºÐ¸ --------------------------------------------------------
     def _next_invoice_number():
-        mb = (
-            db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0))
-            .scalar()
-            or 0
-        )
-        ml = (
-            db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0))
-            .scalar()
-            or 0
-        )
-        return max(int(mb), int(ml)) + 1
+        # WCCR INVOICE SEQUENCE V1C
+        from services.wccr_invoice_sequence import reserve_invoice_number as _wccr_reserve
+        return _wccr_reserve(db.session)
 
     def _ensure_invoice_number_for_records(
         records,
@@ -17716,20 +17698,13 @@ def update_report_record(record_id):
 @inventory_bp.route('/reports/cancel/<int:record_id>', methods=['POST'])
 @login_required
 def cancel_issued_record(record_id):
-    if current_user.role not in ['superadmin', 'admin']:
-        flash("Access denied", "danger")
-        return redirect(url_for('inventory.reports'))
-
-    record = IssuedPartRecord.query.get_or_404(record_id)
-    part = Part.query.get(record.part_id)
-    if part:
-        part.quantity += record.quantity
-
-    db.session.delete(record)
-    db.session.commit()
-
-    flash(f"Issued record #{record.id} canceled and stock restored.", "success")
-    return redirect(url_for('inventory.reports'))
+    # WCCR ISSUE SAFETY V2.1 - legacy destructive action blocked
+    current_app.logger.warning(
+        "WCCR blocked legacy issue deletion: cancel_issued_record; user_id=%s",
+        getattr(current_user, "id", None),
+    )
+    flash("Invoice deletion is temporarily disabled while safe cancellation is being implemented.", "warning")
+    return redirect(url_for("inventory.reports"))
 
 @inventory_bp.route('/reports/update_invoice', methods=['POST'])
 @login_required
@@ -17778,10 +17753,9 @@ def update_invoice():
         )
 
     def _next_invoice_number():
-        """Safe next invoice number from max(IssuedBatch, IssuedPartRecord)."""
-        mb = db.session.query(func.coalesce(func.max(IssuedBatch.invoice_number), 0)).scalar() or 0
-        ml = db.session.query(func.coalesce(func.max(IssuedPartRecord.invoice_number), 0)).scalar() or 0
-        return max(int(mb), int(ml)) + 1
+        # WCCR INVOICE SEQUENCE V1C
+        from services.wccr_invoice_sequence import reserve_invoice_number as _wccr_reserve
+        return _wccr_reserve(db.session)
 
     def _ensure_invoice_number_for_records(
         records,
@@ -17932,6 +17906,19 @@ def update_invoice():
         return redirect(url_for('inventory.reports_grouped'))
 
     # ---------- DELETE INVOICE ----------
+    if delete_invoice_no is not None:
+        if current_user.role != 'superadmin':
+            flash("Only superadmin may delete invoices.", "danger")
+            return redirect(url_for('inventory.reports_grouped'))
+
+        from services.issue_safe_delete import safe_delete_invoice
+        success, message = safe_delete_invoice(
+            delete_invoice_no,
+            getattr(current_user, 'username', 'system')
+        )
+        flash(message, "success" if success else "warning")
+        return redirect(url_for('inventory.reports_grouped'))
+
     if delete_invoice_no is not None:
         if current_user.role != 'superadmin':
             flash("Only superadmin may delete invoice.", "danger")
@@ -18092,6 +18079,59 @@ def update_invoice():
 
         return redirect(url_for('inventory.reports_grouped'))
     # ---------- DELETE RETURN ----------
+    if do_delete_ret:
+        if current_user.role != "superadmin":
+            flash("Only superadmin may delete return invoices.", "danger")
+            return redirect(url_for("inventory.reports_grouped"))
+
+        from services.issue_safe_return_delete import safe_delete_vendor_return
+
+        target_invoice = form_invoice_no
+        if target_invoice is None:
+            flash("Return invoice number is required.", "warning")
+            return redirect(url_for("inventory.reports_grouped"))
+
+        # WCCR RETURN DELETE V2.5
+        # Dispatch by persisted return type; never guess.
+        from services.issue_safe_stock_return_delete import (
+            safe_delete_stock_return
+        )
+
+        delete_records = IssuedPartRecord.query.filter_by(
+            invoice_number=target_invoice
+        ).all()
+
+        if len(delete_records) != 1:
+            flash(
+                "Safe deletion requires exactly one return line.",
+                "warning"
+            )
+            return redirect(url_for("inventory.reports_grouped"))
+
+        return_type = (
+            delete_records[0].return_to or ""
+        ).strip().upper()
+
+        if return_type == "STOCK":
+            success, message = safe_delete_stock_return(
+                target_invoice,
+                getattr(current_user, "username", "system")
+            )
+        elif return_type == "VENDOR":
+            success, message = safe_delete_vendor_return(
+                target_invoice,
+                getattr(current_user, "username", "system")
+            )
+        else:
+            db.session.rollback()
+            success, message = (
+                False,
+                "Return type is missing or unsupported. "
+                "Deletion blocked."
+            )
+        flash(message, "success" if success else "warning")
+        return redirect(url_for("inventory.reports_grouped"))
+
     if do_delete_ret:
         if current_user.role != 'superadmin':
             flash("Only superadmin may delete return invoices.", "danger")
@@ -18564,8 +18604,53 @@ def update_invoice():
                                 )
 
                             else:
-                                # Valid RETURN ledger correction.
-                                # DO NOT touch Part.quantity.
+                                # WCCR RETURN STOCK EDIT V2.1
+                                # Return quantity is signed: -3 means 3 returned.
+                                # Only STOCK changes physical inventory.
+                                return_type = str(
+                                    getattr(r, "return_to", None) or ""
+                                ).strip().upper()
+
+                                if new_qty != old_qty:
+                                    if return_type == "STOCK":
+                                        part = getattr(r, "part", None)
+                                        if part is None:
+                                            raise ValueError(
+                                                "Cannot edit STOCK return: part missing."
+                                            )
+
+                                        stock_before = int(part.quantity or 0)
+                                        stock_delta = old_qty - new_qty
+                                        stock_after = stock_before + stock_delta
+
+                                        if stock_after < 0:
+                                            raise ValueError(
+                                                "Insufficient stock to reduce return: "
+                                                f"available={stock_before}, "
+                                                f"required={-stock_delta}."
+                                            )
+
+                                        part.quantity = stock_after
+
+                                        current_app.logger.info(
+                                            "WCCR RETURN STOCK EDIT V2.1 "
+                                            "record=%s invoice=%s part=%s "
+                                            "old=%s new=%s stock=%s->%s",
+                                            r.id, r.invoice_number, r.part_id,
+                                            old_qty, new_qty,
+                                            stock_before, stock_after,
+                                        )
+
+                                    elif return_type == "VENDOR":
+                                        # No direct stock movement.
+                                        # Existing Supplier Return AUTO-SYNC follows.
+                                        pass
+
+                                    else:
+                                        raise ValueError(
+                                            "Return destination is missing or invalid."
+                                        )
+
                                 r.quantity = new_qty
 
                         else:
@@ -18645,6 +18730,148 @@ def update_invoice():
                 location=getattr(base, "location", location),
             )
 
+
+        # WCCR RETURN AUTO-SYNC V1
+        # Synchronize vendor return accounting before the SAME commit.
+        # No physical inventory movement is performed here.
+        from decimal import Decimal, ROUND_HALF_UP
+
+        def _money(value):
+            return Decimal(str(value or 0)).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP
+            )
+
+        for _return_record in recs:
+            if not _is_return_row(_return_record):
+                continue
+
+            if (
+                str(
+                    getattr(_return_record, "return_to", "") or ""
+                ).strip().upper() != "VENDOR"
+            ):
+                continue
+
+            _linked_batches = SupplierReturnBatch.query.filter_by(
+                source_return_record_id=_return_record.id
+            ).all()
+
+            if len(_linked_batches) != 1:
+                raise ValueError(
+                    "Vendor Return invoice #{} cannot be saved: "
+                    "expected exactly one linked Supplier Return, "
+                    "found {}.".format(
+                        _return_record.invoice_number,
+                        len(_linked_batches)
+                    )
+                )
+
+            _supplier_batch = _linked_batches[0]
+
+            if (
+                str(_supplier_batch.status or "").lower()
+                != "posted"
+            ):
+                raise ValueError(
+                    "Supplier Return #{} is not posted. "
+                    "Automatic synchronization was stopped.".format(
+                        _supplier_batch.id
+                    )
+                )
+
+            _supplier_items = SupplierReturnItem.query.filter_by(
+                batch_id=_supplier_batch.id
+            ).all()
+
+            if len(_supplier_items) != 1:
+                raise ValueError(
+                    "Supplier Return #{} has {} lines. "
+                    "Automatic synchronization requires one line."
+                    .format(
+                        _supplier_batch.id,
+                        len(_supplier_items)
+                    )
+                )
+
+            _supplier_item = _supplier_items[0]
+
+            _part = _return_record.part
+            if _part is None:
+                raise ValueError(
+                    "Vendor Return has no linked inventory part."
+                )
+
+            if (
+                str(_supplier_item.part_number or "").strip().upper()
+                != str(_part.part_number or "").strip().upper()
+            ):
+                raise ValueError(
+                    "Supplier Return part number mismatch. "
+                    "Save stopped."
+                )
+
+            _qty = int(_return_record.quantity or 0)
+            if _qty >= 0:
+                raise ValueError(
+                    "Posted Vendor Return quantity must be negative. "
+                    "Use the dedicated cancellation workflow "
+                    "instead of setting it to zero."
+                )
+
+            _new_qty = abs(_qty)
+            _new_cost = _money(
+                _return_record.unit_cost_at_issue
+            )
+            _new_total = _money(
+                Decimal(_new_qty) * _new_cost
+            )
+
+            if _new_cost < 0:
+                raise ValueError(
+                    "Negative Vendor Return unit cost is not allowed."
+                )
+
+            _changed = (
+                int(_supplier_item.qty_returned or 0) != _new_qty
+                or _money(_supplier_item.unit_cost) != _new_cost
+                or _money(_supplier_item.total_cost) != _new_total
+                or _money(_supplier_batch.total_value) != _new_total
+            )
+
+            if not _changed:
+                continue
+
+            if (
+                _supplier_batch.reconciled_at is not None
+                or _supplier_batch.supplier_credit_document
+                or _supplier_batch.supplier_credit_date is not None
+            ):
+                raise ValueError(
+                    "Supplier Return #{} already has supplier credit "
+                    "or reconciliation. Editing its quantity/cost "
+                    "requires a separate controlled correction."
+                    .format(_supplier_batch.id)
+                )
+
+            _supplier_item.qty_returned = _new_qty
+            _supplier_item.unit_cost = float(_new_cost)
+            _supplier_item.total_cost = float(_new_total)
+            _supplier_batch.total_value = float(_new_total)
+
+            current_app.logger.info(
+                "WCCR RETURN AUTO-SYNC V1 | "
+                "invoice=%s record=%s supplier_batch=%s "
+                "qty=%s cost=%s total=%s actor=%s",
+                _return_record.invoice_number,
+                _return_record.id,
+                _supplier_batch.id,
+                _new_qty,
+                _new_cost,
+                _new_total,
+                getattr(current_user, "username", "unknown"),
+            )
+
         db.session.commit()
 
         if qty_edit_warnings:
@@ -18662,53 +18889,13 @@ def update_invoice():
 @inventory_bp.route('/reports/cancel_invoice', methods=['POST'])
 @login_required
 def cancel_invoice():
-    if current_user.role not in ['superadmin', 'admin']:
-        flash("Access denied", "danger")
-        return redirect(url_for('inventory.reports'))
-
-    ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
-    records = []
-    if ids:
-        try:
-            ids = [int(x) for x in ids]
-        except ValueError:
-            ids = []
-        if ids:
-            records = IssuedPartRecord.query.filter(IssuedPartRecord.id.in_(ids)).all()
-
-    if not records:
-        issued_to  = (request.form.get('issued_to') or request.args.get('issued_to') or '').strip()
-        reference  = (request.form.get('reference_job') or request.args.get('reference_job') or '').strip() or None
-        issued_by  = (request.form.get('issued_by') or request.args.get('issued_by') or '').strip()
-        s          = (request.form.get('issue_date') or request.args.get('issue_date') or '').strip()
-        issue_date = _parse_dt_flex(s)
-
-        if not (issued_to and issued_by and issue_date):
-            flash("Invoice identifiers are missing.", "danger")
-            return redirect(url_for('inventory.reports'))
-
-        start = datetime.combine(issue_date.date(), time.min)
-        end   = datetime.combine(issue_date.date(), time.max)
-        records = IssuedPartRecord.query.filter(
-            IssuedPartRecord.issued_to == issued_to,
-            IssuedPartRecord.reference_job == reference,
-            IssuedPartRecord.issued_by == issued_by,
-            IssuedPartRecord.issue_date.between(start, end)
-        ).all()
-
-    if not records:
-        flash("Invoice not found.", "warning")
-        return redirect(url_for('inventory.reports'))
-
-    for r in records:
-        part = Part.query.get(r.part_id)
-        if part:
-            part.quantity = int(part.quantity or 0) + int(r.quantity or 0)
-        db.session.delete(r)
-    db.session.commit()
-
-    flash("Invoice canceled and stock restored.", "success")
-    return redirect(url_for('inventory.reports'))
+    # WCCR ISSUE SAFETY V2.1 - legacy destructive action blocked
+    current_app.logger.warning(
+        "WCCR blocked legacy issue deletion: cancel_invoice; user_id=%s",
+        getattr(current_user, "id", None),
+    )
+    flash("Invoice deletion is temporarily disabled while safe cancellation is being implemented.", "warning")
+    return redirect(url_for("inventory.reports"))
 
 # ----------------- Download Invoice -----------------
 @inventory_bp.route("/import", methods=["GET", "POST"])
@@ -18741,10 +18928,27 @@ def import_parts():
     # ÐšÑƒÐ´Ð° ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÐ¼
     upload_dir = os.path.join(current_app.instance_path, "uploads")
     os.makedirs(upload_dir, exist_ok=True)
-    pdf_path = os.path.join(upload_dir, f"{datetime.utcnow():%Y%m%d_%H%M%S}_{src_name}")
+    # WCCR AUTO PDF V1.3C
+    import uuid
+    pdf_path = os.path.join(
+        upload_dir,
+        f"{uuid.uuid4().hex}_{src_name}"
+    )
 
     # Ð¡Ð¾Ñ…Ñ€Ð°Ð½ÑÐµÐ¼ Ñ„Ð°Ð¹Ð»
-    file.save(pdf_path)
+    file.stream.seek(0)
+    pdf_bytes = file.stream.read(10 * 1024 * 1024 + 1)
+
+    if (
+        len(pdf_bytes) > 10 * 1024 * 1024
+        or not pdf_bytes.startswith(b"%PDF-")
+        or b"%%EOF" not in pdf_bytes[-2048:]
+    ):
+        flash("Invalid PDF or PDF exceeds 10 MB.", "danger")
+        return redirect(url_for("inventory.import_parts"))
+
+    with open(pdf_path, "wb") as output:
+        output.write(pdf_bytes)
 
     # ÐŸÐ°Ñ€ÑÐ¸Ð¼ PDF â†’ DataFrame â†’ Ð½Ð¾Ñ€Ð¼Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ ÑÑ‚Ñ€Ð¾Ðº
     try_ocr = bool(request.form.get("try_ocr"))
@@ -18839,6 +19043,21 @@ def import_parts():
         return redirect(url_for("inventory.import_parts"))
 
     # Ð ÐµÐ½Ð´ÐµÑ€ Ð¿Ñ€ÐµÐ²ÑŒÑŽ, ÐŸÐ•Ð Ð•Ð”ÐÐÐœ Ð¿ÑƒÑ‚ÑŒ ÑÐºÑ€Ñ‹Ñ‚Ñ‹Ð¼ Ð¿Ð¾Ð»ÐµÐ¼
+    import hashlib
+    import secrets
+    from flask import session
+    from flask_login import current_user
+
+    token = secrets.token_hex(32)
+
+    session["wccr_v13c_import"] = {
+        "token": token,
+        "stored_name": os.path.basename(pdf_path),
+        "original_name": src_name,
+        "sha256": hashlib.sha256(pdf_bytes).hexdigest(),
+        "user_id": str(getattr(current_user, "id", "")),
+    }
+
     return render_template(
         "receiving_import_preview.html",
         rows=rows,
@@ -18850,7 +19069,8 @@ def import_parts():
             currency="USD",
             attachment_path=pdf_path,        # â† Ñ‚ÑƒÑ‚ Ð¿ÑƒÑ‚ÑŒ Ð´Ð»Ñ hidden
         ),
-        src_file=src_name
+        src_file=src_name,
+        pdf_import_token=token
     )
 
 
@@ -20625,6 +20845,22 @@ def edit_user(user_id):
                     user.role = new_role
                     changed = True
 
+            # WCCR_AUTO_LUNCH_SETTING_V1
+            # Auto Lunch is independently permission-checked.
+            # Missing field does not silently turn the setting OFF.
+            if pay_allowed and "employee_auto_lunch_enabled" in request.form:
+                values = request.form.getlist(
+                    "employee_auto_lunch_enabled"
+                )
+                if values not in (["0"], ["0", "1"]):
+                    raise ValueError("Invalid Auto Lunch setting")
+
+                new_auto_lunch = values[-1] == "1"
+
+                if bool(user.employee_auto_lunch_enabled) != new_auto_lunch:
+                    user.employee_auto_lunch_enabled = new_auto_lunch
+                    changed = True
+
             if pay_allowed:
                 enabled = (
                     request.form.get("payroll_enabled") == "1"
@@ -21170,17 +21406,13 @@ def delete_user(user_id):
 @inventory_bp.route('/clear_issued_records')
 @login_required
 def clear_issued_records():
-    if current_user.role != 'superadmin':
-        flash('Only superadmin can clear records.', 'danger')
-        return redirect(url_for('inventory.dashboard'))
-
-    from models import IssuedPartRecord
-    from extensions import db
-
-    IssuedPartRecord.query.delete()
-    db.session.commit()
-    flash('All issued records cleared.', 'success')
-    return redirect(url_for('inventory.dashboard'))
+    # WCCR ISSUE SAFETY V1: destructive legacy endpoint disabled.
+    current_app.logger.warning(
+        "WCCR blocked destructive issue-history endpoint: clear_issued_records user_id=%s",
+        getattr(current_user, "id", None),
+    )
+    flash("This legacy deletion action is disabled to protect inventory history.", "warning")
+    return redirect(url_for("inventory.dashboard"))
 
 @inventory_bp.route('/update_part/<int:part_id>', methods=['POST'])
 @login_required
@@ -21346,15 +21578,13 @@ def edit_part(part_id):
 @inventory_bp.route('/reports/delete/<int:record_id>', methods=['POST'])
 @login_required
 def delete_report_record(record_id):
-    if current_user.role != 'superadmin':
-        flash('Access denied', 'danger')
-        return redirect(url_for('inventory.reports'))
-
-    record = IssuedPartRecord.query.get_or_404(record_id)
-    db.session.delete(record)
-    db.session.commit()
-    flash('Issued record deleted successfully.', 'success')
-    return redirect(url_for('inventory.reports'))
+    # WCCR ISSUE SAFETY V1: destructive legacy endpoint disabled.
+    current_app.logger.warning(
+        "WCCR blocked destructive issue-history endpoint: delete_report_record user_id=%s",
+        getattr(current_user, "id", None),
+    )
+    flash("This legacy deletion action is disabled to protect inventory history.", "warning")
+    return redirect(url_for("inventory.reports"))
 
 @inventory_bp.route('/clear_parts')
 @login_required
@@ -22050,6 +22280,72 @@ def import_parts_upload():
         )
     ):
         saved_path = (request.form.get("saved_path") or "").strip()
+
+        # WCCR AUTO PDF V1.3D - validate original
+        _wccr_v13d_pdf = None
+
+        if "apply" in request.form:
+            from flask import session as flask_session, abort
+            import hashlib
+
+            pdf_state = flask_session.get("wccr_v13d_pdf")
+
+            if pdf_state:
+                expected_path = pdf_state.get("path", "")
+                actual_path = os.path.realpath(saved_path)
+
+                if (
+                    not expected_path
+                    or not os.path.isfile(expected_path)
+                    or os.path.islink(saved_path)
+                    or actual_path != expected_path
+                    or pdf_state.get("user") != str(
+                        getattr(current_user, "id", "")
+                    )
+                ):
+                    abort(403)
+
+                upload_root = os.path.realpath(
+                    current_app.config.get(
+                        "UPLOAD_FOLDER",
+                        os.path.join(
+                            current_app.instance_path, "uploads"
+                        )
+                    )
+                )
+
+                if os.path.commonpath(
+                    [upload_root, actual_path]
+                ) != upload_root:
+                    abort(403)
+
+                with open(actual_path, "rb") as pdf_stream:
+                    pdf_data = pdf_stream.read(
+                        10 * 1024 * 1024 + 1
+                    )
+
+                if (
+                    len(pdf_data) > 10 * 1024 * 1024
+                    or not pdf_data.startswith(b"%PDF-")
+                    or b"%%EOF" not in pdf_data[-2048:]
+                    or hashlib.sha256(pdf_data).hexdigest()
+                        != pdf_state.get("sha256")
+                ):
+                    abort(400)
+
+                _wccr_v13d_pdf = (
+                    pdf_data,
+                    pdf_state.get("filename") or "invoice.pdf",
+                )
+            elif saved_path.lower().endswith(".pdf"):
+                flash(
+                    "PDF import session expired. Upload PDF again.",
+                    "danger"
+                )
+                return redirect(
+                    url_for("inventory.import_parts_upload")
+                )
+
         extra_expenses_raw = (request.form.get("extra_expenses") or "").strip()
         try:
             extra_expenses_val = float(extra_expenses_raw)
@@ -22071,7 +22367,7 @@ def import_parts_upload():
 
         rows = parse_preview_rows_relaxed(request.form)
         if not rows:
-            flash("ÐÐµÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ñ… Ð² Ñ„Ð¾Ñ€Ð¼Ðµ (Ð¿ÑƒÑÑ‚Ð°Ñ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ð°).", "warning")
+            flash('No rows were submitted for import.', "warning")
             return render_template(
                 "import_preview.html",
                 rows=[],
@@ -22104,7 +22400,7 @@ def import_parts_upload():
         default_loc = _supplier_to_default_location(supplier_hint)
 
         if norm is None or norm.empty:
-            flash("ÐÐµÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ñ… Ð´Ð»Ñ Ð¿Ñ€Ð¸Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Ð¸Ð¼Ð¿Ð¾Ñ€Ñ‚Ð° (Ð¿ÑƒÑÑ‚Ð¾Ð¹ Ð½Ð°Ð±Ð¾Ñ€ ÑÑ‚Ñ€Ð¾Ðº).", "warning")
+            flash('No data available to apply this import.', "warning")
             return render_template(
                 "import_preview.html",
                 rows=[],
@@ -22183,7 +22479,7 @@ def import_parts_upload():
         # ----- APPLY (ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ batch) -----
         if "apply" in request.form:
             if dry or not enabled:
-                flash("Ð˜Ð¼Ð¿Ð¾Ñ€Ñ‚ Ð² Ñ€ÐµÐ¶Ð¸Ð¼Ðµ Ð¿Ñ€ÐµÐ´Ð¿Ñ€Ð¾ÑÐ¼Ð¾Ñ‚Ñ€Ð° (DRY) Ð¸Ð»Ð¸ Ð¾Ñ‚ÐºÐ»ÑŽÑ‡Ñ‘Ð½ ÐºÐ¾Ð½Ñ„Ð¸Ð³Ð¾Ð¼.", "info")
+                flash('Import is in preview-only mode or disabled.', "info")
                 return render_template(
                     "import_preview.html",
                     rows=norm.to_dict(orient="records"),
@@ -22257,12 +22553,12 @@ def import_parts_upload():
                     session.rollback()
                     batch = None
                     logging.exception("DB error while creating receiving batch: %s", e)
-                    flash("DB error while creating receiving batch (ÑÐ¼. Ð»Ð¾Ð³). ÐŸÑ€Ð¾Ð´Ð¾Ð»Ð¶Ð°ÑŽ Ð±ÐµÐ· Ð±Ð°Ñ‚Ñ‡Ð°.", "danger")
+                    flash('Database error creating receiving batch. Check the server log.', "danger")
                 except Exception as e:
                     session.rollback()
                     batch = None
                     logging.exception("Failed to create ReceivingBatch: %s", e)
-                    flash("ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ ReceivingBatch. ÐŸÑ€Ð¾Ð´Ð¾Ð»Ð¶Ð°ÑŽ Ð±ÐµÐ· Ð±Ð°Ñ‚Ñ‡Ð°.", "warning")
+                    flash('Unable to create receiving batch. Check the server log.', "warning")
 
             def duplicate_exists(rk: str) -> bool:
                 return has_key(rk)
@@ -22428,6 +22724,12 @@ def import_parts_upload():
                     I_PN = _pick_field(ItemModel, ["part_number", "part", "sku", "code"])
                     I_PNAME = _pick_field(ItemModel, ["part_name", "name", "descr", "description", "title"])
                     I_QTY = _pick_field(ItemModel, ["qty", "quantity"])
+                    # WCCR RECEIVING APPLIED QTY FIX V1.0
+                    I_APPLIED = _pick_field(ItemModel, ["applied_qty"])
+                    if I_APPLIED is None or I_QTY is None:
+                        raise RuntimeError(
+                            "Receiving model requires quantity and applied_qty"
+                        )
                     I_COST = _pick_field(ItemModel, ["unit_cost", "cost", "price", "unitprice"])
                     I_LOC = _pick_field(ItemModel, ["location", "bin", "shelf", "place", "loc"])
 
@@ -22452,6 +22754,9 @@ def import_parts_upload():
 
                         if I_QTY:
                             item_kwargs[I_QTY] = int(incoming_qty or 0)
+                            # Import Parts already increases Part.quantity.
+                            # Record exactly that applied quantity.
+                            item_kwargs[I_APPLIED] = int(incoming_qty or 0)
 
                         # âœ… costs
                         if I_BASE:
@@ -22474,11 +22779,11 @@ def import_parts_upload():
                     except IntegrityError as e:
                         session.rollback()
                         logging.exception("DB error while creating ReceivingItem: %s", e)
-                        flash("DB error while creating ReceivingItem (ÑÐ¼. Ð»Ð¾Ð³).", "danger")
+                        flash('Database error creating receiving item. Check the server log.', "danger")
                     except Exception as e:
                         session.rollback()
                         logging.exception("Failed to create ReceivingItem: %s", e)
-                        flash("ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑÐ¾Ð·Ð´Ð°Ñ‚ÑŒ ÑÑ‚Ñ€Ð¾ÐºÑƒ Ð¿Ñ€Ð¸Ñ‘Ð¼ÐºÐ¸ (ÑÐ¼. Ð»Ð¾Ð³).", "warning")
+                        flash('Unable to create receiving item. Check the server log.', "warning")
 
                 # ---------------- dedup key ----------------
                 meta = {
@@ -22504,12 +22809,124 @@ def import_parts_upload():
             )
 
             try:
+                # WCCR AUTO PDF V1.3D - same DB transaction
+                if _wccr_v13d_pdf is not None:
+                    import hashlib
+                    import zlib
+                    from sqlalchemy import text as sql_text
+
+                    if batch is None or not batch_id_field:
+                        raise RuntimeError(
+                            "Cannot attach PDF: receiving batch missing"
+                        )
+
+                    pdf_data, pdf_name = _wccr_v13d_pdf
+                    pdf_zip = zlib.compress(pdf_data, 6)
+                    compressed = len(pdf_zip) < len(pdf_data)
+
+                    receipt_id = getattr(
+                        batch, batch_id_field
+                    )
+
+                    result = session.execute(
+                        sql_text("""
+                            INSERT INTO receiving_invoice_document
+                            (
+                                receipt_id,
+                                filename,
+                                data,
+                                compression,
+                                sha256,
+                                original_size,
+                                uploaded_at
+                            )
+                            VALUES
+                            (
+                                :receipt_id,
+                                :filename,
+                                :data,
+                                :compression,
+                                :sha256,
+                                :original_size,
+                                :uploaded_at
+                            )
+                            ON CONFLICT(receipt_id) DO NOTHING
+                        """),
+                        {
+                            "receipt_id": receipt_id,
+                            "filename": pdf_name[:180],
+                            "data": (
+                                pdf_zip if compressed else pdf_data
+                            ),
+                            "compression": (
+                                "zlib" if compressed else "none"
+                            ),
+                            "sha256": hashlib.sha256(
+                                pdf_data
+                            ).hexdigest(),
+                            "original_size": len(pdf_data),
+                            "uploaded_at": (
+                                datetime.utcnow().isoformat()
+                            ),
+                        }
+                    )
+
+                    if result.rowcount != 1:
+                        raise RuntimeError(
+                            "Original PDF already exists for batch"
+                        )
+
                 session.commit()
             except Exception as e:
                 session.rollback()
                 logging.exception("Final commit failed: %s", e)
-                flash("ÐžÑˆÐ¸Ð±ÐºÐ° Ð¿Ñ€Ð¸ Ð¾ÐºÐ¾Ð½Ñ‡Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾Ð¹ Ð·Ð°Ð¿Ð¸ÑÐ¸ Ð² Ð±Ð°Ð·Ñƒ. Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Ð¾Ñ‚ÐºÐ°Ñ‚Ð¸Ð»Ð¸ÑÑŒ.", "danger")
+
+                # WCCR COAST APPLY DIAGNOSTIC V2
+                try:
+                    import traceback as _tb
+                    from pathlib import Path as _Path
+                    from datetime import datetime as _DateTime
+
+                    _dir = _Path(
+                        r"C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\_diagnostics"
+                    )
+                    _dir.mkdir(parents=True, exist_ok=True)
+
+                    _file = _dir / "WCCR_COAST_APPLY_EXCEPTION.txt"
+
+                    with _file.open("a", encoding="utf-8") as _out:
+                        _out.write("\n" + "=" * 70 + "\n")
+                        _out.write("WCCR COAST APPLY ERROR\n")
+                        _out.write(
+                            "TIME: " + _DateTime.now().isoformat() + "\n"
+                        )
+                        _out.write("EXCEPTION: " + repr(e) + "\n")
+                        _out.write(_tb.format_exc())
+                        _out.write("\n")
+
+                except Exception as _diag_error:
+                    try:
+                        with open(
+                            r"C:\Users\administrator.WEST\PycharmProjects\WEAT_COAST\_diagnostics\WCCR_COAST_DIAGNOSTIC_INTERNAL_ERROR.txt",
+                            "a",
+                            encoding="utf-8"
+                        ) as _out:
+                            _out.write(repr(_diag_error) + "\n")
+                            _out.write(traceback.format_exc() + "\n")
+                    except Exception:
+                        pass
+
+                flash("Unable to save receiving. All changes were rolled back. Please contact the administrator.", "danger")
                 return redirect(url_for("inventory.import_parts_upload"))
+
+            if _wccr_v13d_pdf is not None:
+                from flask import session as flask_session
+
+                flask_session.pop("wccr_v13d_pdf", None)
+                flash(
+                    "Original supplier PDF attached automatically.",
+                    "success"
+                )
 
             bid = None
             if batch is not None and batch_id_field:
@@ -22557,14 +22974,14 @@ def import_parts_upload():
                 except Exception as e:
                     session.rollback()
                     logging.exception("Failed to finalize batch status: %s", e)
-                    flash("ÐŸÑ€Ð¸Ñ…Ð¾Ð´ ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½, Ð½Ð¾ ÑÑ‚Ð°Ñ‚ÑƒÑ Ð¿Ð°Ñ€Ñ‚Ð¸Ð¸ Ð½Ðµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑƒÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ 'posted'.", "warning")
+                    flash('Receiving saved, but the batch status could not be finalized as posted.', "warning")
 
             for e in errors:
                 flash(e, "danger")
 
             if bid is not None:
                 flash(
-                    f"Stock received and posted. Batch #{bid}. Ð¡Ð¾Ð·Ð´Ð°Ð½Ð¾ ÑÑ‚Ñ€Ð¾Ðº: {len(built)}",
+                    f"Stock received and posted. Batch #{bid}. Lines created: {len(built)}",
                     "success"
                 )
                 return redirect(url_for("inventory.receiving_detail", batch_id=bid))
@@ -22579,7 +22996,7 @@ def import_parts_upload():
     if request.method == "POST":
         f = request.files.get("file")
         if not f or not f.filename.strip():
-            flash("Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ñ„Ð°Ð¹Ð» (.pdf, .xlsx, .xls Ð¸Ð»Ð¸ .csv)", "warning")
+            flash('Please select a file (.pdf, .xlsx, .xls or .csv).', "warning")
             return redirect(request.url)
 
         filename   = secure_filename(f.filename)
@@ -22588,24 +23005,68 @@ def import_parts_upload():
             os.path.join(current_app.instance_path, "uploads")
         )
         os.makedirs(upload_dir, exist_ok=True)
-        path = os.path.join(upload_dir, filename)
+        # WCCR AUTO PDF V1.3D - unique upload
+        import uuid
+        path = os.path.join(
+            upload_dir, f"{uuid.uuid4().hex}_{filename}"
+        )
         f.save(path)
 
-        ext = os.path.splitext(path)[1].lower()
-        df  = dataframe_from_pdf(path, try_ocr=False) if ext == ".pdf" else load_table(path)
+        from flask import session as flask_session
+        import hashlib
 
-        supplier_hint = _detect_supplier_from_content(path, df)
+        flask_session.pop("wccr_v13d_pdf", None)
+
+        if filename.lower().endswith(".pdf"):
+
+            with open(path, "rb") as pdf_stream:
+                pdf_data = pdf_stream.read(10 * 1024 * 1024 + 1)
+
+            if (
+                len(pdf_data) > 10 * 1024 * 1024
+                or not pdf_data.startswith(b"%PDF-")
+                or b"%%EOF" not in pdf_data[-2048:]
+            ):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                flash("Invalid PDF or PDF exceeds 10 MB.", "danger")
+                return redirect(
+                    url_for("inventory.import_parts_upload")
+                )
+
+            flask_session["wccr_v13d_pdf"] = {
+                "path": os.path.realpath(path),
+                "filename": filename,
+                "sha256": hashlib.sha256(pdf_data).hexdigest(),
+                "user": str(getattr(current_user, "id", "")),
+            }
+
+        ext = os.path.splitext(path)[1].lower()
+        # WCCR COAST PARSER V1
+        from .coast_parser_v1 import is_coast_pdf, parse_coast_pdf
+        coast_invoice = ""
+        coast_freight = 0.0
+        is_coast = ext == ".pdf" and is_coast_pdf(path)
+        if is_coast:
+            df, coast_invoice, coast_freight = parse_coast_pdf(path)
+        else:
+            df = dataframe_from_pdf(path, try_ocr=False) if ext == ".pdf" else load_table(path)
+
+        supplier_hint = "Coast Appliance Parts" if is_coast else _detect_supplier_from_content(path, df)
         default_loc   = _supplier_to_default_location(supplier_hint)
         flash(
             f"Supplier hint: {supplier_hint or 'None'}, default location: {default_loc}",
             "info"
         )
 
-        df = drop_vendor_noise_rows(df)
+        if not is_coast:
+            df = drop_vendor_noise_rows(df)
         df = fix_pn_and_description_in_df(df)
 
         if df is None or df.empty:
-            flash("Ð’ ÑÑ‚Ð¾Ð¼ Ñ„Ð°Ð¹Ð»Ðµ Ð½Ðµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ñ€Ð°ÑÐ¿Ð¾Ð·Ð½Ð°Ñ‚ÑŒ Ñ‚Ð°Ð±Ð»Ð¸Ñ†Ñ‹ (Ð²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð¾ Ð¾Ñ‚ÑÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ PDF).", "danger")
+            flash('No recognizable table found in this file. It may be a scanned PDF.', "danger")
             return render_template(
                 "import_preview.html",
                 rows=[],
@@ -22616,12 +23077,15 @@ def import_parts_upload():
                 grand_total=0.0,
             )
 
-        norm, issues = normalize_table(
-            df,
-            supplier_hint=supplier_hint,
-            source_file=path,
-            default_location=default_loc,
-        )
+        if is_coast:
+            norm, issues = df.copy(), []
+        else:
+            norm, issues = normalize_table(
+                df,
+                supplier_hint=supplier_hint,
+                source_file=path,
+                default_location=default_loc,
+            )
         for msg in issues:
             flash(msg, "warning")
 
@@ -22653,7 +23117,9 @@ def import_parts_upload():
             )
             return redirect(request.referrer or url_for("inventory.import_parts_upload"))
 
-        norm, subtotal_base, grand_total = _distribute_extra_and_adjust_costs(norm, 0.0)
+        norm, subtotal_base, grand_total = _distribute_extra_and_adjust_costs(
+            norm, coast_freight if is_coast else 0.0
+        )
 
         import pandas as pd
         norm["unit_cost_base"] = pd.to_numeric(norm.get("unit_cost_base"), errors="coerce").fillna(0.0)
@@ -22666,14 +23132,14 @@ def import_parts_upload():
         rows = fix_norm_records(rows, default_loc)
 
         # ÐÐžÐ’ÐžÐ•: Ð°Ð²Ñ‚Ð¾-Ð´Ð¾Ð³Ð°Ð´ÐºÐ° Invoice #
-        invoice_guess = _infer_invoice_number(norm, path, supplier_hint) or ""
+        invoice_guess = coast_invoice if is_coast else (_infer_invoice_number(norm, path, supplier_hint) or "")
 
         return render_template(
             "import_preview.html",
             rows=rows,
             saved_path=path,
             supplier_hint=supplier_hint or "",
-            extra_expenses=0.0,
+            extra_expenses=coast_freight if is_coast else 0.0,
             subtotal_base=subtotal_base,
             grand_total=grand_total,
             invoice_number=invoice_guess,
@@ -22856,69 +23322,13 @@ def create_return_invoice():
 @inventory_bp.route('/reports/delete_return_invoice', methods=['POST'])
 @login_required
 def delete_return_invoice():
-    if current_user.role != 'superadmin':
-        flash("Access denied", "danger")
-        return redirect(url_for('inventory.reports_grouped'))
-
-    raw_ids = request.form.getlist('record_ids[]') or request.form.getlist('record_ids')
-
-    try:
-        ids = [int(x) for x in raw_ids if str(x).strip()]
-    except ValueError:
-        ids = []
-
-    inv_raw = (request.form.get("invoice_number") or request.form.get("delete_return") or "").strip()
-    inv_no = int(inv_raw) if inv_raw.isdigit() else None
-
-    q = IssuedPartRecord.query
-
-    if ids:
-        rows = q.filter(IssuedPartRecord.id.in_(ids)).all()
-    elif inv_no is not None:
-        rows = q.filter(IssuedPartRecord.invoice_number == inv_no).all()
-    else:
-        flash("Nothing selected to delete.", "warning")
-        return redirect(url_for('inventory.reports_grouped'))
-
-    rows = [
-        r for r in rows
-        if (r.quantity or 0) < 0 or ((r.reference_job or '').upper().startswith('RETURN'))
-    ]
-
-    if not rows:
-        flash("Return records not found.", "warning")
-        return redirect(url_for('inventory.reports_grouped'))
-
-    touched_batch_ids = set()
-
-    try:
-        for r in rows:
-            # delete return => subtract returned qty from stock
-            if r.part and (r.quantity or 0) < 0:
-                r.part.quantity = (r.part.quantity or 0) - abs(int(r.quantity or 0))
-
-            if r.batch_id:
-                touched_batch_ids.add(r.batch_id)
-
-            db.session.delete(r)
-
-        db.session.flush()
-
-        for bid in list(touched_batch_ids):
-            still_has = db.session.query(IssuedPartRecord.id).filter_by(batch_id=bid).first()
-            if not still_has:
-                b = db.session.get(IssuedBatch, bid)
-                if b:
-                    db.session.delete(b)
-
-        db.session.commit()
-        flash("Return invoice deleted.", "success")
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f"Failed to delete return invoice: {e}", "danger")
-
-    return redirect(url_for('inventory.reports_grouped'))
+    # WCCR ISSUE SAFETY V2.1 - legacy destructive action blocked
+    current_app.logger.warning(
+        "WCCR blocked legacy issue deletion: delete_return_invoice; user_id=%s",
+        getattr(current_user, "id", None),
+    )
+    flash("Invoice deletion is temporarily disabled while safe cancellation is being implemented.", "warning")
+    return redirect(url_for("inventory.reports_grouped"))
 
 @inventory_bp.route('/reports/return_selected', methods=['POST'])
 @login_required
@@ -23155,6 +23565,9 @@ def return_selected():
             except Exception as e:
                 print("AUTO SUPPLIER RETURN PREP ERROR:", e)
                 flash(f"Vendor return failed: {e}", "danger")
+                # WCCR RETURN SAFETY V1.4B FIX
+                db.session.rollback()
+                return _back_to_same_invoice(inv_no_first)
 
     if not created:
         flash("Nothing to return.", "warning")
@@ -23185,18 +23598,23 @@ def return_selected():
                     unit_cost=row["unit_cost"],
                     location=row["location"],
                     tech_note=row["tech_note"],
+                    # WCCR RETURN SAFETY V1.4A
+                    issued_part_record_id=row["ret"].id,
                 )
                 db.session.add(item_sr)
 
             db.session.flush()
 
-            res = post_batch(batch_id=batch_sr.id, actor=current_user.username)
+            res = post_batch(batch_id=batch_sr.id, actor=current_user.username, commit=False)
             if not res.get("ok"):
                 raise RuntimeError(res.get("errors"))
 
         except Exception as e:
             print("AUTO SUPPLIER RETURN ERROR:", e)
             flash(f"Vendor return failed for {supplier_label}: {e}", "danger")
+            # WCCR RETURN SAFETY V1.4B FIX
+            db.session.rollback()
+            return _back_to_same_invoice(inv_no_first)
 
     try:
         batch = _create_batch_for_records(
@@ -23294,6 +23712,15 @@ def _already_returned_qty_for_source(src) -> int:
         q = q.filter(
             IssuedPartRecord.source_receipt_line_id
             == src_receipt_line_id
+        )
+
+    # WCCR STOCK RETURN FIX V1
+    # A STOCK-issued source has no receipt line.
+    # Do not count VENDOR returns from a different receipt lot
+    # against this STOCK-issued quantity.
+    if src_receipt_line_id is None:
+        q = q.filter(
+            IssuedPartRecord.source_receipt_line_id.is_(None)
         )
 
     total_neg = q.scalar() or 0
@@ -23407,6 +23834,8 @@ def receiving_list():
     # BASE QUERY
     # ============================================================
 
+    from models import GoodsReceiptLine
+
     q = ReceivingBatch.query
 
     if status in ("draft", "posted"):
@@ -23490,6 +23919,37 @@ def receiving_list():
     # ORDER
     # ============================================================
 
+
+    # WCCR RECEIVING SEARCH V1.1
+    # Filter before LIMIT, including historical invoices.
+    if global_q:
+        from sqlalchemy import exists, select
+
+        pattern = f"%{global_q}%"
+
+        matching_line = (
+            select(GoodsReceiptLine.id)
+            .where(
+                GoodsReceiptLine.goods_receipt_id
+                == ReceivingBatch.id
+            )
+            .where(
+                or_(
+                    GoodsReceiptLine.part_number.ilike(pattern),
+                    GoodsReceiptLine.part_name.ilike(pattern),
+                )
+            )
+            .exists()
+        )
+
+        q = q.filter(
+            or_(
+                ReceivingBatch.invoice_number.ilike(pattern),
+                ReceivingBatch.supplier_name.ilike(pattern),
+                matching_line,
+            )
+        )
+
     qry = q.order_by(
         ReceivingBatch.invoice_date.desc().nullslast(),
         ReceivingBatch.id.desc(),
@@ -23518,98 +23978,9 @@ def receiving_list():
     # SEARCH
     # ============================================================
 
+
     search_started = time.perf_counter()
-
-    if global_q:
-        needle = global_q.lower()
-        filtered = []
-
-        for b in batches:
-            sup = (
-                getattr(
-                    b,
-                    "supplier_name",
-                    "",
-                )
-                or ""
-            ).lower()
-
-            inv = (
-                getattr(
-                    b,
-                    "invoice_number",
-                    "",
-                )
-                or ""
-            ).lower()
-
-            match_batch = (
-                needle in sup
-                or needle in inv
-            )
-
-            if not match_batch:
-                lines = (
-                    getattr(b, "items", None)
-                    or getattr(b, "lines", None)
-                    or []
-                )
-
-                for ln in lines:
-                    pn = (
-                        getattr(
-                            ln,
-                            "part_number",
-                            None,
-                        )
-                        or getattr(
-                            ln,
-                            "pn",
-                            None,
-                        )
-                        or ""
-                    )
-
-                    part_obj = getattr(
-                        ln,
-                        "part",
-                        None,
-                    )
-
-                    name = (
-                        getattr(
-                            ln,
-                            "part_name",
-                            None,
-                        )
-                        or (
-                            getattr(
-                                part_obj,
-                                "name",
-                                None,
-                            )
-                            if part_obj is not None
-                            else None
-                        )
-                        or ""
-                    )
-
-                    if (
-                        needle in str(pn).lower()
-                        or needle in str(name).lower()
-                    ):
-                        match_batch = True
-                        break
-
-            if match_batch:
-                filtered.append(b)
-
-        batches = filtered
-
-    search_elapsed = (
-        time.perf_counter()
-        - search_started
-    )
+    search_elapsed = time.perf_counter() - search_started
 
     # ============================================================
     # TOTALS
@@ -24081,6 +24452,11 @@ def receiving_unpost(batch_id: int):
         current_app.logger.exception("Unpost failed")
         flash(f"Unpost failed: {e}", "danger")
     return redirect(url_for("inventory.receiving_detail", batch_id=batch_id))
+# WCCR V1.3C - import endpoint
+@inventory_bp.post(
+    "/receiving/import/apply",
+    endpoint="receiving_import_apply"
+)
 @inventory_bp.post("/receiving/save", endpoint="receiving_save")
 @login_required
 def receiving_save():
@@ -24113,6 +24489,61 @@ def receiving_save():
             except Exception:
                 continue
         return None
+
+    _v13c_pdf = None
+
+    if request.endpoint == "inventory.receiving_import_apply":
+        import hashlib
+        import hmac
+        from pathlib import Path
+        from flask import session, abort, current_app
+
+        state = session.get("wccr_v13c_import") or {}
+        supplied = request.form.get("wccr_import_token", "")
+
+        if (
+            not supplied
+            or not state.get("token")
+            or not hmac.compare_digest(supplied, state["token"])
+            or state.get("user_id") != str(
+                getattr(current_user, "id", "")
+            )
+            or request.form.get("batch_id")
+        ):
+            abort(403)
+
+        stored = state.get("stored_name", "")
+        if not stored or Path(stored).name != stored:
+            abort(400)
+
+        directory = (
+            Path(current_app.instance_path) / "uploads"
+        ).resolve()
+        pdf_path = directory / stored
+
+        if (
+            pdf_path.is_symlink()
+            or not pdf_path.is_file()
+            or pdf_path.resolve().parent != directory
+        ):
+            abort(400)
+
+        raw = pdf_path.read_bytes()
+
+        if (
+            len(raw) > 10 * 1024 * 1024
+            or not raw.startswith(b"%PDF-")
+            or b"%%EOF" not in raw[-2048:]
+            or hashlib.sha256(raw).hexdigest()
+                != state.get("sha256")
+        ):
+            abort(400)
+
+        _v13c_pdf = (
+            pdf_path,
+            raw,
+            state.get("original_name") or stored,
+        )
 
     f = request.form
     batch_id = (f.get("batch_id") or "").strip()
@@ -24475,6 +24906,72 @@ def receiving_save():
     # ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ draft (Ñ extra_expenses Ð¸ Ñ adj_cost Ð² ÑÑ‚Ñ€Ð¾ÐºÐ°Ñ…)
     db.session.add(batch)
     db.session.commit()
+
+    # WCCR V1.3C - original PDF storage.
+    if _v13c_pdf is not None:
+        import hashlib
+        import sqlite3
+        import zlib
+        from pathlib import Path
+        from flask import current_app, session
+
+        pdf_path, raw, original_name = _v13c_pdf
+        compressed = zlib.compress(raw, 6)
+        use_compression = len(compressed) < len(raw)
+
+        try:
+            with sqlite3.connect(
+                Path(current_app.instance_path) / "inventory.db",
+                timeout=30
+            ) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    """INSERT INTO receiving_invoice_document
+                       (receipt_id, filename, data, compression,
+                        sha256, original_size, uploaded_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        batch.id,
+                        original_name[:180],
+                        compressed if use_compression else raw,
+                        "zlib" if use_compression else "none",
+                        hashlib.sha256(raw).hexdigest(),
+                        len(raw),
+                        datetime.utcnow().isoformat(),
+                    )
+                )
+        except Exception:
+            current_app.logger.exception(
+                "WCCR V1.3C PDF storage failed: batch=%s",
+                batch.id
+            )
+            flash(
+                "Draft created, but PDF storage failed. "
+                "Stock was NOT posted. "
+                "Attach the PDF manually.",
+                "danger"
+            )
+            return redirect(
+                url_for(
+                    "inventory.receiving_detail",
+                    batch_id=batch.id
+                )
+            )
+
+        session.pop("wccr_v13c_import", None)
+
+        try:
+            pdf_path.unlink()
+        except OSError:
+            current_app.logger.warning(
+                "Temporary PDF cleanup failed: %s",
+                pdf_path
+            )
+
+        flash(
+            "Original supplier PDF saved automatically.",
+            "success"
+        )
 
     # ÐµÑÐ»Ð¸ Ð½Ð°Ð¶Ð°Ð»Ð¸ "Receive & Post Stock"
     if action == "post":
@@ -25336,6 +25833,7 @@ def add_part_batch():
     return redirect(url_for("inventory.receiving_detail", batch_id=batch.id))
 
 
+    # WCCR_PAYROLL_APPROVAL_PREPARATION_V1
 # WCCR_ATTENDANCE_PAYROLL_V29B_BEGIN
 @inventory_bp.route("/attendance-payroll", methods=["GET"])
 @inventory_bp.route(
@@ -25479,6 +25977,21 @@ def attendance_payroll_dashboard(section="overview"):
                 end_date=selected_end
             )
 
+
+    # WCCR_V8C5C_FIX41
+    # Presentation-only adjustment. Payroll remains untouched.
+    if (
+        section in ("overview", "timesheets")
+        and attendance_data is not None
+        and access["attendance_view"]
+    ):
+        from services.attendance_display_v8c5c import (
+            prepare_attendance_display,
+        )
+        attendance_data = prepare_attendance_display(
+            attendance_data
+        )
+
     # WCCR_CORRECTION_QUEUE_UI_V3
     correction_pending_count = None
 
@@ -25497,7 +26010,7 @@ def attendance_payroll_dashboard(section="overview"):
     # WCCR_PAYROLL_SCHEDULE_V1
     # Read-only biweekly period selector; no payroll persistence.
     payroll_schedule = None
-    if section == "payroll-preview":
+    if section in ("payroll-preview", "payroll-approval"):
         from datetime import date as _pay_date, timedelta as _pay_delta
         from flask import request as _pay_request
 
@@ -25577,7 +26090,7 @@ def attendance_payroll_dashboard(section="overview"):
     payroll_preview_rows = []
     payroll_preview_totals = None
 
-    if section == "payroll-preview":
+    if section in ("payroll-preview", "payroll-approval"):
         from decimal import Decimal as _PayDecimal
         from models import User as _PayUser
         from services.employee_time_policy import (
@@ -26240,4 +26753,378 @@ def attendance_shift_edit(shift_id):
         expected_start=aware(shift.started_at).isoformat(),
         expected_end=(aware(shift.ended_at).isoformat() if shift.ended_at is not None else ''),
     )
+
+
+# WCCR RECEIVING ORIGINAL PDF V1A
+@inventory_bp.route("/receiving/<int:batch_id>/original-pdf", methods=["GET"])
+@login_required
+def wccr_receiving_original_pdf(batch_id):
+    import io
+    import zlib
+    import sqlite3
+    import hashlib
+    from flask import abort, request, send_file
+    from models import ReceivingBatch
+
+    if not ErpAccessService.is_allowed(
+        current_user, "erp.receiving.access", default_allowed=True
+    ):
+        abort(403)
+
+    if db.session.get(ReceivingBatch, batch_id) is None:
+        abort(404)
+
+    path = current_app.instance_path
+    from pathlib import Path
+    dbfile = Path(path) / "inventory.db"
+
+    with sqlite3.connect(dbfile) as con:
+        row = con.execute(
+            """SELECT filename, data, compression, sha256
+               FROM receiving_invoice_document
+               WHERE receipt_id=?""",
+            (batch_id,)
+        ).fetchone()
+
+    if not row:
+        abort(404)
+
+    filename, payload, compression, digest = row
+    try:
+        pdf = zlib.decompress(payload) if compression == "zlib" else payload
+    except zlib.error:
+        abort(500)
+
+    if hashlib.sha256(pdf).hexdigest() != digest:
+        current_app.logger.error("Receiving PDF integrity failed: %s", batch_id)
+        abort(500)
+
+    return send_file(
+        io.BytesIO(pdf),
+        mimetype="application/pdf",
+        as_attachment=request.args.get("download") == "1",
+        download_name=filename
+    )
+
+
+# WCCR ORIGINAL PDF V1.1
+def _wccr_pdf_permission(batch, *, edit=False):
+    from flask_login import current_user
+
+    if not ErpAccessService.is_allowed(
+        current_user, "erp.receiving.access",
+        default_allowed=True
+    ):
+        return False
+
+    if not edit:
+        return True
+
+    role = (getattr(current_user, "role", "") or "").lower()
+    admin = (
+        role in ("admin", "superadmin")
+        or getattr(current_user, "is_admin", False)
+        or getattr(current_user, "is_superadmin", False)
+        or getattr(current_user, "is_super_admin", False)
+    )
+    superadmin = (
+        role == "superadmin"
+        or getattr(current_user, "is_superadmin", False)
+        or getattr(current_user, "is_super_admin", False)
+    )
+
+    posted = (getattr(batch, "status", "") or "").lower() == "posted"
+    permission = (
+        "erp.receiving.edit_posted"
+        if posted else "erp.receiving.create"
+    )
+
+    return ErpAccessService.is_allowed(
+        current_user, permission,
+        default_allowed=superadmin if posted else admin
+    )
+
+
+def _wccr_pdf_check_token():
+    import hmac
+    from flask import request, session
+
+    supplied = request.form.get("wccr_pdf_token", "")
+    expected = session.get("wccr_pdf_token", "")
+
+    return bool(
+        supplied and expected
+        and hmac.compare_digest(supplied, expected)
+    )
+
+
+@inventory_bp.post("/receiving/<int:batch_id>/original-pdf/upload")
+@login_required
+def wccr_receiving_original_pdf_upload(batch_id):
+    import sqlite3
+    import hashlib
+    import zlib
+    from pathlib import Path
+    from flask import (
+        request, redirect, url_for, flash, abort, current_app
+    )
+    from models import ReceivingBatch
+
+    batch = db.session.get(ReceivingBatch, batch_id)
+    if batch is None:
+        abort(404)
+
+    if not _wccr_pdf_permission(batch, edit=True):
+        abort(403)
+
+    if not _wccr_pdf_check_token():
+        abort(403)
+
+    destination = url_for(
+        "inventory.receiving_detail", batch_id=batch_id
+    )
+
+    file = request.files.get("original_pdf")
+    if not file or not file.filename:
+        flash("Select a PDF file.", "warning")
+        return redirect(destination)
+
+    data = file.stream.read(10 * 1024 * 1024 + 1)
+    if len(data) > 10 * 1024 * 1024:
+        flash("PDF exceeds 10 MB.", "danger")
+        return redirect(destination)
+
+    if (
+        not data.startswith(b"%PDF-")
+        or b"%%EOF" not in data[-2048:]
+    ):
+        flash("Invalid or incomplete PDF.", "danger")
+        return redirect(destination)
+
+    name = Path(
+        file.filename.replace("\\", "/")
+    ).name[:180]
+
+    if not name.lower().endswith(".pdf"):
+        name += ".pdf"
+
+    digest = hashlib.sha256(data).hexdigest()
+    compressed = zlib.compress(data, 6)
+
+    use_zip = len(compressed) < len(data)
+    payload = compressed if use_zip else data
+    method = "zlib" if use_zip else "none"
+
+    dbfile = Path(current_app.instance_path) / "inventory.db"
+
+    try:
+        with sqlite3.connect(dbfile, timeout=30) as con:
+            con.execute("BEGIN IMMEDIATE")
+
+            old = con.execute(
+                """SELECT filename, data, compression,
+                          sha256, original_size
+                   FROM receiving_invoice_document
+                   WHERE receipt_id=?""",
+                (batch_id,)
+            ).fetchone()
+
+            if old:
+                old_data = (
+                    zlib.decompress(old[1])
+                    if old[2] == "zlib" else old[1]
+                )
+                if hashlib.sha256(old_data).hexdigest() != old[3]:
+                    raise ValueError(
+                        "Existing PDF integrity check failed"
+                    )
+
+                con.execute(
+                    """INSERT INTO receiving_invoice_document_history
+                       (receipt_id, filename, data, compression,
+                        sha256, original_size, action, actor_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        batch_id, old[0], old[1], old[2],
+                        old[3], old[4], "REPLACE",
+                        str(getattr(current_user, "id", ""))
+                    )
+                )
+
+                con.execute(
+                    """UPDATE receiving_invoice_document
+                       SET filename=?, data=?, compression=?,
+                           sha256=?, original_size=?,
+                           uploaded_at=CURRENT_TIMESTAMP
+                       WHERE receipt_id=?""",
+                    (
+                        name, payload, method, digest,
+                        len(data), batch_id
+                    )
+                )
+            else:
+                con.execute(
+                    """INSERT INTO receiving_invoice_document
+                       (receipt_id, filename, data, compression,
+                        sha256, original_size)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        batch_id, name, payload, method,
+                        digest, len(data)
+                    )
+                )
+
+            saved = con.execute(
+                """SELECT data, compression, sha256
+                   FROM receiving_invoice_document
+                   WHERE receipt_id=?""",
+                (batch_id,)
+            ).fetchone()
+
+            restored = (
+                zlib.decompress(saved[0])
+                if saved[1] == "zlib" else saved[0]
+            )
+
+            if hashlib.sha256(restored).hexdigest() != digest:
+                raise ValueError("New PDF verification failed")
+
+    except Exception:
+        current_app.logger.exception(
+            "Receiving PDF save failed: batch=%s", batch_id
+        )
+        flash("PDF could not be saved. Check server log.", "danger")
+        return redirect(destination)
+
+    flash(
+        "Original PDF replaced and archived."
+        if old else "Original PDF saved in SQLite.",
+        "success"
+    )
+    return redirect(destination)
+
+
+@inventory_bp.get("/receiving/<int:batch_id>/original-pdf/status")
+@login_required
+def wccr_receiving_original_pdf_status(batch_id):
+    import sqlite3
+    import secrets
+    from pathlib import Path
+    from flask import jsonify, abort, session, current_app
+    from models import ReceivingBatch
+
+    batch = db.session.get(ReceivingBatch, batch_id)
+    if batch is None:
+        abort(404)
+
+    if not _wccr_pdf_permission(batch):
+        abort(403)
+
+    if "wccr_pdf_token" not in session:
+        session["wccr_pdf_token"] = secrets.token_hex(32)
+
+    with sqlite3.connect(
+        Path(current_app.instance_path) / "inventory.db"
+    ) as con:
+        row = con.execute(
+            """SELECT filename, original_size
+               FROM receiving_invoice_document
+               WHERE receipt_id=?""",
+            (batch_id,)
+        ).fetchone()
+
+    return jsonify({
+        "exists": bool(row),
+        "filename": row[0] if row else None,
+        "size": row[1] if row else None,
+        "can_modify": bool(
+            _wccr_pdf_permission(batch, edit=True)
+        ),
+        "token": session["wccr_pdf_token"]
+    })
+
+
+@inventory_bp.post("/receiving/<int:batch_id>/original-pdf/delete")
+@login_required
+def wccr_receiving_original_pdf_delete(batch_id):
+    import sqlite3
+    import hashlib
+    import zlib
+    from pathlib import Path
+    from flask import (
+        abort, redirect, url_for, flash, current_app
+    )
+    from models import ReceivingBatch
+
+    batch = db.session.get(ReceivingBatch, batch_id)
+    if batch is None:
+        abort(404)
+
+    if not _wccr_pdf_permission(batch, edit=True):
+        abort(403)
+
+    if not _wccr_pdf_check_token():
+        abort(403)
+
+    destination = url_for(
+        "inventory.receiving_detail", batch_id=batch_id
+    )
+
+    try:
+        with sqlite3.connect(
+            Path(current_app.instance_path) / "inventory.db",
+            timeout=30
+        ) as con:
+            con.execute("BEGIN IMMEDIATE")
+
+            old = con.execute(
+                """SELECT filename, data, compression,
+                          sha256, original_size
+                   FROM receiving_invoice_document
+                   WHERE receipt_id=?""",
+                (batch_id,)
+            ).fetchone()
+
+            if not old:
+                flash("No PDF attached.", "warning")
+                return redirect(destination)
+
+            original = (
+                zlib.decompress(old[1])
+                if old[2] == "zlib" else old[1]
+            )
+
+            if hashlib.sha256(original).hexdigest() != old[3]:
+                raise ValueError("PDF integrity check failed")
+
+            con.execute(
+                """INSERT INTO receiving_invoice_document_history
+                   (receipt_id, filename, data, compression,
+                    sha256, original_size, action, actor_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    batch_id, old[0], old[1], old[2],
+                    old[3], old[4], "DELETE",
+                    str(getattr(current_user, "id", ""))
+                )
+            )
+
+            con.execute(
+                """DELETE FROM receiving_invoice_document
+                   WHERE receipt_id=?""",
+                (batch_id,)
+            )
+
+    except Exception:
+        current_app.logger.exception(
+            "Receiving PDF delete failed: batch=%s", batch_id
+        )
+        flash("PDF deletion failed. Check server log.", "danger")
+        return redirect(destination)
+
+    flash(
+        "PDF removed from Receiving. Archived copy retained.",
+        "success"
+    )
+    return redirect(destination)
 
